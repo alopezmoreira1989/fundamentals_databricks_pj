@@ -1,0 +1,19 @@
+fundamentals_databricks_pj/
+│
+├── config/
+│   └── tickers.py              ← master list of tickers + metadata
+│
+├── ingestion/
+│   ├── 01_fetch_sec_xbrl       ← hits SEC API, writes to financials_raw (Delta)
+│   └── 02_fetch_sec_filings    ← downloads 10-K PDFs to DBFS/Volumes (optional)
+│
+├── transformation/
+│   ├── 03_clean_and_merge      ← MERGE into financials (clean fact table)
+│   └── 04_derived_metrics      ← FCF, margins, ratios, YoY growth
+│
+├── analysis/
+│   ├── 05_eda                  ← exploratory, ad-hoc queries
+│   └── 06_dashboard_queries    ← SQL views that power your dashboards
+│
+└── pipelines/
+    └── full_pipeline           ← runs 01→02→03→04 in sequence (Job entry point)
