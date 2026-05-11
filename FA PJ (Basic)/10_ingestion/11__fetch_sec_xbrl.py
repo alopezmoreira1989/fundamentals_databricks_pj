@@ -62,15 +62,15 @@ from pyspark.sql.types import (
     StringType, IntegerType, DoubleType, TimestampType
 )
 
-# Read ticker list from pipeline params if called from full_pipeline,
-# otherwise fall back to all active tickers from config
+# If called from 91__full_pipeline, run_tickers is already defined in the shared namespace
+# If run standalone, fall back to all active tickers from config
 try:
-    _override = spark.conf.get("pipeline.tickers")
-    RUN_TICKERS = [t.strip() for t in _override.split(",") if t.strip()]
+    _ = run_tickers
+    RUN_TICKERS = run_tickers
     print(f"Running pipeline subset: {RUN_TICKERS}")
-except Exception:
+except NameError:
     RUN_TICKERS = ACTIVE_TICKERS
-    print(f"Running all active tickers: {RUN_TICKERS}")
+    print(f"Running standalone — all active tickers: {RUN_TICKERS}")
 
 HEADERS = {"User-Agent": SEC_USER_AGENT}
 
@@ -141,7 +141,7 @@ def extract_annual_series(facts: dict, concept: str, namespace: str = "us-gaap")
 SCHEMA_DEF = StructType([
     StructField("ticker",     StringType(),    False),
     StructField("company",    StringType(),    True),
-    StructField("statement",  StringType(),    False),
+    StructField("stmt",  StringType(),    False),
     StructField("year",       IntegerType(),   False),
     StructField("concept",    StringType(),    False),
     StructField("value",      DoubleType(),    True),
@@ -173,7 +173,7 @@ for ticker in RUN_TICKERS:
                     all_records.append({
                         "ticker":     ticker.upper(),
                         "company":    company_name,
-                        "statement":  stmt_name,
+                        "stmt":  stmt_name,
                         "year":       int(row["date"].year),
                         "concept":    label,
                         "value":      float(row["value"]),
@@ -228,14 +228,14 @@ spark.sql(f"""
     CREATE TABLE IF NOT EXISTS {raw_full} (
         ticker     STRING    NOT NULL,
         company    STRING,
-        statement  STRING    NOT NULL,
+        stmt       STRING    NOT NULL,
         year       INT       NOT NULL,
         concept    STRING    NOT NULL,
         value      DOUBLE,
         scraped_at TIMESTAMP
     )
     USING DELTA
-    PARTITIONED BY (ticker, statement)
+    PARTITIONED BY (ticker, stmt)
     TBLPROPERTIES (
         'delta.autoOptimize.optimizeWrite' = 'true',
         'delta.autoOptimize.autoCompact'   = 'true'
@@ -261,7 +261,7 @@ print(f"✓ Appended {spark_df.count():,} rows → {raw_full}")
 spark.sql(f"""
     SELECT
         ticker,
-        statement,
+        stmt,
         COUNT(DISTINCT year)  AS years,
         MIN(year)             AS first_year,
         MAX(year)             AS last_year,
@@ -270,8 +270,8 @@ spark.sql(f"""
     FROM {raw_full}
     WHERE ticker IN ({", ".join(f"'{t}'" for t in RUN_TICKERS)})
       AND scraped_at = (SELECT MAX(scraped_at) FROM {raw_full})
-    GROUP BY ticker, statement
-    ORDER BY ticker, statement
+    GROUP BY ticker, stmt
+    ORDER BY ticker, stmt
 """).display()
 
 # COMMAND ----------

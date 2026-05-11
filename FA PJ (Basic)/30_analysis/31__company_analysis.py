@@ -34,7 +34,6 @@ print(f"Peers     : {PEERS}")
 print(f"From year : {START_YEAR}")
 
 # COMMAND ----------
-
 # MAGIC %md ---
 # MAGIC ## 1. Single company — Income Statement overview
 # MAGIC > Change `COMPANY` and `START_YEAR` in the cell above to switch company.
@@ -50,14 +49,13 @@ spark.sql(f"""
         ROUND(value / 1e9, 2) AS value_bn
     FROM {F}
     WHERE ticker    = '{COMPANY}'
-      AND statement = 'Income Statement'
+      AND stmt = 'Income Statement'
       AND concept   IN ('Revenue', 'Gross Profit', 'Operating Income', 'Net Income')
       AND year     >= {START_YEAR}
     ORDER BY year, concept
 """).display()
 
 # COMMAND ----------
-
 # MAGIC %md ## 2. Single company — Margins over time
 # MAGIC **How to chart:** Line chart → X: `year`, Y: `value`, Series: `metric`
 
@@ -76,7 +74,6 @@ spark.sql(f"""
 """).display()
 
 # COMMAND ----------
-
 # MAGIC %md ## 3. Single company — Cash flow breakdown
 # MAGIC **How to chart:** Bar chart → X: `year`, Y: `value_bn`, Series: `concept`
 
@@ -89,14 +86,13 @@ spark.sql(f"""
         ROUND(value / 1e9, 2) AS value_bn
     FROM {F}
     WHERE ticker    = '{COMPANY}'
-      AND statement = 'Cash Flow'
+      AND stmt = 'Cash Flow'
       AND concept   IN ('Operating Cash Flow', 'CapEx', 'Financing Cash Flow')
       AND year     >= {START_YEAR}
     ORDER BY year, concept
 """).display()
 
 # COMMAND ----------
-
 # MAGIC %md ## 4. Single company — Free Cash Flow vs Net Income
 # MAGIC **How to chart:** Line chart → X: `year`, Y: `value_bn`, Series: `metric`
 
@@ -105,28 +101,27 @@ spark.sql(f"""
 spark.sql(f"""
     SELECT year, 'Free Cash Flow' AS metric, ROUND(value / 1e9, 2) AS value_bn
     FROM {F}
-    WHERE ticker = '{COMPANY}' AND statement = 'Cash Flow'
+    WHERE ticker = '{COMPANY}' AND stmt = 'Cash Flow'
       AND concept = 'Operating Cash Flow' AND year >= {START_YEAR}
 
     UNION ALL
 
     SELECT year, 'CapEx' AS metric, ROUND(-value / 1e9, 2) AS value_bn
     FROM {F}
-    WHERE ticker = '{COMPANY}' AND statement = 'Cash Flow'
+    WHERE ticker = '{COMPANY}' AND stmt = 'Cash Flow'
       AND concept = 'CapEx' AND year >= {START_YEAR}
 
     UNION ALL
 
     SELECT year, 'Net Income' AS metric, ROUND(value / 1e9, 2) AS value_bn
     FROM {F}
-    WHERE ticker = '{COMPANY}' AND statement = 'Income Statement'
+    WHERE ticker = '{COMPANY}' AND stmt = 'Income Statement'
       AND concept = 'Net Income' AND year >= {START_YEAR}
 
     ORDER BY year, metric
 """).display()
 
 # COMMAND ----------
-
 # MAGIC %md ## 5. Single company — Balance sheet composition
 # MAGIC **How to chart:** Bar chart (stacked) → X: `year`, Y: `value_bn`, Series: `concept`
 
@@ -139,7 +134,7 @@ spark.sql(f"""
         ROUND(value / 1e9, 2) AS value_bn
     FROM {F}
     WHERE ticker    = '{COMPANY}'
-      AND statement = 'Balance Sheet'
+      AND stmt = 'Balance Sheet'
       AND concept   IN (
             'Cash & Equivalents', 'Short-term Investments',
             'Total Current Assets', 'PP&E Net', 'Goodwill',
@@ -151,7 +146,6 @@ spark.sql(f"""
 """).display()
 
 # COMMAND ----------
-
 # MAGIC %md ## 6. Single company — YoY growth rates
 # MAGIC **How to chart:** Line chart → X: `year`, Y: `value`, Series: `metric`
 
@@ -171,7 +165,6 @@ spark.sql(f"""
 """).display()
 
 # COMMAND ----------
-
 # MAGIC %md ## 7. Single company — Leverage & liquidity
 # MAGIC **How to chart:** Line chart → X: `year`, Y: `value`, Series: `metric`
 
@@ -190,7 +183,6 @@ spark.sql(f"""
 """).display()
 
 # COMMAND ----------
-
 # MAGIC %md ---
 # MAGIC ## 8. Cross-company — Revenue comparison
 # MAGIC **How to chart:** Bar chart → X: `year`, Y: `revenue_bn`, Series: `ticker`
@@ -206,14 +198,13 @@ spark.sql(f"""
         ROUND(value / 1e9, 2) AS revenue_bn
     FROM {F}
     WHERE ticker    IN ({peers_str})
-      AND statement = 'Income Statement'
+      AND stmt = 'Income Statement'
       AND concept   IN ('Revenue', 'Revenue (contract)')
       AND year     >= {START_YEAR}
     ORDER BY year, ticker
 """).display()
 
 # COMMAND ----------
-
 # MAGIC %md ## 9. Cross-company — Net margin comparison
 # MAGIC **How to chart:** Line chart → X: `year`, Y: `value`, Series: `ticker`
 
@@ -232,7 +223,6 @@ spark.sql(f"""
 """).display()
 
 # COMMAND ----------
-
 # MAGIC %md ## 10. Cross-company — Free Cash Flow comparison
 # MAGIC **How to chart:** Bar chart → X: `year`, Y: `fcf_bn`, Series: `ticker`
 
@@ -251,7 +241,6 @@ spark.sql(f"""
 """).display()
 
 # COMMAND ----------
-
 # MAGIC %md ## 11. Cross-company — Snapshot scorecard (latest year)
 # MAGIC Single table with the most recent values for all key metrics across all peers.
 # MAGIC **How to use:** sort by any column to rank companies.
@@ -294,7 +283,6 @@ spark.sql(f"""
 """).display()
 
 # COMMAND ----------
-
 # MAGIC %md ## 12. Cross-company — Revenue growth ranking over time
 # MAGIC **How to chart:** Bar chart → X: `ticker`, Y: `revenue_yoy_pct`, Series: `year`
 
@@ -311,3 +299,4 @@ spark.sql(f"""
       AND year   >= {START_YEAR}
     ORDER BY year DESC, value DESC
 """).display()
+
