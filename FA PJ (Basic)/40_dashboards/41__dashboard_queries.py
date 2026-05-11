@@ -15,7 +15,6 @@
 # MAGIC - `main.financials.financials_metrics` ← derived metrics (margins, FCF, YoY growth, leverage)
 
 # COMMAND ----------
-
 # MAGIC %md ---
 # MAGIC ## Dataset 1 — Income Statement
 # MAGIC *Used by: Revenue chart, Gross Profit chart, Net Income chart*
@@ -29,12 +28,11 @@
 # MAGIC     concept,
 # MAGIC     ROUND(value / 1e9, 2) AS value_bn
 # MAGIC FROM main.financials.financials
-# MAGIC WHERE statement = 'Income Statement'
+# MAGIC WHERE stmt = 'Income Statement'
 # MAGIC   AND concept IN ('Revenue', 'Revenue (contract)', 'Gross Profit', 'Operating Income', 'Net Income')
 # MAGIC ORDER BY ticker, year, concept
 
 # COMMAND ----------
-
 # MAGIC %md ## Dataset 2 — Margins
 # MAGIC *Used by: Gross / Operating / Net / FCF margin charts*
 
@@ -52,7 +50,6 @@
 # MAGIC ORDER BY ticker, year, metric
 
 # COMMAND ----------
-
 # MAGIC %md ## Dataset 3 — Cash Flow
 # MAGIC *Used by: Operating CF, CapEx, FCF charts*
 
@@ -65,12 +62,11 @@
 # MAGIC     concept,
 # MAGIC     ROUND(value / 1e9, 2) AS value_bn
 # MAGIC FROM main.financials.financials
-# MAGIC WHERE statement = 'Cash Flow'
+# MAGIC WHERE stmt = 'Cash Flow'
 # MAGIC   AND concept IN ('Operating Cash Flow', 'CapEx', 'Investing Cash Flow', 'Financing Cash Flow')
 # MAGIC ORDER BY ticker, year, concept
 
 # COMMAND ----------
-
 # MAGIC %md ## Dataset 4 — Free Cash Flow vs Net Income
 # MAGIC *Used by: FCF vs Net Income line chart*
 
@@ -79,24 +75,23 @@
 # MAGIC %sql
 # MAGIC SELECT ticker, year, 'Operating Cash Flow' AS metric, ROUND(value / 1e9, 2) AS value_bn
 # MAGIC FROM main.financials.financials
-# MAGIC WHERE statement = 'Cash Flow' AND concept = 'Operating Cash Flow'
+# MAGIC WHERE stmt = 'Cash Flow' AND concept = 'Operating Cash Flow'
 # MAGIC
 # MAGIC UNION ALL
 # MAGIC
 # MAGIC SELECT ticker, year, 'CapEx (negative)' AS metric, ROUND(-value / 1e9, 2) AS value_bn
 # MAGIC FROM main.financials.financials
-# MAGIC WHERE statement = 'Cash Flow' AND concept = 'CapEx'
+# MAGIC WHERE stmt = 'Cash Flow' AND concept = 'CapEx'
 # MAGIC
 # MAGIC UNION ALL
 # MAGIC
 # MAGIC SELECT ticker, year, 'Net Income' AS metric, ROUND(value / 1e9, 2) AS value_bn
 # MAGIC FROM main.financials.financials
-# MAGIC WHERE statement = 'Income Statement' AND concept = 'Net Income'
+# MAGIC WHERE stmt = 'Income Statement' AND concept = 'Net Income'
 # MAGIC
 # MAGIC ORDER BY ticker, year, metric
 
 # COMMAND ----------
-
 # MAGIC %md ## Dataset 5 — Balance Sheet
 # MAGIC *Used by: Assets, Liabilities, Equity charts*
 
@@ -109,7 +104,7 @@
 # MAGIC     concept,
 # MAGIC     ROUND(value / 1e9, 2) AS value_bn
 # MAGIC FROM main.financials.financials
-# MAGIC WHERE statement = 'Balance Sheet'
+# MAGIC WHERE stmt = 'Balance Sheet'
 # MAGIC   AND concept IN (
 # MAGIC       'Cash & Equivalents', 'Short-term Investments',
 # MAGIC       'Total Current Assets', 'PP&E Net', 'Goodwill',
@@ -120,7 +115,6 @@
 # MAGIC ORDER BY ticker, year, concept
 
 # COMMAND ----------
-
 # MAGIC %md ## Dataset 6 — YoY Growth rates
 # MAGIC *Used by: Revenue growth, Net Income growth charts*
 
@@ -141,7 +135,6 @@
 # MAGIC ORDER BY ticker, year, metric
 
 # COMMAND ----------
-
 # MAGIC %md ## Dataset 7 — Leverage & Liquidity
 # MAGIC *Used by: Debt/Equity, Current Ratio charts*
 
@@ -159,7 +152,6 @@
 # MAGIC ORDER BY ticker, year, metric
 
 # COMMAND ----------
-
 # MAGIC %md ## Dataset 8 — Scorecard (latest year per company)
 # MAGIC *Used by: summary scorecard table*
 
@@ -188,3 +180,4 @@
 # MAGIC JOIN latest l ON m.ticker = l.ticker AND m.year = l.max_year
 # MAGIC GROUP BY m.ticker, m.company, m.year
 # MAGIC ORDER BY `Net Margin %` DESC
+

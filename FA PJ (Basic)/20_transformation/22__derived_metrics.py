@@ -13,7 +13,6 @@
 # MAGIC Same long format: ticker | company | year | metric | value
 
 # COMMAND ----------
-
 # MAGIC %md ### ⚠️ Path note
 # MAGIC `%run` paths are **relative to this notebook's location** in the Databricks workspace.
 # MAGIC If you get a `NameError`, adjust the path below to match your folder structure.
@@ -25,7 +24,6 @@
 # MAGIC %run "/Workspace/Users/al.lopez.moreira@gmail.com/fundamentals_databricks_pj/FA PJ (Basic)/00_config/01__tickers"
 
 # COMMAND ----------
-
 # Validate config loaded — if this fails, fix the %run path in the cell above
 try:
     _ = ACTIVE_TICKERS
@@ -44,7 +42,6 @@ full_table  = f"{CATALOG}.{SCHEMA}.{TABLE}"
 metrics_tbl = f"{CATALOG}.{SCHEMA}.financials_metrics"
 
 # COMMAND ----------
-
 # MAGIC %md ### Pull the concepts we need into a wide pivot
 
 # COMMAND ----------
@@ -75,13 +72,13 @@ from pyspark.sql import functions as F
 condition = F.lit(False)
 for stmt, concept in needed_concepts:
     condition = condition | (
-        (F.col("statement") == stmt) & (F.col("concept") == concept)
+        (F.col("stmt") == stmt) & (F.col("concept") == concept)
     )
 
 raw = (
     spark.table(full_table)
     .filter(condition)
-    .select("ticker", "company", "year", "statement", "concept", "value")
+    .select("ticker", "company", "year", "stmt", "concept", "value")
 )
 
 # Pivot to wide: one row per (ticker, year), one column per concept
@@ -102,7 +99,6 @@ if "Revenue" in wide.columns and "Revenue (contract)" in wide.columns:
 print(f"Wide table: {wide.count()} rows × {len(wide.columns)} columns")
 
 # COMMAND ----------
-
 # MAGIC %md ### Compute metrics
 
 # COMMAND ----------
@@ -141,7 +137,6 @@ metrics_wide = (
 )
 
 # COMMAND ----------
-
 # MAGIC %md ### Compute YoY growth (window function)
 
 # COMMAND ----------
@@ -168,7 +163,6 @@ for col in grow_cols:
         )
 
 # COMMAND ----------
-
 # MAGIC %md ### Melt back to long format
 
 # COMMAND ----------
@@ -199,7 +193,6 @@ metrics_long = metrics_wide.selectExpr(
 print(f"Long metrics table: {metrics_long.count()} rows")
 
 # COMMAND ----------
-
 # MAGIC %md ### Write to Delta (MERGE — idempotent)
 
 # COMMAND ----------
@@ -240,7 +233,6 @@ spark.sql(f"""
 print(f"✓ Merged into {metrics_tbl}")
 
 # COMMAND ----------
-
 # MAGIC %md ### Preview
 
 # COMMAND ----------
@@ -253,3 +245,4 @@ spark.sql(f"""
                      'Current Ratio', 'Revenue YoY %')
     ORDER BY metric, year
 """).display()
+

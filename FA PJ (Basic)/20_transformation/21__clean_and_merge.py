@@ -59,7 +59,7 @@ incoming = (
     .filter(F.col("value").isNotNull())
 
     # Drop obvious duplicates (shouldn't exist in raw, but defensive)
-    .dropDuplicates(["ticker", "statement", "year", "concept"])
+    .dropDuplicates(["ticker", "stmt", "year", "concept"])
 
     # Normalise company name capitalisation
     .withColumn("company", F.initcap(F.col("company")))
@@ -78,19 +78,39 @@ spark.sql(f"""
     CREATE TABLE IF NOT EXISTS {full_tbl} (
         ticker     STRING    NOT NULL,
         company    STRING,
-        statement  STRING    NOT NULL,
+        stmt       STRING    NOT NULL,
         year       INT       NOT NULL,
         concept    STRING    NOT NULL,
         value      DOUBLE,
         scraped_at TIMESTAMP
     )
     USING DELTA
-    PARTITIONED BY (ticker, statement)
+    PARTITIONED BY (ticker, stmt)
     TBLPROPERTIES (
         'delta.autoOptimize.optimizeWrite' = 'true',
         'delta.autoOptimize.autoCompact'   = 'true'
     )
 """)
+
+# COMMAND ----------
+
+# Normalise Revenue (contract) → Revenue
+# Only applies when the company has no plain 'Revenue' for that year
+incoming = incoming.withColumn(
+    "concept",
+    F.when(F.col("concept") == "Revenue (contract)", "Revenue")
+     .otherwise(F.col("concept"))
+)
+
+# If a company reported both, keep the higher value
+from pyspark.sql.window import Window
+w = Window.partitionBy("ticker", "stmt", "year", "concept")
+incoming = (
+    incoming
+    .withColumn("rn", F.row_number().over(w.orderBy(F.col("value").desc_nulls_last())))
+    .filter(F.col("rn") == 1)
+    .drop("rn")
+)
 
 # COMMAND ----------
 
@@ -104,7 +124,7 @@ merge_result = spark.sql(f"""
     MERGE INTO {full_tbl} AS target
     USING incoming_clean AS source
     ON  target.ticker    = source.ticker
-    AND target.statement = source.statement
+    AND target.stmt = source.stmt
     AND target.year      = source.year
     AND target.concept   = source.concept
 
@@ -117,8 +137,8 @@ merge_result = spark.sql(f"""
 
     -- New row → insert
     WHEN NOT MATCHED THEN
-        INSERT (ticker, company, statement, year, concept, value, scraped_at)
-        VALUES (source.ticker, source.company, source.statement,
+        INSERT (ticker, company, stmt, year, concept, value, scraped_at)
+        VALUES (source.ticker, source.company, source.stmt,
                 source.year,  source.concept,  source.value, source.scraped_at)
 """)
 
@@ -133,7 +153,7 @@ print(f"✓ MERGE complete → {full_tbl}")
 spark.sql(f"""
     SELECT
         ticker,
-        COUNT(DISTINCT statement)   AS statements,
+        COUNT(DISTINCT stmt)        AS statements,
         COUNT(DISTINCT year)        AS years,
         MIN(year)                   AS first_year,
         MAX(year)                   AS last_year,
