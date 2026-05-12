@@ -14,30 +14,108 @@ Dashboard queries pivot and format this data on the fly, filtering by `statement
 
 ---
 
-## Source table
+## Tables
 
 | Table | Description |
 |---|---|
 | `{CATALOG}.{SCHEMA}.financials` | Long-format fact table — one row per ticker / year / concept |
+| `{CATALOG}.{SCHEMA}.financials_raw` | Append-only audit log of all SEC scrapes |
+| `{CATALOG}.{SCHEMA}.market_data` | Year-end closing prices and market cap per ticker / year |
+| `{CATALOG}.{SCHEMA}.financials_metrics` | Derived metrics — margins, FCF, YoY growth, leverage, valuation ratios |
 
-Expected schema:
+---
+
+## Source table — `financials`
 
 | Column | Type | Description |
 |---|---|---|
 | `ticker` | STRING | Stock ticker symbol (e.g. `AAPL`) |
 | `company` | STRING | Company name |
 | `year` | INT | Fiscal year |
-| `statement` | STRING | One of `Income Statement`, `Balance Sheet`, `Cash Flow` |
+| `stmt` | STRING | One of `Income Statement`, `Balance Sheet`, `Cash Flow` |
 | `concept` | STRING | Financial line item name (XBRL-derived) |
 | `value` | DOUBLE | Raw value in USD |
 
 ---
 
+## Market data — `market_data`
+
+Year-end closing prices fetched from Yahoo Finance (via `yfinance`), joined with `Shares Diluted` from `financials` to derive an annual market cap. Required by all valuation metrics.
+
+| Column | Type | Description |
+|---|---|---|
+| `ticker` | STRING | Stock ticker symbol |
+| `year` | INT | Calendar year |
+| `price_close` | DOUBLE | Last closing price of the year (adjusted) |
+| `shares_diluted` | DOUBLE | Diluted share count sourced from `financials` |
+| `market_cap` | DOUBLE | `price_close × shares_diluted` |
+| `fetched_at` | TIMESTAMP | Fetch timestamp |
+
+---
+
+## Derived metrics — `financials_metrics`
+
+Long-format table: one row per `ticker / year / metric`. Computed by `22__derived_metrics` from `financials` and `market_data`.
+
+```
+ticker | company | year | metric          | value
+-------|---------|------|-----------------|-------
+AAPL   | Apple   | 2023 | Net Margin %    | 25.31
+AAPL   | Apple   | 2023 | Free Cash Flow  | 99584000000
+AAPL   | Apple   | 2023 | P/E             | 28.74
+```
+
+### Margins
+
+| Metric | Formula |
+|---|---|
+| `Gross Margin %` | `Gross Profit / Revenue × 100` |
+| `Operating Margin %` | `Operating Income / Revenue × 100` |
+| `Net Margin %` | `Net Income / Revenue × 100` |
+| `FCF Margin %` | `Free Cash Flow / Revenue × 100` |
+
+### Cash flow
+
+| Metric | Formula |
+|---|---|
+| `Free Cash Flow` | `Operating Cash Flow − CapEx` |
+
+### YoY growth
+
+| Metric | Formula |
+|---|---|
+| `Revenue YoY %` | Year-over-year % change in Revenue |
+| `Net Income YoY %` | Year-over-year % change in Net Income |
+| `Operating Cash Flow YoY %` | Year-over-year % change in Operating CF |
+| `Free Cash Flow YoY %` | Year-over-year % change in FCF |
+
+### Leverage & liquidity
+
+| Metric | Formula |
+|---|---|
+| `Debt / Equity` | `(LT Debt + ST Debt) / Total Stockholders Equity` |
+| `Debt / Assets` | `(LT Debt + ST Debt) / Total Assets` |
+| `Current Ratio` | `Total Current Assets / Total Current Liabilities` |
+
+### Valuation ratios *(requires `market_data`)*
+
+| Metric | Formula | Notes |
+|---|---|---|
+| `P/E` | `Market Cap / Net Income` | |
+| `P/S` | `Market Cap / Revenue` | |
+| `P/FCF` | `Market Cap / Free Cash Flow` | |
+| `EV` | `Market Cap + Total Debt − (Cash & Equivalents + ST Investments)` | Enterprise value in USD |
+| `EV/EBITDA` | `EV / (Operating Income + D&A)` | Outliers beyond ±500× are filtered out |
+
+> Valuation ratios are only populated for ticker/year combinations where `market_data` has a valid `market_cap`. If `12__fetch_market_data` has not been run, these metrics are skipped gracefully.
+
+---
+
 ## Statement filters
 
-Each dashboard statement filters on the `statement` column and selects the relevant `concept` values:
+Each dashboard statement filters on the `stmt` column and selects the relevant `concept` values:
 
-| Statement | `statement` filter |
+| Statement | `stmt` filter |
 |---|---|
 | Income Statement | `'Income Statement'` |
 | Balance Sheet | `'Balance Sheet'` |
