@@ -1,0 +1,730 @@
+{
+  "datasets": [
+    {
+      "name": "3faf0071",
+      "displayName": "ds_income_statement",
+      "queryLines": [
+        "SELECT ticker, year, concept,\r\n",
+        "    ROUND(SUM(value) / 1e6, 2) AS value_mn\r\n",
+        "FROM main.financials.financials\r\n",
+        "WHERE stmt = 'Income Statement'\r\n",
+        "GROUP BY ticker, year, concept\r\n",
+        "ORDER BY year"
+      ]
+    },
+    {
+      "name": "e0d529a9",
+      "displayName": "ds_cash_flow",
+      "queryLines": [
+        "SELECT ticker, year, concept,\r\n",
+        "    ROUND(SUM(value) / 1e6, 2) AS value_mn\r\n",
+        "FROM main.financials.financials\r\n",
+        "WHERE stmt = 'Cash Flow'\r\n",
+        "GROUP BY ticker, year, concept\r\n",
+        "ORDER BY year"
+      ]
+    },
+    {
+      "name": "6646c7a4",
+      "displayName": "ds_balance_sheet",
+      "queryLines": [
+        "SELECT ticker, year, concept,\r\n",
+        "    ROUND(SUM(value) / 1e6, 2) AS value_mn\r\n",
+        "FROM main.financials.financials\r\n",
+        "WHERE stmt = 'Balance Sheet'\r\n",
+        "GROUP BY ticker, year, concept\r\n",
+        "ORDER BY year"
+      ]
+    },
+    {
+      "name": "96deb0c6",
+      "displayName": "devired_metrics",
+      "queryLines": [
+        "SELECT ticker, year, metric, round(any_value(value), 2) as value\r\n",
+        "FROM main.financials.financials_metrics\r\n",
+        "GROUP BY ticker, year, metric\r\n",
+        "ORDER BY year"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "8293abd2",
+      "displayName": "Balance Sheet",
+      "layout": [
+        {
+          "widget": {
+            "name": "balance-sheet-ticker",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "6646c7a4",
+                  "fields": [
+                    {
+                      "name": "concept",
+                      "expression": "`concept`"
+                    },
+                    {
+                      "name": "year",
+                      "expression": "`year`"
+                    },
+                    {
+                      "name": "sum(value_mn)",
+                      "expression": "SUM(`value_mn`)"
+                    }
+                  ],
+                  "cubeGroupingSets": {
+                    "sets": [
+                      {
+                        "fieldNames": [
+                          "concept"
+                        ]
+                      },
+                      {
+                        "fieldNames": [
+                          "year"
+                        ]
+                      }
+                    ]
+                  },
+                  "disaggregated": false,
+                  "orders": [
+                    {
+                      "direction": "ASC",
+                      "expression": "`concept`"
+                    },
+                    {
+                      "direction": "ASC",
+                      "expression": "`year`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "frame": {
+                "showTitle": false,
+                "title": "Balance Sheet",
+                "showDescription": false,
+                "description": "{{ filter:95d1144f }} "
+              },
+              "widgetType": "pivot",
+              "encodings": {
+                "rows": [
+                  {
+                    "fieldName": "concept"
+                  }
+                ],
+                "columns": [
+                  {
+                    "fieldName": "year"
+                  }
+                ],
+                "cell": {
+                  "type": "multi-cell",
+                  "fields": [
+                    {
+                      "fieldName": "sum(value_mn)",
+                      "cellType": "text"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 1,
+            "width": 12,
+            "height": 11
+          }
+        },
+        {
+          "widget": {
+            "name": "95d1144f",
+            "queries": [
+              {
+                "name": "dashboards/01f14d17130c1c00b9efa16f14a7751a/datasets/01f14d17de661fea9cebb355becaafa9_ticker",
+                "query": {
+                  "datasetName": "6646c7a4",
+                  "fields": [
+                    {
+                      "name": "ticker",
+                      "expression": "`ticker`"
+                    },
+                    {
+                      "name": "ticker_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "selection": {
+                "defaultSelection": {
+                  "values": {
+                    "dataType": "STRING",
+                    "values": [
+                      {
+                        "value": "AAPL"
+                      }
+                    ]
+                  }
+                }
+              },
+              "disallowAll": true,
+              "frame": {
+                "showTitle": true,
+                "showDescription": false
+              },
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "ticker",
+                    "queryName": "dashboards/01f14d17130c1c00b9efa16f14a7751a/datasets/01f14d17de661fea9cebb355becaafa9_ticker"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 0,
+            "width": 4,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "51d952e5",
+            "multilineTextboxSpec": {
+              "lines": [
+                "# BALANCE SHEET"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 8,
+            "height": 1
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "b56b5ae6",
+      "displayName": "Income Statement",
+      "layout": [
+        {
+          "widget": {
+            "name": "b76a9f6b",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "3faf0071",
+                  "fields": [
+                    {
+                      "name": "concept",
+                      "expression": "`concept`"
+                    },
+                    {
+                      "name": "year",
+                      "expression": "`year`"
+                    },
+                    {
+                      "name": "sum(value_mn)",
+                      "expression": "SUM(`value_mn`)"
+                    }
+                  ],
+                  "cubeGroupingSets": {
+                    "sets": [
+                      {
+                        "fieldNames": [
+                          "concept"
+                        ]
+                      },
+                      {
+                        "fieldNames": [
+                          "year"
+                        ]
+                      }
+                    ]
+                  },
+                  "disaggregated": false,
+                  "orders": [
+                    {
+                      "direction": "ASC",
+                      "expression": "`concept`"
+                    },
+                    {
+                      "direction": "ASC",
+                      "expression": "`year`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "pivot",
+              "encodings": {
+                "rows": [
+                  {
+                    "fieldName": "concept"
+                  }
+                ],
+                "columns": [
+                  {
+                    "fieldName": "year"
+                  }
+                ],
+                "cell": {
+                  "type": "multi-cell",
+                  "fields": [
+                    {
+                      "fieldName": "sum(value_mn)",
+                      "cellType": "text"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 1,
+            "width": 12,
+            "height": 10
+          }
+        },
+        {
+          "widget": {
+            "name": "90d2e134",
+            "queries": [
+              {
+                "name": "dashboards/01f14d17130c1c00b9efa16f14a7751a/datasets/01f14d1732a112d9871466dd814ca427_ticker",
+                "query": {
+                  "datasetName": "3faf0071",
+                  "fields": [
+                    {
+                      "name": "ticker",
+                      "expression": "`ticker`"
+                    },
+                    {
+                      "name": "ticker_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "showTitle": true
+              },
+              "disallowAll": true,
+              "selection": {
+                "defaultSelection": {
+                  "values": {
+                    "dataType": "STRING",
+                    "values": [
+                      {
+                        "value": "AAPL"
+                      }
+                    ]
+                  }
+                }
+              },
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "ticker",
+                    "queryName": "dashboards/01f14d17130c1c00b9efa16f14a7751a/datasets/01f14d1732a112d9871466dd814ca427_ticker"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 0,
+            "width": 4,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "e5928d5b",
+            "multilineTextboxSpec": {
+              "lines": [
+                "# INCOME STATEMENT"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 8,
+            "height": 1
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "13701209",
+      "displayName": "Cash Flow",
+      "layout": [
+        {
+          "widget": {
+            "name": "f53f22ad",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "e0d529a9",
+                  "fields": [
+                    {
+                      "name": "concept",
+                      "expression": "`concept`"
+                    },
+                    {
+                      "name": "year",
+                      "expression": "`year`"
+                    },
+                    {
+                      "name": "sum(value_mn)",
+                      "expression": "SUM(`value_mn`)"
+                    }
+                  ],
+                  "filters": [
+                    {
+                      "expression": "`ticker` IN (`ticker`) OR TRUE"
+                    }
+                  ],
+                  "cubeGroupingSets": {
+                    "sets": [
+                      {
+                        "fieldNames": [
+                          "concept"
+                        ]
+                      },
+                      {
+                        "fieldNames": [
+                          "year"
+                        ]
+                      }
+                    ]
+                  },
+                  "disaggregated": false,
+                  "orders": [
+                    {
+                      "direction": "ASC",
+                      "expression": "`concept`"
+                    },
+                    {
+                      "direction": "ASC",
+                      "expression": "`year`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "pivot",
+              "encodings": {
+                "rows": [
+                  {
+                    "fieldName": "concept"
+                  }
+                ],
+                "columns": [
+                  {
+                    "fieldName": "year"
+                  }
+                ],
+                "cell": {
+                  "type": "multi-cell",
+                  "fields": [
+                    {
+                      "fieldName": "sum(value_mn)",
+                      "cellType": "text"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 1,
+            "width": 12,
+            "height": 10
+          }
+        },
+        {
+          "widget": {
+            "name": "166237bb",
+            "queries": [
+              {
+                "name": "dashboards/01f14d17130c1c00b9efa16f14a7751a/datasets/01f14d17c93a1b2f8239b8f18905b215_ticker",
+                "query": {
+                  "datasetName": "e0d529a9",
+                  "fields": [
+                    {
+                      "name": "ticker",
+                      "expression": "`ticker`"
+                    },
+                    {
+                      "name": "ticker_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "showTitle": true
+              },
+              "disallowAll": true,
+              "selection": {
+                "defaultSelection": {
+                  "values": {
+                    "dataType": "STRING",
+                    "values": [
+                      {
+                        "value": "AAPL"
+                      }
+                    ]
+                  }
+                }
+              },
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "ticker",
+                    "queryName": "dashboards/01f14d17130c1c00b9efa16f14a7751a/datasets/01f14d17c93a1b2f8239b8f18905b215_ticker"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 0,
+            "width": 4,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "dd6e95d3",
+            "multilineTextboxSpec": {
+              "lines": [
+                "# CASH FLOW"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 8,
+            "height": 1
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "e2b59b9e",
+      "displayName": "Derived Metrics",
+      "layout": [
+        {
+          "widget": {
+            "name": "805ab5aa",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "96deb0c6",
+                  "fields": [
+                    {
+                      "name": "metric",
+                      "expression": "`metric`"
+                    },
+                    {
+                      "name": "year",
+                      "expression": "`year`"
+                    },
+                    {
+                      "name": "sum(value)",
+                      "expression": "SUM(`value`)"
+                    }
+                  ],
+                  "cubeGroupingSets": {
+                    "sets": [
+                      {
+                        "fieldNames": [
+                          "metric"
+                        ]
+                      },
+                      {
+                        "fieldNames": [
+                          "year"
+                        ]
+                      }
+                    ]
+                  },
+                  "disaggregated": false,
+                  "orders": [
+                    {
+                      "direction": "ASC",
+                      "expression": "`metric`"
+                    },
+                    {
+                      "direction": "ASC",
+                      "expression": "`year`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "pivot",
+              "encodings": {
+                "rows": [
+                  {
+                    "fieldName": "metric"
+                  }
+                ],
+                "columns": [
+                  {
+                    "fieldName": "year"
+                  }
+                ],
+                "cell": {
+                  "type": "multi-cell",
+                  "fields": [
+                    {
+                      "fieldName": "sum(value)",
+                      "cellType": "text"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 1,
+            "width": 12,
+            "height": 10
+          }
+        },
+        {
+          "widget": {
+            "name": "0f787827",
+            "queries": [
+              {
+                "name": "dashboards/01f14d17130c1c00b9efa16f14a7751a/datasets/01f14df3fe3614d6acda9e7ea69e11b6_ticker",
+                "query": {
+                  "datasetName": "96deb0c6",
+                  "fields": [
+                    {
+                      "name": "ticker",
+                      "expression": "`ticker`"
+                    },
+                    {
+                      "name": "ticker_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "showTitle": true
+              },
+              "disallowAll": true,
+              "selection": {
+                "defaultSelection": {
+                  "values": {
+                    "dataType": "STRING",
+                    "values": [
+                      {
+                        "value": "AAPL"
+                      }
+                    ]
+                  }
+                }
+              },
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "ticker",
+                    "queryName": "dashboards/01f14d17130c1c00b9efa16f14a7751a/datasets/01f14df3fe3614d6acda9e7ea69e11b6_ticker"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 0,
+            "width": 4,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "47994bea",
+            "multilineTextboxSpec": {
+              "lines": [
+                "# DERIVED METRICS"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 8,
+            "height": 1
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    }
+  ],
+  "uiSettings": {
+    "theme": {
+      "widgetHeaderAlignment": "ALIGNMENT_UNSPECIFIED"
+    },
+    "applyModeEnabled": false
+  }
+}
