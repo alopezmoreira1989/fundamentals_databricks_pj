@@ -1,16 +1,14 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # 00_config / 00_tickers
-# MAGIC Master configuration file. **This is the only file you edit to add/remove companies.**
-# MAGIC All other notebooks read from here via `%run ../config/tickers`.
-
-# COMMAND ----------
-
-# Databricks notebook source
-# MAGIC %md
-# MAGIC # 00_config / 00_tickers
-# MAGIC Master configuration file. **This is the only file you edit to add/remove companies.**
-# MAGIC All other notebooks read from here via `%run ../config/tickers`.
+# MAGIC # 00_config / 01__tickers
+# MAGIC
+# MAGIC Core constants and XBRL concept maps shared by all notebooks.
+# MAGIC
+# MAGIC - **Catalog / schema / table names** — single source of truth
+# MAGIC - **XBRL concept maps** — used by ingestion and transformation notebooks
+# MAGIC
+# MAGIC > The ticker universe is managed in `02__tickers_master`, which writes to `main.config.tickers`.
+# MAGIC > Ingestion notebooks read from that table directly.
 
 # COMMAND ----------
 
@@ -23,55 +21,28 @@ TABLE     = "financials"
 
 SEC_USER_AGENT = "MyCompany myemail@example.com"   # ← update with your details
 
-# ── Master Ticker List ────────────────────────────────────────────────────────
-# Add a new company by adding one dict to this list. Nothing else needs to change.
-#
-# Fields:
-#   ticker    (str)  required  — exchange ticker symbol
-#   name      (str)  required  — human-readable company name
-#   sector    (str)  optional  — used for grouping in dashboards
-#   active    (bool) optional  — set False to pause scraping without deleting
+# Convenience
+DB           = f"{CATALOG}.{SCHEMA}"
+TICKERS_TABLE = f"{CATALOG}.config.tickers"
 
-TICKERS = [
-    # ── Technology ────────────────────────────────────────────────────────────
-    {"ticker": "AAPL",  "name": "Apple Inc.",             "sector": "Technology", "active": True},
-    {"ticker": "MSFT",  "name": "Microsoft Corp.",         "sector": "Technology", "active": True},
-    {"ticker": "GOOGL", "name": "Alphabet Inc.",           "sector": "Technology", "active": True},
-    {"ticker": "META",  "name": "Meta Platforms Inc.",     "sector": "Technology", "active": True},
-    {"ticker": "NVDA",  "name": "NVIDIA Corp.",            "sector": "Technology", "active": True},
+# ── Create catalog & schema if they don't exist ───────────────────────────────
+spark.sql(f"CREATE CATALOG IF NOT EXISTS {CATALOG}")
+spark.sql(f"CREATE SCHEMA  IF NOT EXISTS {CATALOG}.{SCHEMA}")
+spark.sql(f"CREATE SCHEMA  IF NOT EXISTS {CATALOG}.config")
+spark.sql(f"USE CATALOG {CATALOG}")
+spark.sql(f"USE SCHEMA  {SCHEMA}")
 
-    # ── Consumer ──────────────────────────────────────────────────────────────
-    {"ticker": "AMZN",  "name": "Amazon.com Inc.",         "sector": "Consumer",   "active": True},
-    {"ticker": "TSLA",  "name": "Tesla Inc.",              "sector": "Consumer",   "active": True},
+print(f"Config loaded:")
+print(f"  Target        : {DB}.{TABLE}")
+print(f"  Tickers table : {TICKERS_TABLE}")
+print(f"  Schema        : ✓ {DB} ready")
 
-    # ── Financials ────────────────────────────────────────────────────────────
-    {"ticker": "JPM",   "name": "JPMorgan Chase & Co.",    "sector": "Financials", "active": True},
-    {"ticker": "V",     "name": "Visa Inc.",               "sector": "Financials", "active": True},
+# COMMAND ----------
 
-    # ── Healthcare ────────────────────────────────────────────────────────────
-    {"ticker": "JNJ",   "name": "Johnson & Johnson",       "sector": "Healthcare", "active": True},
+# MAGIC %md ## XBRL concept maps
+# MAGIC Centralised here so every notebook uses the same definitions.
 
-    # ── Add new companies below this line ─────────────────────────────────────
-    # {"ticker": "TSM",  "name": "Taiwan Semiconductor",   "sector": "Technology", "active": True},
-]
-
-# ── Convenience helpers (used by other notebooks) ─────────────────────────────
-
-# Only tickers flagged as active
-ACTIVE_TICKERS = [t["ticker"] for t in TICKERS if t.get("active", True)]
-
-# Lookup: ticker → full metadata dict
-TICKER_META = {t["ticker"]: t for t in TICKERS}
-
-# Tickers grouped by sector
-from collections import defaultdict
-TICKERS_BY_SECTOR = defaultdict(list)
-for t in TICKERS:
-    if t.get("active", True):
-        TICKERS_BY_SECTOR[t.get("sector", "Other")].append(t["ticker"])
-
-# ── XBRL Concept Maps ─────────────────────────────────────────────────────────
-# Centralised here so every notebook uses the same definitions.
+# COMMAND ----------
 
 INCOME_STATEMENT = {
     "Revenue":                    "Revenues",
@@ -136,16 +107,3 @@ STATEMENTS = {
     "Balance Sheet":    BALANCE_SHEET,
     "Cash Flow":        CASH_FLOW,
 }
-
-# ── Create catalog & schema if they don't exist ───────────────────────────────
-spark.sql(f"CREATE CATALOG IF NOT EXISTS {CATALOG}")
-spark.sql(f"CREATE SCHEMA IF NOT EXISTS {CATALOG}.{SCHEMA}")
-spark.sql(f"USE CATALOG {CATALOG}")
-spark.sql(f"USE SCHEMA {SCHEMA}")
-
-# ── Print summary on load ──────────────────────────────────────────────────────
-print(f"Config loaded:")
-print(f"  Target    : {CATALOG}.{SCHEMA}.{TABLE}")
-print(f"  Tickers   : {len(ACTIVE_TICKERS)} active — {ACTIVE_TICKERS}")
-print(f"  Sectors   : {dict(TICKERS_BY_SECTOR)}")
-print(f"  Schema    : ✓ {CATALOG}.{SCHEMA} ready")
