@@ -1,38 +1,26 @@
-# 20_transformation / 23__wide_tables
+# Fundamentals Analytics — Financial Statements
 
-Pivots the long-format `financials` fact table into three analyst-ready wide tables (or views), one per financial statement. Each row represents a single ticker/year combination with all relevant line items as columns.
+Produces the three core financial statement outputs (Income Statement, Balance Sheet, Cash Flow) by querying the long-format `financials` fact table directly. No intermediate wide tables or views are materialised.
 
 ```
-ticker | company | year | Revenue ($bn) | Gross Profit ($bn) | Net Income ($bn) | ...
--------|---------|------|---------------|-------------------|-----------------|----
-AAPL   | Apple   | 2020 |        274.52 |             104.96 |           57.41 | ...
-AAPL   | Apple   | 2021 |        365.82 |             152.84 |           94.68 | ...
+ticker | company | year | concept           | value
+-------|---------|------|-------------------|----------
+AAPL   | Apple   | 2020 | Revenue           | 274520000000
+AAPL   | Apple   | 2020 | Gross Profit      | 104956000000
+AAPL   | Apple   | 2020 | Net Income        | 57411000000
 ```
 
-All monetary values are expressed in **billions USD**, rounded to 2 decimal places. Per-share figures (EPS) and share counts are kept in their native units.
+Dashboard queries pivot and format this data on the fly, filtering by `statement` and `concept` as needed.
 
 ---
 
-## Output tables
+## Source table
 
-| Table | Statement | Description |
-|---|---|---|
-| `main.financials.income_statement` | Income Statement | Revenue through net income, EPS, share count |
-| `main.financials.balance_sheet` | Balance Sheet | Assets, liabilities, and equity |
-| `main.financials.cash_flow` | Cash Flow | Operating, investing, and financing activities |
-
-> The notebook exists in two versions: one that materialises physical **Delta tables** (v1), and one that creates lightweight **Delta Views** (v2). The view-based approach is always in sync with `financials` and incurs zero extra storage cost.
-
----
-
-## Dependencies
-
-| Dependency | Path |
+| Table | Description |
 |---|---|
-| Config / tickers | `00_config/01__tickers` (provides `CATALOG`, `SCHEMA`) |
-| Source table | `{CATALOG}.{SCHEMA}.financials` (long-format fact table) |
+| `{CATALOG}.{SCHEMA}.financials` | Long-format fact table — one row per ticker / year / concept |
 
-The source table is expected to have the following columns:
+Expected schema:
 
 | Column | Type | Description |
 |---|---|---|
@@ -45,116 +33,91 @@ The source table is expected to have the following columns:
 
 ---
 
+## Statement filters
+
+Each dashboard statement filters on the `statement` column and selects the relevant `concept` values:
+
+| Statement | `statement` filter |
+|---|---|
+| Income Statement | `'Income Statement'` |
+| Balance Sheet | `'Balance Sheet'` |
+| Cash Flow | `'Cash Flow'` |
+
+---
+
 ## Column reference
 
-### Income Statement — `income_statement`
+All monetary values are in **billions USD** (divided by 1e9, rounded to 2 decimal places) for display. Per-share figures (EPS) and share counts are kept in their native units.
 
-| Column | Unit | Notes |
+### Income Statement
+
+| Concept | Display label | Unit |
 |---|---|---|
-| `Revenue ($bn)` | $bn | Coalesced from `Revenue` and `Revenue (contract)` XBRL tags |
-| `Cost of Revenue ($bn)` | $bn | |
-| `Gross Profit ($bn)` | $bn | |
-| `R&D ($bn)` | $bn | Research & development expense |
-| `SG&A ($bn)` | $bn | Selling, general & administrative expense |
-| `Operating Expenses ($bn)` | $bn | |
-| `Operating Income ($bn)` | $bn | |
-| `Interest Expense ($bn)` | $bn | |
-| `Income Before Tax ($bn)` | $bn | |
-| `Income Tax ($bn)` | $bn | |
-| `Net Income ($bn)` | $bn | |
-| `EPS Basic` | USD | Earnings per share, basic |
-| `EPS Diluted` | USD | Earnings per share, diluted |
-| `Shares Diluted (bn)` | bn shares | Diluted share count |
+| `Revenue` / `Revenue (contract)` | Revenue | $bn |
+| `Cost of Revenue` | Cost of Revenue | $bn |
+| `Gross Profit` | Gross Profit | $bn |
+| `R&D Expense` | R&D | $bn |
+| `SG&A Expense` | SG&A | $bn |
+| `Operating Expenses` | Operating Expenses | $bn |
+| `Operating Income` | Operating Income | $bn |
+| `Interest Expense` | Interest Expense | $bn |
+| `Income Before Tax` | Income Before Tax | $bn |
+| `Income Tax` | Income Tax | $bn |
+| `Net Income` | Net Income | $bn |
+| `EPS Basic` | EPS Basic | USD |
+| `EPS Diluted` | EPS Diluted | USD |
+| `Shares Diluted` | Shares Diluted | bn shares |
 
-### Balance Sheet — `balance_sheet`
+> Revenue is coalesced from two XBRL tags (`Revenue` and `Revenue (contract)`) since companies report under different tags.
 
-| Column | Unit |
-|---|---|
-| `Cash & Equivalents ($bn)` | $bn |
-| `ST Investments ($bn)` | $bn |
-| `Accounts Receivable ($bn)` | $bn |
-| `Inventory ($bn)` | $bn |
-| `Current Assets ($bn)` | $bn |
-| `PP&E Net ($bn)` | $bn |
-| `Goodwill ($bn)` | $bn |
-| `Intangibles ($bn)` | $bn |
-| `Total Assets ($bn)` | $bn |
-| `Accounts Payable ($bn)` | $bn |
-| `ST Debt ($bn)` | $bn |
-| `Current Liabilities ($bn)` | $bn |
-| `LT Debt ($bn)` | $bn |
-| `Total Liabilities ($bn)` | $bn |
-| `Paid-in Capital ($bn)` | $bn |
-| `Retained Earnings ($bn)` | $bn |
-| `Total Equity ($bn)` | $bn |
-| `Total Liabilities & Equity ($bn)` | $bn |
+### Balance Sheet
 
-### Cash Flow — `cash_flow`
-
-| Column | Unit | Notes |
+| Concept | Display label | Unit |
 |---|---|---|
-| `Net Income ($bn)` | $bn | Reconciliation starting point |
-| `D&A ($bn)` | $bn | Depreciation & amortization |
-| `SBC ($bn)` | $bn | Stock-based compensation |
-| `Working Capital Change ($bn)` | $bn | |
-| `Operating CF ($bn)` | $bn | |
-| `CapEx ($bn)` | $bn | Capital expenditures |
-| `Acquisitions ($bn)` | $bn | |
-| `Purchases of Investments ($bn)` | $bn | |
-| `Sales of Investments ($bn)` | $bn | |
-| `Investing CF ($bn)` | $bn | |
-| `Debt Issuance ($bn)` | $bn | |
-| `Debt Repayment ($bn)` | $bn | |
-| `Dividends ($bn)` | $bn | |
-| `Buybacks ($bn)` | $bn | Share repurchases |
-| `Financing CF ($bn)` | $bn | |
-| `Net Change in Cash ($bn)` | $bn | |
-| `Free Cash Flow ($bn)` | $bn | Derived: `Operating CF − CapEx` (view version only) |
+| `Cash & Equivalents` | Cash & Equivalents | $bn |
+| `Short-term Investments` | ST Investments | $bn |
+| `Accounts Receivable` | Accounts Receivable | $bn |
+| `Inventory` | Inventory | $bn |
+| `Total Current Assets` | Current Assets | $bn |
+| `PP&E Net` | PP&E Net | $bn |
+| `Goodwill` | Goodwill | $bn |
+| `Intangible Assets` | Intangibles | $bn |
+| `Total Assets` | Total Assets | $bn |
+| `Accounts Payable` | Accounts Payable | $bn |
+| `Short-term Debt` | ST Debt | $bn |
+| `Total Current Liabilities` | Current Liabilities | $bn |
+| `Long-term Debt` | LT Debt | $bn |
+| `Total Liabilities` | Total Liabilities | $bn |
+| `Additional Paid-in Capital` | Paid-in Capital | $bn |
+| `Retained Earnings` | Retained Earnings | $bn |
+| `Total Stockholders Equity` | Total Equity | $bn |
+| `Total Liabilities & Equity` | Total Liabilities & Equity | $bn |
+
+### Cash Flow
+
+| Concept | Display label | Unit | Notes |
+|---|---|---|---|
+| `Net Income` | Net Income | $bn | Reconciliation starting point |
+| `Depreciation & Amortization` | D&A | $bn | |
+| `Stock-based Compensation` | SBC | $bn | |
+| `Changes in Working Capital` | Working Capital Change | $bn | |
+| `Operating Cash Flow` | Operating CF | $bn | |
+| `CapEx` | CapEx | $bn | |
+| `Acquisitions` | Acquisitions | $bn | |
+| `Purchases of Investments` | Purchases of Investments | $bn | |
+| `Sales of Investments` | Sales of Investments | $bn | |
+| `Investing Cash Flow` | Investing CF | $bn | |
+| `Debt Issuance` | Debt Issuance | $bn | |
+| `Debt Repayment` | Debt Repayment | $bn | |
+| `Dividends Paid` | Dividends | $bn | |
+| `Share Repurchases` | Buybacks | $bn | |
+| `Financing Cash Flow` | Financing CF | $bn | |
+| `Net Change in Cash` | Net Change in Cash | $bn | |
+
+> Free Cash Flow is derived at query time as `Operating CF − CapEx` and is not stored as a concept in `financials`.
 
 ---
 
-## How it works
+## Design decisions
 
-### Physical tables (v1)
-
-`build_wide_table()` performs a three-step operation for each statement:
-
-1. **Filter** — selects rows from `financials` matching the target statement and the concepts defined in the concept map.
-2. **Pivot** — groups by `(ticker, company, year)` and pivots `concept` values into columns using `F.first()`.
-3. **Write** — saves the result as a Delta table partitioned by `ticker`, with `autoOptimize` enabled.
-
-Revenue uses two XBRL tags (`Revenue` and `Revenue (contract)`) depending on the reporting company; the two columns are coalesced into one after the pivot.
-
-### Views (v2)
-
-Each view is a single SQL `SELECT` with conditional aggregation (`MAX(CASE WHEN concept = '...' THEN value END)`), which avoids any physical data duplication. The cash flow view also computes `Free_Cash_Flow_bn` as a derived column (`Operating CF − CapEx`).
-
----
-
-## Delta table properties
-
-Physical tables are created with the following optimisation hints:
-
-```
-PARTITIONED BY (ticker)
-TBLPROPERTIES (
-    'delta.autoOptimize.optimizeWrite' = 'true',
-    'delta.autoOptimize.autoCompact'   = 'true'
-)
-```
-
----
-
-## Sanity check
-
-The final cell queries each output for distinct ticker count, year range, and total row count — a quick way to confirm the pivot produced the expected shape.
-
-```sql
-SELECT
-    COUNT(DISTINCT ticker) AS tickers,
-    COUNT(DISTINCT year)   AS years,
-    MIN(year)              AS first_year,
-    MAX(year)              AS last_year,
-    COUNT(*)               AS total_rows
-FROM main.financials.income_statement
-```
+**No wide tables or views.** An earlier iteration of this project materialised the three statements as Delta wide tables (one column per concept), and later as Delta views. Both approaches were discarded in favour of querying `financials` directly, which keeps the pipeline simpler and avoids any schema drift between the fact table and its derivatives.
