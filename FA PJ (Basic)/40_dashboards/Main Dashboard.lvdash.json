@@ -49,6 +49,58 @@
   ],
   "pages": [
     {
+      "name": "04220857",
+      "displayName": "Scorecard",
+      "layout": [
+        {
+          "widget": {
+            "name": "2e9868e2",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "3faf0071",
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {}
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 4,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "26b6ec84",
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-single-select",
+              "encodings": {},
+              "frame": {
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 9,
+            "y": 0,
+            "width": 3,
+            "height": 2
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
       "name": "8293abd2",
       "displayName": "Balance Sheet",
       "layout": [
@@ -70,8 +122,8 @@
                       "expression": "`year`"
                     },
                     {
-                      "name": "sum(value_mn)",
-                      "expression": "SUM(`value_mn`)"
+                      "name": "value_mn",
+                      "expression": "`value_mn`"
                     }
                   ],
                   "cubeGroupingSets": {
@@ -88,7 +140,7 @@
                       }
                     ]
                   },
-                  "disaggregated": false,
+                  "disaggregated": true,
                   "orders": [
                     {
                       "direction": "ASC",
@@ -105,9 +157,9 @@
             "spec": {
               "version": 3,
               "frame": {
-                "showTitle": false,
+                "showTitle": true,
                 "title": "Balance Sheet",
-                "showDescription": false,
+                "showDescription": true,
                 "description": "{{ filter:95d1144f }} "
               },
               "widgetType": "pivot",
@@ -126,7 +178,7 @@
                   "type": "multi-cell",
                   "fields": [
                     {
-                      "fieldName": "sum(value_mn)",
+                      "fieldName": "value_mn",
                       "cellType": "text"
                     }
                   ]
@@ -180,7 +232,7 @@
               "disallowAll": true,
               "frame": {
                 "showTitle": true,
-                "showDescription": false
+                "showDescription": true
               },
               "widgetType": "filter-single-select",
               "encodings": {
@@ -194,25 +246,9 @@
             }
           },
           "position": {
-            "x": 8,
-            "y": 0,
-            "width": 4,
-            "height": 1
-          }
-        },
-        {
-          "widget": {
-            "name": "51d952e5",
-            "multilineTextboxSpec": {
-              "lines": [
-                "# BALANCE SHEET"
-              ]
-            }
-          },
-          "position": {
             "x": 0,
             "y": 0,
-            "width": 8,
+            "width": 12,
             "height": 1
           }
         }
@@ -226,7 +262,7 @@
       "layout": [
         {
           "widget": {
-            "name": "b76a9f6b",
+            "name": "income",
             "queries": [
               {
                 "name": "main_query",
@@ -276,6 +312,12 @@
             ],
             "spec": {
               "version": 3,
+              "frame": {
+                "showTitle": true,
+                "showDescription": true,
+                "description": "{{ filter:90d2e134 }} ",
+                "title": "Income Statement"
+              },
               "widgetType": "pivot",
               "encodings": {
                 "rows": [
@@ -359,25 +401,9 @@
             }
           },
           "position": {
-            "x": 8,
-            "y": 0,
-            "width": 4,
-            "height": 1
-          }
-        },
-        {
-          "widget": {
-            "name": "e5928d5b",
-            "multilineTextboxSpec": {
-              "lines": [
-                "# INCOME STATEMENT"
-              ]
-            }
-          },
-          "position": {
             "x": 0,
             "y": 0,
-            "width": 8,
+            "width": 12,
             "height": 1
           }
         }
@@ -391,7 +417,7 @@
       "layout": [
         {
           "widget": {
-            "name": "f53f22ad",
+            "name": "cash",
             "queries": [
               {
                 "name": "main_query",
@@ -446,6 +472,12 @@
             ],
             "spec": {
               "version": 3,
+              "frame": {
+                "showTitle": true,
+                "showDescription": true,
+                "title": "Cash Flow Statement",
+                "description": "{{ filter:166237bb }} "
+              },
               "widgetType": "pivot",
               "encodings": {
                 "rows": [
@@ -529,25 +561,9 @@
             }
           },
           "position": {
-            "x": 8,
-            "y": 0,
-            "width": 4,
-            "height": 1
-          }
-        },
-        {
-          "widget": {
-            "name": "dd6e95d3",
-            "multilineTextboxSpec": {
-              "lines": [
-                "# CASH FLOW"
-              ]
-            }
-          },
-          "position": {
             "x": 0,
             "y": 0,
-            "width": 8,
+            "width": 12,
             "height": 1
           }
         }
@@ -561,7 +577,7 @@
       "layout": [
         {
           "widget": {
-            "name": "805ab5aa",
+            "name": "derived",
             "queries": [
               {
                 "name": "main_query",
@@ -611,6 +627,12 @@
             ],
             "spec": {
               "version": 3,
+              "frame": {
+                "showTitle": true,
+                "showDescription": true,
+                "title": "Derived Metrics",
+                "description": "{{ filter:filters }} "
+              },
               "widgetType": "pivot",
               "encodings": {
                 "rows": [
@@ -644,7 +666,7 @@
         },
         {
           "widget": {
-            "name": "0f787827",
+            "name": "filters",
             "queries": [
               {
                 "name": "dashboards/01f14d17130c1c00b9efa16f14a7751a/datasets/01f14df3fe3614d6acda9e7ea69e11b6_ticker",
@@ -666,9 +688,6 @@
             ],
             "spec": {
               "version": 2,
-              "frame": {
-                "showTitle": true
-              },
               "disallowAll": true,
               "selection": {
                 "defaultSelection": {
@@ -682,6 +701,10 @@
                   }
                 }
               },
+              "frame": {
+                "showTitle": true,
+                "title": ""
+              },
               "widgetType": "filter-single-select",
               "encodings": {
                 "fields": [
@@ -694,25 +717,9 @@
             }
           },
           "position": {
-            "x": 8,
-            "y": 0,
-            "width": 4,
-            "height": 1
-          }
-        },
-        {
-          "widget": {
-            "name": "47994bea",
-            "multilineTextboxSpec": {
-              "lines": [
-                "# DERIVED METRICS"
-              ]
-            }
-          },
-          "position": {
             "x": 0,
             "y": 0,
-            "width": 8,
+            "width": 12,
             "height": 1
           }
         }
