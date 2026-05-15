@@ -1,0 +1,9 @@
+[
+  // Añade aquí tus tickers favoritos — se incluyen siempre, independientemente del índice
+  // Formato: {"ticker": "XXXX", "company": "Nombre opcional", "note": "Nota opcional"}
+  //
+  // Ejemplos:
+  // {"ticker": "TSM",  "company": "Taiwan Semiconductor", "note": ""},
+  // {"ticker": "ASML", "company": "ASML Holding",         "note": ""},
+  // {"ticker": "BABA", "company": "Alibaba",               "note": "China risk"}
+]
