@@ -14,6 +14,75 @@ Dashboard queries pivot and format this data on the fly, filtering by `statement
 
 ---
 
+## Estructura del proyecto
+
+```
+fundamentals_databricks_pj/
+│
+├── 00_config/
+│   ├── 01__tickers.py            ← constantes, nombres de tabla y mapas XBRL
+│   ├── 02__tickers_master.ipynb  ← construye main.config.tickers (S&P 500 + Russell 3000 + favoritos)
+│   └── favorites.json            ← lista de tickers favoritos — editar aquí directamente
+│
+├── 10_ingestion/
+│   ├── 11__fetch_sec_xbrl.py     ← SEC EDGAR → financials_raw (Delta, append-only)
+│   └── 12__fetch_market_data.py  ← Yahoo Finance → market_data (precios + market cap)
+│
+├── 20_transformation/
+│   ├── 21__clean_and_merge.py    ← MERGE into financials (clean fact table)
+│   └── 22__derived_metrics.ipynb ← FCF, márgenes, ratios, YoY growth, valoración
+│
+├── 30_analysis/
+│   └── 31__company_analysis.py   ← queries ad-hoc y validación
+│
+├── 40_dashboards/
+│   ├── 41__dashboard_queries.py  ← SQL que alimenta el dashboard
+│   └── Main Dashboard.lvdash.json
+│
+└── 90_pipelines/
+    └── 91__full_pipeline.ipynb   ← entry point del Job — ejecuta todo en secuencia
+```
+
+### Flujo del pipeline
+
+```
+favorites.json           editar tickers favoritos (sin tocar Databricks)
+      ↓
+02__tickers_master       construye main.config.tickers
+      ↓
+11__fetch_sec_xbrl       SEC API → financials_raw
+      ↓
+12__fetch_market_data    Yahoo Finance → market_data
+      ↓
+21__clean_and_merge      deduplica → MERGE into financials
+      ↓
+22__derived_metrics      márgenes, FCF, YoY, leverage, ratios de valoración
+      ↓
+31__company_analysis     queries de validación
+```
+
+---
+
+## Favoritos (`favorites.json`)
+
+Los tickers favoritos se gestionan editando `00_config/favorites.json` directamente en el repositorio Git. Se incluyen siempre en la ingesta, independientemente de si están en el S&P 500 o el Russell 3000.
+
+```json
+[
+  {"ticker": "TSM",  "company": "Taiwan Semiconductor", "note": ""},
+  {"ticker": "ASML", "company": "ASML Holding",         "note": ""}
+]
+```
+
+**Cómo añadir o quitar un ticker favorito:**
+1. Edita `00_config/favorites.json` en el repo
+2. Haz commit y push
+3. Ejecuta `02__tickers_master` (o lanza el Job completo)
+
+No es necesario abrir ni ejecutar ningún notebook de Databricks para gestionar favoritos.
+
+---
+
 ## Tables
 
 | Table | Description |
@@ -199,3 +268,5 @@ All monetary values are in **billions USD** (divided by 1e9, rounded to 2 decima
 ## Design decisions
 
 **No wide tables or views.** An earlier iteration of this project materialised the three statements as Delta wide tables (one column per concept), and later as Delta views. Both approaches were discarded in favour of querying `financials` directly, which keeps the pipeline simpler and avoids any schema drift between the fact table and its derivatives.
+
+**Favorites gestionados en Git, no en Delta.** Una iteración anterior usaba una tabla Delta (`main.config.favorites`) gestionada desde un notebook (`02__favorites`). Se simplificó a un archivo `favorites.json` en el repositorio, lo que permite editar la lista de favoritos directamente desde el editor o GitHub sin necesidad de abrir Databricks.
