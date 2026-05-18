@@ -7,6 +7,13 @@
       { "metric": "Operating Margin %", "unit": "percent", "requires_market_data": false },
       { "metric": "Net Margin %",       "unit": "percent", "requires_market_data": false },
       { "metric": "FCF Margin %",       "unit": "percent", "requires_market_data": false }
+    ],
+    "Returns": [
+      { "metric": "ROA %",   "unit": "percent", "requires_market_data": false },
+      { "metric": "ROE %",   "unit": "percent", "requires_market_data": false },
+      { "metric": "ROIC %",  "unit": "percent", "requires_market_data": false },
+      { "metric": "ROCE %",  "unit": "percent", "requires_market_data": false },
+      { "metric": "CROIC %", "unit": "percent", "requires_market_data": false }
     ]
   },
 
@@ -39,11 +46,20 @@
     "Price Multiples": [
       { "metric": "P/E",   "unit": "ratio", "requires_market_data": true },
       { "metric": "P/S",   "unit": "ratio", "requires_market_data": true },
-      { "metric": "P/FCF", "unit": "ratio", "requires_market_data": true }
+      { "metric": "P/FCF", "unit": "ratio", "requires_market_data": true },
+      { "metric": "P/B",   "unit": "ratio", "requires_market_data": true }
     ],
     "Enterprise Value": [
       { "metric": "EV",        "unit": "usd",   "requires_market_data": true },
       { "metric": "EV/EBITDA", "unit": "ratio", "requires_market_data": true }
+    ],
+    "Yields": [
+      { "metric": "Earnings Yield %",     "unit": "percent", "requires_market_data": true },
+      { "metric": "Sales Yield %",        "unit": "percent", "requires_market_data": true },
+      { "metric": "FCF Yield %",          "unit": "percent", "requires_market_data": true },
+      { "metric": "Op Cash Flow Yield %", "unit": "percent", "requires_market_data": true },
+      { "metric": "Book Yield %",         "unit": "percent", "requires_market_data": true },
+      { "metric": "EBITDA Yield %",       "unit": "percent", "requires_market_data": true }
     ]
   }
 }

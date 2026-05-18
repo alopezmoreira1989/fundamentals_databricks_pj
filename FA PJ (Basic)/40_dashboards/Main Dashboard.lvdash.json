@@ -127,8 +127,8 @@
         "        h.subcategory,\r\n",
         "        h.metric,\r\n",
         "        h.sort_order,\r\n",
-        "        MIN(h.sort_order) OVER (PARTITION BY h.category)              AS category_sort,\r\n",
-        "        MIN(h.sort_order) OVER (PARTITION BY h.category, h.subcategory) AS subcategory_sort\r\n",
+        "        MIN(h.sort_order) OVER (PARTITION BY h.category)                 AS category_sort,\r\n",
+        "        MIN(h.sort_order) OVER (PARTITION BY h.category, h.subcategory)  AS subcategory_sort\r\n",
         "    FROM main.financials.financials_metrics m\r\n",
         "    JOIN main.config.metrics_hierarchy h\r\n",
         "        ON h.metric = m.metric\r\n",
@@ -136,9 +136,9 @@
         "SELECT\r\n",
         "    ticker,\r\n",
         "    year,\r\n",
-        "    LPAD(CAST(category_sort    AS STRING), 3, '0') || ' ' || category    AS category,\r\n",
-        "    LPAD(CAST(subcategory_sort AS STRING), 3, '0') || ' ' || subcategory AS subcategory,\r\n",
-        "    LPAD(CAST(sort_order       AS STRING), 3, '0') || ' ' || metric      AS metric,\r\n",
+        "    LPAD(CAST(category_sort    AS STRING), 3, '0') || ' ' || category     AS category,\r\n",
+        "    LPAD(CAST(subcategory_sort AS STRING), 3, '0') || ' ' || subcategory  AS subcategory,\r\n",
+        "    LPAD(CAST(sort_order       AS STRING), 3, '0') || ' ' || metric       AS metric,\r\n",
         "    ROUND(ANY_VALUE(value), 2) AS value\r\n",
         "FROM ranked\r\n",
         "GROUP BY\r\n",
@@ -324,7 +324,7 @@
             "x": 0,
             "y": 1,
             "width": 12,
-            "height": 11
+            "height": 15
           }
         },
         {
@@ -843,7 +843,7 @@
             "x": 0,
             "y": 1,
             "width": 12,
-            "height": 10
+            "height": 18
           }
         },
         {
