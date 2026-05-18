@@ -1,0 +1,155 @@
+{
+  "_comment": "Jerarquía de conceptos para los 3 estados financieros. Dos tipos de nodos: GRUPOS (con campo 'group' en lugar de 'concept') que solo sirven para agrupar visualmente y NO existen en financials, y CONCEPTOS (con 'concept') que sí existen en financials. Los subtotales como 'Total Assets' son conceptos que aparecen al final del grupo al que pertenecen. El sort_order se deriva del orden en este archivo: hijos primero, luego subtotal del grupo.",
+
+  "Income Statement": [
+    {
+      "group": "Revenue",
+      "children": [
+        { "concept": "Revenue" }
+      ]
+    },
+    {
+      "group": "Cost of Revenue",
+      "children": [
+        { "concept": "Cost of Revenue" },
+        { "concept": "Gross Profit" }
+      ]
+    },
+    {
+      "group": "Operating Expenses",
+      "children": [
+        { "concept": "R&D Expense",        "display_name": "R&D" },
+        { "concept": "SG&A Expense",       "display_name": "SG&A" },
+        { "concept": "Operating Expenses" },
+        { "concept": "Operating Income" }
+      ]
+    },
+    {
+      "group": "Non-Operating",
+      "children": [
+        { "concept": "Interest Expense" },
+        { "concept": "Income Before Tax" }
+      ]
+    },
+    {
+      "group": "Tax",
+      "children": [
+        { "concept": "Income Tax" }
+      ]
+    },
+    {
+      "group": "Bottom Line",
+      "children": [
+        { "concept": "Net Income" }
+      ]
+    },
+    {
+      "group": "Per Share Data",
+      "children": [
+        { "concept": "EPS Basic" },
+        { "concept": "EPS Diluted" },
+        { "concept": "Shares Diluted" }
+      ]
+    }
+  ],
+
+  "Balance Sheet": [
+    {
+      "group": "Assets",
+      "children": [
+        {
+          "group": "Current Assets",
+          "children": [
+            { "concept": "Cash & Equivalents" },
+            { "concept": "Short-term Investments", "display_name": "ST Investments" },
+            { "concept": "Accounts Receivable" },
+            { "concept": "Inventory" },
+            { "concept": "Total Current Assets" }
+          ]
+        },
+        {
+          "group": "Non-Current Assets",
+          "children": [
+            { "concept": "PP&E Net" },
+            { "concept": "Goodwill" },
+            { "concept": "Intangible Assets", "display_name": "Intangibles" }
+          ]
+        },
+        { "concept": "Total Assets" }
+      ]
+    },
+    {
+      "group": "Liabilities & Equity",
+      "children": [
+        {
+          "group": "Liabilities",
+          "children": [
+            {
+              "group": "Current Liabilities",
+              "children": [
+                { "concept": "Accounts Payable" },
+                { "concept": "Short-term Debt", "display_name": "ST Debt" },
+                { "concept": "Total Current Liabilities" }
+              ]
+            },
+            {
+              "group": "Non-Current Liabilities",
+              "children": [
+                { "concept": "Long-term Debt", "display_name": "LT Debt" }
+              ]
+            },
+            { "concept": "Total Liabilities" }
+          ]
+        },
+        {
+          "group": "Stockholders Equity",
+          "children": [
+            { "concept": "Additional Paid-in Capital", "display_name": "Paid-in Capital" },
+            { "concept": "Retained Earnings" },
+            { "concept": "Total Stockholders Equity" }
+          ]
+        },
+        { "concept": "Total Liabilities & Equity" }
+      ]
+    }
+  ],
+
+  "Cash Flow": [
+    {
+      "group": "Operating Activities",
+      "children": [
+        { "concept": "Net Income" },
+        { "concept": "Depreciation & Amortization", "display_name": "D&A" },
+        { "concept": "Stock-based Compensation",    "display_name": "SBC" },
+        { "concept": "Changes in Working Capital",  "display_name": "Working Capital Change" },
+        { "concept": "Operating Cash Flow",         "display_name": "Operating CF" }
+      ]
+    },
+    {
+      "group": "Investing Activities",
+      "children": [
+        { "concept": "CapEx" },
+        { "concept": "Acquisitions" },
+        { "concept": "Purchases of Investments" },
+        { "concept": "Sales of Investments" },
+        { "concept": "Investing Cash Flow",         "display_name": "Investing CF" }
+      ]
+    },
+    {
+      "group": "Financing Activities",
+      "children": [
+        { "concept": "Debt Issuance" },
+        { "concept": "Debt Repayment" },
+        { "concept": "Dividends Paid",     "display_name": "Dividends" },
+        { "concept": "Share Repurchases",  "display_name": "Buybacks" },
+        { "concept": "Financing Cash Flow", "display_name": "Financing CF" }
+      ]
+    },
+    {
+      "group": "Net Change",
+      "children": [
+        { "concept": "Net Change in Cash" }
+      ]
+    }
+  ]
+}

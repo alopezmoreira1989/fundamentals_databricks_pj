@@ -1,39 +1,117 @@
 {
   "datasets": [
     {
+      "name": "6646c7a4",
+      "displayName": "ds_balance_sheet",
+      "queryLines": [
+        "WITH ranked AS (\r\n",
+        "    SELECT\r\n",
+        "        f.ticker,\r\n",
+        "        f.year,\r\n",
+        "        f.value,\r\n",
+        "        h.section,\r\n",
+        "        h.`group`,\r\n",
+        "        h.display_name,\r\n",
+        "        h.sort_order,\r\n",
+        "        MIN(h.sort_order) OVER (PARTITION BY f.stmt, h.section)            AS section_sort,\r\n",
+        "        MIN(h.sort_order) OVER (PARTITION BY f.stmt, h.section, h.`group`) AS group_sort\r\n",
+        "    FROM main.financials.financials f\r\n",
+        "    JOIN main.config.concept_hierarchy h\r\n",
+        "        ON h.stmt = f.stmt AND h.concept = f.concept\r\n",
+        "    WHERE f.stmt = 'Balance Sheet'\r\n",
+        ")\r\n",
+        "SELECT\r\n",
+        "    ticker,\r\n",
+        "    year,\r\n",
+        "    LPAD(CAST(section_sort AS STRING), 3, '0') || ' ' || section AS section,\r\n",
+        "    CASE\r\n",
+        "        WHEN `group` IS NULL\r\n",
+        "            THEN LPAD(CAST(sort_order AS STRING), 3, '0') || ' —'\r\n",
+        "        ELSE LPAD(CAST(group_sort AS STRING), 3, '0') || ' ' || `group`\r\n",
+        "    END AS `group`,\r\n",
+        "    CASE\r\n",
+        "        WHEN display_name LIKE 'Total%'\r\n",
+        "            THEN LPAD(CAST(sort_order AS STRING), 3, '0') || ' ▸ ' || UPPER(display_name)\r\n",
+        "        ELSE LPAD(CAST(sort_order AS STRING), 3, '0') || '   ' || display_name\r\n",
+        "    END AS concept,\r\n",
+        "    ROUND(SUM(value) / 1e6, 2) AS value_mn\r\n",
+        "FROM ranked\r\n",
+        "GROUP BY\r\n",
+        "    ticker, year, section_sort, section, `group`, sort_order, display_name, group_sort\r\n",
+        "ORDER BY\r\n",
+        "    ticker, year, sort_order"
+      ]
+    },
+    {
       "name": "3faf0071",
       "displayName": "ds_income_statement",
       "queryLines": [
-        "SELECT ticker, year, concept,\r\n",
+        "WITH ranked AS (\r\n",
+        "    SELECT\r\n",
+        "        f.ticker,\r\n",
+        "        f.year,\r\n",
+        "        f.value,\r\n",
+        "        h.section,\r\n",
+        "        h.display_name,\r\n",
+        "        h.sort_order,\r\n",
+        "        MIN(h.sort_order) OVER (PARTITION BY f.stmt, h.section) AS section_sort\r\n",
+        "    FROM main.financials.financials f\r\n",
+        "    JOIN main.config.concept_hierarchy h\r\n",
+        "        ON h.stmt = f.stmt AND h.concept = f.concept\r\n",
+        "    WHERE f.stmt = 'Income Statement'\r\n",
+        "      AND h.section <> 'Per Share Data'   -- esta sección va a un widget aparte\r\n",
+        ")\r\n",
+        "SELECT\r\n",
+        "    ticker,\r\n",
+        "    year,\r\n",
+        "    LPAD(CAST(section_sort AS STRING), 3, '0') || ' ' || section AS section,\r\n",
+        "    CASE\r\n",
+        "        WHEN display_name IN ('Gross Profit', 'Operating Income', 'Operating Expenses',\r\n",
+        "                              'Income Before Tax', 'Net Income')\r\n",
+        "            THEN LPAD(CAST(sort_order AS STRING), 3, '0') || ' ▸ ' || UPPER(display_name)\r\n",
+        "        ELSE LPAD(CAST(sort_order AS STRING), 3, '0') || '   ' || display_name\r\n",
+        "    END AS concept,\r\n",
         "    ROUND(SUM(value) / 1e6, 2) AS value_mn\r\n",
-        "FROM main.financials.financials\r\n",
-        "WHERE stmt = 'Income Statement'\r\n",
-        "GROUP BY ticker, year, concept\r\n",
-        "ORDER BY year"
+        "FROM ranked\r\n",
+        "GROUP BY\r\n",
+        "    ticker, year, section_sort, section, sort_order, display_name\r\n",
+        "ORDER BY\r\n",
+        "    ticker, year, sort_order"
       ]
     },
     {
       "name": "e0d529a9",
       "displayName": "ds_cash_flow",
       "queryLines": [
-        "SELECT ticker, year, concept,\r\n",
+        "WITH ranked AS (\r\n",
+        "    SELECT\r\n",
+        "        f.ticker,\r\n",
+        "        f.year,\r\n",
+        "        f.value,\r\n",
+        "        h.section,\r\n",
+        "        h.display_name,\r\n",
+        "        h.sort_order,\r\n",
+        "        MIN(h.sort_order) OVER (PARTITION BY f.stmt, h.section) AS section_sort\r\n",
+        "    FROM main.financials.financials f\r\n",
+        "    JOIN main.config.concept_hierarchy h\r\n",
+        "        ON h.stmt = f.stmt AND h.concept = f.concept\r\n",
+        "    WHERE f.stmt = 'Cash Flow'\r\n",
+        ")\r\n",
+        "SELECT\r\n",
+        "    ticker,\r\n",
+        "    year,\r\n",
+        "    LPAD(CAST(section_sort AS STRING), 3, '0') || ' ' || section AS section,\r\n",
+        "    CASE\r\n",
+        "        WHEN display_name IN ('Operating CF', 'Investing CF', 'Financing CF', 'Net Change in Cash')\r\n",
+        "            THEN LPAD(CAST(sort_order AS STRING), 3, '0') || ' ▸ ' || UPPER(display_name)\r\n",
+        "        ELSE LPAD(CAST(sort_order AS STRING), 3, '0') || '   ' || display_name\r\n",
+        "    END AS concept,\r\n",
         "    ROUND(SUM(value) / 1e6, 2) AS value_mn\r\n",
-        "FROM main.financials.financials\r\n",
-        "WHERE stmt = 'Cash Flow'\r\n",
-        "GROUP BY ticker, year, concept\r\n",
-        "ORDER BY year"
-      ]
-    },
-    {
-      "name": "6646c7a4",
-      "displayName": "ds_balance_sheet",
-      "queryLines": [
-        "SELECT ticker, year, concept,\r\n",
-        "    ROUND(SUM(value) / 1e6, 2) AS value_mn\r\n",
-        "FROM main.financials.financials\r\n",
-        "WHERE stmt = 'Balance Sheet'\r\n",
-        "GROUP BY ticker, year, concept\r\n",
-        "ORDER BY year"
+        "FROM ranked\r\n",
+        "GROUP BY\r\n",
+        "    ticker, year, section_sort, section, sort_order, display_name\r\n",
+        "ORDER BY\r\n",
+        "    ticker, year, sort_order"
       ]
     },
     {
@@ -114,6 +192,14 @@
                   "datasetName": "6646c7a4",
                   "fields": [
                     {
+                      "name": "section",
+                      "expression": "`section`"
+                    },
+                    {
+                      "name": "group",
+                      "expression": "`group`"
+                    },
+                    {
                       "name": "concept",
                       "expression": "`concept`"
                     },
@@ -130,6 +216,8 @@
                     "sets": [
                       {
                         "fieldNames": [
+                          "section",
+                          "group",
                           "concept"
                         ]
                       },
@@ -142,6 +230,14 @@
                   },
                   "disaggregated": true,
                   "orders": [
+                    {
+                      "direction": "ASC",
+                      "expression": "`section`"
+                    },
+                    {
+                      "direction": "ASC",
+                      "expression": "`group`"
+                    },
                     {
                       "direction": "ASC",
                       "expression": "`concept`"
@@ -166,7 +262,22 @@
               "encodings": {
                 "rows": [
                   {
-                    "fieldName": "concept"
+                    "fieldName": "section"
+                  },
+                  {
+                    "fieldName": "group"
+                  },
+                  {
+                    "fieldName": "concept",
+                    "scale": {
+                      "type": "categorical",
+                      "sort": {
+                        "by": "cell-reversed",
+                        "field": {
+                          "index": 0
+                        }
+                      }
+                    }
                   }
                 ],
                 "columns": [
@@ -270,6 +381,10 @@
                   "datasetName": "3faf0071",
                   "fields": [
                     {
+                      "name": "section",
+                      "expression": "`section`"
+                    },
+                    {
                       "name": "concept",
                       "expression": "`concept`"
                     },
@@ -286,6 +401,7 @@
                     "sets": [
                       {
                         "fieldNames": [
+                          "section",
                           "concept"
                         ]
                       },
@@ -298,6 +414,10 @@
                   },
                   "disaggregated": false,
                   "orders": [
+                    {
+                      "direction": "ASC",
+                      "expression": "`section`"
+                    },
                     {
                       "direction": "ASC",
                       "expression": "`concept`"
@@ -321,6 +441,9 @@
               "widgetType": "pivot",
               "encodings": {
                 "rows": [
+                  {
+                    "fieldName": "section"
+                  },
                   {
                     "fieldName": "concept"
                   }
@@ -425,6 +548,10 @@
                   "datasetName": "e0d529a9",
                   "fields": [
                     {
+                      "name": "section",
+                      "expression": "`section`"
+                    },
+                    {
                       "name": "concept",
                       "expression": "`concept`"
                     },
@@ -446,6 +573,7 @@
                     "sets": [
                       {
                         "fieldNames": [
+                          "section",
                           "concept"
                         ]
                       },
@@ -458,6 +586,10 @@
                   },
                   "disaggregated": false,
                   "orders": [
+                    {
+                      "direction": "ASC",
+                      "expression": "`section`"
+                    },
                     {
                       "direction": "ASC",
                       "expression": "`concept`"
@@ -481,6 +613,9 @@
               "widgetType": "pivot",
               "encodings": {
                 "rows": [
+                  {
+                    "fieldName": "section"
+                  },
                   {
                     "fieldName": "concept"
                   }
