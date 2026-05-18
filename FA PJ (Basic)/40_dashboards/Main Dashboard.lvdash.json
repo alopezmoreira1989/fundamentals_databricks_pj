@@ -118,10 +118,33 @@
       "name": "96deb0c6",
       "displayName": "devired_metrics",
       "queryLines": [
-        "SELECT ticker, year, metric, round(any_value(value), 2) as value\r\n",
-        "FROM main.financials.financials_metrics\r\n",
-        "GROUP BY ticker, year, metric\r\n",
-        "ORDER BY year"
+        "WITH ranked AS (\r\n",
+        "    SELECT\r\n",
+        "        m.ticker,\r\n",
+        "        m.year,\r\n",
+        "        m.value,\r\n",
+        "        h.category,\r\n",
+        "        h.subcategory,\r\n",
+        "        h.metric,\r\n",
+        "        h.sort_order,\r\n",
+        "        MIN(h.sort_order) OVER (PARTITION BY h.category)              AS category_sort,\r\n",
+        "        MIN(h.sort_order) OVER (PARTITION BY h.category, h.subcategory) AS subcategory_sort\r\n",
+        "    FROM main.financials.financials_metrics m\r\n",
+        "    JOIN main.config.metrics_hierarchy h\r\n",
+        "        ON h.metric = m.metric\r\n",
+        ")\r\n",
+        "SELECT\r\n",
+        "    ticker,\r\n",
+        "    year,\r\n",
+        "    LPAD(CAST(category_sort    AS STRING), 3, '0') || ' ' || category    AS category,\r\n",
+        "    LPAD(CAST(subcategory_sort AS STRING), 3, '0') || ' ' || subcategory AS subcategory,\r\n",
+        "    LPAD(CAST(sort_order       AS STRING), 3, '0') || ' ' || metric      AS metric,\r\n",
+        "    ROUND(ANY_VALUE(value), 2) AS value\r\n",
+        "FROM ranked\r\n",
+        "GROUP BY\r\n",
+        "    ticker, year, category_sort, category, subcategory_sort, subcategory, sort_order, metric\r\n",
+        "ORDER BY\r\n",
+        "    ticker, year, sort_order"
       ]
     }
   ],
@@ -720,6 +743,14 @@
                   "datasetName": "96deb0c6",
                   "fields": [
                     {
+                      "name": "category",
+                      "expression": "`category`"
+                    },
+                    {
+                      "name": "subcategory",
+                      "expression": "`subcategory`"
+                    },
+                    {
                       "name": "metric",
                       "expression": "`metric`"
                     },
@@ -736,6 +767,8 @@
                     "sets": [
                       {
                         "fieldNames": [
+                          "category",
+                          "subcategory",
                           "metric"
                         ]
                       },
@@ -748,6 +781,14 @@
                   },
                   "disaggregated": false,
                   "orders": [
+                    {
+                      "direction": "ASC",
+                      "expression": "`category`"
+                    },
+                    {
+                      "direction": "ASC",
+                      "expression": "`subcategory`"
+                    },
                     {
                       "direction": "ASC",
                       "expression": "`metric`"
@@ -771,6 +812,12 @@
               "widgetType": "pivot",
               "encodings": {
                 "rows": [
+                  {
+                    "fieldName": "category"
+                  },
+                  {
+                    "fieldName": "subcategory"
+                  },
                   {
                     "fieldName": "metric"
                   }

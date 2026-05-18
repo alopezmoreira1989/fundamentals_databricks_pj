@@ -1,0 +1,49 @@
+{
+  "_comment": "Jerarquía de derived metrics (financials_metrics). Dos niveles: category → subcategory → metric. Cada metric es una fila en main.config.metrics_hierarchy. El campo 'requires_market_data' indica si la métrica depende de la tabla market_data (se computa solo si 12__fetch_market_data se ha ejecutado). El orden en este JSON determina el sort_order final (10, 20, 30, ...).",
+
+  "Profitability": {
+    "Margins": [
+      { "metric": "Gross Margin %",     "unit": "percent", "requires_market_data": false },
+      { "metric": "Operating Margin %", "unit": "percent", "requires_market_data": false },
+      { "metric": "Net Margin %",       "unit": "percent", "requires_market_data": false },
+      { "metric": "FCF Margin %",       "unit": "percent", "requires_market_data": false }
+    ]
+  },
+
+  "Cash Flow": {
+    "Absolute": [
+      { "metric": "Free Cash Flow", "unit": "usd", "requires_market_data": false }
+    ]
+  },
+
+  "Growth": {
+    "YoY": [
+      { "metric": "Revenue YoY %",             "unit": "percent", "requires_market_data": false },
+      { "metric": "Net Income YoY %",          "unit": "percent", "requires_market_data": false },
+      { "metric": "Operating Cash Flow YoY %", "unit": "percent", "requires_market_data": false },
+      { "metric": "Free Cash Flow YoY %",      "unit": "percent", "requires_market_data": false }
+    ]
+  },
+
+  "Financial Health": {
+    "Leverage": [
+      { "metric": "Debt / Equity", "unit": "ratio", "requires_market_data": false },
+      { "metric": "Debt / Assets", "unit": "ratio", "requires_market_data": false }
+    ],
+    "Liquidity": [
+      { "metric": "Current Ratio", "unit": "ratio", "requires_market_data": false }
+    ]
+  },
+
+  "Valuation": {
+    "Price Multiples": [
+      { "metric": "P/E",   "unit": "ratio", "requires_market_data": true },
+      { "metric": "P/S",   "unit": "ratio", "requires_market_data": true },
+      { "metric": "P/FCF", "unit": "ratio", "requires_market_data": true }
+    ],
+    "Enterprise Value": [
+      { "metric": "EV",        "unit": "usd",   "requires_market_data": true },
+      { "metric": "EV/EBITDA", "unit": "ratio", "requires_market_data": true }
+    ]
+  }
+}
