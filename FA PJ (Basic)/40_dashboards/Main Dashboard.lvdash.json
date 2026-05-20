@@ -7,7 +7,7 @@
         "WITH ranked AS (\r\n",
         "    SELECT\r\n",
         "        f.ticker,\r\n",
-        "        f.year,\r\n",
+        "        f.fiscal_year,\r\n",
         "        f.value,\r\n",
         "        h.section,\r\n",
         "        h.`group`,\r\n",
@@ -18,11 +18,12 @@
         "    FROM main.financials.financials f\r\n",
         "    JOIN main.config.concept_hierarchy h\r\n",
         "        ON h.stmt = f.stmt AND h.concept = f.concept\r\n",
-        "    WHERE f.stmt = 'Balance Sheet'\r\n",
+        "    WHERE f.stmt        = 'Balance Sheet'\r\n",
+        "      AND f.period_type = 'FY'\r\n",
         ")\r\n",
         "SELECT\r\n",
         "    ticker,\r\n",
-        "    year,\r\n",
+        "    fiscal_year,\r\n",
         "    LPAD(CAST(section_sort AS STRING), 3, '0') || ' ' || section AS section,\r\n",
         "    CASE\r\n",
         "        WHEN `group` IS NULL\r\n",
@@ -37,9 +38,9 @@
         "    ROUND(SUM(value) / 1e6, 2) AS value_mn\r\n",
         "FROM ranked\r\n",
         "GROUP BY\r\n",
-        "    ticker, year, section_sort, section, `group`, sort_order, display_name, group_sort\r\n",
+        "    ticker, fiscal_year, section_sort, section, `group`, sort_order, display_name, group_sort\r\n",
         "ORDER BY\r\n",
-        "    ticker, year, sort_order"
+        "    ticker, fiscal_year, sort_order"
       ]
     },
     {
@@ -49,7 +50,7 @@
         "WITH ranked AS (\r\n",
         "    SELECT\r\n",
         "        f.ticker,\r\n",
-        "        f.year,\r\n",
+        "        f.fiscal_year,\r\n",
         "        f.value,\r\n",
         "        h.section,\r\n",
         "        h.display_name,\r\n",
@@ -58,12 +59,13 @@
         "    FROM main.financials.financials f\r\n",
         "    JOIN main.config.concept_hierarchy h\r\n",
         "        ON h.stmt = f.stmt AND h.concept = f.concept\r\n",
-        "    WHERE f.stmt = 'Income Statement'\r\n",
-        "      AND h.section <> 'Per Share Data'   -- esta sección va a un widget aparte\r\n",
+        "    WHERE f.stmt        = 'Income Statement'\r\n",
+        "      AND f.period_type = 'FY'\r\n",
+        "      AND h.section    <> 'Per Share Data'   -- esta sección va a un widget aparte\r\n",
         ")\r\n",
         "SELECT\r\n",
         "    ticker,\r\n",
-        "    year,\r\n",
+        "    fiscal_year,\r\n",
         "    LPAD(CAST(section_sort AS STRING), 3, '0') || ' ' || section AS section,\r\n",
         "    CASE\r\n",
         "        WHEN display_name IN ('Gross Profit', 'Operating Income', 'Operating Expenses',\r\n",
@@ -74,9 +76,9 @@
         "    ROUND(SUM(value) / 1e6, 2) AS value_mn\r\n",
         "FROM ranked\r\n",
         "GROUP BY\r\n",
-        "    ticker, year, section_sort, section, sort_order, display_name\r\n",
+        "    ticker, fiscal_year, section_sort, section, sort_order, display_name\r\n",
         "ORDER BY\r\n",
-        "    ticker, year, sort_order"
+        "    ticker, fiscal_year, sort_order"
       ]
     },
     {
@@ -86,7 +88,7 @@
         "WITH ranked AS (\r\n",
         "    SELECT\r\n",
         "        f.ticker,\r\n",
-        "        f.year,\r\n",
+        "        f.fiscal_year,\r\n",
         "        f.value,\r\n",
         "        h.section,\r\n",
         "        h.display_name,\r\n",
@@ -95,11 +97,12 @@
         "    FROM main.financials.financials f\r\n",
         "    JOIN main.config.concept_hierarchy h\r\n",
         "        ON h.stmt = f.stmt AND h.concept = f.concept\r\n",
-        "    WHERE f.stmt = 'Cash Flow'\r\n",
+        "    WHERE f.stmt        = 'Cash Flow'\r\n",
+        "      AND f.period_type = 'FY'\r\n",
         ")\r\n",
         "SELECT\r\n",
         "    ticker,\r\n",
-        "    year,\r\n",
+        "    fiscal_year,\r\n",
         "    LPAD(CAST(section_sort AS STRING), 3, '0') || ' ' || section AS section,\r\n",
         "    CASE\r\n",
         "        WHEN display_name IN ('Operating CF', 'Investing CF', 'Financing CF', 'Net Change in Cash')\r\n",
@@ -109,9 +112,9 @@
         "    ROUND(SUM(value) / 1e6, 2) AS value_mn\r\n",
         "FROM ranked\r\n",
         "GROUP BY\r\n",
-        "    ticker, year, section_sort, section, sort_order, display_name\r\n",
+        "    ticker, fiscal_year, section_sort, section, sort_order, display_name\r\n",
         "ORDER BY\r\n",
-        "    ticker, year, sort_order"
+        "    ticker, fiscal_year, sort_order"
       ]
     },
     {
@@ -121,7 +124,7 @@
         "WITH ranked AS (\r\n",
         "    SELECT\r\n",
         "        m.ticker,\r\n",
-        "        m.year,\r\n",
+        "        m.fiscal_year,\r\n",
         "        m.value,\r\n",
         "        h.category,\r\n",
         "        h.subcategory,\r\n",
@@ -135,16 +138,158 @@
         ")\r\n",
         "SELECT\r\n",
         "    ticker,\r\n",
-        "    year,\r\n",
+        "    fiscal_year,\r\n",
         "    LPAD(CAST(category_sort    AS STRING), 3, '0') || ' ' || category     AS category,\r\n",
         "    LPAD(CAST(subcategory_sort AS STRING), 3, '0') || ' ' || subcategory  AS subcategory,\r\n",
         "    LPAD(CAST(sort_order       AS STRING), 3, '0') || ' ' || metric       AS metric,\r\n",
         "    ROUND(ANY_VALUE(value), 2) AS value\r\n",
         "FROM ranked\r\n",
         "GROUP BY\r\n",
-        "    ticker, year, category_sort, category, subcategory_sort, subcategory, sort_order, metric\r\n",
+        "    ticker, fiscal_year, category_sort, category, subcategory_sort, subcategory, sort_order, metric\r\n",
         "ORDER BY\r\n",
-        "    ticker, year, sort_order"
+        "    ticker, fiscal_year, sort_order"
+      ]
+    },
+    {
+      "name": "b8d55986",
+      "displayName": "ds_quarterly_revenue_yoy",
+      "queryLines": [
+        "WITH quarterly AS (\r\n",
+        "    SELECT \r\n",
+        "        ticker,\r\n",
+        "        period_end,\r\n",
+        "        fiscal_year,\r\n",
+        "        period_type,\r\n",
+        "        value / 1e9 AS revenue_bn\r\n",
+        "    FROM main.financials.financials\r\n",
+        "    WHERE concept     = 'Revenue'\r\n",
+        "      AND period_type IN ('Q1','Q2','Q3','Q4')\r\n",
+        "),\r\n",
+        "with_yoy AS (\r\n",
+        "    SELECT \r\n",
+        "        ticker,\r\n",
+        "        period_end,\r\n",
+        "        fiscal_year,\r\n",
+        "        period_type,\r\n",
+        "        revenue_bn,\r\n",
+        "        LAG(revenue_bn, 4) OVER (\r\n",
+        "            PARTITION BY ticker \r\n",
+        "            ORDER BY period_end\r\n",
+        "        ) AS revenue_prev_year\r\n",
+        "    FROM quarterly\r\n",
+        ")\r\n",
+        "SELECT \r\n",
+        "    ticker,\r\n",
+        "    period_end,\r\n",
+        "    CONCAT(CAST(fiscal_year AS STRING), '-', period_type) AS quarter_label,\r\n",
+        "    ROUND(revenue_bn, 2) AS revenue_bn,\r\n",
+        "    CASE \r\n",
+        "        WHEN revenue_prev_year > 0 \r\n",
+        "        THEN ROUND((revenue_bn - revenue_prev_year) / revenue_prev_year * 100, 1)\r\n",
+        "    END AS yoy_pct\r\n",
+        "FROM with_yoy\r\n",
+        "ORDER BY ticker, period_end"
+      ]
+    },
+    {
+      "name": "5605ad07",
+      "displayName": "ds_quarterly_income_statement",
+      "queryLines": [
+        "WITH quarterly AS (\r\n",
+        "    SELECT \r\n",
+        "        f.ticker,\r\n",
+        "        f.period_end,\r\n",
+        "        f.fiscal_year,\r\n",
+        "        f.period_type,\r\n",
+        "        f.value,\r\n",
+        "        h.section,\r\n",
+        "        h.display_name,\r\n",
+        "        h.sort_order,\r\n",
+        "        MIN(h.sort_order) OVER (PARTITION BY f.stmt, h.section) AS section_sort\r\n",
+        "    FROM main.financials.financials f\r\n",
+        "    JOIN main.config.concept_hierarchy h\r\n",
+        "        ON h.stmt = f.stmt AND h.concept = f.concept\r\n",
+        "    WHERE f.stmt        = 'Income Statement'\r\n",
+        "      AND f.period_type IN ('Q1','Q2','Q3','Q4')\r\n",
+        "      AND h.section    <> 'Per Share Data'\r\n",
+        ")\r\n",
+        "SELECT\r\n",
+        "    ticker,\r\n",
+        "    CONCAT(CAST(fiscal_year AS STRING), '-', period_type) AS quarter_label,\r\n",
+        "    LPAD(CAST(section_sort AS STRING), 3, '0') || ' ' || section AS section,\r\n",
+        "    CASE\r\n",
+        "        WHEN display_name IN ('Gross Profit', 'Operating Income', 'Operating Expenses',\r\n",
+        "                              'Income Before Tax', 'Net Income')\r\n",
+        "            THEN LPAD(CAST(sort_order AS STRING), 3, '0') || ' ▸ ' || UPPER(display_name)\r\n",
+        "        ELSE LPAD(CAST(sort_order AS STRING), 3, '0') || '   ' || display_name\r\n",
+        "    END AS concept,\r\n",
+        "    ROUND(SUM(value) / 1e6, 2) AS value_mn\r\n",
+        "FROM quarterly\r\n",
+        "GROUP BY\r\n",
+        "    ticker, fiscal_year, period_type, section_sort, section, sort_order, display_name\r\n",
+        "ORDER BY\r\n",
+        "    ticker, fiscal_year, period_type, sort_order"
+      ]
+    },
+    {
+      "name": "1626af2e",
+      "displayName": "ds_quarterly_balance_sheet",
+      "queryLines": [
+        "WITH bs_quarterly AS (\r\n",
+        "    SELECT\r\n",
+        "        f.ticker,\r\n",
+        "        f.period_end,\r\n",
+        "        f.fiscal_year,\r\n",
+        "        f.period_type,\r\n",
+        "        f.value,\r\n",
+        "        h.section,\r\n",
+        "        h.`group`,\r\n",
+        "        h.display_name,\r\n",
+        "        h.sort_order,\r\n",
+        "        MIN(h.sort_order) OVER (PARTITION BY f.stmt, h.section)            AS section_sort,\r\n",
+        "        MIN(h.sort_order) OVER (PARTITION BY f.stmt, h.section, h.`group`) AS group_sort\r\n",
+        "    FROM main.financials.financials f\r\n",
+        "    JOIN main.config.concept_hierarchy h\r\n",
+        "        ON h.stmt = f.stmt AND h.concept = f.concept\r\n",
+        "    WHERE f.stmt        = 'Balance Sheet'\r\n",
+        "      AND f.period_type IN ('Q1','Q2','Q3','Q4')\r\n",
+        "),\r\n",
+        "ranked AS (\r\n",
+        "    SELECT \r\n",
+        "        *,\r\n",
+        "        ROW_NUMBER() OVER (\r\n",
+        "            PARTITION BY ticker, display_name \r\n",
+        "            ORDER BY period_end DESC\r\n",
+        "        ) AS rn_latest,\r\n",
+        "        LAG(value, 4) OVER (\r\n",
+        "            PARTITION BY ticker, display_name \r\n",
+        "            ORDER BY period_end\r\n",
+        "        ) AS value_prev_year\r\n",
+        "    FROM bs_quarterly\r\n",
+        ")\r\n",
+        "SELECT\r\n",
+        "    ticker,\r\n",
+        "    CONCAT(CAST(fiscal_year AS STRING), '-', period_type) AS quarter_label,\r\n",
+        "    LPAD(CAST(section_sort AS STRING), 3, '0') || ' ' || section AS section,\r\n",
+        "    CASE\r\n",
+        "        WHEN `group` IS NULL\r\n",
+        "            THEN LPAD(CAST(sort_order AS STRING), 3, '0') || ' —'\r\n",
+        "        ELSE LPAD(CAST(group_sort AS STRING), 3, '0') || ' ' || `group`\r\n",
+        "    END AS `group`,\r\n",
+        "    CASE\r\n",
+        "        WHEN display_name LIKE 'Total%'\r\n",
+        "            THEN LPAD(CAST(sort_order AS STRING), 3, '0') || ' ▸ ' || UPPER(display_name)\r\n",
+        "        ELSE LPAD(CAST(sort_order AS STRING), 3, '0') || '   ' || display_name\r\n",
+        "    END AS concept,\r\n",
+        "    ROUND(value           / 1e6, 2) AS value_mn,\r\n",
+        "    ROUND(value_prev_year / 1e6, 2) AS value_prev_year_mn,\r\n",
+        "    CASE \r\n",
+        "        WHEN value_prev_year > 0 \r\n",
+        "        THEN ROUND((value - value_prev_year) / value_prev_year * 100, 1)\r\n",
+        "    END AS yoy_pct\r\n",
+        "FROM ranked\r\n",
+        "WHERE rn_latest <= 8\r\n",
+        "ORDER BY ticker, period_end DESC, sort_order"
       ]
     }
   ],
@@ -160,22 +305,22 @@
               {
                 "name": "main_query",
                 "query": {
-                  "datasetName": "3faf0071",
-                  "disaggregated": true
+                  "datasetName": "6646c7a4",
+                  "disaggregated": false
                 }
               }
             ],
             "spec": {
-              "version": 3,
-              "widgetType": "bar",
+              "version": 2,
+              "widgetType": "counter",
               "encodings": {}
             }
           },
           "position": {
             "x": 0,
             "y": 0,
-            "width": 4,
-            "height": 3
+            "width": 3,
+            "height": 2
           }
         },
         {
@@ -227,8 +372,8 @@
                       "expression": "`concept`"
                     },
                     {
-                      "name": "year",
-                      "expression": "`year`"
+                      "name": "fiscal_year",
+                      "expression": "`fiscal_year`"
                     },
                     {
                       "name": "value_mn",
@@ -246,7 +391,7 @@
                       },
                       {
                         "fieldNames": [
-                          "year"
+                          "fiscal_year"
                         ]
                       }
                     ]
@@ -267,7 +412,7 @@
                     },
                     {
                       "direction": "ASC",
-                      "expression": "`year`"
+                      "expression": "`fiscal_year`"
                     }
                   ]
                 }
@@ -305,7 +450,7 @@
                 ],
                 "columns": [
                   {
-                    "fieldName": "year"
+                    "fieldName": "fiscal_year"
                   }
                 ],
                 "cell": {
@@ -412,8 +557,8 @@
                       "expression": "`concept`"
                     },
                     {
-                      "name": "year",
-                      "expression": "`year`"
+                      "name": "fiscal_year",
+                      "expression": "`fiscal_year`"
                     },
                     {
                       "name": "sum(value_mn)",
@@ -430,7 +575,7 @@
                       },
                       {
                         "fieldNames": [
-                          "year"
+                          "fiscal_year"
                         ]
                       }
                     ]
@@ -447,7 +592,7 @@
                     },
                     {
                       "direction": "ASC",
-                      "expression": "`year`"
+                      "expression": "`fiscal_year`"
                     }
                   ]
                 }
@@ -473,7 +618,7 @@
                 ],
                 "columns": [
                   {
-                    "fieldName": "year"
+                    "fieldName": "fiscal_year"
                   }
                 ],
                 "cell": {
@@ -579,8 +724,8 @@
                       "expression": "`concept`"
                     },
                     {
-                      "name": "year",
-                      "expression": "`year`"
+                      "name": "fiscal_year",
+                      "expression": "`fiscal_year`"
                     },
                     {
                       "name": "sum(value_mn)",
@@ -602,7 +747,7 @@
                       },
                       {
                         "fieldNames": [
-                          "year"
+                          "fiscal_year"
                         ]
                       }
                     ]
@@ -619,7 +764,7 @@
                     },
                     {
                       "direction": "ASC",
-                      "expression": "`year`"
+                      "expression": "`fiscal_year`"
                     }
                   ]
                 }
@@ -645,7 +790,7 @@
                 ],
                 "columns": [
                   {
-                    "fieldName": "year"
+                    "fieldName": "fiscal_year"
                   }
                 ],
                 "cell": {
@@ -755,8 +900,8 @@
                       "expression": "`metric`"
                     },
                     {
-                      "name": "year",
-                      "expression": "`year`"
+                      "name": "fiscal_year",
+                      "expression": "`fiscal_year`"
                     },
                     {
                       "name": "sum(value)",
@@ -774,7 +919,7 @@
                       },
                       {
                         "fieldNames": [
-                          "year"
+                          "fiscal_year"
                         ]
                       }
                     ]
@@ -795,7 +940,7 @@
                     },
                     {
                       "direction": "ASC",
-                      "expression": "`year`"
+                      "expression": "`fiscal_year`"
                     }
                   ]
                 }
@@ -824,7 +969,7 @@
                 ],
                 "columns": [
                   {
-                    "fieldName": "year"
+                    "fieldName": "fiscal_year"
                   }
                 ],
                 "cell": {
@@ -903,6 +1048,476 @@
             "y": 0,
             "width": 12,
             "height": 1
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "4ed05a3c",
+      "displayName": "quarterly_revenue_yoy",
+      "layout": [
+        {
+          "widget": {
+            "name": "a8ad7a27",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "b8d55986",
+                  "fields": [
+                    {
+                      "name": "quarter_label",
+                      "expression": "`quarter_label`"
+                    },
+                    {
+                      "name": "revenue_bn",
+                      "expression": "`revenue_bn`"
+                    },
+                    {
+                      "name": "yoy_pct",
+                      "expression": "`yoy_pct`"
+                    }
+                  ],
+                  "filters": [
+                    {
+                      "expression": "`ticker` IN (`ticker`) OR TRUE"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "combo",
+              "encodings": {
+                "x": {
+                  "fieldName": "quarter_label",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "primary": {
+                    "fields": [
+                      {
+                        "fieldName": "revenue_bn"
+                      }
+                    ]
+                  },
+                  "secondary": {
+                    "fields": [
+                      {
+                        "fieldName": "yoy_pct"
+                      }
+                    ]
+                  },
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 1,
+            "width": 12,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "feaba1be",
+            "queries": [
+              {
+                "name": "dashboards/01f14d17130c1c00b9efa16f14a7751a/datasets/01f1541c0d6110b19bc923d8181201e7_ticker",
+                "query": {
+                  "datasetName": "b8d55986",
+                  "fields": [
+                    {
+                      "name": "ticker",
+                      "expression": "`ticker`"
+                    },
+                    {
+                      "name": "ticker_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "showTitle": true
+              },
+              "disallowAll": true,
+              "selection": {
+                "defaultSelection": {
+                  "values": {
+                    "dataType": "STRING",
+                    "values": [
+                      {
+                        "value": "AAPL"
+                      }
+                    ]
+                  }
+                }
+              },
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "ticker",
+                    "queryName": "dashboards/01f14d17130c1c00b9efa16f14a7751a/datasets/01f1541c0d6110b19bc923d8181201e7_ticker"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 0,
+            "width": 4,
+            "height": 1
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "20f2502b",
+      "displayName": "quarterly_income_statement",
+      "layout": [
+        {
+          "widget": {
+            "name": "743d2360",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "5605ad07",
+                  "fields": [
+                    {
+                      "name": "section",
+                      "expression": "`section`"
+                    },
+                    {
+                      "name": "concept",
+                      "expression": "`concept`"
+                    },
+                    {
+                      "name": "quarter_label",
+                      "expression": "`quarter_label`"
+                    },
+                    {
+                      "name": "value_mn",
+                      "expression": "`value_mn`"
+                    }
+                  ],
+                  "cubeGroupingSets": {
+                    "sets": [
+                      {
+                        "fieldNames": [
+                          "section",
+                          "concept"
+                        ]
+                      },
+                      {
+                        "fieldNames": [
+                          "quarter_label"
+                        ]
+                      }
+                    ]
+                  },
+                  "disaggregated": true,
+                  "orders": [
+                    {
+                      "direction": "ASC",
+                      "expression": "`section`"
+                    },
+                    {
+                      "direction": "ASC",
+                      "expression": "`concept`"
+                    },
+                    {
+                      "direction": "ASC",
+                      "expression": "`quarter_label`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "pivot",
+              "encodings": {
+                "rows": [
+                  {
+                    "fieldName": "section"
+                  },
+                  {
+                    "fieldName": "concept"
+                  }
+                ],
+                "columns": [
+                  {
+                    "fieldName": "quarter_label"
+                  }
+                ],
+                "cell": {
+                  "type": "multi-cell",
+                  "fields": [
+                    {
+                      "fieldName": "value_mn",
+                      "cellType": "text"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 1,
+            "width": 11,
+            "height": 9
+          }
+        },
+        {
+          "widget": {
+            "name": "03b8743d",
+            "queries": [
+              {
+                "name": "dashboards/01f14d17130c1c00b9efa16f14a7751a/datasets/01f1541c0d6110b19bc923d8181201e7_ticker",
+                "query": {
+                  "datasetName": "b8d55986",
+                  "fields": [
+                    {
+                      "name": "ticker",
+                      "expression": "`ticker`"
+                    },
+                    {
+                      "name": "ticker_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "showTitle": true
+              },
+              "disallowAll": true,
+              "selection": {
+                "defaultSelection": {
+                  "values": {
+                    "dataType": "STRING",
+                    "values": [
+                      {
+                        "value": "AAPL"
+                      }
+                    ]
+                  }
+                }
+              },
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "ticker",
+                    "queryName": "dashboards/01f14d17130c1c00b9efa16f14a7751a/datasets/01f1541c0d6110b19bc923d8181201e7_ticker"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 7,
+            "y": 0,
+            "width": 4,
+            "height": 1
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "ff3113f7",
+      "displayName": "quarterly_balance_sheet",
+      "layout": [
+        {
+          "widget": {
+            "name": "395a68d5",
+            "queries": [
+              {
+                "name": "dashboards/01f14d17130c1c00b9efa16f14a7751a/datasets/01f1541c2e9e164aa8d65d26e4300e33_ticker",
+                "query": {
+                  "datasetName": "1626af2e",
+                  "fields": [
+                    {
+                      "name": "ticker",
+                      "expression": "`ticker`"
+                    },
+                    {
+                      "name": "ticker_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "showTitle": true
+              },
+              "disallowAll": true,
+              "selection": {
+                "defaultSelection": {
+                  "values": {
+                    "dataType": "STRING",
+                    "values": [
+                      {
+                        "value": "AAPL"
+                      }
+                    ]
+                  }
+                }
+              },
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "ticker",
+                    "queryName": "dashboards/01f14d17130c1c00b9efa16f14a7751a/datasets/01f1541c2e9e164aa8d65d26e4300e33_ticker"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 0,
+            "width": 4,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "8c20cea2",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "1626af2e",
+                  "fields": [
+                    {
+                      "name": "section",
+                      "expression": "`section`"
+                    },
+                    {
+                      "name": "group",
+                      "expression": "`group`"
+                    },
+                    {
+                      "name": "concept",
+                      "expression": "`concept`"
+                    },
+                    {
+                      "name": "quarter_label",
+                      "expression": "`quarter_label`"
+                    },
+                    {
+                      "name": "value_mn",
+                      "expression": "`value_mn`"
+                    }
+                  ],
+                  "cubeGroupingSets": {
+                    "sets": [
+                      {
+                        "fieldNames": [
+                          "section",
+                          "group",
+                          "concept"
+                        ]
+                      },
+                      {
+                        "fieldNames": [
+                          "quarter_label"
+                        ]
+                      }
+                    ]
+                  },
+                  "disaggregated": true,
+                  "orders": [
+                    {
+                      "direction": "ASC",
+                      "expression": "`section`"
+                    },
+                    {
+                      "direction": "ASC",
+                      "expression": "`group`"
+                    },
+                    {
+                      "direction": "ASC",
+                      "expression": "`concept`"
+                    },
+                    {
+                      "direction": "ASC",
+                      "expression": "`quarter_label`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "pivot",
+              "encodings": {
+                "rows": [
+                  {
+                    "fieldName": "section"
+                  },
+                  {
+                    "fieldName": "group"
+                  },
+                  {
+                    "fieldName": "concept"
+                  }
+                ],
+                "columns": [
+                  {
+                    "fieldName": "quarter_label"
+                  }
+                ],
+                "cell": {
+                  "type": "multi-cell",
+                  "fields": [
+                    {
+                      "fieldName": "value_mn",
+                      "cellType": "text"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 1,
+            "width": 12,
+            "height": 9
           }
         }
       ],

@@ -1,23 +1,27 @@
 # Fundamentals Analytics — Databricks Pipeline
 
-End-to-end Databricks pipeline that ingests XBRL financial filings from SEC EDGAR, fetches market data from Yahoo Finance, and serves Income Statement, Balance Sheet, Cash Flow, and derived financial metrics via direct queries on Delta tables.
+End-to-end Databricks pipeline that ingests **annual (10-K) and quarterly (10-Q)** XBRL financial filings from SEC EDGAR, fetches market data from Yahoo Finance, and serves Income Statement, Balance Sheet, Cash Flow, and derived financial metrics via direct queries on Delta tables.
 
 ```
-favorites.json / concept_hierarchy.json   ← edit tickers & concept order here
+favorites.json / concept_hierarchy.json / metrics_hierarchy.json   ← edit here
         ↓
-02__tickers_master          build main.config.tickers
+02__tickers_master              build main.config.tickers
         ↓
-03__concept_hierarchy_master  build main.config.concept_hierarchy
+03__concept_hierarchy_master    build main.config.concept_hierarchy
         ↓
-11__fetch_sec_xbrl          SEC API → financials_raw
+04__metrics_hierarchy_master    build main.config.metrics_hierarchy
         ↓
-12__fetch_market_data       Yahoo Finance → market_data
+11__fetch_sec_xbrl              SEC API → financials_raw  (10-K + 10-Q)
         ↓
-21__clean_and_merge         deduplicate → MERGE into financials
+12__fetch_market_data           Yahoo Finance → market_data
         ↓
-22__derived_metrics         margins, FCF, YoY growth, leverage, valuation ratios
+21__clean_and_merge             FY rows   → MERGE into financials
+21b__derive_quarterly           Q1..Q4    → MERGE into financials
+21c__prune_quarterly            keep last 12 quarters per ticker
         ↓
-31__company_analysis        validation queries
+22__derived_metrics             margins, FCF, YoY growth, leverage, valuation ratios
+        ↓
+31__company_analysis            validation queries
 ```
 
 ---
@@ -28,34 +32,38 @@ favorites.json / concept_hierarchy.json   ← edit tickers & concept order here
 fundamentals_databricks_pj/
 │
 ├── 00_config/
-│   ├── 01__tickers.py                       ← constantes, nombres de tabla y mapas XBRL
+│   ├── 01__tickers.py                       ← constantes, nombres de tabla y mapas XBRL (con kind por concept)
 │   ├── 02__tickers_master.ipynb             ← construye main.config.tickers (S&P 500 + Russell 3000 + favoritos)
-│   ├── 03__concept_hierarchy_master.ipynb   ← construye main.config.concept_hierarchy desde concept_hierarchy.json
-│   ├── 04__metrics_hierarchy_master.ipynb   ← construye main.config.metrics_hierarchy desde metrics_hierarchy.json
-│   ├── favorites.json                       ← lista de tickers favoritos — editar aquí directamente
-│   ├── concept_hierarchy.json               ← jerarquía de conceptos contables — editar aquí directamente
-│   └── metrics_hierarchy.json               ← jerarquía de derived metrics — editar aquí directamente
+│   ├── 03__concept_hierarchy_master.ipynb   ← construye main.config.concept_hierarchy desde JSON
+│   ├── 04__metrics_hierarchy_master.ipynb   ← construye main.config.metrics_hierarchy desde JSON
+│   ├── favorites.json                       ← lista de tickers favoritos
+│   ├── concept_hierarchy.json               ← jerarquía de conceptos contables
+│   └── metrics_hierarchy.json               ← jerarquía de derived metrics
 │
 ├── 10_ingestion/
-│   ├── 11__fetch_sec_xbrl.py         ← SEC EDGAR XBRL API → financials_raw (append-only)
+│   ├── 11__fetch_sec_xbrl.py         ← SEC EDGAR XBRL API → financials_raw (parallel + Arrow + batched)
 │   └── 12__fetch_market_data.py      ← Yahoo Finance (yfinance) → market_data
 │
 ├── 20_transformation/
-│   ├── 21__clean_and_merge.py        ← MERGE into financials (idempotent)
-│   └── 22__derived_metrics.ipynb     ← FCF, margins, YoY growth, leverage, valuation ratios
+│   ├── 21__clean_and_merge.py        ← MERGE FY rows into financials
+│   ├── 21b__derive_quarterly.py      ← derive standalone Q1..Q4 (with Q4 = FY − YTD_Q3) → MERGE into financials
+│   ├── 21c__prune_quarterly.py       ← enforce rolling window of QUARTERLY_WINDOW (=12) quarters per ticker
+│   └── 22__derived_metrics.py        ← FCF, margins, YoY, leverage, valuation ratios (FY only)
 │
 ├── 30_analysis/
-│   └── 31__company_analysis.py       ← ad-hoc queries and validation
+│   └── 31__company_analysis.py       ← ad-hoc validation queries
 │
 ├── 40_dashboards/
 │   ├── 41__dashboard_queries.py      ← SQL feeding the Databricks dashboard
-│   └── Main Dashboard.lvdash.json    ← dashboard definition
+│   └── Main Dashboard.lvdash.json    ← dashboard definition (annual pages + quarterly page)
 │
 └── 90_pipelines/
-    └── 91__full_pipeline.ipynb   ← entry point del Job — ejecuta todo en secuencia
+    └── 91__full_pipeline.ipynb       ← entry point del Job — ejecuta los 9 steps en secuencia
 ```
 
-### Flujo del pipeline
+---
+
+## Pipeline flow
 
 ```
 favorites.json                editar tickers favoritos (sin tocar Databricks)
@@ -68,27 +76,26 @@ metrics_hierarchy.json        editar jerarquía de derived metrics
       ↓
 04__metrics_hierarchy_master    construye main.config.metrics_hierarchy    (auto)
       ↓
-11__fetch_sec_xbrl              SEC API → financials_raw
+11__fetch_sec_xbrl              SEC API → financials_raw                   (10-K + 10-Q)
       ↓
 12__fetch_market_data           Yahoo Finance → market_data
       ↓
-21__clean_and_merge             deduplica → MERGE into financials
+21__clean_and_merge             FY rows   → MERGE into financials
+21b__derive_quarterly           Q1..Q4    → MERGE into financials
+21c__prune_quarterly            keep last QUARTERLY_WINDOW Qs per ticker
       ↓
-22__derived_metrics             márgenes, FCF, YoY, leverage, ratios de valoración
+22__derived_metrics             márgenes, FCF, YoY, leverage, ratios de valoración (FY only)
       ↓
 31__company_analysis            queries de validación
 ```
 
-`main.config.tickers` se reconstruye manualmente con `02__tickers_master` cuando edites
-`favorites.json` (las fuentes de S&P 500 / Russell 3000 cambian poco). Las dos
-jerarquías sí se reconstruyen automáticamente en cada run del pipeline desde sus
-respectivos JSONs.
+`main.config.tickers` se reconstruye manualmente con `02__tickers_master` cuando edites `favorites.json`. Las jerarquías se reconstruyen automáticamente en cada run desde sus JSONs.
 
 ---
 
 ## Favoritos (`favorites.json`)
 
-Los tickers favoritos se gestionan editando `00_config/favorites.json` directamente en el repositorio Git. Se incluyen siempre en la ingesta, independientemente de si están en el S&P 500 o el Russell 3000.
+Los tickers favoritos se gestionan editando `00_config/favorites.json` directamente en el repositorio Git. Se incluyen siempre en la ingesta.
 
 ```json
 [
@@ -101,16 +108,13 @@ Los tickers favoritos se gestionan editando `00_config/favorites.json` directame
 
 ## Jerarquías (`concept_hierarchy.json` y `metrics_hierarchy.json`)
 
-Ambas jerarquías son archivos JSON en `00_config/` editables directamente desde el repo. El pipeline las re-aplana a tablas Delta en cada ejecución, así que cualquier cambio se refleja sin pasos manuales adicionales.
+Ambas jerarquías son archivos JSON en `00_config/` editables desde el repo. El pipeline las aplana a tablas Delta en cada ejecución.
 
-**`concept_hierarchy.json`** define el árbol contable (Income Statement, Balance Sheet, Cash Flow) — qué conceptos van bajo qué grupo y en qué orden aparecen en el dashboard. Soporta anidamiento variable: `section → group → concept`, con subtotales como conceptos al final de su grupo.
+**`concept_hierarchy.json`** — árbol contable (Income Statement, Balance Sheet, Cash Flow): qué conceptos van bajo qué grupo y en qué orden aparecen en el dashboard.
 
-**`metrics_hierarchy.json`** define la organización de las derived metrics en 2 niveles fijos: `category → subcategory → metric`. Cinco categorías: Profitability, Cash Flow, Growth, Financial Health, Valuation.
+**`metrics_hierarchy.json`** — organización de las derived metrics en 2 niveles: `category → subcategory → metric`. Cinco categorías: Profitability, Cash Flow, Growth, Financial Health, Valuation.
 
-**Cómo modificar una jerarquía:**
-1. Edita el JSON correspondiente en `00_config/`
-2. Commit + push
-3. El siguiente run del pipeline reconstruirá la tabla automáticamente (o ejecuta el notebook master por separado)
+Para modificarlas: edita el JSON, commit + push, y el siguiente run del pipeline reconstruye la tabla automáticamente.
 
 ---
 
@@ -119,46 +123,113 @@ Ambas jerarquías son archivos JSON en `00_config/` editables directamente desde
 | Table | Description |
 |---|---|
 | `{CATALOG}.config.tickers` | Universo de tickers activos (S&P 500 + Russell 3000 + favoritos) |
-| `{CATALOG}.config.concept_hierarchy` | Jerarquía de conceptos contables (stmt → section → group → concept) |
-| `{CATALOG}.config.metrics_hierarchy` | Jerarquía de derived metrics (category → subcategory → metric) |
-| `{CATALOG}.{SCHEMA}.financials` | Long-format fact table — one row per ticker / year / concept |
-| `{CATALOG}.{SCHEMA}.financials_raw` | Append-only audit log of all SEC scrapes |
-| `{CATALOG}.{SCHEMA}.market_data` | Year-end closing prices and market cap per ticker / year |
-| `{CATALOG}.{SCHEMA}.financials_metrics` | Derived metrics — margins, FCF, YoY growth, leverage, valuation ratios |
+| `{CATALOG}.config.concept_hierarchy` | Jerarquía de conceptos contables |
+| `{CATALOG}.config.metrics_hierarchy` | Jerarquía de derived metrics |
+| `{CATALOG}.{SCHEMA}.financials_raw` | Append-only audit log of all SEC scrapes (10-K + 10-Q) |
+| `{CATALOG}.{SCHEMA}.financials` | Long-format fact table — one row per ticker / fiscal_year / period_type / concept |
+| `{CATALOG}.{SCHEMA}.market_data` | Year-end closing prices and market cap per ticker / fiscal_year |
+| `{CATALOG}.{SCHEMA}.financials_metrics` | Derived metrics — margins, FCF, YoY, leverage, valuation ratios |
 
 ---
 
-## `financials` — source fact table
+## `financials_raw` — append-only audit log
+
+Stores every fact returned by SEC EDGAR's XBRL API, across both annual (10-K) and quarterly (10-Q) filings, plus their amendments. Period metadata is preserved so downstream notebooks can derive standalone quarters and handle restatements deterministically.
 
 | Column | Type | Description |
 |---|---|---|
-| `ticker` | STRING | Stock ticker symbol (e.g. `AAPL`) |
+| `ticker` | STRING | Stock ticker symbol |
 | `company` | STRING | Company name |
-| `year` | INT | Fiscal year |
-| `stmt` | STRING | One of `Income Statement`, `Balance Sheet`, `Cash Flow` |
-| `concept` | STRING | Financial line item name (XBRL-derived) |
+| `stmt` | STRING | `Income Statement` / `Balance Sheet` / `Cash Flow` |
+| `concept` | STRING | Display label (from XBRL concept map) |
+| `kind` | STRING | `flow_additive` / `flow_nonadditive` / `stock` — drives quarterly derivation logic |
+| `fy` | INT | Fiscal year per SEC |
+| `fp` | STRING | Fiscal period per SEC: `FY` / `Q1` / `Q2` / `Q3` |
+| `form` | STRING | `10-K` / `10-Q` / `10-K/A` / `10-Q/A` |
+| `period_start` | DATE | Start of period (NULL for stock concepts) |
+| `period_end` | DATE | End of period |
+| `period_shape` | STRING | `Q_standalone` (~90d) / `YTD_6M` / `YTD_9M` / `FY_or_TTM` / `snapshot` / `other_Xd` |
 | `value` | DOUBLE | Raw value in USD |
+| `filed` | DATE | Filing date (used for restatement dedupe — latest `filed` wins) |
+| `scraped_at` | TIMESTAMP | Fetch timestamp |
+
+---
+
+## `financials` — clean fact table
+
+Long-format fact table with one row per `ticker / fiscal_year / period_type / concept`. Annual (FY) rows are kept for full history; quarterly rows (Q1..Q4) are limited to the most recent `QUARTERLY_WINDOW` (= 12) per ticker.
+
+| Column | Type | Description |
+|---|---|---|
+| `ticker` | STRING | Stock ticker symbol |
+| `company` | STRING | Company name |
+| `stmt` | STRING | `Income Statement` / `Balance Sheet` / `Cash Flow` |
+| `concept` | STRING | Financial line item name |
+| `fiscal_year` | INT | Fiscal year (from SEC `fy`, not calendar year) |
+| `period_type` | STRING | `FY` / `Q1` / `Q2` / `Q3` / `Q4` |
+| `period_end` | DATE | End of period — useful for cross-ticker chronological ordering |
+| `value` | DOUBLE | Raw value in USD (or native unit for EPS/shares) |
+| `is_derived` | BOOLEAN | `true` if computed (Q4 = FY − YTD_Q3, or Q1..Q3 derived from YTD differences); `false` if reported directly |
+| `scraped_at` | TIMESTAMP | Source scrape timestamp |
+
+---
+
+## Quarterly data — how it works
+
+The pipeline ingests every fact SEC returns, but the `financials` fact table only exposes **standalone quarter values** (not the YTD accumulated ones). This is achieved in `21b__derive_quarterly` according to the concept's `kind`:
+
+| Kind | Examples | Q1, Q2, Q3 | Q4 |
+|---|---|---|---|
+| `flow_additive` | Revenue, Net Income, OCF, CapEx | Standalone (~90d) if SEC reported it; otherwise `YTD_n − YTD_(n-1)` | **Always** `FY (10-K) − YTD_Q3` |
+| `flow_nonadditive` | EPS, Shares Diluted | Standalone (~90d) only; NULL otherwise | NULL (cannot be derived sensibly) |
+| `stock` | Assets, Cash, Equity | Snapshot at `period_end`; deduped by `(ticker, concept, period_end)` keeping latest `filed` | Snapshot at FY end (from `21__clean_and_merge`) |
+
+**Why Q4 is always derived from `FY − YTD_Q3`:** SEC reports the full FY in the 10-K, but never a standalone Q4 fact. Computing Q4 from the 10-K total (rather than summing Q1+Q2+Q3+Q4) ensures any year-end audit adjustments are correctly captured.
+
+**Rolling window of 12 quarters:** `21c__prune_quarterly` enforces a window of the 12 most recent quarters per ticker. FY rows are kept for full history.
+
+**Balance Sheet duplicates:** SEC re-reports the prior FY snapshot in each subsequent 10-Q as a comparative. `21b` dedupes by `(ticker, concept, period_end)` keeping the latest `filed`, so each `period_end` shows exactly one value.
+
+### Verifying quarterly correctness
+
+```sql
+-- Should return zero or very few rows (small rounding diffs)
+WITH q AS (
+    SELECT ticker, concept, fiscal_year,
+           SUM(CASE WHEN period_type IN ('Q1','Q2','Q3','Q4') THEN value END) AS qsum,
+           MAX(CASE WHEN period_type = 'FY' THEN value END)                    AS fy
+    FROM main.financials.financials
+    WHERE stmt IN ('Income Statement', 'Cash Flow')
+    GROUP BY ticker, concept, fiscal_year
+    HAVING COUNT(DISTINCT period_type) = 5
+)
+SELECT * FROM q
+WHERE ABS((qsum - fy) / NULLIF(fy, 0)) > 0.001
+ORDER BY ticker, fiscal_year DESC;
+```
 
 ---
 
 ## `market_data` — year-end prices & market cap
 
-Year-end adjusted closing prices fetched from Yahoo Finance via `yfinance`, joined with `Shares Diluted` from `financials` to compute an annual market cap. Required by all valuation metrics.
+Year-end adjusted closing prices fetched from Yahoo Finance via `yfinance`, joined with `Shares Diluted` from `financials` to compute an annual market cap.
 
 | Column | Type | Description |
 |---|---|---|
 | `ticker` | STRING | Stock ticker symbol |
-| `year` | INT | Calendar year |
+| `fiscal_year` | INT | Calendar year (yfinance has no notion of fiscal years) |
 | `price_close` | DOUBLE | Last adjusted closing price of the year |
-| `shares_diluted` | DOUBLE | Diluted share count sourced from `financials` |
+| `shares_diluted` | DOUBLE | Diluted share count sourced from `financials` (FY only) |
 | `market_cap` | DOUBLE | `price_close × shares_diluted` |
 | `fetched_at` | TIMESTAMP | Fetch timestamp |
+
+> **Note on `fiscal_year`:** the column name matches `financials` for join convenience, but the value here is **calendar year**. For companies with non-December fiscal year-ends (AAPL/Sep, MSFT/Jun, WMT/Jan), this introduces a known 0–11 month offset between fundamentals (fiscal) and price (calendar). Acceptable for trend analysis; precise valuation requires `period_end`-based pricing.
 
 ---
 
 ## Metrics hierarchy — `main.config.metrics_hierarchy`
 
-Tabla de lookup que organiza las derived metrics en categorías. Se reconstruye en cada run desde `00_config/metrics_hierarchy.json`. Joinear con `financials_metrics` por `metric` para añadir filtros de `category` / `subcategory` al dashboard y obtener orden de filas estable vía `sort_order`.
+Lookup table organising derived metrics into categories. Rebuilt every run from `00_config/metrics_hierarchy.json`. Join with `financials_metrics` by `metric` to add `category` / `subcategory` filters to the dashboard and get stable row ordering via `sort_order`.
 
 | Column | Type | Description |
 |---|---|---|
@@ -167,25 +238,24 @@ Tabla de lookup que organiza las derived metrics en categorías. Se reconstruye 
 | `metric` | STRING | Nombre exacto tal como aparece en `financials_metrics.metric` |
 | `unit` | STRING | `percent` / `usd` / `ratio` |
 | `requires_market_data` | BOOLEAN | `true` para las métricas que dependen de `market_data` |
-| `sort_order` | INT | Orden global (10, 20, 30, ...) — usar para `ORDER BY` en el dashboard |
+| `sort_order` | INT | Orden global (10, 20, 30, ...) |
 
 ---
 
 ## Derived metrics — `financials_metrics`
 
-Long-format table: one row per `ticker / year / metric`. Computed by `22__derived_metrics` from `financials` and `market_data`.
+Long-format table: one row per `ticker / fiscal_year / metric`. Computed by `22__derived_metrics` from `financials` (FY rows only) and `market_data`.
 
 ```
-ticker | company | year | metric          | value
--------|---------|------|-----------------|----------
-AAPL   | Apple   | 2023 | Net Margin %    |     25.31
-AAPL   | Apple   | 2023 | Free Cash Flow  | 99584000000
-AAPL   | Apple   | 2023 | P/E             |     28.74
+ticker | company | fiscal_year | metric          | value
+-------|---------|-------------|-----------------|----------
+AAPL   | Apple   | 2023        | Net Margin %    |     25.31
+AAPL   | Apple   | 2023        | Free Cash Flow  | 99584000000
+AAPL   | Apple   | 2023        | P/E             |     28.74
 ```
 
-Las 17 métricas están organizadas en 5 categorías. La jerarquía completa vive en
-`00_config/metrics_hierarchy.json` y se materializa en `main.config.metrics_hierarchy`
-(ver sección anterior).
+Las métricas están organizadas en 5 categorías. La jerarquía completa vive en
+`00_config/metrics_hierarchy.json` y se materializa en `main.config.metrics_hierarchy`.
 
 ### Profitability — Margins
 
@@ -195,6 +265,16 @@ Las 17 métricas están organizadas en 5 categorías. La jerarquía completa viv
 | `Operating Margin %` | `Operating Income / Revenue × 100` |
 | `Net Margin %` | `Net Income / Revenue × 100` |
 | `FCF Margin %` | `Free Cash Flow / Revenue × 100` |
+
+### Profitability — Returns
+
+| Metric | Formula |
+|---|---|
+| `ROA %` | `Net Income / Total Assets × 100` |
+| `ROE %` | `Net Income / Total Stockholders Equity × 100` |
+| `ROIC %` | `Operating Income / Invested Capital × 100` |
+| `ROCE %` | `Operating Income / Capital Employed × 100` |
+| `CROIC %` | `Free Cash Flow / Invested Capital × 100` |
 
 ### Cash Flow — Absolute
 
@@ -206,10 +286,10 @@ Las 17 métricas están organizadas en 5 categorías. La jerarquía completa viv
 
 | Metric | Formula |
 |---|---|
-| `Revenue YoY %` | Year-over-year % change in Revenue |
-| `Net Income YoY %` | Year-over-year % change in Net Income |
-| `Operating Cash Flow YoY %` | Year-over-year % change in Operating CF |
-| `Free Cash Flow YoY %` | Year-over-year % change in FCF |
+| `Revenue YoY %` | YoY % change in Revenue |
+| `Net Income YoY %` | YoY % change in Net Income |
+| `Operating Cash Flow YoY %` | YoY % change in Operating CF |
+| `Free Cash Flow YoY %` | YoY % change in FCF |
 
 ### Financial Health — Leverage
 
@@ -231,6 +311,7 @@ Las 17 métricas están organizadas en 5 categorías. La jerarquía completa viv
 | `P/E` | `Market Cap / Net Income` |
 | `P/S` | `Market Cap / Revenue` |
 | `P/FCF` | `Market Cap / Free Cash Flow` |
+| `P/B` | `Market Cap / Total Stockholders Equity` |
 
 ### Valuation — Enterprise Value *(requires `market_data`)*
 
@@ -239,22 +320,36 @@ Las 17 métricas están organizadas en 5 categorías. La jerarquía completa viv
 | `EV` | `Market Cap + Total Debt − (Cash & Equivalents + ST Investments)` | Enterprise value in USD |
 | `EV/EBITDA` | `EV / (Operating Income + D&A)` | Outliers beyond ±500× filtered out |
 
-> Las métricas de valoración solo se rellenan para combinaciones ticker/año donde `market_data` tiene un `market_cap` válido. Si `12__fetch_market_data` no se ha ejecutado, estas métricas se omiten silenciosamente.
+### Valuation — Yields *(requires `market_data`)*
+
+| Metric | Formula |
+|---|---|
+| `Earnings Yield %` | `Net Income / Market Cap × 100` |
+| `Sales Yield %` | `Revenue / Market Cap × 100` |
+| `FCF Yield %` | `Free Cash Flow / Market Cap × 100` |
+| `Op Cash Flow Yield %` | `Operating Cash Flow / Market Cap × 100` |
+| `Book Yield %` | `Total Stockholders Equity / Market Cap × 100` |
+| `EBITDA Yield %` | `EBITDA / Market Cap × 100` |
+
+> Las métricas de valoración solo se rellenan para combinaciones `ticker / fiscal_year` donde `market_data` tiene un `market_cap` válido.
 
 ---
 
-## Favorites (`favorites.json`)
+## Dashboard — `Main Dashboard.lvdash.json`
 
-Tickers in `00_config/favorites.json` are always included in the ingestion, regardless of whether they appear in the S&P 500 or Russell 3000 universe.
+The dashboard has the following pages:
 
-```json
-[
-  {"ticker": "TSM",  "company": "Taiwan Semiconductor", "note": ""},
-  {"ticker": "ASML", "company": "ASML Holding",         "note": ""}
-]
-```
+- **Scorecard** — high-level KPIs (annual)
+- **Balance Sheet** — annual BS pivot
+- **Income Statement** — annual IS pivot
+- **Cash Flow** — annual CF pivot
+- **Derived Metrics** — all calculated metrics (annual)
+- **Quarterly** — last 12 quarters per ticker:
+  - Quarterly Revenue with YoY growth (same-Q comparison)
+  - Quarterly Income Statement pivot
+  - Quarterly Balance Sheet snapshot with YoY change
 
-To add or remove a ticker: edit the file, commit and push, then run `02__tickers_master` (or trigger the full Job). No Databricks notebooks need to be opened manually.
+All annual pages filter `period_type = 'FY'` in their queries. The quarterly page filters `period_type IN ('Q1','Q2','Q3','Q4')`.
 
 ---
 
@@ -266,7 +361,7 @@ The full pipeline (`91__full_pipeline`) accepts Databricks Job parameters at run
 |---|---|---|
 | `tickers_override` | *(empty)* | Comma-separated list of tickers — bypasses `main.config.tickers` |
 | `run_optimization` | `false` | Run `OPTIMIZE + VACUUM` on Delta tables at the end of the pipeline |
-| `rebuild_config` | `false` | Flag for future use — ticker rebuild must still be run manually via `02__tickers_master` |
+| `rebuild_config` | `false` | Reserved — ticker rebuild must still be run manually via `02__tickers_master` |
 
 Example:
 ```json
@@ -277,81 +372,37 @@ Example:
 
 ## Column reference
 
-All monetary values are displayed in **billions USD** (divided by 1e9, rounded to 2 decimal places). Per-share figures (EPS) and share counts are kept in their native units.
+All monetary values are displayed in **millions or billions USD** in the dashboard widgets (raw values in tables are in USD). Per-share figures (EPS) and share counts are kept in their native units.
 
 ### Income Statement
 
 | Concept | Display label | Unit |
 |---|---|---|
-| `Revenue` / `Revenue (contract)` | Revenue | $bn |
-| `Cost of Revenue` | Cost of Revenue | $bn |
-| `Gross Profit` | Gross Profit | $bn |
-| `R&D Expense` | R&D | $bn |
-| `SG&A Expense` | SG&A | $bn |
-| `Operating Expenses` | Operating Expenses | $bn |
-| `Operating Income` | Operating Income | $bn |
-| `Interest Expense` | Interest Expense | $bn |
-| `Income Before Tax` | Income Before Tax | $bn |
-| `Income Tax` | Income Tax | $bn |
-| `Net Income` | Net Income | $bn |
+| `Revenue` / `Revenue (contract)` | Revenue | $ |
+| `Cost of Revenue` | Cost of Revenue | $ |
+| `Gross Profit` | Gross Profit | $ |
+| `R&D Expense` | R&D | $ |
+| `SG&A Expense` | SG&A | $ |
+| `Operating Expenses` | Operating Expenses | $ |
+| `Operating Income` | Operating Income | $ |
+| `Interest Expense` | Interest Expense | $ |
+| `Income Before Tax` | Income Before Tax | $ |
+| `Income Tax` | Income Tax | $ |
+| `Net Income` | Net Income | $ |
 | `EPS Basic` | EPS Basic | USD |
 | `EPS Diluted` | EPS Diluted | USD |
-| `Shares Diluted` | Shares Diluted | bn shares |
+| `Shares Diluted` | Shares Diluted | shares |
 
 > Revenue is coalesced from two XBRL tags (`Revenues` and `RevenueFromContractWithCustomerExcludingAssessedTax`) since companies report under different tags.
 
-### Balance Sheet
-
-| Concept | Display label | Unit |
-|---|---|---|
-| `Cash & Equivalents` | Cash & Equivalents | $bn |
-| `Short-term Investments` | ST Investments | $bn |
-| `Accounts Receivable` | Accounts Receivable | $bn |
-| `Inventory` | Inventory | $bn |
-| `Total Current Assets` | Current Assets | $bn |
-| `PP&E Net` | PP&E Net | $bn |
-| `Goodwill` | Goodwill | $bn |
-| `Intangible Assets` | Intangibles | $bn |
-| `Total Assets` | Total Assets | $bn |
-| `Accounts Payable` | Accounts Payable | $bn |
-| `Short-term Debt` | ST Debt | $bn |
-| `Total Current Liabilities` | Current Liabilities | $bn |
-| `Long-term Debt` | LT Debt | $bn |
-| `Total Liabilities` | Total Liabilities | $bn |
-| `Additional Paid-in Capital` | Paid-in Capital | $bn |
-| `Retained Earnings` | Retained Earnings | $bn |
-| `Total Stockholders Equity` | Total Equity | $bn |
-| `Total Liabilities & Equity` | Total Liabilities & Equity | $bn |
-
-### Cash Flow
-
-| Concept | Display label | Unit | Notes |
-|---|---|---|---|
-| `Net Income` | Net Income | $bn | Reconciliation starting point |
-| `Depreciation & Amortization` | D&A | $bn | |
-| `Stock-based Compensation` | SBC | $bn | |
-| `Changes in Working Capital` | Working Capital Change | $bn | |
-| `Operating Cash Flow` | Operating CF | $bn | |
-| `CapEx` | CapEx | $bn | |
-| `Acquisitions` | Acquisitions | $bn | |
-| `Purchases of Investments` | Purchases of Investments | $bn | |
-| `Sales of Investments` | Sales of Investments | $bn | |
-| `Investing Cash Flow` | Investing CF | $bn | |
-| `Debt Issuance` | Debt Issuance | $bn | |
-| `Debt Repayment` | Debt Repayment | $bn | |
-| `Dividends Paid` | Dividends | $bn | |
-| `Share Repurchases` | Buybacks | $bn | |
-| `Financing Cash Flow` | Financing CF | $bn | |
-| `Net Change in Cash` | Net Change in Cash | $bn | |
-
-> Free Cash Flow is derived at compute time as `Operating CF − CapEx` and is not stored as a concept in `financials`.
-
 ---
 
-## Design decisions
+## Architectural notes
 
-**No wide tables or views.** An earlier iteration materialised the three statements as Delta wide tables (one column per concept), and later as Delta views. Both approaches were discarded in favour of querying `financials` directly, which keeps the pipeline simpler and avoids schema drift between the fact table and its derivatives.
+**Favorites in JSON, not Delta.** An earlier iteration used a Delta table (`main.config.favorites`) managed via a notebook. Simplified to `favorites.json` so the favorites list can be edited from the editor or GitHub without opening Databricks.
 
-**Favorites gestionados en Git, no en Delta.** Una iteración anterior usaba una tabla Delta (`main.config.favorites`) gestionada desde un notebook (`02__favorites`). Se simplificó a un archivo `favorites.json` en el repositorio, lo que permite editar la lista de favoritos directamente desde el editor o GitHub sin necesidad de abrir Databricks.
+**Hierarchies in JSON, not code.** Both `concept_hierarchy.json` and `metrics_hierarchy.json` live as declarative JSON in `00_config/`. Each has a master notebook that flattens it into a Delta lookup table. This decouples structure (order, grouping, categories) from transformation logic.
 
-**Jerarquías en JSON, no en código.** Tanto la jerarquía contable (`concept_hierarchy.json`) como la de derived metrics (`metrics_hierarchy.json`) viven en archivos JSON declarativos en `00_config/`. Cada uno tiene su notebook master correspondiente que las aplana a una tabla Delta de lookup. Esto desacopla la estructura (orden, agrupación, categorías) del código de transformación, así que un cambio de categoría o de orden no requiere tocar Python.
+**Why `fiscal_year` everywhere.** Migrated from `year` to `fiscal_year` to be semantically correct: SEC reports against fiscal years (which differ from calendar years for ~30% of US issuers). The column name is consistent across `financials`, `financials_metrics`, and `market_data` for join convenience, even though `market_data` stores calendar-year-end prices.
+
+**SEC fetch parallelism.** `11__fetch_sec_xbrl` uses `ThreadPoolExecutor` with 8 workers and a global rate limiter (`MIN_REQUEST_GAP = 0.12s` enforced via Lock + monotonic clock). Writes happen incrementally in batches of 250 tickers via `flush_batch()` — avoids building a multi-million-row pandas DataFrame in driver memory before a single `createDataFrame` call.
