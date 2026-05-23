@@ -21,7 +21,9 @@
 # MAGIC       ↓
 # MAGIC 12__fetch_market_data           fetch from Yahoo Finance → market_data
 # MAGIC       ↓
-# MAGIC 21__clean_and_merge             deduplicate → MERGE into financials
+# MAGIC 21__clean_and_merge             deduplicate → MERGE into financials (FY rows)
+# MAGIC       ↓
+# MAGIC 21b__derive_quarterly           derive Q1–Q4 standalone rows (Q4 = FY − YTD_Q3 fallback)
 # MAGIC       ↓
 # MAGIC 22__derived_metrics             margins, FCF, YoY, leverage, valuation ratios
 # MAGIC       ↓
@@ -126,7 +128,7 @@ else:
 # COMMAND ----------
 
 print("=" * 55)
-print("STEP 1 / 8 — Concept Hierarchy")
+print("STEP 1 / 9 — Concept Hierarchy")
 print("=" * 55)
 
 # COMMAND ----------
@@ -146,7 +148,7 @@ print("=" * 55)
 # COMMAND ----------
 
 print("=" * 55)
-print("STEP 2 / 8 — Metrics Hierarchy")
+print("STEP 2 / 9 — Metrics Hierarchy")
 print("=" * 55)
 
 # COMMAND ----------
@@ -162,7 +164,7 @@ print("=" * 55)
 # COMMAND ----------
 
 print("=" * 55)
-print("STEP 3 / 8 — SEC Ingestion")
+print("STEP 3 / 9 — SEC Ingestion")
 print("=" * 55)
 
 # COMMAND ----------
@@ -178,7 +180,7 @@ print("=" * 55)
 # COMMAND ----------
 
 print("=" * 55)
-print("STEP 4 / 8 — Market Data")
+print("STEP 4 / 9 — Market Data")
 print("=" * 55)
 
 # COMMAND ----------
@@ -194,12 +196,35 @@ print("=" * 55)
 # COMMAND ----------
 
 print("=" * 55)
-print("STEP 5 / 8 — Clean & Merge")
+print("STEP 5 / 9 — Clean & Merge")
 print("=" * 55)
 
 # COMMAND ----------
 
 # MAGIC %run "/Workspace/Users/al.lopez.moreira@gmail.com/fundamentals_databricks_pj/FA PJ (Basic)/20_transformation/21__clean_and_merge"
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 7b. Derive quarterly rows
+# MAGIC `financials` — añade filas Q1–Q4 standalone por concepto.
+# MAGIC
+# MAGIC Por `kind`:
+# MAGIC - `flow_additive`: Q1–Q3 standalone (~90d) o `YTD_n − YTD_(n-1)`. Q4 standalone si existe en el 10-K, si no `FY − YTD_Q3`.
+# MAGIC - `flow_nonadditive`: solo standalone (~90d); NULL si no.
+# MAGIC - `stock`: snapshot al `period_end` (dedup latest `filed`).
+# MAGIC
+# MAGIC Requiere que `21__clean_and_merge` haya escrito las filas FY antes.
+
+# COMMAND ----------
+
+print("=" * 55)
+print("STEP 6 / 9 — Derive Quarterly")
+print("=" * 55)
+
+# COMMAND ----------
+
+# MAGIC %run "/Workspace/Users/al.lopez.moreira@gmail.com/fundamentals_databricks_pj/FA PJ (Basic)/20_transformation/21b__derive_quarterly"
 
 # COMMAND ----------
 
@@ -210,7 +235,7 @@ print("=" * 55)
 # COMMAND ----------
 
 print("=" * 55)
-print("STEP 6 / 8 — Derived Metrics")
+print("STEP 7 / 9 — Derived Metrics")
 print("=" * 55)
 
 # COMMAND ----------
@@ -233,7 +258,7 @@ print("=" * 55)
 # COMMAND ----------
 
 print("=" * 55)
-print("STEP 7 / 8 — Intrinsic Value")
+print("STEP 8 / 9 — Intrinsic Value")
 print("=" * 55)
 
 # COMMAND ----------
@@ -249,7 +274,7 @@ print("=" * 55)
 # COMMAND ----------
 
 print("=" * 55)
-print("STEP 8 / 8 — Analysis")
+print("STEP 9 / 9 — Analysis")
 print("=" * 55)
 
 # COMMAND ----------

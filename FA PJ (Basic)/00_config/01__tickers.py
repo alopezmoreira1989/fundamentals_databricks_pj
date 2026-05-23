@@ -21,7 +21,7 @@ SCHEMA    = "financials"
 RAW_TABLE = "financials_raw"
 TABLE     = "financials"
 
-SEC_USER_AGENT = "MyCompany myemail@example.com"   # ← update with your details
+SEC_USER_AGENT = "Alejandro Lopez Moreira al.lopez.moreira@gmail.com"
 
 # Convenience
 DB           = f"{CATALOG}.{SCHEMA}"
