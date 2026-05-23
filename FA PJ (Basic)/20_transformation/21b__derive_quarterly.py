@@ -386,6 +386,23 @@ stock_dedup = (
     .drop("rn")
 )
 
+# Drop comparatives: SEC companyfacts returns every BS fact tagged with the
+# containing filing's fp/fy, so a 10-Q for fy=2025/Q3 carries ~12 historical
+# period_ends (the issuer's prior quarters/years as comparatives). Each of
+# those older quarter ends is already captured as the current row in its
+# own original 10-Q, so per (ticker, stmt, concept, fy, fp) keep only the
+# row with the latest period_end (the filing's actual reporting period).
+w_stock_current = Window.partitionBy(
+    "ticker", "stmt", "concept", "fy", "fp"
+).orderBy(F.col("period_end").desc_nulls_last())
+
+stock_dedup = (
+    stock_dedup
+    .withColumn("rn", F.row_number().over(w_stock_current))
+    .filter(F.col("rn") == 1)
+    .drop("rn")
+)
+
 stock_quarterly = stock_dedup.select(
     F.col("ticker"),
     F.col("company"),
