@@ -1,0 +1,74 @@
+{
+  "_comment": "Supuestos para el cálculo de valor intrínseco (notebook 23__intrinsic_value). La sección 'defaults' aplica a todos los tickers; 'overrides' permite sobrescribir parámetros para tickers concretos. Los defaults son conservadores estilo Buffett/Graham — un WACC del 9% y un crecimiento terminal del 2.5% son razonables para large caps US. Editar este archivo NO requiere tocar código.",
+
+  "_units": {
+    "wacc":                 "decimal (0.09 = 9%)",
+    "growth_*":             "decimal (0.08 = 8%)",
+    "horizon_years":        "int (años de crecimiento explícito en DCF)",
+    "graham_aaa_yield":     "decimal (yield AAA actual — actualizar periódicamente)",
+    "owner_earnings_multi": "ratio (múltiplo aplicado a Owner Earnings — 15x es el clásico Buffett)",
+    "min_margin_of_safety": "decimal (umbral para considerar 'compra' — Graham usaba 0.33 = 33%)"
+  },
+
+  "defaults": {
+    "graham": {
+      "magic_number": 22.5,
+      "_magic_number_doc": "Graham original: √(22.5 × EPS × BVPS). El 22.5 = 15× max P/E × 1.5× max P/B según Graham."
+    },
+    "graham_revised": {
+      "base_pe":           8.5,
+      "growth_multiplier": 2.0,
+      "aaa_yield_norm":    4.4,
+      "graham_aaa_yield":  0.045,
+      "growth_cap":        0.15,
+      "_growth_cap_doc":   "Cap del crecimiento a 15% para evitar valoraciones absurdas en empresas hyper-growth."
+    },
+    "dcf": {
+      "wacc":              0.09,
+      "growth_stage1":     0.08,
+      "growth_terminal":   0.025,
+      "horizon_years":     10,
+      "use_owner_earnings": false,
+      "_use_oe_doc":       "Si true, descuenta Owner Earnings en vez de FCF (sabor más buffettiano)."
+    },
+    "owner_earnings": {
+      "multiple":            15.0,
+      "discount_rate":       0.09,
+      "method":              "multiple",
+      "_method_doc":         "'multiple' = OE × múltiplo. 'perpetuity' = OE / discount_rate (Gordon sin crecimiento)."
+    },
+    "margin_of_safety": {
+      "warn_threshold": 0.10,
+      "buy_threshold":  0.33,
+      "_doc":           "Solo informativo — el dashboard puede colorear filas según estos umbrales."
+    }
+  },
+
+  "overrides": {
+    "_doc": "Cada clave es un ticker. Solo hay que listar los parámetros que cambian respecto a defaults; el resto se hereda.",
+
+    "AAPL": {
+      "dcf": { "growth_stage1": 0.06 },
+      "_note": "Apple ya es maduro — crecimiento explícito más conservador."
+    },
+    "MSFT": {
+      "dcf": { "growth_stage1": 0.10 }
+    },
+    "GOOGL": {
+      "dcf": { "growth_stage1": 0.10 }
+    },
+    "TSLA": {
+      "dcf": { "growth_stage1": 0.15, "horizon_years": 7 },
+      "_note": "Hyper-growth, horizonte más corto porque la incertidumbre se dispara."
+    },
+    "BRK.B": {
+      "_note": "Holding diversificado — los modelos por flujos no aplican bien. Mejor confiar en Graham Number sobre book value.",
+      "dcf": { "skip": true }
+    },
+    "JPM": {
+      "_note": "Banco — Owner Earnings y FCF no aplican bien. Confiar en P/B y Graham.",
+      "dcf": { "skip": true },
+      "owner_earnings": { "skip": true }
+    }
+  }
+}

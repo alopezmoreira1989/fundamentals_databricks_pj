@@ -1,0 +1,24 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# IDE
+.idea/
+.vscode/
+
+# Databricks Connect — artefactos locales
+.databricks-connect
+
+# Local smoke tests (no son parte del pipeline)
+test_connection.py
+
+# Claude Code — instrucciones personales (no compartir)
+CLAUDE.local.md
+.claude/
+
+# Sistema
+Thumbs.db
+.DS_Store
