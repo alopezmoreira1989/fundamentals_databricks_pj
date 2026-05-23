@@ -1,0 +1,33 @@
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+extend-exclude = [
+    ".venv",
+    ".databricks",
+    "**/*.ipynb_checkpoints",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "W",   # pycodestyle warnings
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+]
+ignore = [
+    "E501",  # line-too-long (long XBRL concept names in 01__tickers.py blow this)
+    "E402",  # module-level-import-not-at-top (Databricks notebooks use `%run` / COMMAND ---- cells and re-import per cell)
+    "F401",  # imported-but-unused (notebook cells legitimately re-import; `spark`, `dbutils` are injected globals)
+    "F821",  # undefined-name (notebooks reference Databricks injected globals: spark, dbutils, sc, sqlContext)
+    "B018",  # useless-expression (notebooks end cells with bare expressions to display values)
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Notebook .py source files use Databricks `# MAGIC` / `# COMMAND ----------` markers that linters treat oddly.
+"FA PJ (Basic)/**/*.py" = ["E265"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
