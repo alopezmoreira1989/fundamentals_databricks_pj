@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this project is
 
-Databricks analytical pipeline that ingests SEC EDGAR XBRL filings (10-K/10-Q) for ~3,000 US tickers, joins Yahoo Finance year-end prices, derives financial metrics, and serves them via Delta tables to a Databricks dashboard. Entry point: `90_pipelines/91__full_pipeline.ipynb` (run as a Databricks Job). Code is bilingual — most prose, metric labels, and JSON hierarchies are in Spanish.
+Databricks analytical pipeline that ingests SEC EDGAR XBRL filings (10-K/10-Q) for ~3,000 US tickers, joins Yahoo Finance year-end prices, derives financial metrics, and serves them via Delta tables to a Databricks dashboard. Entry point: `90_pipelines/91__full_pipeline.py` (Databricks notebook source format, run as a Databricks Job). Code is bilingual — most prose, metric labels, and JSON hierarchies are in Spanish.
 
 ## Conventions that must be preserved
 
@@ -25,7 +25,7 @@ Databricks analytical pipeline that ingests SEC EDGAR XBRL filings (10-K/10-Q) f
 
 - **Plan before editing notebooks or pipeline `.py` files.** They are stateful and side-effecting (writes to Delta tables, calls SEC/yfinance APIs). Outline the change first, then implement.
 - **Flag Databricks-only assumptions** explicitly when proposing changes (uses `dbutils`, `%run`, `spark`, Unity Catalog three-part names, etc.) so the user knows what will break locally.
-- **Run from `91__full_pipeline.ipynb`** as a Databricks Job; it accepts `tickers_override`, `run_optimization`, `rebuild_config`. Local smoke test for Databricks Connect credentials is `test_connection.py` (gitignored).
+- **Run from `91__full_pipeline.py`** as a Databricks Job; it accepts `tickers_override`, `run_optimization`, `rebuild_config`. Local smoke test for Databricks Connect credentials is `test_connection.py` (gitignored).
 
 ## Layout
 
@@ -34,4 +34,4 @@ Databricks analytical pipeline that ingests SEC EDGAR XBRL filings (10-K/10-Q) f
 - `20_transformation/` — annual merge, quarterly derivation, pruning, derived metrics
 - `30_analysis/` — ad-hoc validation queries
 - `40_dashboards/` — dashboard SQL and `.lvdash.json`
-- `90_pipelines/91__full_pipeline.ipynb` — orchestration entry point
+- `90_pipelines/91__full_pipeline.py` — orchestration entry point (Databricks notebook source format)
