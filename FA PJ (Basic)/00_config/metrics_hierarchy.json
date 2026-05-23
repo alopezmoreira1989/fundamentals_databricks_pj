@@ -61,5 +61,38 @@
       { "metric": "Book Yield %",         "unit": "percent", "requires_market_data": true },
       { "metric": "EBITDA Yield %",       "unit": "percent", "requires_market_data": true }
     ]
+  },
+
+  "Intrinsic Value": {
+    "Graham (FY)": [
+      { "metric": "Graham Number (FY)",          "unit": "usd",     "requires_market_data": false },
+      { "metric": "MoS % (Graham Number, FY)",   "unit": "percent", "requires_market_data": true  },
+      { "metric": "Graham Revised Value (FY)",   "unit": "usd",     "requires_market_data": false },
+      { "metric": "MoS % (Graham Revised, FY)",  "unit": "percent", "requires_market_data": true  }
+    ],
+    "DCF (FY)": [
+      { "metric": "DCF Value per Share (FY)",    "unit": "usd",     "requires_market_data": false },
+      { "metric": "MoS % (DCF, FY)",             "unit": "percent", "requires_market_data": true  }
+    ],
+    "Buffett (FY)": [
+      { "metric": "Owner Earnings (FY)",            "unit": "usd",     "requires_market_data": false },
+      { "metric": "Owner Earnings Value/Share (FY)","unit": "usd",     "requires_market_data": false },
+      { "metric": "MoS % (Owner Earnings, FY)",     "unit": "percent", "requires_market_data": true  }
+    ],
+    "Graham (TTM)": [
+      { "metric": "Graham Number (TTM)",         "unit": "usd",     "requires_market_data": false },
+      { "metric": "MoS % (Graham Number, TTM)",  "unit": "percent", "requires_market_data": true  },
+      { "metric": "Graham Revised Value (TTM)",  "unit": "usd",     "requires_market_data": false },
+      { "metric": "MoS % (Graham Revised, TTM)", "unit": "percent", "requires_market_data": true  }
+    ],
+    "DCF (TTM)": [
+      { "metric": "DCF Value per Share (TTM)",   "unit": "usd",     "requires_market_data": false },
+      { "metric": "MoS % (DCF, TTM)",            "unit": "percent", "requires_market_data": true  }
+    ],
+    "Buffett (TTM)": [
+      { "metric": "Owner Earnings (TTM)",            "unit": "usd",     "requires_market_data": false },
+      { "metric": "Owner Earnings Value/Share (TTM)","unit": "usd",     "requires_market_data": false },
+      { "metric": "MoS % (Owner Earnings, TTM)",     "unit": "percent", "requires_market_data": true  }
+    ]
   }
 }
