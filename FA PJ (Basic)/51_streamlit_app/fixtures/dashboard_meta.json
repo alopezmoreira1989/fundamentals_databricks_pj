@@ -1,18 +1,234 @@
 {
   "schema_version": 2,
-  "build_timestamp": "2026-05-24T18:44:05+00:00",
+  "build_timestamp": "2026-05-24T19:21:55+00:00",
   "tickers": [
     {
       "ticker": "AAPL",
       "company": "Apple Inc."
     },
     {
-      "ticker": "MSFT",
-      "company": "Microsoft Corporation"
+      "ticker": "ABBV",
+      "company": "AbbVie Inc."
+    },
+    {
+      "ticker": "ABT",
+      "company": "Abbott Laboratories"
+    },
+    {
+      "ticker": "ACN",
+      "company": "Accenture plc"
+    },
+    {
+      "ticker": "ADBE",
+      "company": "Adobe Inc."
+    },
+    {
+      "ticker": "AMD",
+      "company": "Advanced Micro Devices"
+    },
+    {
+      "ticker": "AMZN",
+      "company": "Amazon.com Inc."
+    },
+    {
+      "ticker": "AVGO",
+      "company": "Broadcom Inc."
+    },
+    {
+      "ticker": "AXP",
+      "company": "American Express"
+    },
+    {
+      "ticker": "BA",
+      "company": "The Boeing Company"
+    },
+    {
+      "ticker": "BAC",
+      "company": "Bank of America"
+    },
+    {
+      "ticker": "BRK-B",
+      "company": "Berkshire Hathaway Inc."
+    },
+    {
+      "ticker": "CAT",
+      "company": "Caterpillar Inc."
+    },
+    {
+      "ticker": "COP",
+      "company": "ConocoPhillips"
+    },
+    {
+      "ticker": "CRM",
+      "company": "Salesforce Inc."
+    },
+    {
+      "ticker": "CSCO",
+      "company": "Cisco Systems"
+    },
+    {
+      "ticker": "COST",
+      "company": "Costco Wholesale"
+    },
+    {
+      "ticker": "CVX",
+      "company": "Chevron Corporation"
+    },
+    {
+      "ticker": "DIS",
+      "company": "The Walt Disney Company"
+    },
+    {
+      "ticker": "GE",
+      "company": "GE Aerospace"
+    },
+    {
+      "ticker": "GOOG",
+      "company": "Alphabet Inc. (Class C)"
     },
     {
       "ticker": "GOOGL",
       "company": "Alphabet Inc."
+    },
+    {
+      "ticker": "GS",
+      "company": "Goldman Sachs Group"
+    },
+    {
+      "ticker": "HD",
+      "company": "The Home Depot"
+    },
+    {
+      "ticker": "HON",
+      "company": "Honeywell International"
+    },
+    {
+      "ticker": "IBM",
+      "company": "International Business Machines"
+    },
+    {
+      "ticker": "INTC",
+      "company": "Intel Corporation"
+    },
+    {
+      "ticker": "JNJ",
+      "company": "Johnson & Johnson"
+    },
+    {
+      "ticker": "JPM",
+      "company": "JPMorgan Chase & Co."
+    },
+    {
+      "ticker": "KO",
+      "company": "The Coca-Cola Company"
+    },
+    {
+      "ticker": "LLY",
+      "company": "Eli Lilly and Company"
+    },
+    {
+      "ticker": "MA",
+      "company": "Mastercard Incorporated"
+    },
+    {
+      "ticker": "MCD",
+      "company": "McDonald's Corporation"
+    },
+    {
+      "ticker": "META",
+      "company": "Meta Platforms Inc."
+    },
+    {
+      "ticker": "MRK",
+      "company": "Merck & Co."
+    },
+    {
+      "ticker": "MSFT",
+      "company": "Microsoft Corporation"
+    },
+    {
+      "ticker": "NEE",
+      "company": "NextEra Energy"
+    },
+    {
+      "ticker": "NFLX",
+      "company": "Netflix Inc."
+    },
+    {
+      "ticker": "NKE",
+      "company": "NIKE Inc."
+    },
+    {
+      "ticker": "NVDA",
+      "company": "NVIDIA Corporation"
+    },
+    {
+      "ticker": "ORCL",
+      "company": "Oracle Corporation"
+    },
+    {
+      "ticker": "PEP",
+      "company": "PepsiCo Inc."
+    },
+    {
+      "ticker": "PFE",
+      "company": "Pfizer Inc."
+    },
+    {
+      "ticker": "PG",
+      "company": "Procter & Gamble"
+    },
+    {
+      "ticker": "PYPL",
+      "company": "PayPal Holdings"
+    },
+    {
+      "ticker": "QCOM",
+      "company": "QUALCOMM Incorporated"
+    },
+    {
+      "ticker": "RTX",
+      "company": "RTX Corporation"
+    },
+    {
+      "ticker": "SBUX",
+      "company": "Starbucks Corporation"
+    },
+    {
+      "ticker": "T",
+      "company": "AT&T Inc."
+    },
+    {
+      "ticker": "TMO",
+      "company": "Thermo Fisher Scientific"
+    },
+    {
+      "ticker": "TSLA",
+      "company": "Tesla Inc."
+    },
+    {
+      "ticker": "TXN",
+      "company": "Texas Instruments"
+    },
+    {
+      "ticker": "UNH",
+      "company": "UnitedHealth Group"
+    },
+    {
+      "ticker": "V",
+      "company": "Visa Inc."
+    },
+    {
+      "ticker": "VZ",
+      "company": "Verizon Communications"
+    },
+    {
+      "ticker": "WMT",
+      "company": "Walmart Inc."
+    },
+    {
+      "ticker": "XOM",
+      "company": "Exxon Mobil Corporation"
     }
   ],
   "fy_ranges": [
@@ -22,7 +238,172 @@
       "fy_max": 2024
     },
     {
+      "ticker": "ABBV",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "ABT",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "ACN",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "ADBE",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "AMD",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "AMZN",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "AVGO",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "AXP",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "BA",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "BAC",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "BRK-B",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "CAT",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "COP",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "COST",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "CRM",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "CSCO",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "CVX",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "DIS",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "GE",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "GOOG",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
       "ticker": "GOOGL",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "GS",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "HD",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "HON",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "IBM",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "INTC",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "JNJ",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "JPM",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "KO",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "LLY",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "MA",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "MCD",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "META",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "MRK",
       "fy_min": 2015,
       "fy_max": 2024
     },
@@ -30,11 +411,116 @@
       "ticker": "MSFT",
       "fy_min": 2015,
       "fy_max": 2024
+    },
+    {
+      "ticker": "NEE",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "NFLX",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "NKE",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "NVDA",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "ORCL",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "PEP",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "PFE",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "PG",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "PYPL",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "QCOM",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "RTX",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "SBUX",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "T",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "TMO",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "TSLA",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "TXN",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "UNH",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "V",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "VZ",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "WMT",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "XOM",
+      "fy_min": 2015,
+      "fy_max": 2024
     }
   ],
   "row_counts": {
-    "financials": 1944,
-    "metrics": 1410
+    "financials": 36936,
+    "metrics": 26790
   },
   "retention": {
     "fy_years": 10,
