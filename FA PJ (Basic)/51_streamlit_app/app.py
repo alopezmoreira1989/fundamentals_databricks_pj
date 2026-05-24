@@ -42,13 +42,24 @@ inject_css(Path(__file__).parent / "styles.css")
 data, metrics, meta = load_latest_data()
 notes = load_notes(Path(__file__).parent / "notes.json")
 
+# Build ticker list with company names for search
+ticker_company = {}
+for t_info in meta.get("tickers", []):
+    if isinstance(t_info, dict):
+        ticker_company[t_info["ticker"]] = t_info.get("company", t_info["ticker"])
 tickers = sorted(data["ticker"].unique().tolist())
 default_idx = tickers.index("AAPL") if "AAPL" in tickers else 0
 
-# Ticker selector — Streamlit selectbox restyled via CSS to look like the spec's chip.
-sel_col, _ = st.columns([1, 5])
+# Ticker selector with search — format_func shows "AAPL — Apple Inc."
+sel_col, info_col = st.columns([2, 4])
 with sel_col:
-    ticker = st.selectbox("Ticker", tickers, index=default_idx, label_visibility="visible")
+    ticker = st.selectbox(
+        f"Search {len(tickers)} tickers",
+        tickers,
+        index=default_idx,
+        format_func=lambda t: f"{t} — {ticker_company.get(t, '')}",
+        label_visibility="visible",
+    )
 
 # Masthead + KPI strip — single markdown block so the spacing matches the spec.
 st.markdown(render_masthead(ticker, data, meta), unsafe_allow_html=True)

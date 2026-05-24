@@ -1,86 +1,854 @@
 {
   "schema_version": 2,
-  "build_timestamp": "2026-05-24T19:21:55+00:00",
+  "build_timestamp": "2026-05-24T19:47:59+00:00",
   "tickers": [
+    {
+      "ticker": "A",
+      "company": "Agilent Technologies"
+    },
     {
       "ticker": "AAPL",
       "company": "Apple Inc."
     },
     {
       "ticker": "ABBV",
-      "company": "AbbVie Inc."
+      "company": "AbbVie"
+    },
+    {
+      "ticker": "ABNB",
+      "company": "Airbnb"
     },
     {
       "ticker": "ABT",
       "company": "Abbott Laboratories"
     },
     {
+      "ticker": "ACGL",
+      "company": "Arch Capital Group"
+    },
+    {
       "ticker": "ACN",
-      "company": "Accenture plc"
+      "company": "Accenture"
     },
     {
       "ticker": "ADBE",
       "company": "Adobe Inc."
     },
     {
+      "ticker": "ADI",
+      "company": "Analog Devices"
+    },
+    {
+      "ticker": "ADM",
+      "company": "Archer Daniels Midland"
+    },
+    {
+      "ticker": "ADP",
+      "company": "Automatic Data Processing"
+    },
+    {
+      "ticker": "ADSK",
+      "company": "Autodesk"
+    },
+    {
+      "ticker": "AEE",
+      "company": "Ameren"
+    },
+    {
+      "ticker": "AEP",
+      "company": "American Electric Power"
+    },
+    {
+      "ticker": "AES",
+      "company": "AES Corporation"
+    },
+    {
+      "ticker": "AFL",
+      "company": "Aflac"
+    },
+    {
+      "ticker": "AIG",
+      "company": "American International Group"
+    },
+    {
+      "ticker": "AIZ",
+      "company": "Assurant"
+    },
+    {
+      "ticker": "AJG",
+      "company": "Arthur J. Gallagher & Co."
+    },
+    {
+      "ticker": "AKAM",
+      "company": "Akamai Technologies"
+    },
+    {
+      "ticker": "ALB",
+      "company": "Albemarle Corporation"
+    },
+    {
+      "ticker": "ALGN",
+      "company": "Align Technology"
+    },
+    {
+      "ticker": "ALL",
+      "company": "Allstate"
+    },
+    {
+      "ticker": "ALLE",
+      "company": "Allegion"
+    },
+    {
+      "ticker": "AMAT",
+      "company": "Applied Materials"
+    },
+    {
+      "ticker": "AMCR",
+      "company": "Amcor"
+    },
+    {
       "ticker": "AMD",
       "company": "Advanced Micro Devices"
     },
     {
+      "ticker": "AME",
+      "company": "Ametek"
+    },
+    {
+      "ticker": "AMGN",
+      "company": "Amgen"
+    },
+    {
+      "ticker": "AMP",
+      "company": "Ameriprise Financial"
+    },
+    {
+      "ticker": "AMT",
+      "company": "American Tower"
+    },
+    {
       "ticker": "AMZN",
-      "company": "Amazon.com Inc."
+      "company": "Amazon"
+    },
+    {
+      "ticker": "ANET",
+      "company": "Arista Networks"
+    },
+    {
+      "ticker": "AON",
+      "company": "Aon plc"
+    },
+    {
+      "ticker": "AOS",
+      "company": "A. O. Smith"
+    },
+    {
+      "ticker": "APA",
+      "company": "APA Corporation"
+    },
+    {
+      "ticker": "APD",
+      "company": "Air Products"
+    },
+    {
+      "ticker": "APH",
+      "company": "Amphenol"
+    },
+    {
+      "ticker": "APO",
+      "company": "Apollo Global Management"
+    },
+    {
+      "ticker": "APP",
+      "company": "AppLovin"
+    },
+    {
+      "ticker": "APTV",
+      "company": "Aptiv"
+    },
+    {
+      "ticker": "ARE",
+      "company": "Alexandria Real Estate Equities"
+    },
+    {
+      "ticker": "ARES",
+      "company": "Ares Management"
+    },
+    {
+      "ticker": "ATO",
+      "company": "Atmos Energy"
+    },
+    {
+      "ticker": "AVB",
+      "company": "AvalonBay Communities"
     },
     {
       "ticker": "AVGO",
-      "company": "Broadcom Inc."
+      "company": "Broadcom"
+    },
+    {
+      "ticker": "AVY",
+      "company": "Avery Dennison"
+    },
+    {
+      "ticker": "AWK",
+      "company": "American Water Works"
+    },
+    {
+      "ticker": "AXON",
+      "company": "Axon Enterprise"
     },
     {
       "ticker": "AXP",
       "company": "American Express"
     },
     {
+      "ticker": "AZO",
+      "company": "AutoZone"
+    },
+    {
       "ticker": "BA",
-      "company": "The Boeing Company"
+      "company": "Boeing"
     },
     {
       "ticker": "BAC",
       "company": "Bank of America"
     },
     {
+      "ticker": "BALL",
+      "company": "Ball Corporation"
+    },
+    {
+      "ticker": "BAX",
+      "company": "Baxter International"
+    },
+    {
+      "ticker": "BBY",
+      "company": "Best Buy"
+    },
+    {
+      "ticker": "BDX",
+      "company": "Becton Dickinson"
+    },
+    {
+      "ticker": "BEN",
+      "company": "Franklin Resources"
+    },
+    {
+      "ticker": "BF-B",
+      "company": "Brown\u2013Forman"
+    },
+    {
+      "ticker": "BG",
+      "company": "Bunge Global"
+    },
+    {
+      "ticker": "BIIB",
+      "company": "Biogen"
+    },
+    {
+      "ticker": "BKNG",
+      "company": "Booking Holdings"
+    },
+    {
+      "ticker": "BKR",
+      "company": "Baker Hughes"
+    },
+    {
+      "ticker": "BLDR",
+      "company": "Builders FirstSource"
+    },
+    {
+      "ticker": "BLK",
+      "company": "BlackRock"
+    },
+    {
+      "ticker": "BMY",
+      "company": "Bristol Myers Squibb"
+    },
+    {
+      "ticker": "BNY",
+      "company": "BNY Mellon"
+    },
+    {
+      "ticker": "BR",
+      "company": "Broadridge Financial Solutions"
+    },
+    {
       "ticker": "BRK-B",
-      "company": "Berkshire Hathaway Inc."
+      "company": "Berkshire Hathaway"
+    },
+    {
+      "ticker": "BRO",
+      "company": "Brown & Brown"
+    },
+    {
+      "ticker": "BSX",
+      "company": "Boston Scientific"
+    },
+    {
+      "ticker": "BX",
+      "company": "Blackstone Inc."
+    },
+    {
+      "ticker": "BXP",
+      "company": "BXP, Inc."
+    },
+    {
+      "ticker": "C",
+      "company": "Citigroup"
+    },
+    {
+      "ticker": "CAG",
+      "company": "Conagra Brands"
+    },
+    {
+      "ticker": "CAH",
+      "company": "Cardinal Health"
+    },
+    {
+      "ticker": "CARR",
+      "company": "Carrier Global"
+    },
+    {
+      "ticker": "CASY",
+      "company": "Casey's"
     },
     {
       "ticker": "CAT",
       "company": "Caterpillar Inc."
     },
     {
+      "ticker": "CB",
+      "company": "Chubb Limited"
+    },
+    {
+      "ticker": "CBOE",
+      "company": "Cboe Global Markets"
+    },
+    {
+      "ticker": "CBRE",
+      "company": "CBRE Group"
+    },
+    {
+      "ticker": "CCI",
+      "company": "Crown Castle"
+    },
+    {
+      "ticker": "CCL",
+      "company": "Carnival Corporation"
+    },
+    {
+      "ticker": "CDNS",
+      "company": "Cadence Design Systems"
+    },
+    {
+      "ticker": "CDW",
+      "company": "CDW Corporation"
+    },
+    {
+      "ticker": "CEG",
+      "company": "Constellation Energy"
+    },
+    {
+      "ticker": "CF",
+      "company": "CF Industries"
+    },
+    {
+      "ticker": "CFG",
+      "company": "Citizens Financial Group"
+    },
+    {
+      "ticker": "CHD",
+      "company": "Church & Dwight"
+    },
+    {
+      "ticker": "CHRW",
+      "company": "C.H. Robinson"
+    },
+    {
+      "ticker": "CHTR",
+      "company": "Charter Communications"
+    },
+    {
+      "ticker": "CI",
+      "company": "Cigna"
+    },
+    {
+      "ticker": "CIEN",
+      "company": "Ciena"
+    },
+    {
+      "ticker": "CINF",
+      "company": "Cincinnati Financial"
+    },
+    {
+      "ticker": "CL",
+      "company": "Colgate-Palmolive"
+    },
+    {
+      "ticker": "CLX",
+      "company": "Clorox"
+    },
+    {
+      "ticker": "CMCSA",
+      "company": "Comcast"
+    },
+    {
+      "ticker": "CME",
+      "company": "CME Group"
+    },
+    {
+      "ticker": "CMG",
+      "company": "Chipotle Mexican Grill"
+    },
+    {
+      "ticker": "CMI",
+      "company": "Cummins"
+    },
+    {
+      "ticker": "CMS",
+      "company": "CMS Energy"
+    },
+    {
+      "ticker": "CNC",
+      "company": "Centene Corporation"
+    },
+    {
+      "ticker": "CNP",
+      "company": "CenterPoint Energy"
+    },
+    {
+      "ticker": "COF",
+      "company": "Capital One"
+    },
+    {
+      "ticker": "COHR",
+      "company": "Coherent Corp."
+    },
+    {
+      "ticker": "COIN",
+      "company": "Coinbase"
+    },
+    {
+      "ticker": "COO",
+      "company": "Cooper Companies (The)"
+    },
+    {
       "ticker": "COP",
       "company": "ConocoPhillips"
     },
     {
-      "ticker": "CRM",
-      "company": "Salesforce Inc."
-    },
-    {
-      "ticker": "CSCO",
-      "company": "Cisco Systems"
+      "ticker": "COR",
+      "company": "Cencora"
     },
     {
       "ticker": "COST",
-      "company": "Costco Wholesale"
+      "company": "Costco"
+    },
+    {
+      "ticker": "CPAY",
+      "company": "Corpay"
+    },
+    {
+      "ticker": "CPB",
+      "company": "Campbell's Company (The)"
+    },
+    {
+      "ticker": "CPRT",
+      "company": "Copart"
+    },
+    {
+      "ticker": "CPT",
+      "company": "Camden Property Trust"
+    },
+    {
+      "ticker": "CRH",
+      "company": "CRH plc"
+    },
+    {
+      "ticker": "CRL",
+      "company": "Charles River Laboratories"
+    },
+    {
+      "ticker": "CRM",
+      "company": "Salesforce"
+    },
+    {
+      "ticker": "CRWD",
+      "company": "CrowdStrike"
+    },
+    {
+      "ticker": "CSCO",
+      "company": "Cisco"
+    },
+    {
+      "ticker": "CSGP",
+      "company": "CoStar Group"
+    },
+    {
+      "ticker": "CSX",
+      "company": "CSX Corporation"
+    },
+    {
+      "ticker": "CTAS",
+      "company": "Cintas"
+    },
+    {
+      "ticker": "CTSH",
+      "company": "Cognizant"
+    },
+    {
+      "ticker": "CTVA",
+      "company": "Corteva"
+    },
+    {
+      "ticker": "CVNA",
+      "company": "Carvana"
+    },
+    {
+      "ticker": "CVS",
+      "company": "CVS Health"
     },
     {
       "ticker": "CVX",
       "company": "Chevron Corporation"
     },
     {
+      "ticker": "D",
+      "company": "Dominion Energy"
+    },
+    {
+      "ticker": "DAL",
+      "company": "Delta Air Lines"
+    },
+    {
+      "ticker": "DASH",
+      "company": "DoorDash"
+    },
+    {
+      "ticker": "DD",
+      "company": "DuPont"
+    },
+    {
+      "ticker": "DDOG",
+      "company": "Datadog"
+    },
+    {
+      "ticker": "DE",
+      "company": "Deere & Company"
+    },
+    {
+      "ticker": "DECK",
+      "company": "Deckers Brands"
+    },
+    {
+      "ticker": "DELL",
+      "company": "Dell Technologies"
+    },
+    {
+      "ticker": "DG",
+      "company": "Dollar General"
+    },
+    {
+      "ticker": "DGX",
+      "company": "Quest Diagnostics"
+    },
+    {
+      "ticker": "DHI",
+      "company": "D. R. Horton"
+    },
+    {
+      "ticker": "DHR",
+      "company": "Danaher Corporation"
+    },
+    {
       "ticker": "DIS",
-      "company": "The Walt Disney Company"
+      "company": "Walt Disney Company (The)"
+    },
+    {
+      "ticker": "DLR",
+      "company": "Digital Realty"
+    },
+    {
+      "ticker": "DLTR",
+      "company": "Dollar Tree"
+    },
+    {
+      "ticker": "DOC",
+      "company": "Healthpeak Properties"
+    },
+    {
+      "ticker": "DOV",
+      "company": "Dover Corporation"
+    },
+    {
+      "ticker": "DOW",
+      "company": "Dow Inc."
+    },
+    {
+      "ticker": "DPZ",
+      "company": "Domino's"
+    },
+    {
+      "ticker": "DRI",
+      "company": "Darden Restaurants"
+    },
+    {
+      "ticker": "DTE",
+      "company": "DTE Energy"
+    },
+    {
+      "ticker": "DUK",
+      "company": "Duke Energy"
+    },
+    {
+      "ticker": "DVA",
+      "company": "DaVita"
+    },
+    {
+      "ticker": "DVN",
+      "company": "Devon Energy"
+    },
+    {
+      "ticker": "DXCM",
+      "company": "Dexcom"
+    },
+    {
+      "ticker": "EA",
+      "company": "Electronic Arts"
+    },
+    {
+      "ticker": "EBAY",
+      "company": "eBay Inc."
+    },
+    {
+      "ticker": "ECL",
+      "company": "Ecolab"
+    },
+    {
+      "ticker": "ED",
+      "company": "Consolidated Edison"
+    },
+    {
+      "ticker": "EFX",
+      "company": "Equifax"
+    },
+    {
+      "ticker": "EG",
+      "company": "Everest Group"
+    },
+    {
+      "ticker": "EIX",
+      "company": "Edison International"
+    },
+    {
+      "ticker": "EL",
+      "company": "Est\u00e9e Lauder Companies (The)"
+    },
+    {
+      "ticker": "ELV",
+      "company": "Elevance Health"
+    },
+    {
+      "ticker": "EME",
+      "company": "Emcor"
+    },
+    {
+      "ticker": "EMR",
+      "company": "Emerson Electric"
+    },
+    {
+      "ticker": "EOG",
+      "company": "EOG Resources"
+    },
+    {
+      "ticker": "EPAM",
+      "company": "EPAM Systems"
+    },
+    {
+      "ticker": "EQIX",
+      "company": "Equinix"
+    },
+    {
+      "ticker": "EQR",
+      "company": "Equity Residential"
+    },
+    {
+      "ticker": "EQT",
+      "company": "EQT Corporation"
+    },
+    {
+      "ticker": "ERIE",
+      "company": "Erie Indemnity"
+    },
+    {
+      "ticker": "ES",
+      "company": "Eversource Energy"
+    },
+    {
+      "ticker": "ESS",
+      "company": "Essex Property Trust"
+    },
+    {
+      "ticker": "ETN",
+      "company": "Eaton Corporation"
+    },
+    {
+      "ticker": "ETR",
+      "company": "Entergy"
+    },
+    {
+      "ticker": "EVRG",
+      "company": "Evergy"
+    },
+    {
+      "ticker": "EW",
+      "company": "Edwards Lifesciences"
+    },
+    {
+      "ticker": "EXC",
+      "company": "Exelon"
+    },
+    {
+      "ticker": "EXE",
+      "company": "Expand Energy"
+    },
+    {
+      "ticker": "EXPD",
+      "company": "Expeditors International"
+    },
+    {
+      "ticker": "EXPE",
+      "company": "Expedia Group"
+    },
+    {
+      "ticker": "EXR",
+      "company": "Extra Space Storage"
+    },
+    {
+      "ticker": "F",
+      "company": "Ford Motor Company"
+    },
+    {
+      "ticker": "FANG",
+      "company": "Diamondback Energy"
+    },
+    {
+      "ticker": "FAST",
+      "company": "Fastenal"
+    },
+    {
+      "ticker": "FCX",
+      "company": "Freeport-McMoRan"
+    },
+    {
+      "ticker": "FDS",
+      "company": "FactSet"
+    },
+    {
+      "ticker": "FDX",
+      "company": "FedEx"
+    },
+    {
+      "ticker": "FE",
+      "company": "FirstEnergy"
+    },
+    {
+      "ticker": "FFIV",
+      "company": "F5, Inc."
+    },
+    {
+      "ticker": "FICO",
+      "company": "Fair Isaac"
+    },
+    {
+      "ticker": "FIS",
+      "company": "Fidelity National Information Services"
+    },
+    {
+      "ticker": "FISV",
+      "company": "Fiserv"
+    },
+    {
+      "ticker": "FITB",
+      "company": "Fifth Third Bancorp"
+    },
+    {
+      "ticker": "FIX",
+      "company": "Comfort Systems USA"
+    },
+    {
+      "ticker": "FOX",
+      "company": "Fox Corporation (Class B)"
+    },
+    {
+      "ticker": "FOXA",
+      "company": "Fox Corporation (Class A)"
+    },
+    {
+      "ticker": "FRT",
+      "company": "Federal Realty Investment Trust"
+    },
+    {
+      "ticker": "FSLR",
+      "company": "First Solar"
+    },
+    {
+      "ticker": "FTNT",
+      "company": "Fortinet"
+    },
+    {
+      "ticker": "FTV",
+      "company": "Fortive"
+    },
+    {
+      "ticker": "GD",
+      "company": "General Dynamics"
+    },
+    {
+      "ticker": "GDDY",
+      "company": "GoDaddy"
     },
     {
       "ticker": "GE",
       "company": "GE Aerospace"
+    },
+    {
+      "ticker": "GEHC",
+      "company": "GE HealthCare"
+    },
+    {
+      "ticker": "GEN",
+      "company": "Gen Digital"
+    },
+    {
+      "ticker": "GEV",
+      "company": "GE Vernova"
+    },
+    {
+      "ticker": "GILD",
+      "company": "Gilead Sciences"
+    },
+    {
+      "ticker": "GIS",
+      "company": "General Mills"
+    },
+    {
+      "ticker": "GL",
+      "company": "Globe Life"
+    },
+    {
+      "ticker": "GLW",
+      "company": "Corning Inc."
+    },
+    {
+      "ticker": "GM",
+      "company": "General Motors"
+    },
+    {
+      "ticker": "GNRC",
+      "company": "Generac"
     },
     {
       "ticker": "GOOG",
@@ -88,27 +856,195 @@
     },
     {
       "ticker": "GOOGL",
-      "company": "Alphabet Inc."
+      "company": "Alphabet Inc. (Class A)"
+    },
+    {
+      "ticker": "GPC",
+      "company": "Genuine Parts Company"
+    },
+    {
+      "ticker": "GPN",
+      "company": "Global Payments"
+    },
+    {
+      "ticker": "GRMN",
+      "company": "Garmin"
     },
     {
       "ticker": "GS",
-      "company": "Goldman Sachs Group"
+      "company": "Goldman Sachs"
+    },
+    {
+      "ticker": "GWW",
+      "company": "W. W. Grainger"
+    },
+    {
+      "ticker": "HAL",
+      "company": "Halliburton"
+    },
+    {
+      "ticker": "HAS",
+      "company": "Hasbro"
+    },
+    {
+      "ticker": "HBAN",
+      "company": "Huntington Bancshares"
+    },
+    {
+      "ticker": "HCA",
+      "company": "HCA Healthcare"
     },
     {
       "ticker": "HD",
-      "company": "The Home Depot"
+      "company": "Home Depot (The)"
+    },
+    {
+      "ticker": "HIG",
+      "company": "Hartford (The)"
+    },
+    {
+      "ticker": "HII",
+      "company": "Huntington Ingalls Industries"
+    },
+    {
+      "ticker": "HLT",
+      "company": "Hilton Worldwide"
     },
     {
       "ticker": "HON",
-      "company": "Honeywell International"
+      "company": "Honeywell"
+    },
+    {
+      "ticker": "HOOD",
+      "company": "Robinhood Markets"
+    },
+    {
+      "ticker": "HPE",
+      "company": "Hewlett Packard Enterprise"
+    },
+    {
+      "ticker": "HPQ",
+      "company": "HP Inc."
+    },
+    {
+      "ticker": "HRL",
+      "company": "Hormel Foods"
+    },
+    {
+      "ticker": "HSIC",
+      "company": "Henry Schein"
+    },
+    {
+      "ticker": "HST",
+      "company": "Host Hotels & Resorts"
+    },
+    {
+      "ticker": "HSY",
+      "company": "Hershey Company (The)"
+    },
+    {
+      "ticker": "HUBB",
+      "company": "Hubbell Incorporated"
+    },
+    {
+      "ticker": "HUM",
+      "company": "Humana"
+    },
+    {
+      "ticker": "HWM",
+      "company": "Howmet Aerospace"
+    },
+    {
+      "ticker": "IBKR",
+      "company": "Interactive Brokers"
     },
     {
       "ticker": "IBM",
-      "company": "International Business Machines"
+      "company": "IBM"
+    },
+    {
+      "ticker": "ICE",
+      "company": "Intercontinental Exchange"
+    },
+    {
+      "ticker": "IDXX",
+      "company": "Idexx Laboratories"
+    },
+    {
+      "ticker": "IEX",
+      "company": "IDEX Corporation"
+    },
+    {
+      "ticker": "IFF",
+      "company": "International Flavors & Fragrances"
+    },
+    {
+      "ticker": "INCY",
+      "company": "Incyte"
     },
     {
       "ticker": "INTC",
-      "company": "Intel Corporation"
+      "company": "Intel"
+    },
+    {
+      "ticker": "INTU",
+      "company": "Intuit"
+    },
+    {
+      "ticker": "INVH",
+      "company": "Invitation Homes"
+    },
+    {
+      "ticker": "IP",
+      "company": "International Paper"
+    },
+    {
+      "ticker": "IQV",
+      "company": "IQVIA"
+    },
+    {
+      "ticker": "IR",
+      "company": "Ingersoll Rand"
+    },
+    {
+      "ticker": "IRM",
+      "company": "Iron Mountain"
+    },
+    {
+      "ticker": "ISRG",
+      "company": "Intuitive Surgical"
+    },
+    {
+      "ticker": "IT",
+      "company": "Gartner"
+    },
+    {
+      "ticker": "ITW",
+      "company": "Illinois Tool Works"
+    },
+    {
+      "ticker": "IVZ",
+      "company": "Invesco"
+    },
+    {
+      "ticker": "J",
+      "company": "Jacobs Solutions"
+    },
+    {
+      "ticker": "JBHT",
+      "company": "J.B. Hunt"
+    },
+    {
+      "ticker": "JBL",
+      "company": "Jabil"
+    },
+    {
+      "ticker": "JCI",
+      "company": "Johnson Controls"
+    },
+    {
+      "ticker": "JKHY",
+      "company": "Jack Henry & Associates"
     },
     {
       "ticker": "JNJ",
@@ -116,122 +1052,975 @@
     },
     {
       "ticker": "JPM",
-      "company": "JPMorgan Chase & Co."
+      "company": "JPMorgan Chase"
+    },
+    {
+      "ticker": "KDP",
+      "company": "Keurig Dr Pepper"
+    },
+    {
+      "ticker": "KEY",
+      "company": "KeyCorp"
+    },
+    {
+      "ticker": "KEYS",
+      "company": "Keysight Technologies"
+    },
+    {
+      "ticker": "KHC",
+      "company": "Kraft Heinz"
+    },
+    {
+      "ticker": "KIM",
+      "company": "Kimco Realty"
+    },
+    {
+      "ticker": "KKR",
+      "company": "KKR & Co."
+    },
+    {
+      "ticker": "KLAC",
+      "company": "KLA Corporation"
+    },
+    {
+      "ticker": "KMB",
+      "company": "Kimberly-Clark"
+    },
+    {
+      "ticker": "KMI",
+      "company": "Kinder Morgan"
     },
     {
       "ticker": "KO",
-      "company": "The Coca-Cola Company"
+      "company": "Coca-Cola Company (The)"
+    },
+    {
+      "ticker": "KR",
+      "company": "Kroger"
+    },
+    {
+      "ticker": "KVUE",
+      "company": "Kenvue"
+    },
+    {
+      "ticker": "L",
+      "company": "Loews Corporation"
+    },
+    {
+      "ticker": "LDOS",
+      "company": "Leidos"
+    },
+    {
+      "ticker": "LEN",
+      "company": "Lennar"
+    },
+    {
+      "ticker": "LH",
+      "company": "Labcorp"
+    },
+    {
+      "ticker": "LHX",
+      "company": "L3Harris"
+    },
+    {
+      "ticker": "LII",
+      "company": "Lennox International"
+    },
+    {
+      "ticker": "LIN",
+      "company": "Linde plc"
+    },
+    {
+      "ticker": "LITE",
+      "company": "Lumentum"
     },
     {
       "ticker": "LLY",
-      "company": "Eli Lilly and Company"
+      "company": "Lilly (Eli)"
+    },
+    {
+      "ticker": "LMT",
+      "company": "Lockheed Martin"
+    },
+    {
+      "ticker": "LNT",
+      "company": "Alliant Energy"
+    },
+    {
+      "ticker": "LOW",
+      "company": "Lowe's"
+    },
+    {
+      "ticker": "LRCX",
+      "company": "Lam Research"
+    },
+    {
+      "ticker": "LULU",
+      "company": "Lululemon Athletica"
+    },
+    {
+      "ticker": "LUV",
+      "company": "Southwest Airlines"
+    },
+    {
+      "ticker": "LVS",
+      "company": "Las Vegas Sands"
+    },
+    {
+      "ticker": "LYB",
+      "company": "LyondellBasell"
+    },
+    {
+      "ticker": "LYV",
+      "company": "Live Nation Entertainment"
     },
     {
       "ticker": "MA",
-      "company": "Mastercard Incorporated"
+      "company": "Mastercard"
+    },
+    {
+      "ticker": "MAA",
+      "company": "Mid-America Apartment Communities"
+    },
+    {
+      "ticker": "MAR",
+      "company": "Marriott International"
+    },
+    {
+      "ticker": "MAS",
+      "company": "Masco"
     },
     {
       "ticker": "MCD",
-      "company": "McDonald's Corporation"
+      "company": "McDonald's"
+    },
+    {
+      "ticker": "MCHP",
+      "company": "Microchip Technology"
+    },
+    {
+      "ticker": "MCK",
+      "company": "McKesson Corporation"
+    },
+    {
+      "ticker": "MCO",
+      "company": "Moody's Corporation"
+    },
+    {
+      "ticker": "MDLZ",
+      "company": "Mondelez International"
+    },
+    {
+      "ticker": "MDT",
+      "company": "Medtronic"
+    },
+    {
+      "ticker": "MET",
+      "company": "MetLife"
     },
     {
       "ticker": "META",
-      "company": "Meta Platforms Inc."
+      "company": "Meta Platforms"
+    },
+    {
+      "ticker": "MGM",
+      "company": "MGM Resorts"
+    },
+    {
+      "ticker": "MKC",
+      "company": "McCormick & Company"
+    },
+    {
+      "ticker": "MLM",
+      "company": "Martin Marietta Materials"
+    },
+    {
+      "ticker": "MMM",
+      "company": "3M"
+    },
+    {
+      "ticker": "MNST",
+      "company": "Monster Beverage"
+    },
+    {
+      "ticker": "MO",
+      "company": "Altria"
+    },
+    {
+      "ticker": "MOS",
+      "company": "Mosaic Company (The)"
+    },
+    {
+      "ticker": "MPC",
+      "company": "Marathon Petroleum"
+    },
+    {
+      "ticker": "MPWR",
+      "company": "Monolithic Power Systems"
     },
     {
       "ticker": "MRK",
       "company": "Merck & Co."
     },
     {
+      "ticker": "MRNA",
+      "company": "Moderna"
+    },
+    {
+      "ticker": "MRSH",
+      "company": "Marsh McLennan"
+    },
+    {
+      "ticker": "MS",
+      "company": "Morgan Stanley"
+    },
+    {
+      "ticker": "MSCI",
+      "company": "MSCI Inc."
+    },
+    {
       "ticker": "MSFT",
-      "company": "Microsoft Corporation"
+      "company": "Microsoft"
+    },
+    {
+      "ticker": "MSI",
+      "company": "Motorola Solutions"
+    },
+    {
+      "ticker": "MTB",
+      "company": "M&T Bank"
+    },
+    {
+      "ticker": "MTD",
+      "company": "Mettler Toledo"
+    },
+    {
+      "ticker": "MU",
+      "company": "Micron Technology"
+    },
+    {
+      "ticker": "NCLH",
+      "company": "Norwegian Cruise Line Holdings"
+    },
+    {
+      "ticker": "NDAQ",
+      "company": "Nasdaq, Inc."
+    },
+    {
+      "ticker": "NDSN",
+      "company": "Nordson Corporation"
     },
     {
       "ticker": "NEE",
       "company": "NextEra Energy"
     },
     {
+      "ticker": "NEM",
+      "company": "Newmont"
+    },
+    {
       "ticker": "NFLX",
-      "company": "Netflix Inc."
+      "company": "Netflix"
+    },
+    {
+      "ticker": "NI",
+      "company": "NiSource"
     },
     {
       "ticker": "NKE",
-      "company": "NIKE Inc."
+      "company": "Nike, Inc."
+    },
+    {
+      "ticker": "NOC",
+      "company": "Northrop Grumman"
+    },
+    {
+      "ticker": "NOW",
+      "company": "ServiceNow"
+    },
+    {
+      "ticker": "NRG",
+      "company": "NRG Energy"
+    },
+    {
+      "ticker": "NSC",
+      "company": "Norfolk Southern"
+    },
+    {
+      "ticker": "NTAP",
+      "company": "NetApp"
+    },
+    {
+      "ticker": "NTRS",
+      "company": "Northern Trust"
+    },
+    {
+      "ticker": "NUE",
+      "company": "Nucor"
     },
     {
       "ticker": "NVDA",
-      "company": "NVIDIA Corporation"
+      "company": "Nvidia"
+    },
+    {
+      "ticker": "NVR",
+      "company": "NVR, Inc."
+    },
+    {
+      "ticker": "NWS",
+      "company": "News Corp (Class B)"
+    },
+    {
+      "ticker": "NWSA",
+      "company": "News Corp (Class A)"
+    },
+    {
+      "ticker": "NXPI",
+      "company": "NXP Semiconductors"
+    },
+    {
+      "ticker": "O",
+      "company": "Realty Income"
+    },
+    {
+      "ticker": "ODFL",
+      "company": "Old Dominion"
+    },
+    {
+      "ticker": "OKE",
+      "company": "Oneok"
+    },
+    {
+      "ticker": "OMC",
+      "company": "Omnicom Group"
+    },
+    {
+      "ticker": "ON",
+      "company": "ON Semiconductor"
     },
     {
       "ticker": "ORCL",
       "company": "Oracle Corporation"
     },
     {
+      "ticker": "ORLY",
+      "company": "O\u2019Reilly Automotive"
+    },
+    {
+      "ticker": "OTIS",
+      "company": "Otis Worldwide"
+    },
+    {
+      "ticker": "OXY",
+      "company": "Occidental Petroleum"
+    },
+    {
+      "ticker": "PANW",
+      "company": "Palo Alto Networks"
+    },
+    {
+      "ticker": "PAYX",
+      "company": "Paychex"
+    },
+    {
+      "ticker": "PCAR",
+      "company": "Paccar"
+    },
+    {
+      "ticker": "PCG",
+      "company": "PG&E Corporation"
+    },
+    {
+      "ticker": "PEG",
+      "company": "Public Service Enterprise Group"
+    },
+    {
       "ticker": "PEP",
-      "company": "PepsiCo Inc."
+      "company": "PepsiCo"
     },
     {
       "ticker": "PFE",
-      "company": "Pfizer Inc."
+      "company": "Pfizer"
+    },
+    {
+      "ticker": "PFG",
+      "company": "Principal Financial Group"
     },
     {
       "ticker": "PG",
       "company": "Procter & Gamble"
     },
     {
+      "ticker": "PGR",
+      "company": "Progressive Corporation"
+    },
+    {
+      "ticker": "PH",
+      "company": "Parker Hannifin"
+    },
+    {
+      "ticker": "PHM",
+      "company": "PulteGroup"
+    },
+    {
+      "ticker": "PKG",
+      "company": "Packaging Corporation of America"
+    },
+    {
+      "ticker": "PLD",
+      "company": "Prologis"
+    },
+    {
+      "ticker": "PLTR",
+      "company": "Palantir Technologies"
+    },
+    {
+      "ticker": "PM",
+      "company": "Philip Morris International"
+    },
+    {
+      "ticker": "PNC",
+      "company": "PNC Financial Services"
+    },
+    {
+      "ticker": "PNR",
+      "company": "Pentair"
+    },
+    {
+      "ticker": "PNW",
+      "company": "Pinnacle West Capital"
+    },
+    {
+      "ticker": "PODD",
+      "company": "Insulet Corporation"
+    },
+    {
+      "ticker": "POOL",
+      "company": "Pool Corporation"
+    },
+    {
+      "ticker": "PPG",
+      "company": "PPG Industries"
+    },
+    {
+      "ticker": "PPL",
+      "company": "PPL Corporation"
+    },
+    {
+      "ticker": "PRU",
+      "company": "Prudential Financial"
+    },
+    {
+      "ticker": "PSA",
+      "company": "Public Storage"
+    },
+    {
+      "ticker": "PSKY",
+      "company": "Paramount Skydance Corporation"
+    },
+    {
+      "ticker": "PSX",
+      "company": "Phillips 66"
+    },
+    {
+      "ticker": "PTC",
+      "company": "PTC Inc."
+    },
+    {
+      "ticker": "PWR",
+      "company": "Quanta Services"
+    },
+    {
       "ticker": "PYPL",
-      "company": "PayPal Holdings"
+      "company": "PayPal"
+    },
+    {
+      "ticker": "Q",
+      "company": "Qnity Electronics"
     },
     {
       "ticker": "QCOM",
-      "company": "QUALCOMM Incorporated"
+      "company": "Qualcomm"
+    },
+    {
+      "ticker": "RCL",
+      "company": "Royal Caribbean Group"
+    },
+    {
+      "ticker": "REG",
+      "company": "Regency Centers"
+    },
+    {
+      "ticker": "REGN",
+      "company": "Regeneron Pharmaceuticals"
+    },
+    {
+      "ticker": "RF",
+      "company": "Regions Financial Corporation"
+    },
+    {
+      "ticker": "RJF",
+      "company": "Raymond James Financial"
+    },
+    {
+      "ticker": "RL",
+      "company": "Ralph Lauren Corporation"
+    },
+    {
+      "ticker": "RMD",
+      "company": "ResMed"
+    },
+    {
+      "ticker": "ROK",
+      "company": "Rockwell Automation"
+    },
+    {
+      "ticker": "ROL",
+      "company": "Rollins, Inc."
+    },
+    {
+      "ticker": "ROP",
+      "company": "Roper Technologies"
+    },
+    {
+      "ticker": "ROST",
+      "company": "Ross Stores"
+    },
+    {
+      "ticker": "RSG",
+      "company": "Republic Services"
     },
     {
       "ticker": "RTX",
       "company": "RTX Corporation"
     },
     {
+      "ticker": "RVTY",
+      "company": "Revvity"
+    },
+    {
+      "ticker": "SATS",
+      "company": "EchoStar"
+    },
+    {
+      "ticker": "SBAC",
+      "company": "SBA Communications"
+    },
+    {
       "ticker": "SBUX",
-      "company": "Starbucks Corporation"
+      "company": "Starbucks"
+    },
+    {
+      "ticker": "SCHW",
+      "company": "Charles Schwab Corporation"
+    },
+    {
+      "ticker": "SHW",
+      "company": "Sherwin-Williams"
+    },
+    {
+      "ticker": "SJM",
+      "company": "J.M. Smucker Company (The)"
+    },
+    {
+      "ticker": "SLB",
+      "company": "Schlumberger"
+    },
+    {
+      "ticker": "SMCI",
+      "company": "Supermicro"
+    },
+    {
+      "ticker": "SNA",
+      "company": "Snap-on"
+    },
+    {
+      "ticker": "SNDK",
+      "company": "Sandisk"
+    },
+    {
+      "ticker": "SNPS",
+      "company": "Synopsys"
+    },
+    {
+      "ticker": "SO",
+      "company": "Southern Company"
+    },
+    {
+      "ticker": "SOLV",
+      "company": "Solventum"
+    },
+    {
+      "ticker": "SPG",
+      "company": "Simon Property Group"
+    },
+    {
+      "ticker": "SPGI",
+      "company": "S&P Global"
+    },
+    {
+      "ticker": "SRE",
+      "company": "Sempra"
+    },
+    {
+      "ticker": "STE",
+      "company": "Steris"
+    },
+    {
+      "ticker": "STLD",
+      "company": "Steel Dynamics"
+    },
+    {
+      "ticker": "STT",
+      "company": "State Street Corporation"
+    },
+    {
+      "ticker": "STX",
+      "company": "Seagate Technology"
+    },
+    {
+      "ticker": "STZ",
+      "company": "Constellation Brands"
+    },
+    {
+      "ticker": "SW",
+      "company": "Smurfit Westrock"
+    },
+    {
+      "ticker": "SWK",
+      "company": "Stanley Black & Decker"
+    },
+    {
+      "ticker": "SWKS",
+      "company": "Skyworks Solutions"
+    },
+    {
+      "ticker": "SYF",
+      "company": "Synchrony Financial"
+    },
+    {
+      "ticker": "SYK",
+      "company": "Stryker Corporation"
+    },
+    {
+      "ticker": "SYY",
+      "company": "Sysco"
     },
     {
       "ticker": "T",
-      "company": "AT&T Inc."
+      "company": "AT&T"
+    },
+    {
+      "ticker": "TAP",
+      "company": "Molson Coors Beverage Company"
+    },
+    {
+      "ticker": "TDG",
+      "company": "TransDigm Group"
+    },
+    {
+      "ticker": "TDY",
+      "company": "Teledyne Technologies"
+    },
+    {
+      "ticker": "TECH",
+      "company": "Bio-Techne"
+    },
+    {
+      "ticker": "TEL",
+      "company": "TE Connectivity"
+    },
+    {
+      "ticker": "TER",
+      "company": "Teradyne"
+    },
+    {
+      "ticker": "TFC",
+      "company": "Truist Financial"
+    },
+    {
+      "ticker": "TGT",
+      "company": "Target Corporation"
+    },
+    {
+      "ticker": "TJX",
+      "company": "TJX Companies"
+    },
+    {
+      "ticker": "TKO",
+      "company": "TKO Group Holdings"
     },
     {
       "ticker": "TMO",
       "company": "Thermo Fisher Scientific"
     },
     {
+      "ticker": "TMUS",
+      "company": "T-Mobile US"
+    },
+    {
+      "ticker": "TPL",
+      "company": "Texas Pacific Land Corporation"
+    },
+    {
+      "ticker": "TPR",
+      "company": "Tapestry, Inc."
+    },
+    {
+      "ticker": "TRGP",
+      "company": "Targa Resources"
+    },
+    {
+      "ticker": "TRMB",
+      "company": "Trimble Inc."
+    },
+    {
+      "ticker": "TROW",
+      "company": "T. Rowe Price"
+    },
+    {
+      "ticker": "TRV",
+      "company": "Travelers Companies (The)"
+    },
+    {
+      "ticker": "TSCO",
+      "company": "Tractor Supply"
+    },
+    {
       "ticker": "TSLA",
-      "company": "Tesla Inc."
+      "company": "Tesla, Inc."
+    },
+    {
+      "ticker": "TSN",
+      "company": "Tyson Foods"
+    },
+    {
+      "ticker": "TT",
+      "company": "Trane Technologies"
+    },
+    {
+      "ticker": "TTD",
+      "company": "Trade Desk (The)"
+    },
+    {
+      "ticker": "TTWO",
+      "company": "Take-Two Interactive"
     },
     {
       "ticker": "TXN",
       "company": "Texas Instruments"
     },
     {
+      "ticker": "TXT",
+      "company": "Textron"
+    },
+    {
+      "ticker": "TYL",
+      "company": "Tyler Technologies"
+    },
+    {
+      "ticker": "UAL",
+      "company": "United Airlines Holdings"
+    },
+    {
+      "ticker": "UBER",
+      "company": "Uber"
+    },
+    {
+      "ticker": "UDR",
+      "company": "UDR, Inc."
+    },
+    {
+      "ticker": "UHS",
+      "company": "Universal Health Services"
+    },
+    {
+      "ticker": "ULTA",
+      "company": "Ulta Beauty"
+    },
+    {
       "ticker": "UNH",
       "company": "UnitedHealth Group"
+    },
+    {
+      "ticker": "UNP",
+      "company": "Union Pacific Corporation"
+    },
+    {
+      "ticker": "UPS",
+      "company": "United Parcel Service"
+    },
+    {
+      "ticker": "URI",
+      "company": "United Rentals"
+    },
+    {
+      "ticker": "USB",
+      "company": "U.S. Bancorp"
     },
     {
       "ticker": "V",
       "company": "Visa Inc."
     },
     {
+      "ticker": "VEEV",
+      "company": "Veeva Systems"
+    },
+    {
+      "ticker": "VICI",
+      "company": "Vici Properties"
+    },
+    {
+      "ticker": "VLO",
+      "company": "Valero Energy"
+    },
+    {
+      "ticker": "VLTO",
+      "company": "Veralto"
+    },
+    {
+      "ticker": "VMC",
+      "company": "Vulcan Materials Company"
+    },
+    {
+      "ticker": "VRSK",
+      "company": "Verisk Analytics"
+    },
+    {
+      "ticker": "VRSN",
+      "company": "Verisign"
+    },
+    {
+      "ticker": "VRT",
+      "company": "Vertiv"
+    },
+    {
+      "ticker": "VRTX",
+      "company": "Vertex Pharmaceuticals"
+    },
+    {
+      "ticker": "VST",
+      "company": "Vistra Corp."
+    },
+    {
+      "ticker": "VTR",
+      "company": "Ventas"
+    },
+    {
+      "ticker": "VTRS",
+      "company": "Viatris"
+    },
+    {
       "ticker": "VZ",
-      "company": "Verizon Communications"
+      "company": "Verizon"
+    },
+    {
+      "ticker": "WAB",
+      "company": "Wabtec"
+    },
+    {
+      "ticker": "WAT",
+      "company": "Waters Corporation"
+    },
+    {
+      "ticker": "WBD",
+      "company": "Warner Bros. Discovery"
+    },
+    {
+      "ticker": "WDAY",
+      "company": "Workday, Inc."
+    },
+    {
+      "ticker": "WDC",
+      "company": "Western Digital"
+    },
+    {
+      "ticker": "WEC",
+      "company": "WEC Energy Group"
+    },
+    {
+      "ticker": "WELL",
+      "company": "Welltower"
+    },
+    {
+      "ticker": "WFC",
+      "company": "Wells Fargo"
+    },
+    {
+      "ticker": "WM",
+      "company": "Waste Management"
+    },
+    {
+      "ticker": "WMB",
+      "company": "Williams Companies"
     },
     {
       "ticker": "WMT",
-      "company": "Walmart Inc."
+      "company": "Walmart"
+    },
+    {
+      "ticker": "WRB",
+      "company": "W. R. Berkley Corporation"
+    },
+    {
+      "ticker": "WSM",
+      "company": "Williams-Sonoma, Inc."
+    },
+    {
+      "ticker": "WST",
+      "company": "West Pharmaceutical Services"
+    },
+    {
+      "ticker": "WTW",
+      "company": "Willis Towers Watson"
+    },
+    {
+      "ticker": "WY",
+      "company": "Weyerhaeuser"
+    },
+    {
+      "ticker": "WYNN",
+      "company": "Wynn Resorts"
+    },
+    {
+      "ticker": "XEL",
+      "company": "Xcel Energy"
     },
     {
       "ticker": "XOM",
-      "company": "Exxon Mobil Corporation"
+      "company": "ExxonMobil"
+    },
+    {
+      "ticker": "XYL",
+      "company": "Xylem Inc."
+    },
+    {
+      "ticker": "XYZ",
+      "company": "Block, Inc."
+    },
+    {
+      "ticker": "YUM",
+      "company": "Yum! Brands"
+    },
+    {
+      "ticker": "ZBH",
+      "company": "Zimmer Biomet"
+    },
+    {
+      "ticker": "ZBRA",
+      "company": "Zebra Technologies"
+    },
+    {
+      "ticker": "ZTS",
+      "company": "Zoetis"
     }
   ],
   "fy_ranges": [
+    {
+      "ticker": "A",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
     {
       "ticker": "AAPL",
       "fy_min": 2015,
@@ -243,7 +2032,17 @@
       "fy_max": 2024
     },
     {
+      "ticker": "ABNB",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
       "ticker": "ABT",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "ACGL",
       "fy_min": 2015,
       "fy_max": 2024
     },
@@ -258,7 +2057,117 @@
       "fy_max": 2024
     },
     {
+      "ticker": "ADI",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "ADM",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "ADP",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "ADSK",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "AEE",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "AEP",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "AES",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "AFL",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "AIG",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "AIZ",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "AJG",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "AKAM",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "ALB",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "ALGN",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "ALL",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "ALLE",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "AMAT",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "AMCR",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
       "ticker": "AMD",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "AME",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "AMGN",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "AMP",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "AMT",
       "fy_min": 2015,
       "fy_max": 2024
     },
@@ -268,12 +2177,97 @@
       "fy_max": 2024
     },
     {
+      "ticker": "ANET",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "AON",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "AOS",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "APA",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "APD",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "APH",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "APO",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "APP",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "APTV",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "ARE",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "ARES",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "ATO",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "AVB",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
       "ticker": "AVGO",
       "fy_min": 2015,
       "fy_max": 2024
     },
     {
+      "ticker": "AVY",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "AWK",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "AXON",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
       "ticker": "AXP",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "AZO",
       "fy_min": 2015,
       "fy_max": 2024
     },
@@ -288,7 +2282,127 @@
       "fy_max": 2024
     },
     {
+      "ticker": "BALL",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "BAX",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "BBY",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "BDX",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "BEN",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "BF-B",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "BG",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "BIIB",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "BKNG",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "BKR",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "BLDR",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "BLK",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "BMY",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "BNY",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "BR",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
       "ticker": "BRK-B",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "BRO",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "BSX",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "BX",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "BXP",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "C",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "CAG",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "CAH",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "CARR",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "CASY",
       "fy_min": 2015,
       "fy_max": 2024
     },
@@ -298,7 +2412,157 @@
       "fy_max": 2024
     },
     {
+      "ticker": "CB",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "CBOE",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "CBRE",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "CCI",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "CCL",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "CDNS",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "CDW",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "CEG",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "CF",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "CFG",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "CHD",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "CHRW",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "CHTR",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "CI",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "CIEN",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "CINF",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "CL",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "CLX",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "CMCSA",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "CME",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "CMG",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "CMI",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "CMS",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "CNC",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "CNP",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "COF",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "COHR",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "COIN",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "COO",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
       "ticker": "COP",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "COR",
       "fy_min": 2015,
       "fy_max": 2024
     },
@@ -308,7 +2572,42 @@
       "fy_max": 2024
     },
     {
+      "ticker": "CPAY",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "CPB",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "CPRT",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "CPT",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "CRH",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "CRL",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
       "ticker": "CRM",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "CRWD",
       "fy_min": 2015,
       "fy_max": 2024
     },
@@ -318,7 +2617,102 @@
       "fy_max": 2024
     },
     {
+      "ticker": "CSGP",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "CSX",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "CTAS",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "CTSH",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "CTVA",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "CVNA",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "CVS",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
       "ticker": "CVX",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "D",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "DAL",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "DASH",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "DD",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "DDOG",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "DE",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "DECK",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "DELL",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "DG",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "DGX",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "DHI",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "DHR",
       "fy_min": 2015,
       "fy_max": 2024
     },
@@ -328,7 +2722,357 @@
       "fy_max": 2024
     },
     {
+      "ticker": "DLR",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "DLTR",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "DOC",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "DOV",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "DOW",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "DPZ",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "DRI",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "DTE",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "DUK",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "DVA",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "DVN",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "DXCM",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "EA",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "EBAY",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "ECL",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "ED",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "EFX",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "EG",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "EIX",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "EL",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "ELV",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "EME",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "EMR",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "EOG",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "EPAM",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "EQIX",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "EQR",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "EQT",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "ERIE",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "ES",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "ESS",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "ETN",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "ETR",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "EVRG",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "EW",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "EXC",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "EXE",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "EXPD",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "EXPE",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "EXR",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "F",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "FANG",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "FAST",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "FCX",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "FDS",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "FDX",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "FE",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "FFIV",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "FICO",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "FIS",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "FISV",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "FITB",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "FIX",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "FOX",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "FOXA",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "FRT",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "FSLR",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "FTNT",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "FTV",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "GD",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "GDDY",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
       "ticker": "GE",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "GEHC",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "GEN",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "GEV",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "GILD",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "GIS",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "GL",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "GLW",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "GM",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "GNRC",
       "fy_min": 2015,
       "fy_max": 2024
     },
@@ -343,7 +3087,47 @@
       "fy_max": 2024
     },
     {
+      "ticker": "GPC",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "GPN",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "GRMN",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
       "ticker": "GS",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "GWW",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "HAL",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "HAS",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "HBAN",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "HCA",
       "fy_min": 2015,
       "fy_max": 2024
     },
@@ -353,7 +3137,77 @@
       "fy_max": 2024
     },
     {
+      "ticker": "HIG",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "HII",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "HLT",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
       "ticker": "HON",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "HOOD",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "HPE",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "HPQ",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "HRL",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "HSIC",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "HST",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "HSY",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "HUBB",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "HUM",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "HWM",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "IBKR",
       "fy_min": 2015,
       "fy_max": 2024
     },
@@ -363,7 +3217,107 @@
       "fy_max": 2024
     },
     {
+      "ticker": "ICE",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "IDXX",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "IEX",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "IFF",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "INCY",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
       "ticker": "INTC",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "INTU",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "INVH",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "IP",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "IQV",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "IR",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "IRM",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "ISRG",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "IT",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "ITW",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "IVZ",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "J",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "JBHT",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "JBL",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "JCI",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "JKHY",
       "fy_min": 2015,
       "fy_max": 2024
     },
@@ -378,7 +3332,102 @@
       "fy_max": 2024
     },
     {
+      "ticker": "KDP",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "KEY",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "KEYS",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "KHC",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "KIM",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "KKR",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "KLAC",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "KMB",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "KMI",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
       "ticker": "KO",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "KR",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "KVUE",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "L",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "LDOS",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "LEN",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "LH",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "LHX",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "LII",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "LIN",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "LITE",
       "fy_min": 2015,
       "fy_max": 2024
     },
@@ -388,7 +3437,67 @@
       "fy_max": 2024
     },
     {
+      "ticker": "LMT",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "LNT",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "LOW",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "LRCX",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "LULU",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "LUV",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "LVS",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "LYB",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "LYV",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
       "ticker": "MA",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "MAA",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "MAR",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "MAS",
       "fy_min": 2015,
       "fy_max": 2024
     },
@@ -398,7 +3507,82 @@
       "fy_max": 2024
     },
     {
+      "ticker": "MCHP",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "MCK",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "MCO",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "MDLZ",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "MDT",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "MET",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
       "ticker": "META",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "MGM",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "MKC",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "MLM",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "MMM",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "MNST",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "MO",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "MOS",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "MPC",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "MPWR",
       "fy_min": 2015,
       "fy_max": 2024
     },
@@ -408,7 +3592,62 @@
       "fy_max": 2024
     },
     {
+      "ticker": "MRNA",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "MRSH",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "MS",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "MSCI",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
       "ticker": "MSFT",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "MSI",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "MTB",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "MTD",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "MU",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "NCLH",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "NDAQ",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "NDSN",
       "fy_min": 2015,
       "fy_max": 2024
     },
@@ -418,7 +3657,17 @@
       "fy_max": 2024
     },
     {
+      "ticker": "NEM",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
       "ticker": "NFLX",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "NI",
       "fy_min": 2015,
       "fy_max": 2024
     },
@@ -428,12 +3677,132 @@
       "fy_max": 2024
     },
     {
+      "ticker": "NOC",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "NOW",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "NRG",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "NSC",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "NTAP",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "NTRS",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "NUE",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
       "ticker": "NVDA",
       "fy_min": 2015,
       "fy_max": 2024
     },
     {
+      "ticker": "NVR",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "NWS",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "NWSA",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "NXPI",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "O",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "ODFL",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "OKE",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "OMC",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "ON",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
       "ticker": "ORCL",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "ORLY",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "OTIS",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "OXY",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "PANW",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "PAYX",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "PCAR",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "PCG",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "PEG",
       "fy_min": 2015,
       "fy_max": 2024
     },
@@ -448,7 +3817,112 @@
       "fy_max": 2024
     },
     {
+      "ticker": "PFG",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
       "ticker": "PG",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "PGR",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "PH",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "PHM",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "PKG",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "PLD",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "PLTR",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "PM",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "PNC",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "PNR",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "PNW",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "PODD",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "POOL",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "PPG",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "PPL",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "PRU",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "PSA",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "PSKY",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "PSX",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "PTC",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "PWR",
       "fy_min": 2015,
       "fy_max": 2024
     },
@@ -458,7 +3932,72 @@
       "fy_max": 2024
     },
     {
+      "ticker": "Q",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
       "ticker": "QCOM",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "RCL",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "REG",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "REGN",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "RF",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "RJF",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "RL",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "RMD",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "ROK",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "ROL",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "ROP",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "ROST",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "RSG",
       "fy_min": 2015,
       "fy_max": 2024
     },
@@ -468,7 +4007,142 @@
       "fy_max": 2024
     },
     {
+      "ticker": "RVTY",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "SATS",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "SBAC",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
       "ticker": "SBUX",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "SCHW",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "SHW",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "SJM",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "SLB",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "SMCI",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "SNA",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "SNDK",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "SNPS",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "SO",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "SOLV",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "SPG",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "SPGI",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "SRE",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "STE",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "STLD",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "STT",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "STX",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "STZ",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "SW",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "SWK",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "SWKS",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "SYF",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "SYK",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "SYY",
       "fy_min": 2015,
       "fy_max": 2024
     },
@@ -478,7 +4152,97 @@
       "fy_max": 2024
     },
     {
+      "ticker": "TAP",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "TDG",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "TDY",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "TECH",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "TEL",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "TER",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "TFC",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "TGT",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "TJX",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "TKO",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
       "ticker": "TMO",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "TMUS",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "TPL",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "TPR",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "TRGP",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "TRMB",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "TROW",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "TRV",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "TSCO",
       "fy_min": 2015,
       "fy_max": 2024
     },
@@ -488,7 +4252,62 @@
       "fy_max": 2024
     },
     {
+      "ticker": "TSN",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "TT",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "TTD",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "TTWO",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
       "ticker": "TXN",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "TXT",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "TYL",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "UAL",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "UBER",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "UDR",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "UHS",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "ULTA",
       "fy_min": 2015,
       "fy_max": 2024
     },
@@ -498,7 +4317,87 @@
       "fy_max": 2024
     },
     {
+      "ticker": "UNP",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "UPS",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "URI",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "USB",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
       "ticker": "V",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "VEEV",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "VICI",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "VLO",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "VLTO",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "VMC",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "VRSK",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "VRSN",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "VRT",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "VRTX",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "VST",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "VTR",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "VTRS",
       "fy_min": 2015,
       "fy_max": 2024
     },
@@ -508,7 +4407,92 @@
       "fy_max": 2024
     },
     {
+      "ticker": "WAB",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "WAT",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "WBD",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "WDAY",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "WDC",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "WEC",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "WELL",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "WFC",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "WM",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "WMB",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
       "ticker": "WMT",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "WRB",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "WSM",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "WST",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "WTW",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "WY",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "WYNN",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "XEL",
       "fy_min": 2015,
       "fy_max": 2024
     },
@@ -516,11 +4500,41 @@
       "ticker": "XOM",
       "fy_min": 2015,
       "fy_max": 2024
+    },
+    {
+      "ticker": "XYL",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "XYZ",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "YUM",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "ZBH",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "ZBRA",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "ZTS",
+      "fy_min": 2015,
+      "fy_max": 2024
     }
   ],
   "row_counts": {
-    "financials": 36936,
-    "metrics": 26790
+    "financials": 325944,
+    "metrics": 236410
   },
   "retention": {
     "fy_years": 10,
