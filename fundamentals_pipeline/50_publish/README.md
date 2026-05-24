@@ -2,7 +2,7 @@
 
 Final stage of the pipeline. Takes a slice of `main.financials.*` and pushes it
 to a GitHub Release so the public Streamlit app at
-[../51_streamlit_app](../51_streamlit_app) (live at https://alm-fa-dashboard.streamlit.app/)
+[../51_streamlit_app](../51_streamlit_app) (live at https://alm-fundamentals.streamlit.app/)
 can fetch it without authenticating to Databricks.
 
 ```

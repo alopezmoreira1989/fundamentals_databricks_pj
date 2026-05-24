@@ -371,7 +371,7 @@ Las métricas están organizadas en 6 categorías. La jerarquía completa vive e
 
 ## Public Streamlit Dashboard
 
-**Live app: https://alm-fa-dashboard.streamlit.app/**
+**Live app: https://alm-fundamentals.streamlit.app/**
 
 A read-only dashboard at Streamlit Community Cloud renders the same data without Databricks credentials. Currently serves ~2,500 tickers (S&P 500 + Russell 2000 proxy) with synthetic data for preview; production data is published via GitHub Release. See [`51_streamlit_app/README.md`](fundamentals_pipeline/51_streamlit_app/README.md) for details.
 
