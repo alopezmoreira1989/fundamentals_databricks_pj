@@ -50,7 +50,7 @@ GOOGLE_FONTS_LINK = (
 def inject_css(css_path: Path) -> None:
     """Read the CSS file and inject it + Google Fonts into the page head."""
     css = css_path.read_text(encoding="utf-8")
-    st.markdown(GOOGLE_FONTS_LINK + f"<style>{css}</style>", unsafe_allow_html=True)
+    st.html(GOOGLE_FONTS_LINK + f"<style>{css}</style>")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
