@@ -11,7 +11,7 @@ import pandas as pd
 import requests
 import streamlit as st
 
-OWNER = "al-lopez-moreira"
+OWNER = "alopezmoreira1989"
 REPO  = "fundamentals_databricks_pj"
 BASE_URL = f"https://github.com/{OWNER}/{REPO}/releases/download/latest"
 

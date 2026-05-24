@@ -1,0 +1,43 @@
+{
+  "schema_version": 2,
+  "build_timestamp": "2026-05-24T18:44:05+00:00",
+  "tickers": [
+    {
+      "ticker": "AAPL",
+      "company": "Apple Inc."
+    },
+    {
+      "ticker": "MSFT",
+      "company": "Microsoft Corporation"
+    },
+    {
+      "ticker": "GOOGL",
+      "company": "Alphabet Inc."
+    }
+  ],
+  "fy_ranges": [
+    {
+      "ticker": "AAPL",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "GOOGL",
+      "fy_min": 2015,
+      "fy_max": 2024
+    },
+    {
+      "ticker": "MSFT",
+      "fy_min": 2015,
+      "fy_max": 2024
+    }
+  ],
+  "row_counts": {
+    "financials": 1944,
+    "metrics": 1410
+  },
+  "retention": {
+    "fy_years": 10,
+    "quarters": 12
+  }
+}
