@@ -22,7 +22,7 @@ META_FILE   = "dashboard_meta.json"
 FIXTURE_DIR = Path(__file__).parent.parent / "fixtures"
 
 
-@st.cache_data(ttl=3600, show_spinner="Loading financial data...")
+@st.cache_data(ttl=3600, show_spinner="Loading financial data…")
 def load_latest_data() -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
     """Return (financials, metrics, meta).
 
