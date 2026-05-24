@@ -1,11 +1,12 @@
 # 51_streamlit_app — public financials dashboard
 
-A public, editorial-style financial statements dashboard powered by Streamlit
-Community Cloud. Fetches nightly-published parquet files from a GitHub Release
-(`latest` tag) so it requires **no Databricks credentials** and is free to host.
+**Live app: https://alm-fa-dashboard.streamlit.app/**
 
-Live URL (once deployed):
-`https://al-lopez-moreira-fundamentals-databricks-pj-app.streamlit.app`
+A public, editorial-style financial statements dashboard powered by Streamlit
+Community Cloud. Serves ~2,500 tickers (S&P 500 + Russell 2000 proxy) with
+synthetic data for preview. When the Databricks pipeline publishes real data to
+a GitHub Release (`latest` tag), the app picks it up automatically — **no
+Databricks credentials** needed at runtime.
 
 ---
 
@@ -18,12 +19,13 @@ Databricks pipeline (nightly)
                               │
                               ▼
        Streamlit Community Cloud (this app)
-       Fetches from: github.com/al-lopez-moreira/fundamentals_databricks_pj
-                     /releases/download/latest/{dashboard_data,metrics,meta}.*
+       Reads from: committed fixtures/ (synthetic preview data)
+       Falls back to: github.com/alopezmoreira1989/fundamentals_databricks_pj
+                      /releases/download/latest/{dashboard_data,metrics,meta}.*
                               │
                               ▼
            Anonymous viewer: editorial-newspaper dashboard
-           Ticker dropdown • 5 tabs • no login
+           Ticker search (2,500+) • 5 tabs • no login
 ```
 
 ---
@@ -35,17 +37,22 @@ Databricks pipeline (nightly)
 - Python 3.10+
 - `pip install -r requirements.txt`
 
-### Get fixture data (one-time)
+### Fixture data
 
-You need the three published files locally so the app can render without hitting
-the GitHub Release. See `../50_publish/README.md` for options. Quickest after
-the pipeline has published at least once:
+The repo ships with **committed synthetic fixtures** in `fixtures/` (~2,500
+tickers with AAPL-scaled data). These are used for both local dev and the
+Streamlit Cloud preview deployment.
+
+To regenerate or expand the synthetic fixtures:
 
 ```bash
-cd fixtures/
-curl -sLO https://github.com/al-lopez-moreira/fundamentals_databricks_pj/releases/download/latest/dashboard_data.parquet
-curl -sLO https://github.com/al-lopez-moreira/fundamentals_databricks_pj/releases/download/latest/dashboard_metrics.parquet
-curl -sLO https://github.com/al-lopez-moreira/fundamentals_databricks_pj/releases/download/latest/dashboard_meta.json
+python generate_russell2000_fixtures.py
+```
+
+To replace with real data from Databricks (requires Databricks Connect):
+
+```bash
+python fetch_fixtures.py
 ```
 
 ### Run locally
@@ -55,24 +62,22 @@ streamlit run app.py
 ```
 
 Open `http://localhost:8501`. The app detects `fixtures/` and reads from there
-instead of GitHub. Fixture files are `.gitignore`d.
+instead of GitHub.
 
 ---
 
 ## Streamlit Cloud deployment
 
-1. Push the repo to GitHub (must be **public** for both free Streamlit hosting
-   and public GitHub Release asset access).
+1. Push the repo to GitHub (must be **public** for free Streamlit hosting).
 2. Go to [share.streamlit.io](https://share.streamlit.io) → **New app**.
 3. Configure:
-   - **Repository:** `al-lopez-moreira/fundamentals_databricks_pj`
+   - **Repository:** `alopezmoreira1989/fundamentals_databricks_pj`
    - **Branch:** `main`
    - **Main file path:** `FA PJ (Basic)/51_streamlit_app/app.py`
 4. Deploy. Streamlit Cloud auto-installs from `requirements.txt`.
-5. (Optional) Set a custom subdomain in app settings.
 
-**No secrets are needed in Streamlit Cloud** — the parquet files are public
-GitHub Release assets.
+**No secrets are needed in Streamlit Cloud** — synthetic fixtures are committed
+to the repo.
 
 ---
 
@@ -89,16 +94,19 @@ GitHub Release assets.
 ## File structure
 
 ```
-app.py                      entry point
-styles.css                  CSS spec (editorial-newspaper theme + Streamlit overrides)
-notes.json                  ticker-specific footnotes
-requirements.txt            dependencies
-.streamlit/config.toml      Streamlit theme
-.gitignore                  excludes fixtures/*.parquet/*.json
-fixtures/                   local-dev data (gitignored)
+app.py                                  entry point
+styles.css                              CSS spec (editorial-newspaper theme + Streamlit overrides)
+notes.json                              ticker-specific footnotes
+.streamlit/config.toml                  Streamlit theme
+fixtures/                               synthetic data (~2,500 tickers, committed)
+├── dashboard_data.parquet              financials (long-format)
+├── dashboard_metrics.parquet           derived metrics
+└── dashboard_meta.json                 tickers, FY ranges, row counts
+generate_russell2000_fixtures.py        regenerate synthetic fixtures (S&P 500 + Russell 2000 proxy)
+fetch_fixtures.py                       pull real data from Databricks (requires Connect)
 lib/
 ├── __init__.py
-├── data.py                 fetch + cache parquet from GitHub (or fixtures/)
+├── data.py                 fetch + cache parquet from fixtures/ (or GitHub Release fallback)
 ├── format.py               number formatting (accounting negatives, KPI $B, CAGR)
 ├── colors.py               sparkline stroke color + CSS row-class rules
 ├── sparkline.py            inline SVG sparkline generator

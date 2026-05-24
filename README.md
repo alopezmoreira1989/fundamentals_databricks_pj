@@ -1,9 +1,10 @@
 # Fundamentals Analytics — Databricks Pipeline
 
-End-to-end Databricks pipeline that ingests **annual (10-K) and quarterly (10-Q)** XBRL financial filings from SEC EDGAR, fetches market data from Yahoo Finance, and serves Income Statement, Balance Sheet, Cash Flow, and derived financial metrics via direct queries on Delta tables.
+End-to-end Databricks pipeline that ingests **annual (10-K) and quarterly (10-Q)** XBRL financial filings from SEC EDGAR, fetches market data from Yahoo Finance, and serves Income Statement, Balance Sheet, Cash Flow, and derived financial metrics via direct queries on Delta tables. A public Streamlit dashboard provides read-only access without Databricks credentials.
 
 ```
 favorites.json / concept_hierarchy.json / metrics_hierarchy.json   ← edit here
+valuation_assumptions.json                                         ← edit here
         ↓
 02__tickers_master              build main.config.tickers
         ↓
@@ -21,7 +22,13 @@ favorites.json / concept_hierarchy.json / metrics_hierarchy.json   ← edit here
         ↓
 22__derived_metrics             margins, FCF, YoY growth, leverage, valuation ratios
         ↓
+23__intrinsic_value             Graham, Graham Revised, DCF, Owner Earnings (FY + TTM)
+        ↓
 31__company_analysis            validation queries
+        ↓
+51__export_dashboard_data       slice + write parquet artifacts to /tmp/
+        ↓
+52__publish_to_github           upload artifacts as GitHub Release (latest tag)
 ```
 
 ---
@@ -33,12 +40,13 @@ fundamentals_databricks_pj/
 │
 ├── 00_config/
 │   ├── 01__tickers.py                       ← constantes, nombres de tabla y mapas XBRL (con kind por concept)
-│   ├── 02__tickers_master.ipynb             ← construye main.config.tickers (S&P 500 + Russell 3000 + favoritos)
-│   ├── 03__concept_hierarchy_master.ipynb   ← construye main.config.concept_hierarchy desde JSON
-│   ├── 04__metrics_hierarchy_master.ipynb   ← construye main.config.metrics_hierarchy desde JSON
+│   ├── 02__tickers_master.py                ← construye main.config.tickers (S&P 500 + Russell 3000 + favoritos)
+│   ├── 03__concept_hierarchy_master.py      ← construye main.config.concept_hierarchy desde JSON
+│   ├── 04__metrics_hierarchy_master.py      ← construye main.config.metrics_hierarchy desde JSON
 │   ├── favorites.json                       ← lista de tickers favoritos
 │   ├── concept_hierarchy.json               ← jerarquía de conceptos contables
-│   └── metrics_hierarchy.json               ← jerarquía de derived metrics
+│   ├── metrics_hierarchy.json               ← jerarquía de derived metrics
+│   └── valuation_assumptions.json           ← supuestos de valoración (WACC, growth, overrides por ticker)
 │
 ├── 10_ingestion/
 │   ├── 11__fetch_sec_xbrl.py         ← SEC EDGAR XBRL API → financials_raw (parallel + Arrow + batched)
@@ -48,7 +56,8 @@ fundamentals_databricks_pj/
 │   ├── 21__clean_and_merge.py        ← MERGE FY rows into financials
 │   ├── 21b__derive_quarterly.py      ← derive standalone Q1..Q4 (with Q4 = FY − YTD_Q3) → MERGE into financials
 │   ├── 21c__prune_quarterly.py       ← enforce rolling window of QUARTERLY_WINDOW (=12) quarters per ticker
-│   └── 22__derived_metrics.py        ← FCF, margins, YoY, leverage, valuation ratios (FY only)
+│   ├── 22__derived_metrics.py        ← FCF, margins, YoY, leverage, valuation ratios (FY only)
+│   └── 23__intrinsic_value.py        ← Graham, Graham Revised, DCF, Owner Earnings (FY + TTM)
 │
 ├── 30_analysis/
 │   └── 31__company_analysis.py       ← ad-hoc validation queries
@@ -57,8 +66,14 @@ fundamentals_databricks_pj/
 │   ├── 41__dashboard_queries.py      ← SQL feeding the Databricks dashboard
 │   └── Main Dashboard.lvdash.json    ← dashboard definition (annual pages + quarterly page)
 │
+├── 50_publish/
+│   ├── 51__export_dashboard_data.py  ← slice financials + metrics → /tmp/ parquet artifacts
+│   └── 52__publish_to_github.py      ← upload to GitHub Release (latest tag)
+│
+├── 51_streamlit_app/                 ← public Streamlit Cloud dashboard (see its own README)
+│
 └── 90_pipelines/
-    └── 91__full_pipeline.ipynb       ← entry point del Job — ejecuta los 9 steps en secuencia
+    └── 91__full_pipeline.py          ← entry point del Job — ejecuta los 11 steps en secuencia
 ```
 
 ---
@@ -69,6 +84,7 @@ fundamentals_databricks_pj/
 favorites.json                editar tickers favoritos (sin tocar Databricks)
 concept_hierarchy.json        editar jerarquía de conceptos contables
 metrics_hierarchy.json        editar jerarquía de derived metrics
+valuation_assumptions.json    editar supuestos de valoración (WACC, growth, etc.)
       ↓
 02__tickers_master              construye main.config.tickers              (manual)
       ↓
@@ -86,7 +102,13 @@ metrics_hierarchy.json        editar jerarquía de derived metrics
       ↓
 22__derived_metrics             márgenes, FCF, YoY, leverage, ratios de valoración (FY only)
       ↓
+23__intrinsic_value             Graham, Graham Revised, DCF, Owner Earnings (FY + TTM)
+      ↓
 31__company_analysis            queries de validación
+      ↓
+51__export_dashboard_data       slice + write parquet artifacts to /tmp/
+      ↓
+52__publish_to_github           upload to GitHub Release (latest tag)
 ```
 
 `main.config.tickers` se reconstruye manualmente con `02__tickers_master` cuando edites `favorites.json`. Las jerarquías se reconstruyen automáticamente en cada run desde sus JSONs.
@@ -112,7 +134,7 @@ Ambas jerarquías son archivos JSON en `00_config/` editables desde el repo. El 
 
 **`concept_hierarchy.json`** — árbol contable (Income Statement, Balance Sheet, Cash Flow): qué conceptos van bajo qué grupo y en qué orden aparecen en el dashboard.
 
-**`metrics_hierarchy.json`** — organización de las derived metrics en 2 niveles: `category → subcategory → metric`. Cinco categorías: Profitability, Cash Flow, Growth, Financial Health, Valuation.
+**`metrics_hierarchy.json`** — organización de las derived metrics en 2 niveles: `category → subcategory → metric`. Seis categorías: Profitability, Cash Flow, Growth, Financial Health, Valuation, Intrinsic Value.
 
 Para modificarlas: edita el JSON, commit + push, y el siguiente run del pipeline reconstruye la tabla automáticamente.
 
@@ -129,6 +151,7 @@ Para modificarlas: edita el JSON, commit + push, y el siguiente run del pipeline
 | `{CATALOG}.{SCHEMA}.financials` | Long-format fact table — one row per ticker / fiscal_year / period_type / concept |
 | `{CATALOG}.{SCHEMA}.market_data` | Year-end closing prices and market cap per ticker / fiscal_year |
 | `{CATALOG}.{SCHEMA}.financials_metrics` | Derived metrics — margins, FCF, YoY, leverage, valuation ratios |
+| `{CATALOG}.{SCHEMA}.financials_intrinsic_value` | Intrinsic value models — Graham, DCF, Owner Earnings (FY + TTM) |
 
 ---
 
@@ -233,7 +256,7 @@ Lookup table organising derived metrics into categories. Rebuilt every run from 
 
 | Column | Type | Description |
 |---|---|---|
-| `category` | STRING | Profitability, Cash Flow, Growth, Financial Health, Valuation |
+| `category` | STRING | Profitability, Cash Flow, Growth, Financial Health, Valuation, Intrinsic Value |
 | `subcategory` | STRING | Margins, YoY, Leverage, Liquidity, Price Multiples, Enterprise Value, Absolute |
 | `metric` | STRING | Nombre exacto tal como aparece en `financials_metrics.metric` |
 | `unit` | STRING | `percent` / `usd` / `ratio` |
@@ -254,7 +277,7 @@ AAPL   | Apple   | 2023        | Free Cash Flow  | 99584000000
 AAPL   | Apple   | 2023        | P/E             |     28.74
 ```
 
-Las métricas están organizadas en 5 categorías. La jerarquía completa vive en
+Las métricas están organizadas en 6 categorías. La jerarquía completa vive en
 `00_config/metrics_hierarchy.json` y se materializa en `main.config.metrics_hierarchy`.
 
 ### Profitability — Margins
@@ -331,7 +354,26 @@ Las métricas están organizadas en 5 categorías. La jerarquía completa vive e
 | `Book Yield %` | `Total Stockholders Equity / Market Cap × 100` |
 | `EBITDA Yield %` | `EBITDA / Market Cap × 100` |
 
-> Las métricas de valoración solo se rellenan para combinaciones `ticker / fiscal_year` donde `market_data` tiene un `market_cap` válido.
+### Intrinsic Value *(requires `market_data`)*
+
+| Metric | Formula |
+|---|---|
+| `Graham Number (FY/TTM)` | `sqrt(22.5 × EPS × Book Value per Share)` |
+| `Graham Revised Value (FY/TTM)` | `(EPS × (8.5 + 2g) × 4.4) / Y` |
+| `DCF Value per Share (FY/TTM)` | Discounted 10-year FCF projection + terminal value |
+| `Owner Earnings (FY/TTM)` | `Net Income + D&A − CapEx − ΔWC` |
+| `Owner Earnings Value/Share (FY/TTM)` | Capitalized Owner Earnings at required return |
+| `MoS %` | Margin of Safety: `(Intrinsic Value − Price) / Intrinsic Value × 100` |
+
+> Las métricas de valoración solo se rellenan para combinaciones `ticker / fiscal_year` donde `market_data` tiene un `market_cap` válido. Los supuestos de valoración (WACC, growth rate, etc.) se configuran en `00_config/valuation_assumptions.json`.
+
+---
+
+## Public Streamlit Dashboard
+
+**Live app: https://alm-fa-dashboard.streamlit.app/**
+
+A read-only dashboard at Streamlit Community Cloud renders the same data without Databricks credentials. Currently serves ~2,500 tickers (S&P 500 + Russell 2000 proxy) with synthetic data for preview; production data is published via GitHub Release. See [`51_streamlit_app/README.md`](FA%20PJ%20(Basic)/51_streamlit_app/README.md) for details.
 
 ---
 

@@ -2,8 +2,8 @@
 
 Final stage of the pipeline. Takes a slice of `main.financials.*` and pushes it
 to a GitHub Release so the public Streamlit app at
-[../51_streamlit_app](../51_streamlit_app) can fetch it without authenticating
-to Databricks.
+[../51_streamlit_app](../51_streamlit_app) (live at https://alm-fa-dashboard.streamlit.app/)
+can fetch it without authenticating to Databricks.
 
 ```
 51__export_dashboard_data.py
@@ -13,7 +13,7 @@ to Databricks.
 
 52__publish_to_github.py
     └─ uploads /tmp/* as release assets to
-       github.com/al-lopez-moreira/fundamentals_databricks_pj
+       github.com/alopezmoreira1989/fundamentals_databricks_pj
        under tags `data-YYYY-MM-DD` and `latest` (floating)
 ```
 
@@ -59,9 +59,10 @@ always moves the `latest` tag. No accumulation, no manual cleanup needed.
 
 ## Pulling a local fixture for Streamlit dev
 
-When iterating on the Streamlit app locally you want the same parquet files on
-disk so you can build against real data without setting up a GitHub PAT first.
-Two options:
+The repo ships with committed synthetic fixtures in `51_streamlit_app/fixtures/`
+(~2,500 tickers). For local Streamlit dev, these work out of the box.
+
+To replace synthetic data with real pipeline data, two options:
 
 **Option A — copy via a Unity Catalog Volume.** Edit `51__export_dashboard_data.py`
 and set `COPY_TO_VOLUME = True` (point `VOLUME_PATH` at a Volume you can read).
@@ -77,9 +78,9 @@ publish step has run at least once:
 ```bash
 mkdir -p "FA PJ (Basic)/51_streamlit_app/fixtures"
 cd       "FA PJ (Basic)/51_streamlit_app/fixtures"
-curl -sLO https://github.com/al-lopez-moreira/fundamentals_databricks_pj/releases/download/latest/dashboard_data.parquet
-curl -sLO https://github.com/al-lopez-moreira/fundamentals_databricks_pj/releases/download/latest/dashboard_metrics.parquet
-curl -sLO https://github.com/al-lopez-moreira/fundamentals_databricks_pj/releases/download/latest/dashboard_meta.json
+curl -sLO https://github.com/alopezmoreira1989/fundamentals_databricks_pj/releases/download/latest/dashboard_data.parquet
+curl -sLO https://github.com/alopezmoreira1989/fundamentals_databricks_pj/releases/download/latest/dashboard_metrics.parquet
+curl -sLO https://github.com/alopezmoreira1989/fundamentals_databricks_pj/releases/download/latest/dashboard_meta.json
 ```
 
 The Streamlit app's `lib/data.py` looks for `fixtures/*` first and falls back to
@@ -128,12 +129,12 @@ Long-format derived metrics joined with the metrics hierarchy.
 
 ```json
 {
-  "schema_version":   1,
-  "build_timestamp":  "2026-05-24T03:00:00+00:00",
-  "tickers":          ["AAPL", "MSFT", ...],
+  "schema_version":   2,
+  "build_timestamp":  "2026-05-24T20:13:04+00:00",
+  "tickers":          [{"ticker": "AAPL", "company": "Apple Inc."}, ...],
   "fy_ranges":        [{"ticker": "AAPL", "fy_min": 2015, "fy_max": 2024}, ...],
-  "row_counts":       {"financials": 1234, "metrics": 567},
-  "retention":        {"fy_years": 10, "quarters": 12}
+  "row_counts":       {"financials": 1621944, "metrics": 1176410},
+  "retention":        {"fy_years": 10, "quarterly_periods": 12}
 }
 ```
 
