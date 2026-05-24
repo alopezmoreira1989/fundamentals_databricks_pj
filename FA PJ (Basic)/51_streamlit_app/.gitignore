@@ -1,0 +1,6 @@
+fixtures/*.parquet
+fixtures/*.json
+!fixtures/.gitkeep
+__pycache__/
+*.pyc
+.env

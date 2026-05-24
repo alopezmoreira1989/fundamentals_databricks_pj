@@ -19,6 +19,9 @@ test_connection.py
 CLAUDE.local.md
 .claude/
 
+# Dashboards generados (HTML autocontenidos)
+FA PJ (Basic)/40_dashboards/output/
+
 # Sistema
 Thumbs.db
 .DS_Store

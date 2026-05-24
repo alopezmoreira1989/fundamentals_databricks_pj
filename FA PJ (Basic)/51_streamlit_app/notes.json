@@ -1,0 +1,9 @@
+{
+  "_comment": "Ticker-specific footnotes shown below the relevant table. Keyed by ticker, then by period (FYxxxx or FYxxxx-Qn), then concept. Render order: panel-level (no concept), then per-row.",
+
+  "AAPL": {
+    "FY2024-Q4": {
+      "Net Income": "One-time $10.2B tax charge from the EU State Aid decision (Apple v. Commission, Sept 2024). Excluding this item, normalized Q4 net income would be ~$24.9B."
+    }
+  }
+}

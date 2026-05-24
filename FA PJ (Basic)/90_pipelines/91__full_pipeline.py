@@ -30,6 +30,10 @@
 # MAGIC 23__intrinsic_value             Graham, Graham revised, DCF, Owner Earnings (FY + TTM)
 # MAGIC       ↓
 # MAGIC 31__company_analysis            validation queries
+# MAGIC       ↓
+# MAGIC 51__export_dashboard_data       slice + write parquet artifacts to /tmp/
+# MAGIC       ↓
+# MAGIC 52__publish_to_github           upload artifacts as GitHub Release assets (latest tag)
 # MAGIC ```
 # MAGIC
 # MAGIC > **Nota:** `02__tickers_master`, `03__concept_hierarchy_master` y `04__metrics_hierarchy_master` viven en `00_config/`.
@@ -128,7 +132,7 @@ else:
 # COMMAND ----------
 
 print("=" * 55)
-print("STEP 1 / 9 — Concept Hierarchy")
+print("STEP 1 / 11 — Concept Hierarchy")
 print("=" * 55)
 
 # COMMAND ----------
@@ -148,7 +152,7 @@ print("=" * 55)
 # COMMAND ----------
 
 print("=" * 55)
-print("STEP 2 / 9 — Metrics Hierarchy")
+print("STEP 2 / 11 — Metrics Hierarchy")
 print("=" * 55)
 
 # COMMAND ----------
@@ -164,7 +168,7 @@ print("=" * 55)
 # COMMAND ----------
 
 print("=" * 55)
-print("STEP 3 / 9 — SEC Ingestion")
+print("STEP 3 / 11 — SEC Ingestion")
 print("=" * 55)
 
 # COMMAND ----------
@@ -180,7 +184,7 @@ print("=" * 55)
 # COMMAND ----------
 
 print("=" * 55)
-print("STEP 4 / 9 — Market Data")
+print("STEP 4 / 11 — Market Data")
 print("=" * 55)
 
 # COMMAND ----------
@@ -196,7 +200,7 @@ print("=" * 55)
 # COMMAND ----------
 
 print("=" * 55)
-print("STEP 5 / 9 — Clean & Merge")
+print("STEP 5 / 11 — Clean & Merge")
 print("=" * 55)
 
 # COMMAND ----------
@@ -219,7 +223,7 @@ print("=" * 55)
 # COMMAND ----------
 
 print("=" * 55)
-print("STEP 6 / 9 — Derive Quarterly")
+print("STEP 6 / 11 — Derive Quarterly")
 print("=" * 55)
 
 # COMMAND ----------
@@ -235,7 +239,7 @@ print("=" * 55)
 # COMMAND ----------
 
 print("=" * 55)
-print("STEP 7 / 9 — Derived Metrics")
+print("STEP 7 / 11 — Derived Metrics")
 print("=" * 55)
 
 # COMMAND ----------
@@ -258,7 +262,7 @@ print("=" * 55)
 # COMMAND ----------
 
 print("=" * 55)
-print("STEP 8 / 9 — Intrinsic Value")
+print("STEP 8 / 11 — Intrinsic Value")
 print("=" * 55)
 
 # COMMAND ----------
@@ -274,7 +278,7 @@ print("=" * 55)
 # COMMAND ----------
 
 print("=" * 55)
-print("STEP 9 / 9 — Analysis")
+print("STEP 9 / 11 — Analysis")
 print("=" * 55)
 
 # COMMAND ----------
@@ -284,7 +288,66 @@ print("=" * 55)
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 11. Pipeline summary
+# MAGIC ## 11. Export dashboard data
+# MAGIC `dashboard_data.parquet` + `dashboard_metrics.parquet` + `dashboard_meta.json`
+# MAGIC written to `/tmp/` on the driver. Consumed by step 12 (GitHub publish).
+# MAGIC
+# MAGIC Wrapped in try/except: a failed export should not fail the nightly run,
+# MAGIC since the upstream Delta tables are already updated.
+# MAGIC
+# MAGIC Uses `dbutils.notebook.run` instead of `%run` (which the earlier steps
+# MAGIC use) precisely so we can catch exceptions — `%run` inlines the child
+# MAGIC into the same scope and aborts the whole notebook on error.
+
+# COMMAND ----------
+
+print("=" * 55)
+print("STEP 10 / 11 — Export dashboard data")
+print("=" * 55)
+
+# COMMAND ----------
+
+try:
+    dbutils.notebook.run(
+        "/Workspace/Users/al.lopez.moreira@gmail.com/fundamentals_databricks_pj/FA PJ (Basic)/50_publish/51__export_dashboard_data",
+        timeout_seconds=600,
+    )
+    export_ok = True
+except Exception as e:
+    print(f"⚠ Export failed (non-fatal): {e}")
+    export_ok = False
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 12. Publish to GitHub Release
+# MAGIC Uploads the three `/tmp/` artifacts as assets on the `latest` GitHub
+# MAGIC release. Skipped if step 11 failed. Requires the `github/github_pat`
+# MAGIC Databricks secret — see `50_publish/README.md`.
+
+# COMMAND ----------
+
+print("=" * 55)
+print("STEP 11 / 11 — Publish to GitHub")
+print("=" * 55)
+
+# COMMAND ----------
+
+if export_ok:
+    try:
+        dbutils.notebook.run(
+            "/Workspace/Users/al.lopez.moreira@gmail.com/fundamentals_databricks_pj/FA PJ (Basic)/50_publish/52__publish_to_github",
+            timeout_seconds=300,
+        )
+    except Exception as e:
+        print(f"⚠ Publish failed (non-fatal): {e}")
+else:
+    print("⊘ Skipping GitHub publish — export step failed")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 13. Pipeline summary
 
 # COMMAND ----------
 

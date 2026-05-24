@@ -1,0 +1,1268 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>AAPL · Financial Statements Dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #FAF8F4;
+    --bg-card: #FFFFFF;
+    --bg-subtle: #F1EFE8;
+    --bg-hover: #ECEAE2;
+    --ink: #1C1B18;
+    --ink-2: #5F5E5A;
+    --ink-3: #888780;
+    --rule: #D3D1C7;
+    --rule-soft: #E8E5DC;
+    --accent: #185FA5;
+    --accent-soft: #E6F1FB;
+    --accent-ink: #0C447C;
+    --positive: #0F6E56;
+    --positive-soft: #E1F5EE;
+    --negative: #993C1D;
+    --negative-soft: #FAECE7;
+    --warning: #BA7517;
+    --display: "Fraunces", "Times New Roman", serif;
+    --sans: "Inter", system-ui, sans-serif;
+    --mono: "JetBrains Mono", "SF Mono", Menlo, monospace;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.5;
+    padding: 32px 20px 64px;
+    min-height: 100vh;
+  }
+
+  .wrap { max-width: 1280px; margin: 0 auto; }
+
+  /* ========= MASTHEAD ========= */
+  .masthead {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    padding-bottom: 18px;
+    border-bottom: 1px solid var(--ink);
+    margin-bottom: 28px;
+  }
+
+  .masthead-left .eyebrow {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin-bottom: 8px;
+  }
+
+  .masthead-left h1 {
+    font-family: var(--display);
+    font-size: 42px;
+    font-weight: 500;
+    letter-spacing: -0.02em;
+    line-height: 1;
+    font-variation-settings: "opsz" 144;
+  }
+
+  .masthead-left .ticker-row {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin-top: 6px;
+    color: var(--ink-2);
+    font-size: 13px;
+  }
+
+  .ticker-chip {
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 3px 10px;
+    background: var(--ink);
+    color: var(--bg);
+    border-radius: 3px;
+    letter-spacing: 0.04em;
+  }
+
+  .masthead-right {
+    text-align: right;
+    font-size: 11.5px;
+    color: var(--ink-3);
+    font-family: var(--mono);
+    line-height: 1.7;
+  }
+
+  .masthead-right .date { color: var(--ink); font-weight: 500; }
+
+  /* ========= KPI STRIP ========= */
+  .kpi-strip {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 32px;
+  }
+
+  .kpi {
+    background: var(--bg-card);
+    padding: 20px 22px;
+    position: relative;
+  }
+
+  .kpi .label {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  .kpi .value {
+    font-family: var(--display);
+    font-size: 32px;
+    font-weight: 500;
+    letter-spacing: -0.02em;
+    margin-top: 6px;
+    line-height: 1;
+    font-variation-settings: "opsz" 144;
+  }
+
+  .kpi .delta {
+    margin-top: 8px;
+    font-family: var(--mono);
+    font-size: 11px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .delta.up { color: var(--positive); }
+  .delta.down { color: var(--negative); }
+  .delta.flat { color: var(--ink-3); }
+
+  /* ========= TAB BAR ========= */
+  .tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid var(--rule);
+    margin-bottom: 0;
+    position: sticky;
+    top: 0;
+    background: var(--bg);
+    z-index: 10;
+    padding-top: 4px;
+  }
+
+  .tab {
+    padding: 12px 22px 14px;
+    font-size: 13px;
+    color: var(--ink-3);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    transition: color 0.15s, border-color 0.15s;
+    font-weight: 500;
+    letter-spacing: -0.005em;
+  }
+
+  .tab:hover { color: var(--ink); }
+  .tab.active {
+    color: var(--ink);
+    border-bottom-color: var(--ink);
+  }
+
+  .tab .count {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--ink-3);
+    margin-left: 6px;
+    font-weight: 400;
+  }
+
+  .tab.active .count { color: var(--ink-2); }
+
+  /* ========= PANEL ========= */
+  .panel { display: none; padding-top: 28px; }
+  .panel.active { display: block; }
+
+  .panel-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 18px;
+  }
+
+  .panel-header h2 {
+    font-family: var(--display);
+    font-size: 24px;
+    font-weight: 500;
+    letter-spacing: -0.015em;
+    font-variation-settings: "opsz" 144;
+  }
+
+  .panel-header .meta {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink-3);
+  }
+
+  /* ========= TABLE ========= */
+  .fs-table-wrap {
+    background: var(--bg-card);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    overflow-x: auto;
+  }
+
+  table.fs {
+    width: 100%;
+    border-collapse: collapse;
+    font-variant-numeric: tabular-nums;
+    min-width: 900px;
+  }
+
+  table.fs thead th {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    font-weight: 400;
+    padding: 14px 8px 12px;
+    border-bottom: 1px solid var(--ink);
+    background: var(--bg-card);
+    position: sticky;
+    top: 49px;
+    z-index: 5;
+  }
+
+  table.fs thead th.col-label { text-align: left; padding-left: 20px; min-width: 200px; }
+  table.fs thead th.col-num { text-align: right; min-width: 62px; }
+  table.fs thead th.col-latest { color: var(--ink); }
+  table.fs thead th.col-trend { text-align: center; min-width: 92px; }
+  table.fs thead th.col-cagr { text-align: right; min-width: 64px; padding-right: 20px; }
+
+  table.fs tbody td {
+    padding: 10px 8px;
+    font-size: 12.5px;
+    border-bottom: 1px solid var(--rule-soft);
+  }
+
+  table.fs tbody td.label {
+    padding-left: 20px;
+    color: var(--ink-2);
+    font-family: var(--sans);
+  }
+
+  table.fs tbody td.num {
+    text-align: right;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--ink);
+  }
+
+  table.fs tbody td.num.latest {
+    font-weight: 500;
+    color: var(--ink);
+  }
+
+  table.fs tbody td.num.muted { color: var(--ink-3); }
+
+  table.fs tbody td.trend { text-align: center; padding: 8px; }
+  table.fs tbody td.cagr {
+    text-align: right;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink-3);
+    padding-right: 20px;
+  }
+
+  table.fs tbody td.cagr.up { color: var(--positive); }
+  table.fs tbody td.cagr.down { color: var(--negative); }
+
+  /* Section divider rows */
+  tr.section-row td {
+    padding: 18px 20px 6px;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink);
+    border-bottom: 1px solid var(--rule);
+    background: var(--bg-card);
+  }
+
+  tr.section-row.assets td { color: var(--accent-ink); }
+  tr.section-row.liab td { color: var(--negative); }
+  tr.section-row.operating td { color: var(--accent-ink); }
+  tr.section-row.investing td { color: var(--warning); }
+  tr.section-row.financing td { color: var(--negative); }
+  tr.section-row.netchange td { color: var(--positive); }
+
+  /* Group subheader */
+  tr.group-row td {
+    padding: 10px 20px 4px;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    border-bottom: none;
+  }
+
+  /* Indented children */
+  td.label.indent-1 { padding-left: 36px; }
+  td.label.indent-2 { padding-left: 52px; }
+
+  /* Subtotal rows */
+  tr.subtotal {
+    background: var(--bg-subtle);
+  }
+  tr.subtotal td {
+    border-bottom: 1px solid var(--rule);
+    padding-top: 11px;
+    padding-bottom: 11px;
+  }
+  tr.subtotal td.label {
+    color: var(--ink);
+    font-weight: 500;
+    font-family: var(--sans);
+  }
+  tr.subtotal td.num { font-weight: 500; }
+  tr.subtotal td.label::before { content: "▸ "; color: var(--ink-3); margin-right: 2px; }
+
+  /* Grand total rows */
+  tr.grand-total td {
+    border-top: 1px solid var(--ink);
+    border-bottom: 2px solid var(--ink);
+    padding-top: 14px;
+    padding-bottom: 14px;
+    background: var(--ink);
+    color: var(--bg);
+  }
+  tr.grand-total td.label {
+    color: var(--bg);
+    font-family: var(--display);
+    font-size: 14px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  tr.grand-total td.num {
+    color: var(--bg);
+    font-weight: 500;
+    font-size: 13px;
+  }
+  tr.grand-total td.num.latest { font-size: 14px; }
+  tr.grand-total td.cagr { color: var(--bg-subtle); }
+
+  /* Accent for Net Income / Total Assets */
+  tr.headline td {
+    background: var(--accent-soft);
+    border-top: 1px solid var(--accent);
+    border-bottom: 2px solid var(--accent);
+    padding-top: 12px;
+    padding-bottom: 12px;
+  }
+  tr.headline td.label {
+    color: var(--accent-ink);
+    font-weight: 500;
+    font-family: var(--sans);
+    font-size: 13px;
+  }
+  tr.headline td.label::before {
+    content: "▸ ";
+    color: var(--accent);
+    margin-right: 2px;
+  }
+  tr.headline td.num {
+    color: var(--accent-ink);
+    font-weight: 500;
+  }
+  tr.headline td.num.latest { font-size: 13.5px; }
+  tr.headline td.cagr.up { color: var(--accent-ink); font-weight: 500; }
+
+  /* ========= MARGIN BREAKDOWN ========= */
+  .breakdown {
+    margin-top: 28px;
+    background: var(--bg-card);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: 22px 24px;
+  }
+
+  .breakdown-title {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 18px;
+  }
+  .breakdown-title h3 {
+    font-family: var(--display);
+    font-size: 18px;
+    font-weight: 500;
+    font-variation-settings: "opsz" 144;
+  }
+  .breakdown-title .sub {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--ink-3);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .bar-row {
+    display: grid;
+    grid-template-columns: 160px 1fr;
+    align-items: center;
+    gap: 16px;
+    padding: 7px 0;
+  }
+  .bar-row .bar-label {
+    font-size: 12.5px;
+    color: var(--ink-2);
+  }
+  .bar-track {
+    position: relative;
+    height: 26px;
+    background: var(--bg-subtle);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .bar-fill {
+    position: absolute;
+    top: 0; bottom: 0; left: 0;
+    border-radius: 2px;
+  }
+  .bar-value {
+    position: absolute;
+    top: 50%; transform: translateY(-50%);
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+
+  /* ========= DERIVED METRICS GRID ========= */
+  .metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
+  }
+
+  .metric-card {
+    background: var(--bg-card);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: 18px 20px;
+  }
+
+  .metric-card .cat-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    padding-bottom: 12px;
+    margin-bottom: 12px;
+    border-bottom: 1px solid var(--rule-soft);
+  }
+  .metric-card .cat-header h4 {
+    font-family: var(--display);
+    font-size: 16px;
+    font-weight: 500;
+    font-variation-settings: "opsz" 144;
+  }
+  .metric-card .cat-header .tag {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--ink-3);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .metric-row {
+    display: grid;
+    grid-template-columns: 1fr 60px 70px;
+    gap: 12px;
+    align-items: center;
+    padding: 7px 0;
+    font-size: 12px;
+  }
+  .metric-row .m-label { color: var(--ink-2); }
+  .metric-row .m-value {
+    text-align: right;
+    font-family: var(--mono);
+    font-weight: 500;
+    color: var(--ink);
+  }
+  .metric-row .m-spark { text-align: center; }
+
+  /* ========= QUARTERLY ========= */
+  .qchart {
+    background: var(--bg-card);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: 22px 24px;
+    margin-bottom: 24px;
+  }
+  .qchart-header {
+    display: flex; align-items: baseline; justify-content: space-between;
+    margin-bottom: 20px;
+  }
+  .qchart-header h3 {
+    font-family: var(--display);
+    font-size: 18px; font-weight: 500;
+    font-variation-settings: "opsz" 144;
+  }
+  .qchart-legend {
+    display: flex; gap: 16px;
+    font-size: 11px;
+    color: var(--ink-2);
+    font-family: var(--mono);
+  }
+  .legend-dot {
+    display: inline-block;
+    width: 10px; height: 10px;
+    border-radius: 2px;
+    margin-right: 5px;
+    vertical-align: -1px;
+  }
+
+  /* Quarterly mini-table */
+  table.q-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  table.q-table thead th {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    padding: 12px 6px 10px;
+    border-bottom: 1px solid var(--ink);
+    font-weight: 400;
+    text-align: right;
+  }
+  table.q-table thead th:first-child { text-align: left; padding-left: 18px; }
+  table.q-table thead th.col-latest-q { color: var(--ink); }
+  table.q-table tbody td {
+    padding: 8px 6px;
+    font-size: 11.5px;
+    font-family: var(--mono);
+    text-align: right;
+    border-bottom: 1px solid var(--rule-soft);
+    color: var(--ink);
+  }
+  table.q-table tbody td:first-child {
+    text-align: left;
+    padding-left: 18px;
+    font-family: var(--sans);
+    color: var(--ink-2);
+  }
+  table.q-table tbody td.latest-q { font-weight: 500; }
+
+  /* ========= FOOTNOTE ========= */
+  .footnote {
+    margin-top: 28px;
+    padding: 14px 20px;
+    background: var(--bg-subtle);
+    border-radius: 4px;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--ink-3);
+    letter-spacing: 0.02em;
+    line-height: 1.7;
+  }
+  .footnote .pipe { margin: 0 8px; color: var(--rule); }
+
+  /* Responsive */
+  @media (max-width: 880px) {
+    .kpi-strip { grid-template-columns: repeat(2, 1fr); }
+    .metrics-grid { grid-template-columns: 1fr; }
+    .masthead { flex-direction: column; align-items: flex-start; gap: 12px; }
+    .masthead-right { text-align: left; }
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <!-- ============== MASTHEAD ============== -->
+  <div class="masthead">
+    <div class="masthead-left">
+      <div class="eyebrow">Fundamentals · Annual filings</div>
+      <h1>Apple Inc.</h1>
+      <div class="ticker-row">
+        <span class="ticker-chip">AAPL</span>
+        <span>NASDAQ · Consumer Electronics</span>
+        <span>·</span>
+        <span>Fiscal year ends late September</span>
+      </div>
+    </div>
+    <div class="masthead-right">
+      <div class="date">FY 2015 — FY 2024</div>
+      <div>10 fiscal years · USD millions</div>
+      <div style="margin-top:6px;">main.financials.financials</div>
+    </div>
+  </div>
+
+  <!-- ============== KPI STRIP ============== -->
+  <div class="kpi-strip">
+    <div class="kpi">
+      <div class="label">Revenue</div>
+      <div class="value">$391.0B</div>
+      <div class="delta up">▲ 2.0% YoY  ·  +5.9% CAGR (10y)</div>
+    </div>
+    <div class="kpi">
+      <div class="label">Net income</div>
+      <div class="value">$93.7B</div>
+      <div class="delta down">▼ 3.4% YoY  ·  +6.4% CAGR (10y)</div>
+    </div>
+    <div class="kpi">
+      <div class="label">Operating cash flow</div>
+      <div class="value">$118.3B</div>
+      <div class="delta up">▲ 7.0% YoY  ·  +6.2% CAGR (10y)</div>
+    </div>
+    <div class="kpi">
+      <div class="label">Total assets</div>
+      <div class="value">$364.9B</div>
+      <div class="delta up">▲ 3.5% YoY  ·  +2.6% CAGR (10y)</div>
+    </div>
+  </div>
+
+  <!-- ============== TAB BAR ============== -->
+  <div class="tabs">
+    <div class="tab active" data-tab="is">Income statement</div>
+    <div class="tab" data-tab="bs">Balance sheet</div>
+    <div class="tab" data-tab="cf">Cash flow</div>
+    <div class="tab" data-tab="dm">Derived metrics</div>
+    <div class="tab" data-tab="qt">Quarterly <span class="count">12Q</span></div>
+  </div>
+
+  <!-- ============== INCOME STATEMENT ============== -->
+  <div class="panel active" data-panel="is">
+    <div class="panel-header">
+      <h2>Income statement</h2>
+      <div class="meta">10 fiscal years · USD millions · concept_hierarchy.json</div>
+    </div>
+
+    <div class="fs-table-wrap">
+      <table class="fs">
+        <thead>
+          <tr>
+            <th class="col-label">$M</th>
+            <th class="col-num">'15</th>
+            <th class="col-num">'16</th>
+            <th class="col-num">'17</th>
+            <th class="col-num">'18</th>
+            <th class="col-num">'19</th>
+            <th class="col-num">'20</th>
+            <th class="col-num">'21</th>
+            <th class="col-num">'22</th>
+            <th class="col-num">'23</th>
+            <th class="col-num col-latest">'24</th>
+            <th class="col-trend">10y trend</th>
+            <th class="col-cagr">CAGR</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="section-row"><td colspan="13">Revenue</td></tr>
+          <tr>
+            <td class="label">Revenue</td>
+            <td class="num">233,715</td><td class="num">215,639</td><td class="num">229,234</td><td class="num">265,595</td><td class="num">260,174</td><td class="num">274,515</td><td class="num">365,817</td><td class="num">394,328</td><td class="num">383,285</td><td class="num latest">391,035</td>
+            <td class="trend"><svg width="78" height="20" viewBox="0 0 78 20"><polyline points="2,12 10,15 18,13 26,9 34,10 42,7 50,2 58,2 66,3 76,2" fill="none" stroke="#0F6E56" stroke-width="1.6"/><circle cx="76" cy="2" r="2.3" fill="#0F6E56"/></svg></td>
+            <td class="cagr up">+5.9%</td>
+          </tr>
+
+          <tr class="section-row"><td colspan="13">Cost of revenue</td></tr>
+          <tr>
+            <td class="label">Cost of revenue</td>
+            <td class="num muted">(140,089)</td><td class="num muted">(131,376)</td><td class="num muted">(141,048)</td><td class="num muted">(163,756)</td><td class="num muted">(161,782)</td><td class="num muted">(169,559)</td><td class="num muted">(212,981)</td><td class="num muted">(223,546)</td><td class="num muted">(214,137)</td><td class="num muted latest">(210,352)</td>
+            <td class="trend"><svg width="78" height="20" viewBox="0 0 78 20"><polyline points="2,13 10,16 18,14 26,9 34,10 42,8 50,2 58,1 66,4 76,5" fill="none" stroke="#888780" stroke-width="1.5"/></svg></td>
+            <td class="cagr">+4.6%</td>
+          </tr>
+          <tr class="subtotal">
+            <td class="label">Gross profit</td>
+            <td class="num">93,626</td><td class="num">84,263</td><td class="num">88,186</td><td class="num">101,839</td><td class="num">98,392</td><td class="num">104,956</td><td class="num">152,836</td><td class="num">170,782</td><td class="num">169,148</td><td class="num latest">180,683</td>
+            <td class="trend"><svg width="78" height="20" viewBox="0 0 78 20"><polyline points="2,14 10,17 18,16 26,11 34,12 42,10 50,3 58,2 66,2 76,1" fill="none" stroke="#0F6E56" stroke-width="1.6"/><circle cx="76" cy="1" r="2.3" fill="#0F6E56"/></svg></td>
+            <td class="cagr up">+7.6%</td>
+          </tr>
+
+          <tr class="section-row"><td colspan="13">Operating expenses</td></tr>
+          <tr>
+            <td class="label indent-1">R&amp;D</td>
+            <td class="num muted">(8,067)</td><td class="num muted">(10,045)</td><td class="num muted">(11,581)</td><td class="num muted">(14,236)</td><td class="num muted">(16,217)</td><td class="num muted">(18,752)</td><td class="num muted">(21,914)</td><td class="num muted">(26,251)</td><td class="num muted">(29,915)</td><td class="num muted latest">(31,370)</td>
+            <td class="trend"><svg width="78" height="20" viewBox="0 0 78 20"><polyline points="2,18 10,16 18,15 26,13 34,12 42,10 50,8 58,5 66,2 76,1" fill="none" stroke="#185FA5" stroke-width="1.5"/></svg></td>
+            <td class="cagr" style="color:var(--accent)">+16.3%</td>
+          </tr>
+          <tr>
+            <td class="label indent-1">SG&amp;A</td>
+            <td class="num muted">(14,329)</td><td class="num muted">(14,194)</td><td class="num muted">(15,261)</td><td class="num muted">(16,705)</td><td class="num muted">(18,245)</td><td class="num muted">(19,916)</td><td class="num muted">(21,973)</td><td class="num muted">(25,094)</td><td class="num muted">(24,932)</td><td class="num muted latest">(26,097)</td>
+            <td class="trend"><svg width="78" height="20" viewBox="0 0 78 20"><polyline points="2,17 10,17 18,15 26,14 34,12 42,11 50,9 58,5 66,6 76,4" fill="none" stroke="#888780" stroke-width="1.5"/></svg></td>
+            <td class="cagr">+6.9%</td>
+          </tr>
+          <tr class="subtotal">
+            <td class="label">Operating income</td>
+            <td class="num">71,230</td><td class="num">60,024</td><td class="num">61,344</td><td class="num">70,898</td><td class="num">63,930</td><td class="num">66,288</td><td class="num">108,949</td><td class="num">119,437</td><td class="num">114,301</td><td class="num latest">123,216</td>
+            <td class="trend"><svg width="78" height="20" viewBox="0 0 78 20"><polyline points="2,12 10,17 18,16 26,12 34,16 42,15 50,4 58,2 66,3 76,1" fill="none" stroke="#0F6E56" stroke-width="1.6"/><circle cx="76" cy="1" r="2.3" fill="#0F6E56"/></svg></td>
+            <td class="cagr up">+6.3%</td>
+          </tr>
+
+          <tr class="section-row"><td colspan="13">Bottom line</td></tr>
+          <tr>
+            <td class="label">Income tax</td>
+            <td class="num muted">(19,121)</td><td class="num muted">(15,685)</td><td class="num muted">(15,738)</td><td class="num muted">(13,372)</td><td class="num muted">(10,481)</td><td class="num muted">(9,680)</td><td class="num muted">(14,527)</td><td class="num muted">(19,300)</td><td class="num muted">(16,741)</td><td class="num muted latest">(29,749)</td>
+            <td class="trend"><svg width="78" height="20" viewBox="0 0 78 20"><polyline points="2,8 10,12 18,12 26,14 34,17 42,18 50,14 58,11 66,13 76,1" fill="none" stroke="#993C1D" stroke-width="1.5"/></svg></td>
+            <td class="cagr">+4.5%</td>
+          </tr>
+          <tr class="headline">
+            <td class="label">Net income</td>
+            <td class="num">53,394</td><td class="num">45,687</td><td class="num">48,351</td><td class="num">59,531</td><td class="num">55,256</td><td class="num">57,411</td><td class="num">94,680</td><td class="num">99,803</td><td class="num">96,995</td><td class="num latest">93,736</td>
+            <td class="trend"><svg width="78" height="20" viewBox="0 0 78 20"><polyline points="2,12 10,16 18,14 26,9 34,12 42,11 50,2 58,1 66,2 76,3" fill="none" stroke="#185FA5" stroke-width="1.8"/><circle cx="76" cy="3" r="2.5" fill="#185FA5"/></svg></td>
+            <td class="cagr up">+6.4%</td>
+          </tr>
+
+          <tr class="section-row"><td colspan="13">Per share data</td></tr>
+          <tr>
+            <td class="label">EPS diluted (USD)</td>
+            <td class="num">2.31</td><td class="num">2.08</td><td class="num">2.30</td><td class="num">2.98</td><td class="num">2.97</td><td class="num">3.28</td><td class="num">5.61</td><td class="num">6.11</td><td class="num">6.13</td><td class="num latest">6.08</td>
+            <td class="trend"><svg width="78" height="20" viewBox="0 0 78 20"><polyline points="2,17 10,18 18,17 26,14 34,14 42,13 50,5 58,2 66,2 76,3" fill="none" stroke="#534AB7" stroke-width="1.5"/></svg></td>
+            <td class="cagr up">+11.3%</td>
+          </tr>
+          <tr>
+            <td class="label">Shares diluted (M)</td>
+            <td class="num">23,172</td><td class="num">21,884</td><td class="num">21,007</td><td class="num">20,000</td><td class="num">18,596</td><td class="num">17,528</td><td class="num">16,865</td><td class="num">16,326</td><td class="num">15,813</td><td class="num latest">15,408</td>
+            <td class="trend"><svg width="78" height="20" viewBox="0 0 78 20"><polyline points="2,1 10,3 18,5 26,7 34,9 42,11 50,13 58,14 66,16 76,18" fill="none" stroke="#888780" stroke-width="1.5"/></svg></td>
+            <td class="cagr">−4.4%</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Revenue → Net income waterfall -->
+    <div class="breakdown">
+      <div class="breakdown-title">
+        <h3>Revenue → Net income · FY24</h3>
+        <div class="sub">$391.0B yields $93.7B</div>
+      </div>
+      <div class="bar-row">
+        <div class="bar-label">Revenue</div>
+        <div class="bar-track">
+          <div class="bar-fill" style="width:100%; background:#185FA5;"></div>
+          <div class="bar-value" style="right:10px; color:#FFFFFF;">$391.0B · 100.0%</div>
+        </div>
+      </div>
+      <div class="bar-row">
+        <div class="bar-label">Gross profit</div>
+        <div class="bar-track">
+          <div class="bar-fill" style="width:46.2%; background:#0F6E56;"></div>
+          <div class="bar-value" style="left:calc(46.2% + 10px); color:var(--ink-2);">$180.7B · 46.2%</div>
+        </div>
+      </div>
+      <div class="bar-row">
+        <div class="bar-label">Operating income</div>
+        <div class="bar-track">
+          <div class="bar-fill" style="width:31.5%; background:#534AB7;"></div>
+          <div class="bar-value" style="left:calc(31.5% + 10px); color:var(--ink-2);">$123.2B · 31.5%</div>
+        </div>
+      </div>
+      <div class="bar-row">
+        <div class="bar-label">Net income</div>
+        <div class="bar-track">
+          <div class="bar-fill" style="width:24.0%; background:#185FA5;"></div>
+          <div class="bar-value" style="left:calc(24.0% + 10px); color:var(--ink-2);">$93.7B · 24.0%</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============== BALANCE SHEET ============== -->
+  <div class="panel" data-panel="bs">
+    <div class="panel-header">
+      <h2>Balance sheet</h2>
+      <div class="meta">10 fiscal year-end snapshots · USD millions</div>
+    </div>
+
+    <div class="fs-table-wrap">
+      <table class="fs">
+        <thead>
+          <tr>
+            <th class="col-label">$M</th>
+            <th class="col-num">'15</th><th class="col-num">'16</th><th class="col-num">'17</th><th class="col-num">'18</th><th class="col-num">'19</th><th class="col-num">'20</th><th class="col-num">'21</th><th class="col-num">'22</th><th class="col-num">'23</th>
+            <th class="col-num col-latest">'24</th>
+            <th class="col-trend">10y trend</th>
+            <th class="col-cagr">CAGR</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="section-row assets"><td colspan="13">Assets</td></tr>
+          <tr class="group-row"><td colspan="13">Current assets</td></tr>
+          <tr>
+            <td class="label indent-1">Cash &amp; equivalents</td>
+            <td class="num">21,120</td><td class="num">20,484</td><td class="num">20,289</td><td class="num">25,913</td><td class="num">48,844</td><td class="num">38,016</td><td class="num">34,940</td><td class="num">23,646</td><td class="num">29,965</td><td class="num latest">29,943</td>
+            <td class="trend"><svg width="78" height="20" viewBox="0 0 78 20"><polyline points="2,13 10,13 18,13 26,11 34,2 42,5 50,7 58,12 66,10 76,10" fill="none" stroke="#888780" stroke-width="1.5"/></svg></td>
+            <td class="cagr">+3.9%</td>
+          </tr>
+          <tr>
+            <td class="label indent-1">ST investments</td>
+            <td class="num">20,481</td><td class="num">46,671</td><td class="num">53,892</td><td class="num">40,388</td><td class="num">51,713</td><td class="num">52,927</td><td class="num">27,699</td><td class="num">24,658</td><td class="num">31,590</td><td class="num latest">35,228</td>
+            <td class="trend"><svg width="78" height="20" viewBox="0 0 78 20"><polyline points="2,17 10,8 18,5 26,11 34,7 42,7 50,15 58,16 66,13 76,11" fill="none" stroke="#888780" stroke-width="1.5"/></svg></td>
+            <td class="cagr">+6.2%</td>
+          </tr>
+          <tr>
+            <td class="label indent-1">Accounts receivable</td>
+            <td class="num">16,849</td><td class="num">15,754</td><td class="num">17,874</td><td class="num">23,186</td><td class="num">22,926</td><td class="num">16,120</td><td class="num">26,278</td><td class="num">28,184</td><td class="num">29,508</td><td class="num latest">33,410</td>
+            <td class="trend"><svg width="78" height="20" viewBox="0 0 78 20"><polyline points="2,15 10,16 18,14 26,10 34,11 42,17 50,8 58,6 66,5 76,2" fill="none" stroke="#888780" stroke-width="1.5"/></svg></td>
+            <td class="cagr">+7.1%</td>
+          </tr>
+          <tr>
+            <td class="label indent-1">Inventory</td>
+            <td class="num">2,349</td><td class="num">2,132</td><td class="num">4,855</td><td class="num">3,956</td><td class="num">4,106</td><td class="num">4,061</td><td class="num">6,580</td><td class="num">4,946</td><td class="num">6,331</td><td class="num latest">7,286</td>
+            <td class="trend"><svg width="78" height="20" viewBox="0 0 78 20"><polyline points="2,18 10,18 18,8 26,11 34,10 42,11 50,3 58,9 66,4 76,2" fill="none" stroke="#888780" stroke-width="1.5"/></svg></td>
+            <td class="cagr">+13.4%</td>
+          </tr>
+          <tr class="subtotal">
+            <td class="label">Total current assets</td>
+            <td class="num">89,378</td><td class="num">106,869</td><td class="num">128,645</td><td class="num">131,339</td><td class="num">162,819</td><td class="num">143,713</td><td class="num">134,836</td><td class="num">135,405</td><td class="num">143,566</td><td class="num latest">152,987</td>
+            <td class="trend"><svg width="78" height="20" viewBox="0 0 78 20"><polyline points="2,16 10,13 18,9 26,9 34,2 42,6 50,8 58,8 66,7 76,5" fill="none" stroke="#888780" stroke-width="1.5"/></svg></td>
+            <td class="cagr">+6.1%</td>
+          </tr>
+
+          <tr class="group-row"><td colspan="13">Non-current assets</td></tr>
+          <tr>
+            <td class="label indent-1">PP&amp;E net</td>
+            <td class="num">22,471</td><td class="num">27,010</td><td class="num">33,783</td><td class="num">41,304</td><td class="num">37,378</td><td class="num">36,766</td><td class="num">39,440</td><td class="num">42,117</td><td class="num">43,715</td><td class="num latest">45,680</td>
+            <td class="trend"><svg width="78" height="20" viewBox="0 0 78 20"><polyline points="2,17 10,13 18,9 26,4 34,7 42,7 50,5 58,3 66,2 76,1" fill="none" stroke="#888780" stroke-width="1.5"/></svg></td>
+            <td class="cagr">+8.2%</td>
+          </tr>
+
+          <tr class="grand-total">
+            <td class="label">Total assets</td>
+            <td class="num">290,479</td><td class="num">321,686</td><td class="num">375,319</td><td class="num">365,725</td><td class="num">338,516</td><td class="num">323,888</td><td class="num">351,002</td><td class="num">352,755</td><td class="num">352,583</td><td class="num latest">364,980</td>
+            <td class="trend"><svg width="78" height="20" viewBox="0 0 78 20"><polyline points="2,14 10,11 18,2 26,4 34,7 42,9 50,6 58,5 66,5 76,3" fill="none" stroke="#FAF8F4" stroke-width="1.8"/><circle cx="76" cy="3" r="2.5" fill="#FAF8F4"/></svg></td>
+            <td class="cagr">+2.6%</td>
+          </tr>
+
+          <tr class="section-row liab"><td colspan="13">Liabilities &amp; Equity</td></tr>
+          <tr class="group-row"><td colspan="13">Liabilities</td></tr>
+          <tr>
+            <td class="label indent-1">Accounts payable</td>
+            <td class="num">35,490</td><td class="num">37,294</td><td class="num">44,242</td><td class="num">55,888</td><td class="num">46,236</td><td class="num">42,296</td><td class="num">54,763</td><td class="num">64,115</td><td class="num">62,611</td><td class="num latest">68,960</td>
+            <td class="trend"><svg width="78" height="20" viewBox="0 0 78 20"><polyline points="2,16 10,15 18,12 26,7 34,12 42,14 50,7 58,3 66,4 76,1" fill="none" stroke="#888780" stroke-width="1.5"/></svg></td>
+            <td class="cagr">+7.6%</td>
+          </tr>
+          <tr>
+            <td class="label indent-1">ST debt</td>
+            <td class="num">10,999</td><td class="num">11,605</td><td class="num">18,473</td><td class="num">20,748</td><td class="num">16,240</td><td class="num">13,769</td><td class="num">15,613</td><td class="num">21,239</td><td class="num">15,807</td><td class="num latest">22,511</td>
+            <td class="trend"><svg width="78" height="20" viewBox="0 0 78 20"><polyline points="2,16 10,15 18,9 26,7 34,12 42,15 50,13 58,5 66,12 76,3" fill="none" stroke="#993C1D" stroke-width="1.5"/></svg></td>
+            <td class="cagr">+7.4%</td>
+          </tr>
+          <tr>
+            <td class="label indent-1">LT debt</td>
+            <td class="num">53,463</td><td class="num">75,427</td><td class="num">97,207</td><td class="num">93,735</td><td class="num">91,807</td><td class="num">98,667</td><td class="num">109,106</td><td class="num">98,959</td><td class="num">95,281</td><td class="num latest">85,750</td>
+            <td class="trend"><svg width="78" height="20" viewBox="0 0 78 20"><polyline points="2,17 10,11 18,4 26,5 34,6 42,4 50,1 58,4 66,5 76,7" fill="none" stroke="#0F6E56" stroke-width="1.5"/></svg></td>
+            <td class="cagr">+4.8%</td>
+          </tr>
+          <tr class="subtotal">
+            <td class="label">Total liabilities</td>
+            <td class="num">171,124</td><td class="num">193,437</td><td class="num">241,272</td><td class="num">258,578</td><td class="num">248,028</td><td class="num">258,549</td><td class="num">287,912</td><td class="num">302,083</td><td class="num">290,437</td><td class="num latest">308,030</td>
+            <td class="trend"><svg width="78" height="20" viewBox="0 0 78 20"><polyline points="2,17 10,14 18,8 26,6 34,7 42,6 50,3 58,2 66,4 76,1" fill="none" stroke="#888780" stroke-width="1.5"/></svg></td>
+            <td class="cagr">+6.7%</td>
+          </tr>
+
+          <tr class="group-row"><td colspan="13">Stockholders equity</td></tr>
+          <tr>
+            <td class="label indent-1">Retained earnings</td>
+            <td class="num">92,284</td><td class="num">96,364</td><td class="num">98,330</td><td class="num">70,400</td><td class="num">45,898</td><td class="num">14,966</td><td class="num">5,562</td><td class="num">(3,068)</td><td class="num">(214)</td><td class="num latest">(19,154)</td>
+            <td class="trend"><svg width="78" height="20" viewBox="0 0 78 20"><polyline points="2,2 10,3 18,3 26,6 34,9 42,13 50,15 58,17 66,16 76,18" fill="none" stroke="#993C1D" stroke-width="1.5"/></svg></td>
+            <td class="cagr down">n/a</td>
+          </tr>
+
+          <tr class="grand-total">
+            <td class="label">Total liab. &amp; equity</td>
+            <td class="num">290,479</td><td class="num">321,686</td><td class="num">375,319</td><td class="num">365,725</td><td class="num">338,516</td><td class="num">323,888</td><td class="num">351,002</td><td class="num">352,755</td><td class="num">352,583</td><td class="num latest">364,980</td>
+            <td class="trend"><svg width="78" height="20" viewBox="0 0 78 20"><polyline points="2,14 10,11 18,2 26,4 34,7 42,9 50,6 58,5 66,5 76,3" fill="none" stroke="#FAF8F4" stroke-width="1.8"/><circle cx="76" cy="3" r="2.5" fill="#FAF8F4"/></svg></td>
+            <td class="cagr">+2.6%</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="footnote" style="display:flex; align-items:center; gap:10px;">
+      <span style="color:var(--positive); font-weight:500;">✓ Balance equation verified</span>
+      <span class="pipe">|</span>
+      <span>Total assets = Total liabilities &amp; equity holds for all 10 fiscal years</span>
+    </div>
+  </div>
+
+  <!-- ============== CASH FLOW ============== -->
+  <div class="panel" data-panel="cf">
+    <div class="panel-header">
+      <h2>Cash flow statement</h2>
+      <div class="meta">Operating · Investing · Financing</div>
+    </div>
+
+    <div class="fs-table-wrap">
+      <table class="fs">
+        <thead>
+          <tr>
+            <th class="col-label">$M</th>
+            <th class="col-num">'15</th><th class="col-num">'16</th><th class="col-num">'17</th><th class="col-num">'18</th><th class="col-num">'19</th><th class="col-num">'20</th><th class="col-num">'21</th><th class="col-num">'22</th><th class="col-num">'23</th>
+            <th class="col-num col-latest">'24</th>
+            <th class="col-trend">10y trend</th>
+            <th class="col-cagr">CAGR</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="section-row operating"><td colspan="13">Operating activities</td></tr>
+          <tr>
+            <td class="label">Net income</td>
+            <td class="num">53,394</td><td class="num">45,687</td><td class="num">48,351</td><td class="num">59,531</td><td class="num">55,256</td><td class="num">57,411</td><td class="num">94,680</td><td class="num">99,803</td><td class="num">96,995</td><td class="num latest">93,736</td>
+            <td class="trend"><svg width="78" height="20" viewBox="0 0 78 20"><polyline points="2,12 10,16 18,14 26,9 34,12 42,11 50,2 58,1 66,2 76,3" fill="none" stroke="#0F6E56" stroke-width="1.5"/></svg></td>
+            <td class="cagr up">+6.4%</td>
+          </tr>
+          <tr>
+            <td class="label">D&amp;A</td>
+            <td class="num">11,257</td><td class="num">10,505</td><td class="num">10,157</td><td class="num">10,903</td><td class="num">12,547</td><td class="num">11,056</td><td class="num">11,284</td><td class="num">11,104</td><td class="num">11,519</td><td class="num latest">11,445</td>
+            <td class="trend"><svg width="78" height="20" viewBox="0 0 78 20"><polyline points="2,7 10,10 18,12 26,9 34,2 42,8 50,7 58,8 66,5 76,6" fill="none" stroke="#888780" stroke-width="1.5"/></svg></td>
+            <td class="cagr">+0.2%</td>
+          </tr>
+          <tr>
+            <td class="label">Stock-based comp</td>
+            <td class="num">3,586</td><td class="num">4,210</td><td class="num">4,840</td><td class="num">5,340</td><td class="num">6,068</td><td class="num">6,829</td><td class="num">7,906</td><td class="num">9,038</td><td class="num">10,833</td><td class="num latest">11,688</td>
+            <td class="trend"><svg width="78" height="20" viewBox="0 0 78 20"><polyline points="2,18 10,17 18,15 26,13 34,11 42,9 50,7 58,5 66,3 76,1" fill="none" stroke="#185FA5" stroke-width="1.5"/></svg></td>
+            <td class="cagr up">+14.0%</td>
+          </tr>
+          <tr>
+            <td class="label">Working capital chg</td>
+            <td class="num muted">(8,156)</td><td class="num">3,549</td><td class="num">936</td><td class="num">34,694</td><td class="num">(3,488)</td><td class="num">5,690</td><td class="num">(4,911)</td><td class="num muted">(7,909)</td><td class="num">(6,577)</td><td class="num muted latest">3,651</td>
+            <td class="trend"><svg width="78" height="20" viewBox="0 0 78 20"><polyline points="2,15 10,9 18,11 26,1 34,17 42,7 50,18 58,17 66,16 76,8" fill="none" stroke="#888780" stroke-width="1.5"/></svg></td>
+            <td class="cagr">n/a</td>
+          </tr>
+          <tr class="subtotal">
+            <td class="label">Operating cash flow</td>
+            <td class="num">81,266</td><td class="num">66,231</td><td class="num">64,225</td><td class="num">77,434</td><td class="num">69,391</td><td class="num">80,674</td><td class="num">104,038</td><td class="num">122,151</td><td class="num">110,543</td><td class="num latest">118,254</td>
+            <td class="trend"><svg width="78" height="20" viewBox="0 0 78 20"><polyline points="2,13 10,18 18,18 26,14 34,17 42,12 50,5 58,1 66,4 76,2" fill="none" stroke="#0F6E56" stroke-width="1.6"/><circle cx="76" cy="2" r="2.3" fill="#0F6E56"/></svg></td>
+            <td class="cagr up">+4.3%</td>
+          </tr>
+
+          <tr class="section-row investing"><td colspan="13">Investing activities</td></tr>
+          <tr>
+            <td class="label">CapEx</td>
+            <td class="num muted">(11,247)</td><td class="num muted">(12,734)</td><td class="num muted">(12,451)</td><td class="num muted">(13,313)</td><td class="num muted">(10,495)</td><td class="num muted">(7,309)</td><td class="num muted">(11,085)</td><td class="num muted">(10,708)</td><td class="num muted">(10,959)</td><td class="num muted latest">(9,447)</td>
+            <td class="trend"><svg width="78" height="20" viewBox="0 0 78 20"><polyline points="2,8 10,4 18,5 26,3 34,12 42,17 50,8 58,10 66,9 76,14" fill="none" stroke="#BA7517" stroke-width="1.5"/></svg></td>
+            <td class="cagr">−1.7%</td>
+          </tr>
+          <tr>
+            <td class="label">Acquisitions</td>
+            <td class="num muted">(343)</td><td class="num muted">(297)</td><td class="num muted">(329)</td><td class="num muted">(721)</td><td class="num muted">(624)</td><td class="num muted">(1,524)</td><td class="num muted">(33)</td><td class="num muted">(306)</td><td class="num">—</td><td class="num latest">—</td>
+            <td class="trend"><svg width="78" height="20" viewBox="0 0 78 20"><polyline points="2,11 10,12 18,11 26,7 34,9 42,1 50,15 58,12 66,16 76,16" fill="none" stroke="#888780" stroke-width="1.5"/></svg></td>
+            <td class="cagr">n/a</td>
+          </tr>
+          <tr class="subtotal">
+            <td class="label">Investing cash flow</td>
+            <td class="num muted">(56,274)</td><td class="num muted">(45,977)</td><td class="num muted">(46,446)</td><td class="num">16,066</td><td class="num">45,896</td><td class="num muted">(4,289)</td><td class="num muted">(14,545)</td><td class="num muted">(22,354)</td><td class="num">3,705</td><td class="num muted latest">2,935</td>
+            <td class="trend"><svg width="78" height="20" viewBox="0 0 78 20"><polyline points="2,18 10,17 18,17 26,5 34,1 42,11 50,13 58,15 66,8 76,9" fill="none" stroke="#BA7517" stroke-width="1.5"/></svg></td>
+            <td class="cagr">n/a</td>
+          </tr>
+
+          <tr class="section-row financing"><td colspan="13">Financing activities</td></tr>
+          <tr>
+            <td class="label">Debt issuance</td>
+            <td class="num">27,114</td><td class="num">24,954</td><td class="num">28,662</td><td class="num">6,969</td><td class="num">6,963</td><td class="num">16,091</td><td class="num">20,393</td><td class="num">5,465</td><td class="num">5,228</td><td class="num latest">—</td>
+            <td class="trend"><svg width="78" height="20" viewBox="0 0 78 20"><polyline points="2,2 10,4 18,1 26,13 34,13 42,9 50,7 58,15 66,15 76,18" fill="none" stroke="#888780" stroke-width="1.5"/></svg></td>
+            <td class="cagr">n/a</td>
+          </tr>
+          <tr>
+            <td class="label">Debt repayment</td>
+            <td class="num muted">(2,500)</td><td class="num muted">(2,500)</td><td class="num muted">(3,500)</td><td class="num muted">(6,500)</td><td class="num muted">(8,805)</td><td class="num muted">(12,629)</td><td class="num muted">(8,750)</td><td class="num muted">(9,543)</td><td class="num muted">(11,151)</td><td class="num muted latest">(9,958)</td>
+            <td class="trend"><svg width="78" height="20" viewBox="0 0 78 20"><polyline points="2,16 10,16 18,15 26,13 34,11 42,7 50,12 58,11 66,8 76,10" fill="none" stroke="#993C1D" stroke-width="1.5"/></svg></td>
+            <td class="cagr up">+14.8%</td>
+          </tr>
+          <tr>
+            <td class="label">Dividends paid</td>
+            <td class="num muted">(11,561)</td><td class="num muted">(12,150)</td><td class="num muted">(12,769)</td><td class="num muted">(13,712)</td><td class="num muted">(14,119)</td><td class="num muted">(14,081)</td><td class="num muted">(14,467)</td><td class="num muted">(14,841)</td><td class="num muted">(15,025)</td><td class="num muted latest">(15,234)</td>
+            <td class="trend"><svg width="78" height="20" viewBox="0 0 78 20"><polyline points="2,18 10,17 18,16 26,14 34,13 42,13 50,11 58,10 66,9 76,8" fill="none" stroke="#888780" stroke-width="1.5"/></svg></td>
+            <td class="cagr">+3.1%</td>
+          </tr>
+          <tr>
+            <td class="label">Share buybacks</td>
+            <td class="num muted">(35,253)</td><td class="num muted">(29,722)</td><td class="num muted">(32,900)</td><td class="num muted">(72,738)</td><td class="num muted">(66,897)</td><td class="num muted">(72,358)</td><td class="num muted">(85,971)</td><td class="num muted">(89,402)</td><td class="num muted">(77,550)</td><td class="num muted latest">(94,949)</td>
+            <td class="trend"><svg width="78" height="20" viewBox="0 0 78 20"><polyline points="2,18 10,18 18,18 26,7 34,9 42,7 50,3 58,2 66,5 76,1" fill="none" stroke="#993C1D" stroke-width="1.5"/></svg></td>
+            <td class="cagr up">+10.4%</td>
+          </tr>
+          <tr class="subtotal">
+            <td class="label">Financing cash flow</td>
+            <td class="num muted">(17,716)</td><td class="num muted">(20,890)</td><td class="num muted">(17,347)</td><td class="num muted">(87,876)</td><td class="num muted">(90,976)</td><td class="num muted">(86,820)</td><td class="num muted">(93,353)</td><td class="num muted">(110,749)</td><td class="num muted">(108,488)</td><td class="num muted latest">(121,983)</td>
+            <td class="trend"><svg width="78" height="20" viewBox="0 0 78 20"><polyline points="2,3 10,4 18,3 26,11 34,11 42,11 50,12 58,16 66,15 76,18" fill="none" stroke="#993C1D" stroke-width="1.5"/></svg></td>
+            <td class="cagr up">+21.3%</td>
+          </tr>
+
+          <tr class="section-row netchange"><td colspan="13">Net change</td></tr>
+          <tr class="headline">
+            <td class="label">Net change in cash</td>
+            <td class="num">7,276</td><td class="num muted">(636)</td><td class="num">432</td><td class="num">5,624</td><td class="num">24,311</td><td class="num muted">(10,435)</td><td class="num muted">(3,860)</td><td class="num muted">(10,952)</td><td class="num">5,760</td><td class="num muted latest">(794)</td>
+            <td class="trend"><svg width="78" height="20" viewBox="0 0 78 20"><polyline points="2,9 10,11 18,10 26,8 34,1 42,16 50,13 58,16 66,9 76,12" fill="none" stroke="#185FA5" stroke-width="1.8"/><circle cx="76" cy="12" r="2.5" fill="#185FA5"/></svg></td>
+            <td class="cagr">n/a</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ============== DERIVED METRICS ============== -->
+  <div class="panel" data-panel="dm">
+    <div class="panel-header">
+      <h2>Derived metrics</h2>
+      <div class="meta">5 categories · margins · growth · cash flow · leverage · valuation</div>
+    </div>
+
+    <div class="metrics-grid">
+
+      <div class="metric-card">
+        <div class="cat-header"><h4>Profitability</h4><div class="tag">Margins</div></div>
+        <div class="metric-row"><div class="m-label">Gross margin %</div><div class="m-value">46.2%</div><div class="m-spark"><svg width="60" height="16" viewBox="0 0 60 16"><polyline points="2,11 10,12 18,12 26,9 34,9 42,4 50,3 58,2" fill="none" stroke="#0F6E56" stroke-width="1.5"/></svg></div></div>
+        <div class="metric-row"><div class="m-label">Operating margin %</div><div class="m-value">31.5%</div><div class="m-spark"><svg width="60" height="16" viewBox="0 0 60 16"><polyline points="2,9 10,12 18,12 26,8 34,11 42,3 50,2 58,2" fill="none" stroke="#0F6E56" stroke-width="1.5"/></svg></div></div>
+        <div class="metric-row"><div class="m-label">Net margin %</div><div class="m-value">24.0%</div><div class="m-spark"><svg width="60" height="16" viewBox="0 0 60 16"><polyline points="2,11 10,13 18,12 26,7 34,9 42,2 50,2 58,4" fill="none" stroke="#0F6E56" stroke-width="1.5"/></svg></div></div>
+        <div class="metric-row"><div class="m-label">FCF margin %</div><div class="m-value">27.8%</div><div class="m-spark"><svg width="60" height="16" viewBox="0 0 60 16"><polyline points="2,13 10,14 18,13 26,8 34,10 42,2 50,1 58,3" fill="none" stroke="#0F6E56" stroke-width="1.5"/></svg></div></div>
+        <div class="metric-row"><div class="m-label">ROE %</div><div class="m-value">164.6%</div><div class="m-spark"><svg width="60" height="16" viewBox="0 0 60 16"><polyline points="2,12 10,11 18,9 26,7 34,5 42,3 50,2 58,1" fill="none" stroke="#185FA5" stroke-width="1.5"/></svg></div></div>
+        <div class="metric-row"><div class="m-label">ROIC %</div><div class="m-value">53.0%</div><div class="m-spark"><svg width="60" height="16" viewBox="0 0 60 16"><polyline points="2,13 10,12 18,11 26,9 34,8 42,3 50,2 58,2" fill="none" stroke="#0F6E56" stroke-width="1.5"/></svg></div></div>
+      </div>
+
+      <div class="metric-card">
+        <div class="cat-header"><h4>Growth</h4><div class="tag">YoY %</div></div>
+        <div class="metric-row"><div class="m-label">Revenue YoY %</div><div class="m-value">+2.0%</div><div class="m-spark"><svg width="60" height="16" viewBox="0 0 60 16"><polyline points="2,4 10,11 18,8 26,3 34,12 42,2 50,12 58,9" fill="none" stroke="#888780" stroke-width="1.5"/></svg></div></div>
+        <div class="metric-row"><div class="m-label">Net income YoY %</div><div class="m-value">−3.4%</div><div class="m-spark"><svg width="60" height="16" viewBox="0 0 60 16"><polyline points="2,5 10,12 18,8 26,4 34,13 42,2 50,9 58,12" fill="none" stroke="#993C1D" stroke-width="1.5"/></svg></div></div>
+        <div class="metric-row"><div class="m-label">EPS YoY %</div><div class="m-value">−0.8%</div><div class="m-spark"><svg width="60" height="16" viewBox="0 0 60 16"><polyline points="2,5 10,12 18,7 26,1 34,11 42,1 50,9 58,11" fill="none" stroke="#993C1D" stroke-width="1.5"/></svg></div></div>
+        <div class="metric-row"><div class="m-label">OCF YoY %</div><div class="m-value">+7.0%</div><div class="m-spark"><svg width="60" height="16" viewBox="0 0 60 16"><polyline points="2,9 10,12 18,5 26,9 34,3 42,2 50,11 58,4" fill="none" stroke="#0F6E56" stroke-width="1.5"/></svg></div></div>
+        <div class="metric-row"><div class="m-label">FCF YoY %</div><div class="m-value">+9.3%</div><div class="m-spark"><svg width="60" height="16" viewBox="0 0 60 16"><polyline points="2,9 10,13 18,6 26,9 34,3 42,2 50,11 58,4" fill="none" stroke="#0F6E56" stroke-width="1.5"/></svg></div></div>
+      </div>
+
+      <div class="metric-card">
+        <div class="cat-header"><h4>Cash flow</h4><div class="tag">$ billions</div></div>
+        <div class="metric-row"><div class="m-label">Operating CF</div><div class="m-value">$118.3B</div><div class="m-spark"><svg width="60" height="16" viewBox="0 0 60 16"><polyline points="2,11 10,14 18,14 26,12 34,13 42,8 50,3 58,2" fill="none" stroke="#0F6E56" stroke-width="1.5"/></svg></div></div>
+        <div class="metric-row"><div class="m-label">Free cash flow</div><div class="m-value">$108.8B</div><div class="m-spark"><svg width="60" height="16" viewBox="0 0 60 16"><polyline points="2,12 10,14 18,14 26,11 34,13 42,8 50,2 58,2" fill="none" stroke="#0F6E56" stroke-width="1.5"/></svg></div></div>
+        <div class="metric-row"><div class="m-label">CapEx</div><div class="m-value">$9.4B</div><div class="m-spark"><svg width="60" height="16" viewBox="0 0 60 16"><polyline points="2,5 10,3 18,3 26,2 34,9 42,13 50,5 58,11" fill="none" stroke="#888780" stroke-width="1.5"/></svg></div></div>
+        <div class="metric-row"><div class="m-label">CapEx / Rev %</div><div class="m-value">2.4%</div><div class="m-spark"><svg width="60" height="16" viewBox="0 0 60 16"><polyline points="2,4 10,5 18,4 26,3 34,8 42,12 50,10 58,11" fill="none" stroke="#888780" stroke-width="1.5"/></svg></div></div>
+        <div class="metric-row"><div class="m-label">Cash conversion</div><div class="m-value">1.16x</div><div class="m-spark"><svg width="60" height="16" viewBox="0 0 60 16"><polyline points="2,8 10,11 18,9 26,7 34,9 42,5 50,2 58,4" fill="none" stroke="#0F6E56" stroke-width="1.5"/></svg></div></div>
+      </div>
+
+      <div class="metric-card">
+        <div class="cat-header"><h4>Financial health</h4><div class="tag">Leverage · Liquidity</div></div>
+        <div class="metric-row"><div class="m-label">Debt / Equity</div><div class="m-value">1.90x</div><div class="m-spark"><svg width="60" height="16" viewBox="0 0 60 16"><polyline points="2,12 10,10 18,8 26,6 34,4 42,3 50,2 58,1" fill="none" stroke="#993C1D" stroke-width="1.5"/></svg></div></div>
+        <div class="metric-row"><div class="m-label">Debt / Assets</div><div class="m-value">0.30</div><div class="m-spark"><svg width="60" height="16" viewBox="0 0 60 16"><polyline points="2,11 10,9 18,5 26,4 34,5 42,4 50,3 58,5" fill="none" stroke="#888780" stroke-width="1.5"/></svg></div></div>
+        <div class="metric-row"><div class="m-label">Current ratio</div><div class="m-value">0.87</div><div class="m-spark"><svg width="60" height="16" viewBox="0 0 60 16"><polyline points="2,4 10,3 18,3 26,5 34,2 42,4 50,6 58,9" fill="none" stroke="#888780" stroke-width="1.5"/></svg></div></div>
+        <div class="metric-row"><div class="m-label">Quick ratio</div><div class="m-value">0.83</div><div class="m-spark"><svg width="60" height="16" viewBox="0 0 60 16"><polyline points="2,5 10,4 18,3 26,5 34,2 42,4 50,6 58,9" fill="none" stroke="#888780" stroke-width="1.5"/></svg></div></div>
+        <div class="metric-row"><div class="m-label">Net debt</div><div class="m-value">$43.1B</div><div class="m-spark"><svg width="60" height="16" viewBox="0 0 60 16"><polyline points="2,3 10,4 18,7 26,3 34,2 42,4 50,9 58,7" fill="none" stroke="#888780" stroke-width="1.5"/></svg></div></div>
+      </div>
+
+      <div class="metric-card" style="grid-column: 1 / -1;">
+        <div class="cat-header"><h4>Valuation</h4><div class="tag">At fiscal year-end</div></div>
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px;">
+          <div>
+            <div class="metric-row"><div class="m-label">P/E</div><div class="m-value">37.2x</div><div class="m-spark"><svg width="60" height="16" viewBox="0 0 60 16"><polyline points="2,15 10,14 18,13 26,11 34,8 42,4 50,3 58,2" fill="none" stroke="#185FA5" stroke-width="1.5"/></svg></div></div>
+            <div class="metric-row"><div class="m-label">P/S</div><div class="m-value">8.9x</div><div class="m-spark"><svg width="60" height="16" viewBox="0 0 60 16"><polyline points="2,14 10,12 18,11 26,10 34,7 42,4 50,3 58,2" fill="none" stroke="#185FA5" stroke-width="1.5"/></svg></div></div>
+          </div>
+          <div>
+            <div class="metric-row"><div class="m-label">P/FCF</div><div class="m-value">31.9x</div><div class="m-spark"><svg width="60" height="16" viewBox="0 0 60 16"><polyline points="2,14 10,12 18,12 26,10 34,8 42,5 50,3 58,2" fill="none" stroke="#185FA5" stroke-width="1.5"/></svg></div></div>
+            <div class="metric-row"><div class="m-label">EV/EBITDA</div><div class="m-value">26.1x</div><div class="m-spark"><svg width="60" height="16" viewBox="0 0 60 16"><polyline points="2,13 10,12 18,11 26,10 34,7 42,4 50,3 58,2" fill="none" stroke="#185FA5" stroke-width="1.5"/></svg></div></div>
+          </div>
+          <div>
+            <div class="metric-row"><div class="m-label">Earnings yield</div><div class="m-value">2.7%</div><div class="m-spark"><svg width="60" height="16" viewBox="0 0 60 16"><polyline points="2,2 10,3 18,4 26,6 34,9 42,11 50,13 58,14" fill="none" stroke="#888780" stroke-width="1.5"/></svg></div></div>
+            <div class="metric-row"><div class="m-label">FCF yield</div><div class="m-value">3.1%</div><div class="m-spark"><svg width="60" height="16" viewBox="0 0 60 16"><polyline points="2,2 10,3 18,4 26,6 34,9 42,11 50,13 58,14" fill="none" stroke="#888780" stroke-width="1.5"/></svg></div></div>
+          </div>
+          <div>
+            <div class="metric-row"><div class="m-label">Dividend yield</div><div class="m-value">0.43%</div><div class="m-spark"><svg width="60" height="16" viewBox="0 0 60 16"><polyline points="2,2 10,4 18,5 26,5 34,7 42,9 50,11 58,12" fill="none" stroke="#888780" stroke-width="1.5"/></svg></div></div>
+            <div class="metric-row"><div class="m-label">Buyback yield</div><div class="m-value">2.7%</div><div class="m-spark"><svg width="60" height="16" viewBox="0 0 60 16"><polyline points="2,7 10,8 18,7 26,4 34,5 42,3 50,3 58,2" fill="none" stroke="#0F6E56" stroke-width="1.5"/></svg></div></div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ============== QUARTERLY ============== -->
+  <div class="panel" data-panel="qt">
+    <div class="panel-header">
+      <h2>Quarterly</h2>
+      <div class="meta">Last 12 quarters · USD billions · YoY = same-quarter prior year</div>
+    </div>
+
+    <div class="qchart">
+      <div class="qchart-header">
+        <h3>Quarterly revenue with YoY growth</h3>
+        <div class="qchart-legend">
+          <span><span class="legend-dot" style="background:#185FA5;"></span>Revenue ($B)</span>
+          <span><span class="legend-dot" style="background:#0F6E56;"></span>YoY growth (%)</span>
+        </div>
+      </div>
+
+      <!-- Combo chart: bars for revenue + line for YoY% -->
+      <div style="position:relative;">
+        <svg viewBox="0 0 1180 280" width="100%" style="display:block;" preserveAspectRatio="none">
+          <!-- horizontal gridlines (left axis: revenue $B) -->
+          <g stroke="#E8E5DC" stroke-width="1">
+            <line x1="50" y1="40" x2="1140" y2="40"/>
+            <line x1="50" y1="100" x2="1140" y2="100"/>
+            <line x1="50" y1="160" x2="1140" y2="160"/>
+            <line x1="50" y1="220" x2="1140" y2="220"/>
+          </g>
+          <!-- left axis labels -->
+          <g font-family="JetBrains Mono, monospace" font-size="10" fill="#888780" text-anchor="end">
+            <text x="44" y="44">120</text>
+            <text x="44" y="104">90</text>
+            <text x="44" y="164">60</text>
+            <text x="44" y="224">30</text>
+            <text x="44" y="246">0</text>
+          </g>
+          <!-- right axis labels (YoY %) -->
+          <g font-family="JetBrains Mono, monospace" font-size="10" fill="#0F6E56" text-anchor="start">
+            <text x="1148" y="44">+15</text>
+            <text x="1148" y="104">+8</text>
+            <text x="1148" y="164">+0</text>
+            <text x="1148" y="224">−8</text>
+          </g>
+
+          <!-- Bars: 12 quarters · x positions centered -->
+          <!-- Q1 21 -> Q4 24 ; values $B: 89.6, 81.4, 83.4, 123.9, 97.3, 82.96, 90.15, 117.15, 94.84, 81.8, 89.5, 119.6, 90.8, 85.78, 94.93 ... using 12 most recent: Q2 22 to Q4 24 ish-->
+          <!-- For clarity I'll show 12 quarters: FY22 Q1..Q4, FY23 Q1..Q4, FY24 Q1..Q4 -->
+          <g>
+            <!-- helper: bar height = value * 1.66 (max 120 -> 200px) ; baseline y=240 -->
+            <!-- Q1'22 123.9 -->
+            <rect x="60"  y="34"  width="64" height="206" fill="#185FA5" opacity="0.85"/>
+            <!-- Q2'22 97.3 -->
+            <rect x="148" y="78"  width="64" height="162" fill="#185FA5" opacity="0.85"/>
+            <!-- Q3'22 83.0 -->
+            <rect x="236" y="102" width="64" height="138" fill="#185FA5" opacity="0.85"/>
+            <!-- Q4'22 90.1 -->
+            <rect x="324" y="90"  width="64" height="150" fill="#185FA5" opacity="0.85"/>
+            <!-- Q1'23 117.2 -->
+            <rect x="412" y="45"  width="64" height="195" fill="#185FA5" opacity="0.85"/>
+            <!-- Q2'23 94.8 -->
+            <rect x="500" y="82"  width="64" height="158" fill="#185FA5" opacity="0.85"/>
+            <!-- Q3'23 81.8 -->
+            <rect x="588" y="104" width="64" height="136" fill="#185FA5" opacity="0.85"/>
+            <!-- Q4'23 89.5 -->
+            <rect x="676" y="91"  width="64" height="149" fill="#185FA5" opacity="0.85"/>
+            <!-- Q1'24 119.6 -->
+            <rect x="764" y="41"  width="64" height="199" fill="#185FA5" opacity="0.95"/>
+            <!-- Q2'24 90.8 -->
+            <rect x="852" y="89"  width="64" height="151" fill="#185FA5" opacity="0.95"/>
+            <!-- Q3'24 85.8 -->
+            <rect x="940" y="98"  width="64" height="142" fill="#185FA5" opacity="0.95"/>
+            <!-- Q4'24 94.9 -->
+            <rect x="1028" y="82" width="64" height="158" fill="#185FA5"/>
+          </g>
+
+          <!-- YoY line: scale s.t. y=160 == 0%, +15% -> y=40, -8% -> y=224 -->
+          <!-- YoY values: Q1'22 +11.2, Q2'22 +1.9, Q3'22 +8.1, Q4'22 −5.5, Q1'23 −5.5, Q2'23 −2.5, Q3'23 −1.4, Q4'23 −0.7, Q1'24 +2.1, Q2'24 −4.3, Q3'24 +4.9, Q4'24 +6.1 -->
+          <polyline
+            points="92,71  180,144  268,95  356,204  444,204  532,180  620,171  708,166  796,143  884,194  972,121  1060,108"
+            fill="none" stroke="#0F6E56" stroke-width="2"/>
+          <!-- YoY points -->
+          <g fill="#0F6E56">
+            <circle cx="92"   cy="71"  r="3"/>
+            <circle cx="180"  cy="144" r="3"/>
+            <circle cx="268"  cy="95"  r="3"/>
+            <circle cx="356"  cy="204" r="3"/>
+            <circle cx="444"  cy="204" r="3"/>
+            <circle cx="532"  cy="180" r="3"/>
+            <circle cx="620"  cy="171" r="3"/>
+            <circle cx="708"  cy="166" r="3"/>
+            <circle cx="796"  cy="143" r="3"/>
+            <circle cx="884"  cy="194" r="3"/>
+            <circle cx="972"  cy="121" r="3"/>
+            <circle cx="1060" cy="108" r="4" stroke="#FFFFFF" stroke-width="1.5"/>
+          </g>
+
+          <!-- baseline -->
+          <line x1="50" y1="240" x2="1140" y2="240" stroke="#1C1B18" stroke-width="1"/>
+          <!-- 0% reference -->
+          <line x1="50" y1="160" x2="1140" y2="160" stroke="#0F6E56" stroke-width="0.5" stroke-dasharray="3,3" opacity="0.4"/>
+
+          <!-- x-axis labels -->
+          <g font-family="JetBrains Mono, monospace" font-size="10" fill="#5F5E5A" text-anchor="middle">
+            <text x="92"   y="262">'22-Q1</text>
+            <text x="180"  y="262">'22-Q2</text>
+            <text x="268"  y="262">'22-Q3</text>
+            <text x="356"  y="262">'22-Q4</text>
+            <text x="444"  y="262">'23-Q1</text>
+            <text x="532"  y="262">'23-Q2</text>
+            <text x="620"  y="262">'23-Q3</text>
+            <text x="708"  y="262">'23-Q4</text>
+            <text x="796"  y="262">'24-Q1</text>
+            <text x="884"  y="262">'24-Q2</text>
+            <text x="972"  y="262">'24-Q3</text>
+            <text x="1060" y="262" font-weight="500" fill="#1C1B18">'24-Q4</text>
+          </g>
+        </svg>
+      </div>
+    </div>
+
+    <!-- Quarterly Income Statement pivot (compact, last 8 quarters) -->
+    <div class="fs-table-wrap">
+      <table class="q-table">
+        <thead>
+          <tr>
+            <th>$M · last 8 quarters</th>
+            <th>'23 Q1</th><th>'23 Q2</th><th>'23 Q3</th><th>'23 Q4</th>
+            <th>'24 Q1</th><th>'24 Q2</th><th>'24 Q3</th>
+            <th class="col-latest-q">'24 Q4</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>Revenue</td><td>117,154</td><td>94,836</td><td>81,797</td><td>89,498</td><td>119,575</td><td>90,753</td><td>85,777</td><td class="latest-q">94,930</td></tr>
+          <tr><td>Cost of revenue</td><td>(66,822)</td><td>(52,860)</td><td>(45,384)</td><td>(49,071)</td><td>(64,720)</td><td>(48,482)</td><td>(46,099)</td><td class="latest-q">(51,051)</td></tr>
+          <tr><td>Gross profit</td><td>50,332</td><td>41,976</td><td>36,413</td><td>40,427</td><td>54,855</td><td>42,271</td><td>39,678</td><td class="latest-q">43,879</td></tr>
+          <tr><td>Operating expenses</td><td>(13,718)</td><td>(13,658)</td><td>(13,415)</td><td>(14,056)</td><td>(14,482)</td><td>(14,371)</td><td>(14,326)</td><td class="latest-q">(14,288)</td></tr>
+          <tr><td>Operating income</td><td>36,016</td><td>28,318</td><td>22,998</td><td>26,969</td><td>40,373</td><td>27,900</td><td>25,352</td><td class="latest-q">29,591</td></tr>
+          <tr><td>Net income</td><td>29,998</td><td>24,160</td><td>19,881</td><td>22,956</td><td>33,916</td><td>23,636</td><td>21,448</td><td class="latest-q">14,736</td></tr>
+          <tr><td>EPS diluted</td><td>1.88</td><td>1.52</td><td>1.26</td><td>1.46</td><td>2.18</td><td>1.53</td><td>1.40</td><td class="latest-q">0.97</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="footnote" style="margin-top: 20px;">
+      <strong style="color:var(--ink); font-weight:500;">Note · FY24-Q4 net income</strong>
+      <span class="pipe">|</span>
+      Net income dipped due to a one-time $10.2B tax charge from the EU State Aid decision (Apple v. Commission, Sept 2024). Excluding this item, normalized Q4 net income would be ~$24.9B. The FY24 full-year tax line on the Income Statement reflects the same item.
+    </div>
+  </div>
+
+  <!-- ============== FOOTNOTE ============== -->
+  <div class="footnote">
+    <span style="color:var(--ink); font-weight:500;">main.financials.financials</span>
+    <span class="pipe">|</span> period_type = 'FY' for annual · period_type IN ('Q1','Q2','Q3','Q4') for quarterly
+    <span class="pipe">|</span> concept_hierarchy.json applied for section/group/concept ordering
+    <span class="pipe">|</span> Derived metrics from main.financials.financials_metrics
+    <span class="pipe">|</span> Source · SEC EDGAR XBRL via 11__fetch_sec_xbrl
+  </div>
+
+</div>
+
+<script>
+  // Tab switching
+  document.querySelectorAll('.tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      const target = tab.dataset.tab;
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+      tab.classList.add('active');
+      document.querySelector(`.panel[data-panel="${target}"]`).classList.add('active');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  });
+</script>
+
+</body>
+</html>

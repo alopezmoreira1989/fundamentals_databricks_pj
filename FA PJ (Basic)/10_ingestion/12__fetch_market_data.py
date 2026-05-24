@@ -26,9 +26,12 @@
 
 # COMMAND ----------
 
-tickers_df = spark.table(f"{CATALOG}.config.tickers")
-ACTIVE_TICKERS = [row.ticker for row in tickers_df.select("ticker").collect()]
-print(f"✓ Config loaded — {len(ACTIVE_TICKERS)} active tickers")
+if "ACTIVE_TICKERS" not in globals() or not ACTIVE_TICKERS:
+    tickers_df = spark.table(f"{CATALOG}.config.tickers")
+    ACTIVE_TICKERS = [row.ticker for row in tickers_df.select("ticker").collect()]
+    print(f"✓ Config loaded — {len(ACTIVE_TICKERS)} active tickers from {CATALOG}.config.tickers")
+else:
+    print(f"✓ Inherited {len(ACTIVE_TICKERS)} tickers from parent (override mode)")
 
 # COMMAND ----------
 
