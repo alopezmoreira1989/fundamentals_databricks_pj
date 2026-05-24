@@ -1,4 +1,4 @@
-# Databricks notebook source
+﻿# Databricks notebook source
 # MAGIC %md
 # MAGIC # 00_config / 02__tickers_master
 # MAGIC
@@ -36,7 +36,7 @@ INGEST_SP500  = True
 INGEST_R3000  = True
 
 # Path al JSON de favoritos — relativo a la raíz del repo en el workspace
-FAVORITES_JSON_PATH = "/Workspace/Users/al.lopez.moreira@gmail.com/fundamentals_databricks_pj/FA PJ (Basic)/00_config/favorites.json"
+FAVORITES_JSON_PATH = "/Workspace/Users/al.lopez.moreira@gmail.com/fundamentals_databricks_pj/fundamentals_pipeline/00_config/favorites.json"
 
 TARGET_TABLE = f"{CATALOG}.config.tickers"
 

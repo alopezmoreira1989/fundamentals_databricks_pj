@@ -1,4 +1,4 @@
-# Databricks notebook source
+﻿# Databricks notebook source
 # MAGIC %md
 # MAGIC # 20_transformation / 23__intrinsic_value
 # MAGIC
@@ -36,7 +36,7 @@
 
 # COMMAND ----------
 
-# MAGIC %run "/Workspace/Users/al.lopez.moreira@gmail.com/fundamentals_databricks_pj/FA PJ (Basic)/00_config/01__tickers"
+# MAGIC %run "/Workspace/Users/al.lopez.moreira@gmail.com/fundamentals_databricks_pj/fundamentals_pipeline/00_config/01__tickers"
 
 # COMMAND ----------
 
@@ -50,7 +50,7 @@ import pyspark.sql.types as T
 from pyspark.sql.window import Window
 
 # ── Paths & table names ──────────────────────────────────────────────────────
-ASSUMPTIONS_JSON_PATH = "/Workspace/Users/al.lopez.moreira@gmail.com/fundamentals_databricks_pj/FA PJ (Basic)/00_config/valuation_assumptions.json"
+ASSUMPTIONS_JSON_PATH = "/Workspace/Users/al.lopez.moreira@gmail.com/fundamentals_databricks_pj/fundamentals_pipeline/00_config/valuation_assumptions.json"
 
 full_table  = f"{CATALOG}.{SCHEMA}.{TABLE}"
 market_tbl  = f"{CATALOG}.{SCHEMA}.market_data"

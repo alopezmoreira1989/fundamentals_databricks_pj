@@ -1,4 +1,4 @@
-# Databricks notebook source
+﻿# Databricks notebook source
 # MAGIC %md
 # MAGIC # 90_pipelines / 91__full_pipeline
 # MAGIC
@@ -74,7 +74,7 @@ rebuild_config   = dbutils.widgets.get("rebuild_config")
 
 # COMMAND ----------
 
-# MAGIC %run "/Workspace/Users/al.lopez.moreira@gmail.com/fundamentals_databricks_pj/FA PJ (Basic)/00_config/01__tickers"
+# MAGIC %run "/Workspace/Users/al.lopez.moreira@gmail.com/fundamentals_databricks_pj/fundamentals_pipeline/00_config/01__tickers"
 
 # COMMAND ----------
 
@@ -137,7 +137,7 @@ print("=" * 55)
 
 # COMMAND ----------
 
-# MAGIC %run "/Workspace/Users/al.lopez.moreira@gmail.com/fundamentals_databricks_pj/FA PJ (Basic)/00_config/03__concept_hierarchy_master"
+# MAGIC %run "/Workspace/Users/al.lopez.moreira@gmail.com/fundamentals_databricks_pj/fundamentals_pipeline/00_config/03__concept_hierarchy_master"
 
 # COMMAND ----------
 
@@ -157,7 +157,7 @@ print("=" * 55)
 
 # COMMAND ----------
 
-# MAGIC %run "/Workspace/Users/al.lopez.moreira@gmail.com/fundamentals_databricks_pj/FA PJ (Basic)/00_config/04__metrics_hierarchy_master"
+# MAGIC %run "/Workspace/Users/al.lopez.moreira@gmail.com/fundamentals_databricks_pj/fundamentals_pipeline/00_config/04__metrics_hierarchy_master"
 
 # COMMAND ----------
 
@@ -173,7 +173,7 @@ print("=" * 55)
 
 # COMMAND ----------
 
-# MAGIC %run "/Workspace/Users/al.lopez.moreira@gmail.com/fundamentals_databricks_pj/FA PJ (Basic)/10_ingestion/11__fetch_sec_xbrl"
+# MAGIC %run "/Workspace/Users/al.lopez.moreira@gmail.com/fundamentals_databricks_pj/fundamentals_pipeline/10_ingestion/11__fetch_sec_xbrl"
 
 # COMMAND ----------
 
@@ -189,7 +189,7 @@ print("=" * 55)
 
 # COMMAND ----------
 
-# MAGIC %run "/Workspace/Users/al.lopez.moreira@gmail.com/fundamentals_databricks_pj/FA PJ (Basic)/10_ingestion/12__fetch_market_data"
+# MAGIC %run "/Workspace/Users/al.lopez.moreira@gmail.com/fundamentals_databricks_pj/fundamentals_pipeline/10_ingestion/12__fetch_market_data"
 
 # COMMAND ----------
 
@@ -205,7 +205,7 @@ print("=" * 55)
 
 # COMMAND ----------
 
-# MAGIC %run "/Workspace/Users/al.lopez.moreira@gmail.com/fundamentals_databricks_pj/FA PJ (Basic)/20_transformation/21__clean_and_merge"
+# MAGIC %run "/Workspace/Users/al.lopez.moreira@gmail.com/fundamentals_databricks_pj/fundamentals_pipeline/20_transformation/21__clean_and_merge"
 
 # COMMAND ----------
 
@@ -228,7 +228,7 @@ print("=" * 55)
 
 # COMMAND ----------
 
-# MAGIC %run "/Workspace/Users/al.lopez.moreira@gmail.com/fundamentals_databricks_pj/FA PJ (Basic)/20_transformation/21b__derive_quarterly"
+# MAGIC %run "/Workspace/Users/al.lopez.moreira@gmail.com/fundamentals_databricks_pj/fundamentals_pipeline/20_transformation/21b__derive_quarterly"
 
 # COMMAND ----------
 
@@ -244,7 +244,7 @@ print("=" * 55)
 
 # COMMAND ----------
 
-# MAGIC %run "/Workspace/Users/al.lopez.moreira@gmail.com/fundamentals_databricks_pj/FA PJ (Basic)/20_transformation/22__derived_metrics"
+# MAGIC %run "/Workspace/Users/al.lopez.moreira@gmail.com/fundamentals_databricks_pj/fundamentals_pipeline/20_transformation/22__derived_metrics"
 
 # COMMAND ----------
 
@@ -267,7 +267,7 @@ print("=" * 55)
 
 # COMMAND ----------
 
-# MAGIC %run "/Workspace/Users/al.lopez.moreira@gmail.com/fundamentals_databricks_pj/FA PJ (Basic)/20_transformation/23__intrinsic_value"
+# MAGIC %run "/Workspace/Users/al.lopez.moreira@gmail.com/fundamentals_databricks_pj/fundamentals_pipeline/20_transformation/23__intrinsic_value"
 
 # COMMAND ----------
 
@@ -283,7 +283,7 @@ print("=" * 55)
 
 # COMMAND ----------
 
-# MAGIC %run "/Workspace/Users/al.lopez.moreira@gmail.com/fundamentals_databricks_pj/FA PJ (Basic)/30_analysis/31__company_analysis"
+# MAGIC %run "/Workspace/Users/al.lopez.moreira@gmail.com/fundamentals_databricks_pj/fundamentals_pipeline/30_analysis/31__company_analysis"
 
 # COMMAND ----------
 
@@ -309,7 +309,7 @@ print("=" * 55)
 
 try:
     dbutils.notebook.run(
-        "/Workspace/Users/al.lopez.moreira@gmail.com/fundamentals_databricks_pj/FA PJ (Basic)/50_publish/51__export_dashboard_data",
+        "/Workspace/Users/al.lopez.moreira@gmail.com/fundamentals_databricks_pj/fundamentals_pipeline/50_publish/51__export_dashboard_data",
         timeout_seconds=600,
     )
     export_ok = True
@@ -336,7 +336,7 @@ print("=" * 55)
 if export_ok:
     try:
         dbutils.notebook.run(
-            "/Workspace/Users/al.lopez.moreira@gmail.com/fundamentals_databricks_pj/FA PJ (Basic)/50_publish/52__publish_to_github",
+            "/Workspace/Users/al.lopez.moreira@gmail.com/fundamentals_databricks_pj/fundamentals_pipeline/50_publish/52__publish_to_github",
             timeout_seconds=300,
         )
     except Exception as e:

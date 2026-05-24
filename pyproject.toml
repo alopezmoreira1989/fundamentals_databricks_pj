@@ -34,7 +34,7 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 # Notebook .py source files use Databricks `# MAGIC` / `# COMMAND ----------` markers that linters treat oddly.
-"FA PJ (Basic)/**/*.py" = ["E265"]
+"fundamentals_pipeline/**/*.py" = ["E265"]
 
 [tool.ruff.format]
 quote-style = "double"

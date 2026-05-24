@@ -1,4 +1,4 @@
-# Databricks notebook source
+﻿# Databricks notebook source
 # MAGIC %md
 # MAGIC # 00_config / 03__concept_hierarchy_master
 # MAGIC
@@ -40,7 +40,7 @@
 import json
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType
 
-HIERARCHY_JSON_PATH = "/Workspace/Users/al.lopez.moreira@gmail.com/fundamentals_databricks_pj/FA PJ (Basic)/00_config/concept_hierarchy.json"
+HIERARCHY_JSON_PATH = "/Workspace/Users/al.lopez.moreira@gmail.com/fundamentals_databricks_pj/fundamentals_pipeline/00_config/concept_hierarchy.json"
 TARGET_TABLE        = f"{CATALOG}.config.concept_hierarchy"
 
 print(f"Source : {HIERARCHY_JSON_PATH}")

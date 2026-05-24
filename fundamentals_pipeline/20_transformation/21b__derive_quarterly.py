@@ -1,4 +1,4 @@
-# Databricks notebook source
+﻿# Databricks notebook source
 # /// script
 # [tool.databricks.environment]
 # environment_version = "2"
@@ -40,7 +40,7 @@
 
 # COMMAND ----------
 
-# MAGIC %run "/Workspace/Users/al.lopez.moreira@gmail.com/fundamentals_databricks_pj/FA PJ (Basic)/00_config/01__tickers"
+# MAGIC %run "/Workspace/Users/al.lopez.moreira@gmail.com/fundamentals_databricks_pj/fundamentals_pipeline/00_config/01__tickers"
 
 # COMMAND ----------
 

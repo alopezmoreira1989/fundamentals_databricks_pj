@@ -1,4 +1,4 @@
-# 51_streamlit_app — public financials dashboard
+﻿# 51_streamlit_app — public financials dashboard
 
 **Live app: https://alm-fa-dashboard.streamlit.app/**
 
@@ -73,7 +73,7 @@ instead of GitHub.
 3. Configure:
    - **Repository:** `alopezmoreira1989/fundamentals_databricks_pj`
    - **Branch:** `main`
-   - **Main file path:** `FA PJ (Basic)/51_streamlit_app/app.py`
+   - **Main file path:** `fundamentals_pipeline/51_streamlit_app/app.py`
 4. Deploy. Streamlit Cloud auto-installs from `requirements.txt`.
 
 **No secrets are needed in Streamlit Cloud** — synthetic fixtures are committed
@@ -120,7 +120,7 @@ lib/
 
 ## Visual reference
 
-The pixel-level target is `FA PJ (Basic)/aapl_dashboard.html` — a
+The pixel-level target is `fundamentals_pipeline/aapl_dashboard.html` — a
 self-contained 1268-line static HTML file with the same CSS as `styles.css`.
 When iterating on rendering, open both in parallel and diff visually.
 

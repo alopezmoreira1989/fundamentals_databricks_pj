@@ -1,4 +1,4 @@
-# 50_publish — dashboard data publish step
+﻿# 50_publish — dashboard data publish step
 
 Final stage of the pipeline. Takes a slice of `main.financials.*` and pushes it
 to a GitHub Release so the public Streamlit app at
@@ -50,8 +50,8 @@ Both notebooks are safe to run by themselves (e.g. after a manual data fix):
 
 ```python
 # In a Databricks notebook
-%run "/Workspace/.../FA PJ (Basic)/50_publish/51__export_dashboard_data"
-%run "/Workspace/.../FA PJ (Basic)/50_publish/52__publish_to_github"
+%run "/Workspace/.../fundamentals_pipeline/50_publish/51__export_dashboard_data"
+%run "/Workspace/.../fundamentals_pipeline/50_publish/52__publish_to_github"
 ```
 
 `52__` will replace today's `data-YYYY-MM-DD` release if it already exists, and
@@ -69,15 +69,15 @@ and set `COPY_TO_VOLUME = True` (point `VOLUME_PATH` at a Volume you can read).
 After the notebook runs:
 
 ```bash
-databricks fs cp -r dbfs:/Volumes/main/financials/_publish "FA PJ (Basic)/51_streamlit_app/fixtures/"
+databricks fs cp -r dbfs:/Volumes/main/financials/_publish "fundamentals_pipeline/51_streamlit_app/fixtures/"
 ```
 
 **Option B — download directly from the GitHub `latest` release** once the
 publish step has run at least once:
 
 ```bash
-mkdir -p "FA PJ (Basic)/51_streamlit_app/fixtures"
-cd       "FA PJ (Basic)/51_streamlit_app/fixtures"
+mkdir -p "fundamentals_pipeline/51_streamlit_app/fixtures"
+cd       "fundamentals_pipeline/51_streamlit_app/fixtures"
 curl -sLO https://github.com/alopezmoreira1989/fundamentals_databricks_pj/releases/download/latest/dashboard_data.parquet
 curl -sLO https://github.com/alopezmoreira1989/fundamentals_databricks_pj/releases/download/latest/dashboard_metrics.parquet
 curl -sLO https://github.com/alopezmoreira1989/fundamentals_databricks_pj/releases/download/latest/dashboard_meta.json
