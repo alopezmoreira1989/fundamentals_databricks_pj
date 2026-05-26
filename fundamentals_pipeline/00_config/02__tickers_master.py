@@ -35,8 +35,7 @@ from pyspark.sql.types import StructType, StructField, StringType, BooleanType
 INGEST_SP500  = True
 INGEST_R3000  = True
 
-# Path al JSON de favoritos — relativo a la raíz del repo en el workspace
-FAVORITES_JSON_PATH = "/Workspace/Users/al.lopez.moreira@gmail.com/fundamentals_databricks_pj/fundamentals_pipeline/00_config/favorites.json"
+# FAVORITES_JSON_PATH heredado de 01__tickers vía %run
 
 TARGET_TABLE = f"{CATALOG}.config.tickers"
 

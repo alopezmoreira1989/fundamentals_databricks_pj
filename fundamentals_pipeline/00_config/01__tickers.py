@@ -27,6 +27,8 @@ SEC_USER_AGENT = "Alejandro Lopez Moreira al.lopez.moreira@gmail.com"
 DB           = f"{CATALOG}.{SCHEMA}"
 TICKERS_TABLE = f"{CATALOG}.config.tickers"
 
+FAVORITES_JSON_PATH = "/Workspace/Users/al.lopez.moreira@gmail.com/fundamentals_databricks_pj/fundamentals_pipeline/00_config/favorites.json"
+
 # ── Quarterly retention window ────────────────────────────────────────────────
 QUARTERLY_WINDOW = 12
 

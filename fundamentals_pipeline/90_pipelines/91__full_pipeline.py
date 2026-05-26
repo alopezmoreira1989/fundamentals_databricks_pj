@@ -132,7 +132,7 @@ else:
 # COMMAND ----------
 
 print("=" * 55)
-print("STEP 1 / 11 — Concept Hierarchy")
+print("STEP 1 / 12 — Concept Hierarchy")
 print("=" * 55)
 
 # COMMAND ----------
@@ -152,7 +152,7 @@ print("=" * 55)
 # COMMAND ----------
 
 print("=" * 55)
-print("STEP 2 / 11 — Metrics Hierarchy")
+print("STEP 2 / 12 — Metrics Hierarchy")
 print("=" * 55)
 
 # COMMAND ----------
@@ -168,7 +168,7 @@ print("=" * 55)
 # COMMAND ----------
 
 print("=" * 55)
-print("STEP 3 / 11 — SEC Ingestion")
+print("STEP 3 / 12 — SEC Ingestion")
 print("=" * 55)
 
 # COMMAND ----------
@@ -184,7 +184,7 @@ print("=" * 55)
 # COMMAND ----------
 
 print("=" * 55)
-print("STEP 4 / 11 — Market Data")
+print("STEP 4 / 12 — Market Data")
 print("=" * 55)
 
 # COMMAND ----------
@@ -200,7 +200,7 @@ print("=" * 55)
 # COMMAND ----------
 
 print("=" * 55)
-print("STEP 5 / 11 — Clean & Merge")
+print("STEP 5 / 12 — Clean & Merge")
 print("=" * 55)
 
 # COMMAND ----------
@@ -223,7 +223,7 @@ print("=" * 55)
 # COMMAND ----------
 
 print("=" * 55)
-print("STEP 6 / 11 — Derive Quarterly")
+print("STEP 6 / 12 — Derive Quarterly")
 print("=" * 55)
 
 # COMMAND ----------
@@ -239,7 +239,7 @@ print("=" * 55)
 # COMMAND ----------
 
 print("=" * 55)
-print("STEP 7 / 11 — Derived Metrics")
+print("STEP 7 / 12 — Derived Metrics")
 print("=" * 55)
 
 # COMMAND ----------
@@ -262,7 +262,7 @@ print("=" * 55)
 # COMMAND ----------
 
 print("=" * 55)
-print("STEP 8 / 11 — Intrinsic Value")
+print("STEP 8 / 12 — Intrinsic Value")
 print("=" * 55)
 
 # COMMAND ----------
@@ -278,7 +278,7 @@ print("=" * 55)
 # COMMAND ----------
 
 print("=" * 55)
-print("STEP 9 / 11 — Analysis")
+print("STEP 9 / 12 — Analysis")
 print("=" * 55)
 
 # COMMAND ----------
@@ -288,9 +288,35 @@ print("=" * 55)
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 11. Export dashboard data
+# MAGIC ## 11. Coverage check
+# MAGIC Verifies that all favorite tickers made it through the full pipeline
+# MAGIC (config → financials → financials_metrics). Also surfaces any ingestion
+# MAGIC failures from the latest run. Hard fails if >5% of favorites are missing.
+
+# COMMAND ----------
+
+print("=" * 55)
+print("STEP 10 / 12 — Coverage Check")
+print("=" * 55)
+
+# COMMAND ----------
+
+try:
+    dbutils.notebook.run(
+        "/Workspace/Users/al.lopez.moreira@gmail.com/fundamentals_databricks_pj/fundamentals_pipeline/30_analysis/32__coverage_check",
+        timeout_seconds=120,
+    )
+    coverage_ok = True
+except Exception as e:
+    print(f"⚠ Coverage check failed: {e}")
+    coverage_ok = False
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 12. Export dashboard data
 # MAGIC `dashboard_data.parquet` + `dashboard_metrics.parquet` + `dashboard_meta.json`
-# MAGIC written to `/tmp/` on the driver. Consumed by step 12 (GitHub publish).
+# MAGIC written to `/tmp/` on the driver. Consumed by step 13 (GitHub publish).
 # MAGIC
 # MAGIC Wrapped in try/except: a failed export should not fail the nightly run,
 # MAGIC since the upstream Delta tables are already updated.
@@ -302,7 +328,7 @@ print("=" * 55)
 # COMMAND ----------
 
 print("=" * 55)
-print("STEP 10 / 11 — Export dashboard data")
+print("STEP 11 / 12 — Export dashboard data")
 print("=" * 55)
 
 # COMMAND ----------
@@ -320,15 +346,15 @@ except Exception as e:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 12. Publish to GitHub Release
+# MAGIC ## 13. Publish to GitHub Release
 # MAGIC Uploads the three `/tmp/` artifacts as assets on the `latest` GitHub
-# MAGIC release. Skipped if step 11 failed. Requires the `github/github_pat`
+# MAGIC release. Skipped if step 12 failed. Requires the `github/github_pat`
 # MAGIC Databricks secret — see `50_publish/README.md`.
 
 # COMMAND ----------
 
 print("=" * 55)
-print("STEP 11 / 11 — Publish to GitHub")
+print("STEP 12 / 12 — Publish to GitHub")
 print("=" * 55)
 
 # COMMAND ----------

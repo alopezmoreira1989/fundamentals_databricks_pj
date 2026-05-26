@@ -26,6 +26,8 @@ valuation_assumptions.json                                         ← edit here
         ↓
 31__company_analysis            validation queries
         ↓
+32__coverage_check              verify favorites reached financials + metrics
+        ↓
 51__export_dashboard_data       slice + write parquet artifacts to /tmp/
         ↓
 52__publish_to_github           upload artifacts as GitHub Release (latest tag)
@@ -43,7 +45,7 @@ fundamentals_databricks_pj/
 │   ├── 02__tickers_master.py                ← construye main.config.tickers (S&P 500 + Russell 3000 + favoritos)
 │   ├── 03__concept_hierarchy_master.py      ← construye main.config.concept_hierarchy desde JSON
 │   ├── 04__metrics_hierarchy_master.py      ← construye main.config.metrics_hierarchy desde JSON
-│   ├── favorites.json                       ← lista de tickers favoritos
+│   ├── favorites.json                       ← lista de tickers favoritos (con overrides opcionales: cik, aliases)
 │   ├── concept_hierarchy.json               ← jerarquía de conceptos contables
 │   ├── metrics_hierarchy.json               ← jerarquía de derived metrics
 │   └── valuation_assumptions.json           ← supuestos de valoración (WACC, growth, overrides por ticker)
@@ -60,7 +62,8 @@ fundamentals_databricks_pj/
 │   └── 23__intrinsic_value.py        ← Graham, Graham Revised, DCF, Owner Earnings (FY + TTM)
 │
 ├── 30_analysis/
-│   └── 31__company_analysis.py       ← ad-hoc validation queries
+│   ├── 31__company_analysis.py       ← ad-hoc validation queries
+│   └── 32__coverage_check.py         ← post-pipeline check: favorites coverage + ingestion failures
 │
 ├── 40_dashboards/
 │   ├── 41__dashboard_queries.py      ← SQL feeding the Databricks dashboard
@@ -106,6 +109,8 @@ valuation_assumptions.json    editar supuestos de valoración (WACC, growth, etc
       ↓
 31__company_analysis            queries de validación
       ↓
+32__coverage_check              verificar que favoritos llegaron a financials + metrics
+      ↓
 51__export_dashboard_data       slice + write parquet artifacts to /tmp/
       ↓
 52__publish_to_github           upload to GitHub Release (latest tag)
@@ -117,14 +122,23 @@ valuation_assumptions.json    editar supuestos de valoración (WACC, growth, etc
 
 ## Favoritos (`favorites.json`)
 
-Los tickers favoritos se gestionan editando `00_config/favorites.json` directamente en el repositorio Git. Se incluyen siempre en la ingesta.
+Los tickers favoritos se gestionan editando `00_config/favorites.json` directamente en el repositorio Git. Se incluyen siempre en la ingesta y en la exportación al dashboard público.
 
 ```json
 [
   {"ticker": "TSM",  "company": "Taiwan Semiconductor", "note": ""},
-  {"ticker": "ASML", "company": "ASML Holding",         "note": ""}
+  {"ticker": "VNOM", "company": "Viper Energy Inc",     "cik": "0001602065", "note": "MLP→C-corp 2024"},
+  {"ticker": "FOO",  "company": "Foo Corp",             "aliases": ["FOO-OLD"], "note": "ticker change 2025"}
 ]
 ```
+
+| Campo | Tipo | Requerido | Descripción |
+|---|---|---|---|
+| `ticker` | string | sí | Símbolo del ticker |
+| `company` | string | sí | Nombre de la empresa |
+| `note` | string | no | Nota libre (no usada por código) |
+| `cik` | string | no | CIK de 10 dígitos con padding (ej. `"0001602065"`). Fuerza este CIK en la ingesta SEC, ignorando el lookup estándar. Útil tras conversiones MLP→C-corp, spin-offs, o cuando SEC tarda en actualizar su índice |
+| `aliases` | list[str] | no | Tickers históricos que apuntan a la misma empresa. Si el pipeline intenta resolver un alias, usa el CIK del ticker canónico |
 
 ---
 
@@ -152,6 +166,40 @@ Para modificarlas: edita el JSON, commit + push, y el siguiente run del pipeline
 | `{CATALOG}.{SCHEMA}.market_data` | Year-end closing prices and market cap per ticker / fiscal_year |
 | `{CATALOG}.{SCHEMA}.financials_metrics` | Derived metrics — margins, FCF, YoY, leverage, valuation ratios |
 | `{CATALOG}.{SCHEMA}.financials_intrinsic_value` | Intrinsic value models — Graham, DCF, Owner Earnings (FY + TTM) |
+| `{CATALOG}.{SCHEMA}.ingestion_failures` | Append-only log of ingestion errors (SEC + yfinance) per run |
+
+---
+
+## `ingestion_failures` — error tracking
+
+Append-only log of tickers that failed during ingestion (SEC or yfinance). Written at the end of `11__fetch_sec_xbrl` and `12__fetch_market_data` on each run.
+
+| Column | Type | Description |
+|---|---|---|
+| `ticker` | STRING | Ticker that failed |
+| `error_type` | STRING | Category: `cik_not_found`, `http_404`, `http_5xx`, `timeout`, `json_decode`, `non_json_response`, `empty_facts`, `other` |
+| `error_message` | STRING | First 500 chars of the exception message |
+| `step` | STRING | Pipeline step: `fetch_cik`, `fetch_facts`, `extract`, `market_data` |
+| `scraped_at` | TIMESTAMP | Timestamp of the run |
+
+Query failures from the latest run:
+```sql
+SELECT * FROM main.financials.ingestion_failures
+WHERE scraped_at = (SELECT MAX(scraped_at) FROM main.financials.ingestion_failures)
+ORDER BY error_type, ticker;
+```
+
+---
+
+## Coverage check — `32__coverage_check`
+
+Post-pipeline notebook (`30_analysis/32__coverage_check.py`) that verifies all favorite tickers made it through the full pipeline. Checks:
+
+1. Favorites present in `config.tickers` but missing from `financials`
+2. Favorites present in `financials` but missing from `financials_metrics`
+3. Tickers with ingestion failures in the latest run
+
+**Threshold:** raises `RuntimeError` (hard fail) if >5% of favorites are missing from `financials`. Otherwise warnings only. Runs as step 10/12 in `91__full_pipeline`.
 
 ---
 

@@ -1,5 +1,5 @@
 [
   // Añade aquí tus tickers favoritos — se incluyen siempre, independientemente del índice
   // Formato: {"ticker": "XXXX", "company": "Nombre opcional", "note": "Nota opcional"}
-  {"ticker": "VNOM", "company": "Viper Energy Inc", "note": ""}
+  {"ticker": "VNOM", "company": "Viper Energy Inc", "cik": "0001602065", "note": "MLP→C-corp 2024"}
 ]

@@ -35,6 +35,7 @@ else:
 
 # COMMAND ----------
 
+import json
 import yfinance as yf
 import pandas as pd
 import time
@@ -89,18 +90,32 @@ if not RUN_TICKERS:
 
 # COMMAND ----------
 
-def fetch_year_end_prices(ticker: str) -> list:
-    """Fetch annual year-end prices for one ticker. Returns list of dicts."""
+def _classify_mkt_error(e: Exception) -> dict:
+    """Classify a market data fetch exception."""
+    msg = str(e)[:500]
+    if isinstance(e, (ConnectionError, TimeoutError)):
+        error_type = "timeout"
+    elif "404" in msg or "Not Found" in msg:
+        error_type = "http_404"
+    elif "5" in msg[:1] and "Server" in msg:
+        error_type = "http_5xx"
+    else:
+        error_type = "other"
+    return {"error_type": error_type, "error_message": msg, "step": "market_data"}
+
+
+def fetch_year_end_prices(ticker: str) -> tuple:
+    """Returns (rows, error_dict | None)."""
     try:
         tk = yf.Ticker(ticker)
         hist = tk.history(period="max", auto_adjust=True)
         if hist.empty:
-            return []
+            return [], {"error_type": "empty_facts", "error_message": f"No price history for {ticker}", "step": "market_data"}
         # Take last close of each calendar year
         hist = hist.copy()
         hist["fiscal_year"] = hist.index.year
         yearly = hist.groupby("fiscal_year").tail(1)
-        return [
+        rows = [
             {
                 "ticker":      ticker.upper(),
                 "fiscal_year": int(row["fiscal_year"]),
@@ -109,9 +124,10 @@ def fetch_year_end_prices(ticker: str) -> list:
             }
             for _, row in yearly.iterrows()
         ]
+        return rows, None
     except Exception as e:
         print(f"  ✗ {ticker}: {e}")
-        return []
+        return [], _classify_mkt_error(e)
 
 # COMMAND ----------
 
@@ -121,14 +137,15 @@ if RUN_TICKERS:
     progress_lock = Lock()
     completed = [0]
     total = len(RUN_TICKERS)
+    _mkt_scraped_at = datetime.utcnow()
 
     def worker(ticker):
-        rows = fetch_year_end_prices(ticker)
+        rows, err = fetch_year_end_prices(ticker)
         with progress_lock:
             completed[0] += 1
             n = completed[0]
-            if not rows:
-                failed.append(ticker)
+            if err:
+                failed.append({"ticker": ticker, "error": err})
             else:
                 all_prices.extend(rows)
             if n % 50 == 0 or n == total:
@@ -238,7 +255,55 @@ else:
 
 # COMMAND ----------
 
-# MAGIC %md ## 5. Verify
+# MAGIC %md ## 5. Write market_data failures to ingestion_failures
+
+# COMMAND ----------
+
+_failures_tbl = f"{CATALOG}.{SCHEMA}.ingestion_failures"
+
+spark.sql(f"""
+    CREATE TABLE IF NOT EXISTS {_failures_tbl} (
+        ticker         STRING    NOT NULL,
+        error_type     STRING    NOT NULL,
+        error_message  STRING,
+        step           STRING    NOT NULL,
+        scraped_at     TIMESTAMP NOT NULL
+    )
+    USING DELTA
+    TBLPROPERTIES (
+        'delta.autoOptimize.optimizeWrite' = 'true',
+        'delta.autoOptimize.autoCompact'   = 'true'
+    )
+""")
+
+if RUN_TICKERS and failed:
+    from pyspark.sql.types import StructType, StructField, StringType, TimestampType as _TS
+
+    _fail_schema = StructType([
+        StructField("ticker",        StringType(), False),
+        StructField("error_type",    StringType(), False),
+        StructField("error_message", StringType(), True),
+        StructField("step",          StringType(), False),
+        StructField("scraped_at",    _TS(),        False),
+    ])
+
+    _fail_records = [{
+        "ticker":        f["ticker"],
+        "error_type":    f["error"]["error_type"],
+        "error_message": f["error"]["error_message"],
+        "step":          f["error"]["step"],
+        "scraped_at":    _mkt_scraped_at,
+    } for f in failed]
+
+    spark.createDataFrame(_fail_records, schema=_fail_schema) \
+         .write.mode("append").saveAsTable(_failures_tbl)
+    print(f"✓ {len(_fail_records)} market_data failure(s) written → {_failures_tbl}")
+else:
+    print(f"✓ No market_data failures to record")
+
+# COMMAND ----------
+
+# MAGIC %md ## 6. Verify
 
 # COMMAND ----------
 

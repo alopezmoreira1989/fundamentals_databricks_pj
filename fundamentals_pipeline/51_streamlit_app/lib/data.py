@@ -29,14 +29,17 @@ def load_latest_data() -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
     Looks in `fixtures/` first (local dev), falls back to the GitHub Release URL
     so the same app works locally and on Streamlit Cloud without code changes.
     """
-    if (FIXTURE_DIR / DATA_FILE).exists():
-        data    = pd.read_parquet(FIXTURE_DIR / DATA_FILE)
-        metrics = pd.read_parquet(FIXTURE_DIR / METRIC_FILE)
-        meta    = json.loads((FIXTURE_DIR / META_FILE).read_text())
-    else:
+    try:
         data    = _fetch_parquet(DATA_FILE)
         metrics = _fetch_parquet(METRIC_FILE)
         meta    = _fetch_json(META_FILE)
+    except Exception:
+        if (FIXTURE_DIR / DATA_FILE).exists():
+            data    = pd.read_parquet(FIXTURE_DIR / DATA_FILE)
+            metrics = pd.read_parquet(FIXTURE_DIR / METRIC_FILE)
+            meta    = json.loads((FIXTURE_DIR / META_FILE).read_text())
+        else:
+            raise
 
     # Normalize types: parquet preserves them, but JSON metadata round-trips dates as strings.
     data["period_end"]    = pd.to_datetime(data["period_end"])

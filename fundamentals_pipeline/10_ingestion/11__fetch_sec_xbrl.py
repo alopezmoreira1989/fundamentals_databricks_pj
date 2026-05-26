@@ -34,6 +34,7 @@ else:
 
 # COMMAND ----------
 
+import json
 import requests
 import time
 import pandas as pd
@@ -138,12 +139,38 @@ TICKER_MAP = {
 }
 print(f"✓ Ticker index loaded — {len(TICKER_MAP):,} tickers known to SEC")
 
+# ── CIK overrides from favorites.json ────────────────────────────────────
+_FAV_CIK_OVERRIDES = {}   # ticker → (cik_padded, company)
+_ALIAS_MAP = {}            # alias → canonical_ticker
+try:
+    with open(FAVORITES_JSON_PATH, "r", encoding="utf-8") as f:
+        _fav_raw = f.read()
+    _fav_lines = [l for l in _fav_raw.splitlines() if not l.strip().startswith("/")]
+    for _entry in json.loads("\n".join(_fav_lines)):
+        _t = _entry["ticker"].upper().strip()
+        if _entry.get("cik"):
+            _FAV_CIK_OVERRIDES[_t] = (_entry["cik"].zfill(10), _entry.get("company", _t))
+        for _alias in _entry.get("aliases", []):
+            _ALIAS_MAP[_alias.upper().strip()] = _t
+except Exception as _e:
+    print(f"  ⚠ Could not load favorites overrides: {_e}")
+if _FAV_CIK_OVERRIDES:
+    print(f"  ✓ CIK overrides: {list(_FAV_CIK_OVERRIDES.keys())}")
+
 
 def get_cik(ticker: str) -> tuple:
     t = ticker.upper()
-    if t not in TICKER_MAP:
-        raise ValueError(f"Ticker '{ticker}' not found in SEC database.")
-    return TICKER_MAP[t]
+    if t in _FAV_CIK_OVERRIDES:
+        return _FAV_CIK_OVERRIDES[t]
+    if t in TICKER_MAP:
+        return TICKER_MAP[t]
+    canonical = _ALIAS_MAP.get(t)
+    if canonical:
+        if canonical in _FAV_CIK_OVERRIDES:
+            return _FAV_CIK_OVERRIDES[canonical]
+        if canonical in TICKER_MAP:
+            return TICKER_MAP[canonical]
+    raise ValueError(f"Ticker '{ticker}' not found in SEC database.")
 
 
 def get_facts(cik: str) -> dict:
@@ -202,13 +229,39 @@ def extract_series(facts: dict, concept: str, kind: str, namespace: str = "us-ga
 
 # COMMAND ----------
 
+def _classify_error(e: Exception, step: str) -> dict:
+    """Classify an exception into a structured error dict for ingestion_failures."""
+    msg = str(e)[:500]
+    if step == "fetch_cik":
+        error_type = "cik_not_found"
+    elif isinstance(e, requests.exceptions.Timeout):
+        error_type = "timeout"
+    elif isinstance(e, requests.exceptions.HTTPError):
+        code = getattr(e.response, "status_code", 0)
+        error_type = "http_404" if code == 404 else "http_5xx" if 500 <= code < 600 else f"http_{code}"
+    elif "Non-JSON" in str(e):
+        error_type = "non_json_response"
+    elif isinstance(e, json.JSONDecodeError):
+        error_type = "json_decode"
+    else:
+        error_type = "other"
+    return {"error_type": error_type, "error_message": msg, "step": step}
+
+
 def process_ticker(ticker: str, scraped_at_ts: datetime) -> tuple:
-    """Returns (records, error). `error` is None on success."""
+    """Returns (records, error_dict | None). error_dict has: error_type, error_message, step."""
     records = []
     try:
         cik, company_name = get_cik(ticker)
-        facts = get_facts(cik)
+    except Exception as e:
+        return [], _classify_error(e, "fetch_cik")
 
+    try:
+        facts = get_facts(cik)
+    except Exception as e:
+        return [], _classify_error(e, "fetch_facts")
+
+    try:
         for stmt_name, concept_map in STATEMENTS.items():
             for label, (xbrl_concept, kind) in concept_map.items():
                 series = extract_series(facts, xbrl_concept, kind)
@@ -231,9 +284,11 @@ def process_ticker(ticker: str, scraped_at_ts: datetime) -> tuple:
                         "filed":        row["filed"].date() if pd.notna(row["filed"]) else None,
                         "scraped_at":   scraped_at_ts,
                     })
+        if not records:
+            return [], {"error_type": "empty_facts", "error_message": f"No XBRL facts extracted for {ticker}", "step": "extract"}
         return records, None
     except Exception as e:
-        return [], str(e)
+        return records, _classify_error(e, "extract")
 
 # COMMAND ----------
 
@@ -338,7 +393,7 @@ if RUN_TICKERS:
 
             if err:
                 failed.append({"ticker": ticker, "error": err})
-                print(f"  [{n:>4}/{total}] ✗  {ticker:<6} ERROR: {err}")
+                print(f"  [{n:>4}/{total}] ✗  {ticker:<6} [{err['error_type']}] {err['error_message'][:80]}")
             else:
                 buffer.extend(records)
 
@@ -384,14 +439,62 @@ if RUN_TICKERS:
     if failed:
         print(f"  Failed      : {len(failed)} tickers")
         for f in failed[:10]:
-            print(f"                {f['ticker']:<6} {f['error']}")
+            print(f"                {f['ticker']:<6} [{f['error']['error_type']}] {f['error']['error_message'][:60]}")
         if len(failed) > 10:
             print(f"                ... and {len(failed)-10} more")
     print(f"{'='*60}")
 
 # COMMAND ----------
 
-# MAGIC %md ## 8. Verify
+# MAGIC %md ## 8. Write ingestion failures to Delta
+
+# COMMAND ----------
+
+_failures_tbl = f"{CATALOG}.{SCHEMA}.ingestion_failures"
+
+spark.sql(f"""
+    CREATE TABLE IF NOT EXISTS {_failures_tbl} (
+        ticker         STRING    NOT NULL,
+        error_type     STRING    NOT NULL,
+        error_message  STRING,
+        step           STRING    NOT NULL,
+        scraped_at     TIMESTAMP NOT NULL
+    )
+    USING DELTA
+    TBLPROPERTIES (
+        'delta.autoOptimize.optimizeWrite' = 'true',
+        'delta.autoOptimize.autoCompact'   = 'true'
+    )
+""")
+
+if RUN_TICKERS and failed:
+    from pyspark.sql.types import StructType, StructField, StringType, TimestampType as _TS
+
+    _fail_schema = StructType([
+        StructField("ticker",        StringType(), False),
+        StructField("error_type",    StringType(), False),
+        StructField("error_message", StringType(), True),
+        StructField("step",          StringType(), False),
+        StructField("scraped_at",    _TS(),        False),
+    ])
+
+    _fail_records = [{
+        "ticker":        f["ticker"],
+        "error_type":    f["error"]["error_type"],
+        "error_message": f["error"]["error_message"],
+        "step":          f["error"]["step"],
+        "scraped_at":    scraped_at,
+    } for f in failed]
+
+    spark.createDataFrame(_fail_records, schema=_fail_schema) \
+         .write.mode("append").saveAsTable(_failures_tbl)
+    print(f"✓ {len(_fail_records)} failure(s) written → {_failures_tbl}")
+else:
+    print(f"✓ No ingestion failures to record")
+
+# COMMAND ----------
+
+# MAGIC %md ## 9. Verify
 
 # COMMAND ----------
 
