@@ -11,10 +11,21 @@ jobs:
       - name: Pull latest into Databricks Repo
         env:
           DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
-          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+          DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+          DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
         run: |
+          # Obtain short-lived bearer token via OAuth M2M (client_credentials)
+          TOKEN=$(curl -sf -X POST "${DATABRICKS_HOST}/oidc/v1/token" \
+            -d "grant_type=client_credentials&client_id=${DATABRICKS_CLIENT_ID}&client_secret=${DATABRICKS_CLIENT_SECRET}&scope=all-apis" \
+            | jq -r '.access_token')
+
+          if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
+            echo "::error::OAuth token exchange failed"
+            exit 1
+          fi
+
           REPO_ID=$(curl -sf "${DATABRICKS_HOST}/api/2.0/repos" \
-            -H "Authorization: Bearer ${DATABRICKS_TOKEN}" | \
+            -H "Authorization: Bearer ${TOKEN}" | \
             jq -r '.repos[] | select(.path | endswith("fundamentals_databricks_pj")) | .id')
 
           if [ -z "$REPO_ID" ]; then
@@ -24,7 +35,7 @@ jobs:
 
           echo "Updating repo id=${REPO_ID} to branch main..."
           curl -sf -X PATCH "${DATABRICKS_HOST}/api/2.0/repos/${REPO_ID}" \
-            -H "Authorization: Bearer ${DATABRICKS_TOKEN}" \
+            -H "Authorization: Bearer ${TOKEN}" \
             -H "Content-Type: application/json" \
             -d '{"branch": "main"}' | jq .
 
