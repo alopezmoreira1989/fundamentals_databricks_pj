@@ -1,4 +1,4 @@
-﻿# Databricks notebook source
+# Databricks notebook source
 # MAGIC %md
 # MAGIC # 90_pipelines / 91__full_pipeline
 # MAGIC

@@ -1,4 +1,4 @@
-﻿# Databricks notebook source
+# Databricks notebook source
 # MAGIC %md
 # MAGIC # 50_publish / 51__export_dashboard_data
 # MAGIC

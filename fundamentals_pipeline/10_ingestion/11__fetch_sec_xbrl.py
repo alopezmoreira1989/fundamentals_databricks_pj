@@ -1,4 +1,4 @@
-﻿# Databricks notebook source
+# Databricks notebook source
 # MAGIC %md
 # MAGIC # 10_ingestion / 11__fetch_sec_xbrl
 # MAGIC

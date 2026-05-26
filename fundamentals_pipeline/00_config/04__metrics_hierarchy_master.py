@@ -1,4 +1,4 @@
-﻿# Databricks notebook source
+# Databricks notebook source
 # MAGIC %md
 # MAGIC # 00_config / 04__metrics_hierarchy_master
 # MAGIC
