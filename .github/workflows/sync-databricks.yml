@@ -14,7 +14,7 @@ jobs:
           DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
           DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
         run: |
-          REPO_ID=1757921229602846
+          REPO_ID=4088793207541076
 
           # Obtain short-lived bearer token via OAuth M2M (client_credentials)
           RESP=$(curl -s -X POST "${DATABRICKS_HOST}/oidc/v1/token" \
@@ -30,7 +30,7 @@ jobs:
           RESULT=$(curl -s -w "\n%{http_code}" -X PATCH "${DATABRICKS_HOST}/api/2.0/repos/${REPO_ID}" \
             -H "Authorization: Bearer ${TOKEN}" \
             -H "Content-Type: application/json" \
-            -d '{"branch": "main", "force": true}')
+            -d '{"branch": "main"}')
           HTTP_CODE=$(echo "$RESULT" | tail -1)
           BODY=$(echo "$RESULT" | sed '$d')
 
