@@ -30,7 +30,7 @@ from pathlib import Path
 
 import requests
 
-OWNER = "al-lopez-moreira"
+OWNER = "alopezmoreira1989"
 REPO  = "fundamentals_databricks_pj"
 
 ARTIFACTS = [
