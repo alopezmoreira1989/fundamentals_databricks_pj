@@ -1,0 +1,31 @@
+name: Sync Databricks Repo
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pull latest into Databricks Repo
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+        run: |
+          REPO_ID=$(curl -sf "${DATABRICKS_HOST}/api/2.0/repos" \
+            -H "Authorization: Bearer ${DATABRICKS_TOKEN}" | \
+            jq -r '.repos[] | select(.path | endswith("fundamentals_databricks_pj")) | .id')
+
+          if [ -z "$REPO_ID" ]; then
+            echo "::error::Databricks Repo 'fundamentals_databricks_pj' not found"
+            exit 1
+          fi
+
+          echo "Updating repo id=${REPO_ID} to branch main..."
+          curl -sf -X PATCH "${DATABRICKS_HOST}/api/2.0/repos/${REPO_ID}" \
+            -H "Authorization: Bearer ${DATABRICKS_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d '{"branch": "main"}' | jq .
+
+          echo "::notice::Databricks workspace synced to main"
