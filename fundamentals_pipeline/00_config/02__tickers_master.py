@@ -28,7 +28,6 @@
 import json
 import requests
 import pandas as pd
-from io import StringIO
 from pyspark.sql import functions as F
 from pyspark.sql.types import StructType, StructField, StringType, BooleanType
 
@@ -58,15 +57,100 @@ def fetch_sp500() -> pd.DataFrame:
 
 
 def fetch_russell3000() -> pd.DataFrame:
+    """
+    Fetch IWV (iShares Russell 3000 ETF) holdings via the BlackRock fundDownload API.
+    Returns a DataFrame with columns [ticker, company].
+
+    The response is XML Excel (SpreadsheetML). The header row is detected
+    dynamically by scanning for a row containing a recognised ticker column
+    name, so the parser is resilient to metadata rows being added or removed.
+    """
+    import re
+
     url = (
-        "https://www.ishares.com/us/products/239714/ishares-russell-3000-etf"
-        "/1467271812596.ajax?fileType=csv&fileName=IWV_holdings&dataType=fund"
+        "https://www.blackrock.com/varnish-api/blk-one01-product-data/"
+        "product-data/api/v1/get-fund-document"
+        "?appType=PRODUCT_PAGE&appSubType=ISHARES&targetSite=us-ishares"
+        "&locale=en_US&portfolioId=239714&component=fundDownload&userType=individual"
     )
-    resp = requests.get(url, headers=_HEADERS)
-    df   = pd.read_csv(StringIO(resp.text), skiprows=9, header=0)
-    df   = df[["Ticker", "Name"]].dropna(subset=["Ticker"])
-    df.columns = ["ticker", "company"]
-    df   = df[df["ticker"].str.match(r"^[A-Z\-]+$")]
+    resp = requests.get(url, headers=_HEADERS, timeout=30)
+    resp.raise_for_status()
+
+    if "<ss:Worksheet" not in resp.text[:2000]:
+        raise ValueError(
+            f"IWV response is not SpreadsheetML (first 200 chars: {resp.text[:200]})"
+        )
+
+    # Locate the Holdings worksheet
+    ws_start = resp.text.find('ss:Name="Holdings"')
+    if ws_start == -1:
+        raise ValueError("Holdings worksheet not found in IWV SpreadsheetML response")
+    ws_end = resp.text.find("</ss:Worksheet>", ws_start)
+    ws_xml = resp.text[ws_start:ws_end]
+
+    rows = re.findall(r"<ss:Row[^>]*>(.*?)</ss:Row>", ws_xml, re.DOTALL)
+
+    # Dynamic header detection: find row containing a recognized ticker column
+    TICKER_COLS  = {"Ticker", "Symbol", "Holding Ticker"}
+    COMPANY_COLS = {"Name", "Issuer Name", "Security Name", "Description"}
+
+    header_idx = None
+    header_cells = []
+    for i, row in enumerate(rows):
+        cells = re.findall(r'<ss:Data[^>]*>([^<]*)</ss:Data>', row)
+        if TICKER_COLS & set(cells):
+            header_idx = i
+            header_cells = cells
+            break
+
+    if header_idx is None:
+        all_row_samples = []
+        for i, row in enumerate(rows[:15]):
+            cells = re.findall(r'<ss:Data[^>]*>([^<]*)</ss:Data>', row)
+            all_row_samples.append(f"  Row {i}: {cells}")
+        raise ValueError(
+            f"Could not find header row with any of {TICKER_COLS}. "
+            f"First 15 rows:\n" + "\n".join(all_row_samples)
+        )
+
+    # Resolve column indices with flexible mapping
+    ticker_col = next((j for j, c in enumerate(header_cells) if c in TICKER_COLS), None)
+    company_col = next((j for j, c in enumerate(header_cells) if c in COMPANY_COLS), None)
+
+    if ticker_col is None:
+        raise ValueError(f"Ticker column not found. Header: {header_cells}")
+    if company_col is None:
+        raise ValueError(f"Company column not found. Header: {header_cells}")
+
+    used_ticker_name = header_cells[ticker_col]
+    used_company_name = header_cells[company_col]
+
+    # Parse data rows
+    records = []
+    for row in rows[header_idx + 1:]:
+        cells = re.findall(r'<ss:Data[^>]*>([^<]*)</ss:Data>', row)
+        if len(cells) <= max(ticker_col, company_col):
+            continue
+        t = cells[ticker_col].strip()
+        c = cells[company_col].strip()
+        if t and re.match(r"^[A-Z][A-Z0-9.\-]{0,6}$", t):
+            records.append({"ticker": t, "company": c})
+
+    df = pd.DataFrame(records)
+
+    # Validation
+    if len(df) < 1500:
+        raise ValueError(
+            f"IWV holdings too few: {len(df)} (expected ~2500+). "
+            f"Possible format change or partial response."
+        )
+
+    nan_pct = df["ticker"].isna().sum() / len(df) if len(df) > 0 else 0
+    if nan_pct > 0.05:
+        raise ValueError(f"IWV holdings: {nan_pct:.1%} of tickers are NaN (>5% threshold)")
+
+    print(f"  ✓ Parsed {len(df)} holdings from IWV fundDownload API")
+    print(f"    Header at row {header_idx}, columns: {used_ticker_name}/{used_company_name}")
     return df.reset_index(drop=True)
 
 
@@ -112,8 +196,12 @@ if INGEST_SP500:
 
 if INGEST_R3000:
     print("Fetching Russell 3000...")
-    raw_sources["r3000"] = fetch_russell3000()
-    print(f"  ✓ {len(raw_sources['r3000'])} tickers")
+    try:
+        raw_sources["r3000"] = fetch_russell3000()
+        print(f"  ✓ {len(raw_sources['r3000'])} tickers")
+    except Exception as _r3k_err:
+        print(f"  ✗ Russell 3000 fetch failed: {_r3k_err}")
+        print(f"  ⚠ Continuing with S&P 500 + favorites only — R3000 will be missing")
 
 print("Cargando favoritos desde favorites.json...")
 favorites_df = fetch_favorites()
