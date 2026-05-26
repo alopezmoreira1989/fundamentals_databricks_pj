@@ -43,7 +43,8 @@ def load_latest_data() -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
 
     # Normalize types: parquet preserves them, but JSON metadata round-trips dates as strings.
     data["period_end"]    = pd.to_datetime(data["period_end"])
-    metrics["period_end"] = pd.to_datetime(metrics["period_end"])
+    if "period_end" in metrics.columns:
+        metrics["period_end"] = pd.to_datetime(metrics["period_end"])
     return data, metrics, meta
 
 

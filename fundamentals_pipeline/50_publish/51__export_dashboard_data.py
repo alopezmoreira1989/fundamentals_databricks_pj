@@ -136,7 +136,9 @@ print(financials.groupby(["ticker", "period_type"]).size().unstack(fill_value=0)
 
 metrics = spark.sql(f"""
     SELECT
-      m.ticker, m.period_type, m.period_end, m.fiscal_year,
+      m.ticker, 'FY' AS period_type,
+      MAKE_DATE(m.fiscal_year, 12, 31) AS period_end,
+      m.fiscal_year,
       h.category, h.subcategory, m.metric,
       h.unit, h.sort_order, m.value
     FROM {CATALOG}.{SCHEMA}.financials_metrics m
@@ -145,9 +147,9 @@ metrics = spark.sql(f"""
     WHERE m.ticker IN ({tickers_sql})
 """).toPandas()
 
-# Same trim as financials: last 10 FY rows, last 12 quarterly periods per ticker.
-metrics = trim_recent(metrics, ["FY"], FY_YEARS)
-metrics = trim_recent(metrics, ["Q1", "Q2", "Q3", "Q4"], QUARTERS)
+# Trim: last N fiscal years per ticker
+metrics = metrics.sort_values("fiscal_year", ascending=False)
+metrics = metrics.groupby("ticker").head(FY_YEARS * 40)  # ~40 metrics/yr cap
 
 print(f"  metrics rows: {len(metrics):,}")
 
