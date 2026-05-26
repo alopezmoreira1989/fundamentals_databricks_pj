@@ -30,7 +30,7 @@ jobs:
           RESULT=$(curl -s -w "\n%{http_code}" -X PATCH "${DATABRICKS_HOST}/api/2.0/repos/${REPO_ID}" \
             -H "Authorization: Bearer ${TOKEN}" \
             -H "Content-Type: application/json" \
-            -d '{"branch": "main"}')
+            -d '{"branch": "main", "force": true}')
           HTTP_CODE=$(echo "$RESULT" | tail -1)
           BODY=$(echo "$RESULT" | sed '$d')
 
