@@ -41,8 +41,15 @@ def load_latest_data() -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
         else:
             raise
 
-    # Normalize types: parquet preserves them, but JSON metadata round-trips dates as strings.
-    data["period_end"]    = pd.to_datetime(data["period_end"])
+    # Normalize types: parquet preserves None (not NaN) for missing strings,
+    # which breaks pandas groupby/pivot. Convert to proper NaN.
+    for col in ("section", "group", "display_name"):
+        if col in data.columns:
+            data[col] = data[col].fillna("")
+        if col in metrics.columns:
+            metrics[col] = metrics[col].fillna("")
+
+    data["period_end"] = pd.to_datetime(data["period_end"])
     if "period_end" in metrics.columns:
         metrics["period_end"] = pd.to_datetime(metrics["period_end"])
     return data, metrics, meta
