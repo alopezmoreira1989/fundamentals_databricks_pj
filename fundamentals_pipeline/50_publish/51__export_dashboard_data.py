@@ -145,6 +145,7 @@ metrics = spark.sql(f"""
     LEFT JOIN {CATALOG}.config.metrics_hierarchy h
       ON h.metric = m.metric
     WHERE m.ticker IN ({tickers_sql})
+      AND m.fiscal_year BETWEEN 1990 AND 2099
 """).toPandas()
 
 # Trim: last N fiscal years per ticker
