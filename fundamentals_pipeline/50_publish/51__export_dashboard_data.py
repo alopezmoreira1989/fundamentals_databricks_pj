@@ -12,7 +12,7 @@
 # MAGIC - `/tmp/dashboard_metrics.parquet` — long-format derived metrics joined with metrics_hierarchy
 # MAGIC - `/tmp/dashboard_meta.json`       — build timestamp, ticker list, row counts, schema version
 # MAGIC
-# MAGIC **Universe:** `is_favorite = true` only (start small; widen later).
+# MAGIC **Universe:** all tickers that have data in `financials`.
 # MAGIC
 # MAGIC **Retention window:** last 10 fiscal years (FY) and last 12 quarters per ticker.
 # MAGIC
@@ -42,24 +42,24 @@ META_JSON      = OUT_DIR / "dashboard_meta.json"
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 1. Resolve ticker universe (favorites only for now)
+# MAGIC ## 1. Resolve ticker universe (all tickers with data in financials)
 
 # COMMAND ----------
 
 tickers_df = spark.sql(f"""
-    SELECT ticker, company
-    FROM {CATALOG}.config.tickers
-    WHERE is_favorite = true
-    ORDER BY ticker
+    SELECT t.ticker, t.company
+    FROM {CATALOG}.config.tickers t
+    JOIN (SELECT DISTINCT ticker FROM {CATALOG}.{SCHEMA}.financials) f
+      ON f.ticker = t.ticker
+    ORDER BY t.ticker
 """).toPandas()
 
 if tickers_df.empty:
-    raise ValueError("No favorite tickers found in main.config.tickers")
+    raise ValueError("No tickers with financial data found")
 
 tickers = tickers_df["ticker"].tolist()
-# Carry company so the Streamlit masthead can display it without another data source.
-ticker_meta = tickers_df.to_dict(orient="records")  # [{"ticker": "AAPL", "company": "Apple Inc."}, ...]
-print(f"✓ Exporting {len(tickers)} ticker(s): {tickers}")
+ticker_meta = tickers_df.to_dict(orient="records")
+print(f"✓ Exporting {len(tickers)} ticker(s)")
 
 tickers_sql = ",".join(f"'{t}'" for t in tickers)
 
