@@ -136,11 +136,7 @@ def quarterly_df(data: pd.DataFrame, ticker: str) -> pd.DataFrame:
     pivot = pivot[meta_cols + q_cols_in_pivot]
 
     pivot = pivot.sort_values("sort_order", na_position="last").reset_index(drop=True)
-    pivot["indent"] = 0
-    pivot["row_class"] = pivot.apply(
-        lambda r: derive_row_class(r["stmt"], r["concept"], r["display_name"]), axis=1
-    )
-    return pivot
+    return _decorate(pivot)
 
 
 def get_year_columns(df: pd.DataFrame) -> list:
