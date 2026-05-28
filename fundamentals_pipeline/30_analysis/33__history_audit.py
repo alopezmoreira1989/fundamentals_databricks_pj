@@ -400,8 +400,19 @@ _ENTITY_SUFFIXES = {
 }
 
 _NAME_STOPWORDS = {
-    "AND", "OF", "FOR", "NEW", "THE", "AMERICAN", "UNITED", "GLOBAL",
-    "INTERNATIONAL", "NATIONAL", "FIRST",
+    # conectores / artículos
+    "AND", "OF", "FOR", "NEW", "THE",
+    # geográficos / genéricos altamente recurrentes en nombres de empresa
+    "AMERICAN", "UNITED", "GLOBAL", "INTERNATIONAL", "NATIONAL", "FIRST",
+    # ruido de industria: aparecen en miles de nombres y matchean cualquier cosa.
+    # Si el nombre del emisor SOLO tiene estos tokens, el filtro de overlap
+    # reducirá los candidatos a [], y eso es lo correcto — para esos casos no
+    # podemos buscar predecesor por nombre porque el nombre no distingue.
+    "TECHNOLOGIES", "TECHNOLOGY", "HEALTHCARE", "SYSTEMS", "SOLUTIONS",
+    "INDUSTRIES", "ENTERPRISES", "RESOURCES", "SERVICES", "ENERGY",
+    "FINANCIAL", "FINANCE", "PHARMACEUTICALS", "PHARMACEUTICAL", "MEDICAL",
+    "COMMUNICATIONS", "BANCORP", "BANCSHARES", "BANKSHARES", "CAPITAL",
+    "PROPERTIES", "REALTY",
 }
 
 
@@ -778,18 +789,18 @@ if flagged_idxs:
     print(f"  ✓ Pase lazy completo en {(time.monotonic()-lazy_started):.1f}s")
 
 # ── Pase FTS: buscar predecesores por nombre vía EDGAR full-text ─────────────
-# Solo se invoca para tickers donde flag_short_history disparó, formerNames
-# quedó vacío y NO hay un cik_alias ya configurado. Captura el caso LLC→Inc.
-# (ALH style) que el pase de /submissions no detecta. La sugerencia llega a una
-# nueva columna suggested_predecessor_ciks; nunca se auto-aplica.
+# Se invoca para tickers con flag_short_history que NO tienen alias configurado.
+# OJO: formerNames NO es buen filtro — SEC lo registra para renames dentro del
+# mismo CIK (p.ej. JNTL Inc.→Kenvue Inc., mismo CIK), no para predecesores en
+# OTRO CIK (caso ALH: LLC→Inc., CIK distinto). Las dos columnas (former_names
+# vs suggested_predecessor_ciks) son complementarias, no excluyentes.
 fts_candidates_idxs = [
     i for i in flagged_idxs
-    if not results[i].get("former_names")
-    and results[i]["ticker"] not in _FAV_CIK_ALIASES
+    if results[i]["ticker"] not in _FAV_CIK_ALIASES
     and results[i].get("current_cik")
 ]
 if fts_candidates_idxs:
-    print(f"\n  Pase FTS para {len(fts_candidates_idxs)} candidato(s) sin formerNames ni alias…")
+    print(f"\n  Pase FTS para {len(fts_candidates_idxs)} candidato(s) sin cik_alias configurado…")
     fts_started = time.monotonic()
     n_with_suggestions = 0
 

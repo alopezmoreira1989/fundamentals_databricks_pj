@@ -15,6 +15,10 @@ __pycache__/
 # Local smoke tests (no son parte del pipeline)
 test_connection.py
 
+# Scratch / temp files de sesiones de auditoría (Databricks Jobs API submits,
+# notebook exports, parches temporales con TICKERS_OVERRIDE, etc.)
+.audit_*
+
 # Claude Code — instrucciones personales (no compartir)
 CLAUDE.local.md
 .claude/
