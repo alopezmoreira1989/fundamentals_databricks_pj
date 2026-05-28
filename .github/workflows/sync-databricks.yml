@@ -8,36 +8,96 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
-      - name: Pull latest into Databricks Repo
+      - name: Force-sync Databricks Repo to main (self-healing)
         env:
           DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
           DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
           DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+          REPO_PATH: ${{ vars.DATABRICKS_REPO_PATH }}
+          GIT_URL: https://github.com/${{ github.repository }}.git
+          GIT_PROVIDER: gitHub
         run: |
-          REPO_ID=4088793207541076
+          set -euo pipefail
 
-          # Obtain short-lived bearer token via OAuth M2M (client_credentials)
+          if [ -z "${REPO_PATH:-}" ]; then
+            echo "::error::Falta la variable de Actions DATABRICKS_REPO_PATH (ruta del Repo en el workspace)."
+            exit 1
+          fi
+
+          api() {  # api METHOD PATH [JSON_BODY]
+            local method="$1" path="$2" body="${3:-}"
+            if [ -n "$body" ]; then
+              curl -s -w "\n%{http_code}" -X "$method" "${DATABRICKS_HOST}${path}" \
+                -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json" -d "$body"
+            else
+              curl -s -w "\n%{http_code}" -X "$method" "${DATABRICKS_HOST}${path}" \
+                -H "Authorization: Bearer ${TOKEN}"
+            fi
+          }
+          http_code() { echo "$1" | tail -1; }
+          http_body() { echo "$1" | sed '$d'; }
+
+          # --- 1. OAuth M2M token ---
           RESP=$(curl -s -X POST "${DATABRICKS_HOST}/oidc/v1/token" \
             -d "grant_type=client_credentials&client_id=${DATABRICKS_CLIENT_ID}&client_secret=${DATABRICKS_CLIENT_SECRET}&scope=all-apis")
           TOKEN=$(echo "$RESP" | jq -r '.access_token // empty')
-
           if [ -z "$TOKEN" ]; then
-            echo "::error::OAuth token exchange failed: $RESP"
-            exit 1
+            echo "::error::OAuth token exchange failed: $RESP"; exit 1
           fi
 
-          echo "Updating repo id=${REPO_ID} to branch main..."
-          RESULT=$(curl -s -w "\n%{http_code}" -X PATCH "${DATABRICKS_HOST}/api/2.0/repos/${REPO_ID}" \
-            -H "Authorization: Bearer ${TOKEN}" \
-            -H "Content-Type: application/json" \
-            -d '{"branch": "main"}')
-          HTTP_CODE=$(echo "$RESULT" | tail -1)
-          BODY=$(echo "$RESULT" | sed '$d')
+          # --- 2. Resolver REPO_ID por path (clave estable) ---
+          LIST=$(api GET "/api/2.0/repos?path_prefix=$(jq -rn --arg p "$REPO_PATH" '$p|@uri')")
+          REPO_ID=$(http_body "$LIST" | jq -r --arg p "$REPO_PATH" '.repos[]? | select(.path==$p) | .id' | head -1)
 
-          if [ "$HTTP_CODE" -ge 400 ]; then
-            echo "::error::Repo update failed (HTTP $HTTP_CODE): $BODY"
-            exit 1
+          create_repo() {
+            echo "Creando Repo en ${REPO_PATH}..."
+            local R; R=$(api POST "/api/2.0/repos" \
+              "$(jq -nc --arg u "$GIT_URL" --arg pr "$GIT_PROVIDER" --arg p "$REPO_PATH" \
+                 '{url:$u, provider:$pr, path:$p}')")
+            if [ "$(http_code "$R")" -ge 400 ]; then
+              echo "::error::Create repo falló: $(http_body "$R")"; exit 1
+            fi
+            REPO_ID=$(http_body "$R" | jq -r '.id')
+            echo "Repo creado id=${REPO_ID}"
+          }
+
+          pull_main() {  # devuelve 0 ok, 1 conflicto, 2 otro error
+            local R; R=$(api PATCH "/api/2.0/repos/${REPO_ID}" '{"branch":"main"}')
+            local code body; code=$(http_code "$R"); body=$(http_body "$R")
+            if [ "$code" -lt 400 ]; then echo "$body" | jq -e . >/dev/null 2>&1 || true; return 0; fi
+            if echo "$body" | grep -q "GIT_CONFLICT"; then return 1; fi
+            echo "::error::Pull falló (HTTP $code): $body"; return 2
+          }
+
+          # --- 3. Crear si no existe ---
+          if [ -z "$REPO_ID" ] || [ "$REPO_ID" = "null" ]; then
+            create_repo
           fi
+          echo "Repo id=${REPO_ID} · path=${REPO_PATH}"
 
-          echo "$BODY" | jq .
-          echo "::notice::Databricks workspace synced to main"
+          # --- 4. Intentar pull; auto-reparar ante conflicto ---
+          # NOTA: el borrado+recreación del Repo descarta INTENCIONALMENTE cualquier
+          # cambio local del Databricks Repo (es el "force to remote"). No trabajes en
+          # este Repo sincronizado: cualquier deriva local se pierde aquí.
+          set +e
+          pull_main; rc=$?
+          set -e
+          if [ "$rc" -eq 0 ]; then
+            echo "::notice::Databricks Repo sincronizado a main (pull limpio)"
+            exit 0
+          fi
+          if [ "$rc" -eq 2 ]; then exit 1; fi
+
+          echo "::warning::GIT_CONFLICT detectado — descartando estado local: borrar y recrear el Repo desde main."
+          DEL=$(api DELETE "/api/2.0/repos/${REPO_ID}")
+          if [ "$(http_code "$DEL")" -ge 400 ]; then
+            echo "::error::Delete repo falló: $(http_body "$DEL")"; exit 1
+          fi
+          create_repo
+          set +e
+          pull_main; rc=$?
+          set -e
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::Re-sync tras recrear el Repo falló (rc=$rc)"; exit 1
+          fi
+          echo "::notice::Databricks Repo re-creado y sincronizado a main (auto-reparado)"

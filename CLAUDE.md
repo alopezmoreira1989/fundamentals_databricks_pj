@@ -35,3 +35,19 @@ Databricks analytical pipeline that ingests SEC EDGAR XBRL filings (10-K/10-Q) f
 - `30_analysis/` — ad-hoc validation queries
 - `40_dashboards/` — dashboard SQL and `.lvdash.json`
 - `90_pipelines/91__full_pipeline.py` — orchestration entry point (Databricks notebook source format)
+
+## Sync GitHub → Databricks Repo
+
+GitHub `main` es la única fuente de verdad. El Databricks Repo (sincronizado por
+`.github/workflows/sync-databricks.yml`) es un **espejo de solo lectura**.
+
+- **No edites ni ejecutes los notebooks directamente desde el Repo sincronizado.**
+  Abrir un notebook `.py` en el editor del workspace lo reescribe (metadatos de
+  celdas/reformateo) y crea cambios locales que rompen el pull con `GIT_CONFLICT`.
+- Para iterar de forma interactiva, clona el repo en un Databricks Repo aparte bajo
+  tu carpeta de usuario y trabaja allí; envía los cambios vía GitHub.
+- Si necesitas correr un notebook del Repo sincronizado, lánzalo como **Job** sobre
+  su ruta (no lo abras en el editor): ejecutar no reescribe el fuente, editar sí.
+- El workflow es auto-reparable: ante `GIT_CONFLICT` borra y recrea el Repo desde
+  `main`, descartando el estado local. Si tenías trabajo sin guardar en el Repo
+  sincronizado, se perderá — por eso no se debe trabajar ahí.
