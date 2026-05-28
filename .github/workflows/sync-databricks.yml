@@ -45,22 +45,28 @@ jobs:
             echo "::error::OAuth token exchange failed: $RESP"; exit 1
           fi
 
-          # --- 2. Resolver REPO_ID por path (clave estable) ---
+          # La API de *crear* Repos usa el namespace /Repos/<user>/<repo> (sin el
+          # prefijo /Workspace); la *lista* en cambio devuelve la ruta con /Workspace.
+          # Normalizamos: CREATE_PATH es la forma sin prefijo para crear/mkdirs.
+          CREATE_PATH="${REPO_PATH#/Workspace}"
+
+          # --- 2. Resolver REPO_ID por path (clave estable; tolerante a ambas formas) ---
           LIST=$(api GET "/api/2.0/repos?path_prefix=$(jq -rn --arg p "$REPO_PATH" '$p|@uri')")
-          REPO_ID=$(http_body "$LIST" | jq -r --arg p "$REPO_PATH" '.repos[]? | select(.path==$p) | .id' | head -1)
+          REPO_ID=$(http_body "$LIST" | jq -r --arg p "$REPO_PATH" --arg c "$CREATE_PATH" \
+            '.repos[]? | select(.path==$p or .path==$c) | .id' | head -1)
 
           create_repo() {
-            echo "Creando Repo en ${REPO_PATH}..."
+            echo "Creando Repo en ${CREATE_PATH}..."
             # La API de Repos no crea directorios intermedios; al borrar el Repo
             # puede desaparecer la carpeta padre del usuario. mkdirs es idempotente.
-            local parent; parent=$(dirname "$REPO_PATH")
+            local parent; parent=$(dirname "$CREATE_PATH")
             local MK; MK=$(api POST "/api/2.0/workspace/mkdirs" \
               "$(jq -nc --arg p "$parent" '{path:$p}')")
             if [ "$(http_code "$MK")" -ge 400 ]; then
               echo "::warning::mkdirs del padre ${parent} devolvió: $(http_body "$MK")"
             fi
             local R; R=$(api POST "/api/2.0/repos" \
-              "$(jq -nc --arg u "$GIT_URL" --arg pr "$GIT_PROVIDER" --arg p "$REPO_PATH" \
+              "$(jq -nc --arg u "$GIT_URL" --arg pr "$GIT_PROVIDER" --arg p "$CREATE_PATH" \
                  '{url:$u, provider:$pr, path:$p}')")
             if [ "$(http_code "$R")" -ge 400 ]; then
               echo "::error::Create repo falló: $(http_body "$R")"; exit 1
