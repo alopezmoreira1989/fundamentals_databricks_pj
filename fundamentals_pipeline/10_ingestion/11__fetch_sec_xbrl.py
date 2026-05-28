@@ -65,7 +65,14 @@ REQUEST_TIMEOUT    = 30
 BATCH_TICKERS      = 250
 
 # ── Refresh policy ────────────────────────────────────────────────────────────
-FORCE_FULL_REFRESH = False
+# FORCE_FULL_REFRESH re-fetches every ticker, ignoring the staleness guard below.
+# Driven by the `force_full_refresh` job param: when 11 runs via %run from
+# 91__full_pipeline the widget is inherited; standalone runs without the widget
+# fall back to False (normal incremental behaviour).
+try:
+    FORCE_FULL_REFRESH = dbutils.widgets.get("force_full_refresh").strip().lower() == "true"
+except Exception:
+    FORCE_FULL_REFRESH = False
 STALENESS_DAYS     = 3
 
 raw_full = f"{CATALOG}.{SCHEMA}.{RAW_TABLE}"

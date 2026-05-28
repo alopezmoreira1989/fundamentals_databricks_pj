@@ -51,6 +51,9 @@
 # MAGIC
 # MAGIC - `tickers_override`: lista de tickers separados por coma (omite `main.config.tickers`)
 # MAGIC - `run_optimization`: `true` para correr OPTIMIZE + VACUUM al final
+# MAGIC - `force_full_refresh`: `true` para re-ingestar TODOS los tickers ignorando el
+# MAGIC   guard de frescura de 3 días en `11__fetch_sec_xbrl` (úsalo para un backfill
+# MAGIC   tras un cambio de lógica de ingest/merge)
 # MAGIC
 # MAGIC > El universo de tickers (`main.config.tickers`) se mantiene manualmente con
 # MAGIC > `02__tickers_master`. Las jerarquías de conceptos y métricas
@@ -59,13 +62,15 @@
 
 # COMMAND ----------
 
-dbutils.widgets.text("tickers_override",  "",      "tickers_override")
-dbutils.widgets.text("run_optimization",  "false", "run_optimization")
-dbutils.widgets.text("rebuild_config",    "false", "rebuild_config")
+dbutils.widgets.text("tickers_override",   "",      "tickers_override")
+dbutils.widgets.text("run_optimization",   "false", "run_optimization")
+dbutils.widgets.text("rebuild_config",     "false", "rebuild_config")
+dbutils.widgets.text("force_full_refresh", "false", "force_full_refresh")
 
-tickers_override = dbutils.widgets.get("tickers_override")
-run_optimization = dbutils.widgets.get("run_optimization")
-rebuild_config   = dbutils.widgets.get("rebuild_config")
+tickers_override   = dbutils.widgets.get("tickers_override")
+run_optimization   = dbutils.widgets.get("run_optimization")
+rebuild_config     = dbutils.widgets.get("rebuild_config")
+force_full_refresh = dbutils.widgets.get("force_full_refresh")
 
 # COMMAND ----------
 
