@@ -51,6 +51,14 @@ jobs:
 
           create_repo() {
             echo "Creando Repo en ${REPO_PATH}..."
+            # La API de Repos no crea directorios intermedios; al borrar el Repo
+            # puede desaparecer la carpeta padre del usuario. mkdirs es idempotente.
+            local parent; parent=$(dirname "$REPO_PATH")
+            local MK; MK=$(api POST "/api/2.0/workspace/mkdirs" \
+              "$(jq -nc --arg p "$parent" '{path:$p}')")
+            if [ "$(http_code "$MK")" -ge 400 ]; then
+              echo "::warning::mkdirs del padre ${parent} devolvió: $(http_body "$MK")"
+            fi
             local R; R=$(api POST "/api/2.0/repos" \
               "$(jq -nc --arg u "$GIT_URL" --arg pr "$GIT_PROVIDER" --arg p "$REPO_PATH" \
                  '{url:$u, provider:$pr, path:$p}')")
