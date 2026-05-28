@@ -158,6 +158,26 @@ TICKER_MAP = {
 }
 print(f"✓ Ticker index loaded — {len(TICKER_MAP):,} tickers known to SEC")
 
+# ── CIK aliases desde favorites.json ─────────────────────────────────────────
+# Permite que la auditoría vea el histórico combinado de CIKs predecesores
+# (fusiones MLP→C-corp, spinoffs). Sin esto, un ticker con cik_aliases
+# configurado en el pipeline aparecería falsamente con flag_short_history porque
+# el CIK actual de SEC solo tiene filings recientes (caso VNOM).
+_FAV_CIK_ALIASES = {}
+try:
+    with open(FAVORITES_JSON_PATH, "r", encoding="utf-8") as f:
+        _fav_raw = f.read()
+    _fav_lines = [l for l in _fav_raw.splitlines() if not l.strip().startswith("/")]
+    for _entry in json.loads("\n".join(_fav_lines)):
+        _t = _entry["ticker"].upper().strip()
+        _aliases = [str(c).zfill(10) for c in _entry.get("cik_aliases", []) if c]
+        if _aliases:
+            _FAV_CIK_ALIASES[_t] = _aliases
+except Exception as _e:
+    print(f"  ⚠ Could not load cik_aliases from favorites.json: {_e}")
+if _FAV_CIK_ALIASES:
+    print(f"  ✓ CIK aliases activos para auditoría: {_FAV_CIK_ALIASES}")
+
 # COMMAND ----------
 
 # MAGIC %md ## 4. Helpers — SEC fetch + análisis de un ticker
@@ -218,6 +238,40 @@ def concept_fy_coverage(facts: dict, concept: str) -> "tuple[set[int], int]":
     return years, n_stub
 
 
+def merge_facts(*facts_dicts: dict) -> dict:
+    """
+    Concatena los arrays `facts[ns][concept]["units"][unit]` a través de múltiples
+    JSONs de companyfacts. Misma lógica que 11__fetch_sec_xbrl.merge_facts —
+    duplicada aquí para evitar acoplar este script (que es read-only) con el
+    notebook de ingesta (que tiene side effects al ejecutarse vía %run).
+    """
+    if not facts_dicts:
+        return {}
+    if len(facts_dicts) == 1:
+        return facts_dicts[0]
+
+    merged = {"facts": {}}
+    for k, v in facts_dicts[0].items():
+        if k != "facts":
+            merged[k] = v
+
+    for fd in facts_dicts:
+        for ns, concepts in fd.get("facts", {}).items():
+            ns_bucket = merged["facts"].setdefault(ns, {})
+            for concept, payload in concepts.items():
+                if concept not in ns_bucket:
+                    ns_bucket[concept] = {
+                        "label":       payload.get("label"),
+                        "description": payload.get("description"),
+                        "units":       {u: list(rows) for u, rows in payload.get("units", {}).items()},
+                    }
+                else:
+                    existing_units = ns_bucket[concept]["units"]
+                    for unit_key, rows in payload.get("units", {}).items():
+                        existing_units.setdefault(unit_key, []).extend(rows)
+    return merged
+
+
 def audit_ticker(ticker: str) -> dict:
     """
     Audita un ticker. Devuelve dict con todos los campos requeridos por el schema
@@ -227,6 +281,7 @@ def audit_ticker(ticker: str) -> dict:
     base = {
         "ticker":               ticker,
         "current_cik":          None,
+        "aliased_ciks":         [],
         "former_names":         [],
         "first_10k_year":       None,
         "last_10k_year":        None,
@@ -243,7 +298,7 @@ def audit_ticker(ticker: str) -> dict:
         "error":                None,
     }
 
-    # Resolver CIK
+    # Resolver CIK primario
     cik_info = TICKER_MAP.get(ticker.upper())
     if cik_info is None:
         base["error"] = "ticker_not_in_sec_index"
@@ -252,44 +307,71 @@ def audit_ticker(ticker: str) -> dict:
     cik, _ = cik_info
     base["current_cik"] = cik
 
-    # Submissions: formerNames + 10-K dates
-    try:
-        sub_resp = rate_limited_get(f"https://data.sec.gov/submissions/CIK{cik}.json")
-        sub_resp.raise_for_status()
-        subs = sub_resp.json()
-        base["former_names"] = [f.get("name", "") for f in subs.get("formerNames", []) if f.get("name")]
+    # CIKs a auditar: primario + aliases configurados en favorites.json.
+    # El primario es obligatorio; los aliases son best-effort (un alias roto no
+    # tumba la auditoría del ticker — solo se pierde su contribución).
+    aliases = _FAV_CIK_ALIASES.get(ticker.upper(), [])
+    base["aliased_ciks"] = aliases
+    cik_list = [cik] + [a for a in aliases if a != cik]
 
-        recent = subs.get("filings", {}).get("recent", {})
-        forms  = recent.get("form", [])
-        fdates = recent.get("filingDate", [])
-        ten_k_dates = [fdates[i] for i, f in enumerate(forms) if f in ("10-K", "10-K/A")]
-        if ten_k_dates:
-            years_10k = [int(d[:4]) for d in ten_k_dates]
-            base["first_10k_year"] = min(years_10k)
-            base["last_10k_year"]  = max(years_10k)
-            base["n_10k"]          = len(ten_k_dates)
-    except Exception as e:
-        base["error"] = f"submissions_fetch_failed: {str(e)[:100]}"
-        return base
+    # ── Submissions: acumular formerNames + 10-K dates a través de todos los CIKs ─
+    all_former_names = set()
+    all_10k_dates    = []
+    for c in cik_list:
+        try:
+            sub_resp = rate_limited_get(f"https://data.sec.gov/submissions/CIK{c}.json")
+            sub_resp.raise_for_status()
+            subs = sub_resp.json()
+            for fn in subs.get("formerNames", []):
+                if fn.get("name"):
+                    all_former_names.add(fn["name"])
+            recent = subs.get("filings", {}).get("recent", {})
+            forms  = recent.get("form", [])
+            fdates = recent.get("filingDate", [])
+            all_10k_dates.extend([fdates[i] for i, f in enumerate(forms) if f in ("10-K", "10-K/A")])
+        except Exception as e:
+            if c == cik:
+                base["error"] = f"submissions_fetch_failed: {str(e)[:100]}"
+                return base
+            # alias roto — silencioso, seguimos
 
-    # Companyfacts
-    try:
-        facts_resp = rate_limited_get(f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json")
-        facts_resp.raise_for_status()
-        if "json" not in facts_resp.headers.get("Content-Type", "").lower():
-            base["error"] = "non_json_facts"
-            return base
-        facts = facts_resp.json()
-    except requests.exceptions.HTTPError as e:
-        code = getattr(e.response, "status_code", 0)
-        if code == 404:
-            base["error"] = "no_companyfacts"
-            base["action_recommended"] = "Emisor sin companyfacts (puede ser muy pequeño o nuevo)"
-        else:
-            base["error"] = f"facts_http_{code}"
-        return base
-    except Exception as e:
-        base["error"] = f"facts_fetch_failed: {str(e)[:100]}"
+    base["former_names"] = sorted(all_former_names)
+    if all_10k_dates:
+        years_10k = [int(d[:4]) for d in all_10k_dates]
+        base["first_10k_year"] = min(years_10k)
+        base["last_10k_year"]  = max(years_10k)
+        base["n_10k"]          = len(all_10k_dates)
+
+    # ── Companyfacts: fetch en cada CIK y merge ────────────────────────────
+    facts_list = []
+    for c in cik_list:
+        try:
+            facts_resp = rate_limited_get(f"https://data.sec.gov/api/xbrl/companyfacts/CIK{c}.json")
+            facts_resp.raise_for_status()
+            if "json" not in facts_resp.headers.get("Content-Type", "").lower():
+                if c == cik:
+                    base["error"] = "non_json_facts"
+                    return base
+                continue
+            facts_list.append(facts_resp.json())
+        except requests.exceptions.HTTPError as e:
+            code = getattr(e.response, "status_code", 0)
+            if c == cik:
+                if code == 404:
+                    base["error"] = "no_companyfacts"
+                    base["action_recommended"] = "Emisor sin companyfacts (puede ser muy pequeño o nuevo)"
+                else:
+                    base["error"] = f"facts_http_{code}"
+                return base
+            # alias roto — silencioso, seguimos
+        except Exception as e:
+            if c == cik:
+                base["error"] = f"facts_fetch_failed: {str(e)[:100]}"
+                return base
+
+    facts = merge_facts(*facts_list) if facts_list else {}
+    if not facts.get("facts"):
+        base["error"] = "no_facts_after_merge"
         return base
 
     # Coverage por familia: nos quedamos con el sinónimo de mejor cobertura por familia
@@ -431,6 +513,7 @@ from pyspark.sql.types import (
 schema = StructType([
     StructField("ticker",               StringType(),               False),
     StructField("current_cik",          StringType(),               True),
+    StructField("aliased_ciks",         ArrayType(StringType()),    True),
     StructField("former_names",         ArrayType(StringType()),    True),
     StructField("first_10k_year",       IntegerType(),              True),
     StructField("last_10k_year",        IntegerType(),              True),
