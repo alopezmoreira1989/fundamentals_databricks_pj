@@ -1,10 +1,7 @@
-[project]
-name = "fundamentals-databricks-pj"
-version = "0.1.0"
-requires-python = ">=3.10"
-dependencies = [
-    "jinja2>=3.1",
-]
+# Solo config de herramientas (ruff). Las dependencias de runtime viven en
+# requirements.txt (única fuente; Streamlit Cloud la instala con uv). No declarar
+# aquí un [project]/dependencies: Streamlit lo detectaría como una 2ª fuente de
+# requirements y avisaría. jinja2 (antiguo dep declarado) no se usa en el código.
 
 [tool.ruff]
 line-length = 120
