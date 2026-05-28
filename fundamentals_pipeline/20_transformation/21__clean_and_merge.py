@@ -10,8 +10,9 @@
 # MAGIC **Logic for FY:**
 # MAGIC - Filter raw to `form IN ('10-K','10-K/A')` AND `fp = 'FY'` AND `period_shape = 'FY_or_TTM'`
 # MAGIC   (for flows) OR `kind = 'stock'` AND snapshot at fiscal year-end
-# MAGIC - Dedupe by `(ticker, stmt, concept, fy)` keeping latest `filed`
-# MAGIC - UPDATE if value changed (SEC restated), INSERT if new, leave rest untouched
+# MAGIC - Dedupe by `(ticker, stmt, concept, fy)` keeping the current-year fact =
+# MAGIC   the one with the latest `period_end` (10-K comparatives end earlier)
+# MAGIC - UPDATE if value/period_end changed (SEC restated), INSERT if new, leave rest untouched
 # MAGIC
 # MAGIC Re-running this notebook is always safe — fully idempotent.
 
@@ -81,10 +82,12 @@ raw = spark.table(raw_full).filter(F.col("scraped_at") == latest_scrape)
 # Flow FY rows: 10-K, fp='FY'. Quitamos el filtro estricto period_shape='FY_or_TTM'
 # para no descartar años de transición/stub con duración fuera de 350–380d (típico
 # tras una conversión MLP→C-corp o un cambio de fiscal year-end). El Window de
-# dedup más abajo se queda con la fila de MÁXIMA duración por (ticker, stmt, concept, fy),
-# así que el comportamiento normal (un 365d existe) no cambia. Edge case conocido:
-# si un emisor solo reporta Q4 standalone (~90d) y nada anual, se escogerá el 90d —
-# es degenerado pero mejor que descartar el año entero.
+# dedup más abajo se queda con la fila de period_end MÁS RECIENTE por
+# (ticker, stmt, concept, fy) — el fact del año en curso (los comparativos que el 10-K
+# trae etiquetados con el mismo fy terminan antes). Esto también captura bien el stub de
+# un año de transición (su period_end es el más reciente del grupo). Edge case conocido:
+# si un emisor solo reporta Q4 standalone y nada anual, se escogerá ese — degenerado pero
+# mejor que descartar el año entero.
 # Snapshot se excluye por defensa (no debería aparecer para flows).
 flow_fy = (
     raw
@@ -131,11 +134,17 @@ for _alt, _canon in CONCEPT_SYNONYMS.items():
         F.when(F.col("concept") == _alt, _canon).otherwise(F.col("concept"))
     )
 
-# Dedup: para flows, priorizar fila de MAYOR duración (capta stubs/transiciones donde
-# no hay un row de ~365d puro). Para stocks, duration_days es NULL y el window cae al
-# siguiente criterio (filed). En empate de filed, mayor value gana (restatement upside).
+# Dedup: nos quedamos con el fact del AÑO EN CURSO por (ticker, stmt, concept, fy).
+# Un 10-K etiqueta los comparativos de años previos con el `fy` DEL FILING, así que una
+# partición fy contiene varios facts FY; el año en curso es el de `period_end` MÁS RECIENTE
+# (los comparativos terminan antes). Ordenar por duración era INCORRECTO — un comparativo
+# de 53 semanas (370d) o de año bisiesto (366d) ganaba al año en curso de 52 semanas/365d,
+# arrastrando el valor equivocado y un period_end cuyo año ≠ fiscal_year. Misma regla
+# MAX(period_end) que usa 21b. `filed` desc resuelve restatements; `value` desc es desempate
+# final. Para stocks (BS) period_end desc también elige el snapshot del año en curso (antes
+# caía a `value` desc y podía elegir el snapshot comparativo mayor).
 w = Window.partitionBy("ticker", "stmt", "concept", "fy").orderBy(
-    F.col("duration_days").desc_nulls_last(),
+    F.col("period_end").desc_nulls_last(),
     F.col("filed").desc_nulls_last(),
     F.col("value").desc_nulls_last()
 )
@@ -180,7 +189,7 @@ spark.sql(f"""
     AND target.fiscal_year = source.fiscal_year
     AND target.period_type = source.period_type
 
-    WHEN MATCHED AND target.value != source.value THEN
+    WHEN MATCHED AND (target.value != source.value OR target.period_end != source.period_end) THEN
         UPDATE SET
             target.value      = source.value,
             target.period_end = source.period_end,
