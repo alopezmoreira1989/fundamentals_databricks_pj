@@ -21,8 +21,27 @@ META_FILE   = "dashboard_meta.json"
 
 FIXTURE_DIR = Path(__file__).parent.parent / "fixtures"
 
+# Columnas de texto de baja cardinalidad → category (enorme ahorro de RAM).
+_CATEGORICAL_COLS = (
+    "ticker", "period_type", "stmt", "section", "group",
+    "concept", "display_name", "category", "subcategory", "metric", "unit",
+)
 
-@st.cache_data(ttl=3600, show_spinner="Loading financial data…")
+
+def _optimize_dtypes(df: pd.DataFrame) -> pd.DataFrame:
+    """Reduce la RAM residente: strings repetidos → category, numéricos → menor precisión."""
+    for col in _CATEGORICAL_COLS:
+        if col in df.columns and df[col].dtype == object:
+            df[col] = df[col].astype("category")
+    if "fiscal_year" in df.columns:
+        df["fiscal_year"] = pd.to_numeric(df["fiscal_year"], downcast="integer")
+    for col in ("value", "sort_order"):
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], downcast="float")
+    return df
+
+
+@st.cache_data(ttl=3600, max_entries=1, show_spinner="Loading financial data…")
 def load_latest_data() -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
     """Return (financials, metrics, meta).
 
@@ -52,6 +71,9 @@ def load_latest_data() -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
     data["period_end"] = pd.to_datetime(data["period_end"])
     if "period_end" in metrics.columns:
         metrics["period_end"] = pd.to_datetime(metrics["period_end"])
+
+    data    = _optimize_dtypes(data)
+    metrics = _optimize_dtypes(metrics)
     return data, metrics, meta
 
 
