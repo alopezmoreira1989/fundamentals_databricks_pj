@@ -6,7 +6,7 @@ import io
 import json
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 import pandas as pd
 import requests
@@ -53,13 +53,14 @@ def load_latest_data() -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
         data    = _fetch_parquet(DATA_FILE)
         metrics = _fetch_parquet(METRIC_FILE)
         meta    = _fetch_json(META_FILE)
-    except Exception:
+    except Exception as exc:
+        # Fallback a fixtures locales (dev). Si no hay, error legible (sin traceback).
         if (FIXTURE_DIR / DATA_FILE).exists():
             data    = pd.read_parquet(FIXTURE_DIR / DATA_FILE)
             metrics = pd.read_parquet(FIXTURE_DIR / METRIC_FILE)
             meta    = json.loads((FIXTURE_DIR / META_FILE).read_text())
         else:
-            raise
+            _render_load_error(exc)   # st.error + st.stop(), no retorna
 
     # Normalize types: parquet preserves None (not NaN) for missing strings,
     # which breaks pandas groupby/pivot. Convert to proper NaN.
@@ -76,6 +77,35 @@ def load_latest_data() -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
     data    = _optimize_dtypes(data)
     metrics = _optimize_dtypes(metrics)
     return data, metrics, meta
+
+
+def _render_load_error(exc: Exception) -> NoReturn:
+    """Muestra un st.error legible según el tipo de fallo y corta la ejecución.
+
+    Distingue el caso "datos aún no publicados" (Release `latest` ausente → 404)
+    del resto de fallos de red. `st.stop()` evita que suba el traceback crudo.
+    """
+    is_404 = (
+        isinstance(exc, requests.HTTPError)
+        and getattr(exc.response, "status_code", None) == 404
+    )
+    if is_404:
+        st.error(
+            "**Los datos del dashboard aún no se han publicado.**\n\n"
+            "El app descarga los datos desde el Release `latest` de GitHub, "
+            "que ahora mismo no existe o no es accesible. "
+            "Publícalos ejecutando en Databricks:\n\n"
+            "1. `50_publish/51__export_dashboard_data`\n"
+            "2. `50_publish/52__publish_to_github`\n\n"
+            "Cuando el Release `latest` esté disponible, recarga esta página."
+        )
+    else:
+        st.error(
+            "**No se pudieron cargar los datos del dashboard.**\n\n"
+            f"Error al contactar con la fuente de datos: `{type(exc).__name__}`. "
+            "Reintenta en unos minutos; si persiste, revisa el Release `latest` del repo."
+        )
+    st.stop()
 
 
 def _fetch_parquet(name: str) -> pd.DataFrame:
