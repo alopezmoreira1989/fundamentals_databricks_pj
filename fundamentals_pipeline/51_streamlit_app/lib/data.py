@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -87,6 +88,34 @@ def _fetch_json(name: str) -> dict[str, Any]:
     r = requests.get(f"{BASE_URL}/{name}", timeout=10)
     r.raise_for_status()
     return r.json()
+
+
+@st.cache_data
+def app_version() -> str:
+    """Short git SHA of the deployed app code.
+
+    Streamlit Community Cloud `git clone`s the repo, so `.git` is present at
+    runtime — this lets you confirm a redeploy actually picked up your push.
+    Falls back to reading .git/HEAD if the git binary is unavailable.
+    """
+    repo_root = Path(__file__).resolve().parents[3]
+    try:
+        sha = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=repo_root, capture_output=True, text=True, timeout=5,
+        ).stdout.strip()
+        if sha:
+            return sha
+    except Exception:
+        pass
+    try:
+        head = (repo_root / ".git" / "HEAD").read_text().strip()
+        if head.startswith("ref:"):
+            ref = head.split(" ", 1)[1].strip()
+            return (repo_root / ".git" / ref).read_text().strip()[:7]
+        return head[:7]
+    except Exception:
+        return "unknown"
 
 
 @st.cache_data

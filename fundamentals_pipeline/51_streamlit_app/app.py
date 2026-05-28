@@ -10,7 +10,7 @@ from pathlib import Path
 
 import streamlit as st
 
-from lib.data import load_latest_data, load_notes
+from lib.data import app_version, load_latest_data, load_notes
 from lib.kpis import render_kpi_strip
 from lib.render import (
     inject_css,
@@ -125,4 +125,4 @@ with tab_qt:
     st.markdown(render_quarterly_combo(df_q), unsafe_allow_html=True)
     st.markdown(render_table_html(df_q, statement="qt", ticker=ticker, notes=notes), unsafe_allow_html=True)
 
-st.markdown(render_footnote_bar(meta), unsafe_allow_html=True)
+st.markdown(render_footnote_bar(meta, app_version()), unsafe_allow_html=True)

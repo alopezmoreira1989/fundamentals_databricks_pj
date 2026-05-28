@@ -564,8 +564,9 @@ def render_balance_check(df_bs: pd.DataFrame) -> str:
 # Footnote bar (page bottom)
 # ──────────────────────────────────────────────────────────────────────────────
 
-def render_footnote_bar(meta: dict[str, Any]) -> str:
+def render_footnote_bar(meta: dict[str, Any], version: str = "") -> str:
     ts = meta.get("build_timestamp", "")
+    ver = f'<span class="pipe">|</span> app {version}' if version else ""
     return (
         '<div class="footnote">'
         '<span style="color:var(--ink); font-weight:500;">main.financials.financials</span>'
@@ -574,5 +575,6 @@ def render_footnote_bar(meta: dict[str, Any]) -> str:
         '<span class="pipe">|</span> Derived metrics from main.financials.financials_metrics'
         '<span class="pipe">|</span> Source · SEC EDGAR XBRL via 11__fetch_sec_xbrl'
         f'<span class="pipe">|</span> Built {ts}'
+        f'{ver}'
         '</div>'
     )
