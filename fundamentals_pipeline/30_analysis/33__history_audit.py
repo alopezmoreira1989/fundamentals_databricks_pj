@@ -55,6 +55,7 @@ AUDIT_TABLE = f"{CATALOG}.{SCHEMA}.history_audit"
 import sys
 import json
 import time
+import urllib.parse
 import requests
 import pandas as pd
 from collections import deque
@@ -84,6 +85,11 @@ SESSION.mount("https://", HTTPAdapter(pool_connections=MAX_WORKERS, pool_maxsize
 # Buffer de latencias para el resumen p50/p95/p99 al final. Capped para que
 # no crezca sin límite en runs largos.
 _LATENCIES: "deque[float]" = deque(maxlen=20000)
+
+# Cache de "este CIK tiene XBRL ingestible?" usado por el pase 3 (FTS).
+# Compartido entre workers; los dict ops de una sola clave son atómicos en
+# CPython bajo el GIL — no hace falta lock.
+_XBRL_PROBE_CACHE: "dict[str, bool]" = {}
 
 # COMMAND ----------
 
@@ -322,11 +328,28 @@ def derive_10k_stats(facts: dict) -> "tuple[int|None, int|None, int]":
 def _build_action_recommended(rec: dict) -> "str | None":
     actions = []
     if rec["flag_short_history"]:
-        fn_hint = rec["former_names"] or "sin formerNames; mirar Previous CIKs en EDGAR"
-        actions.append(
-            "CIK predecesor probable — buscar en EDGAR full-text por formerNames "
-            f"({fn_hint}) y anadir a cik_aliases en favorites.json"
-        )
+        suggested = rec.get("suggested_predecessor_ciks") or []
+        had_raw = rec.get("_had_raw_predecessor_candidates", False)
+        if suggested:
+            csv = ", ".join(suggested)
+            actions.append(
+                f"Predecesor probable (EDGAR FTS): CIK(s) {csv} — verificar y anadir a cik_aliases en favorites.json"
+            )
+        elif had_raw:
+            actions.append(
+                "Posible predecesor sin XBRL: hits en EDGAR FTS pero ningun CIK con companyfacts utilizable "
+                "(probable pre-mandato XBRL 2009-2011). Revisar manualmente."
+            )
+        elif rec["former_names"]:
+            actions.append(
+                "CIK predecesor probable — buscar en EDGAR full-text por formerNames "
+                f"({rec['former_names']}) y anadir a cik_aliases en favorites.json"
+            )
+        else:
+            actions.append(
+                "CIK predecesor probable — sin formerNames; mirar Previous CIKs en EDGAR full-text "
+                "y anadir a cik_aliases en favorites.json"
+            )
     if rec["flag_concept_gap"]:
         best_tag = rec["concept_max_coverage"]
         actions.append(
@@ -362,6 +385,189 @@ def fetch_former_names(current_cik: str, aliased_ciks: "list[str]") -> "list[str
     return sorted(names)
 
 
+# ── Pase 3: búsqueda fuzzy de predecesores por nombre (EDGAR FTS) ────────────
+# Cubre el caso en que el predecesor es OTRO CIK (cambio LLC→Inc., emisor de
+# deuda→emisor de equity), no un rename dentro del mismo CIK. SEC's formerNames
+# solo capta lo segundo. Caso canónico: ALH (Alliance Laundry Holdings) cuyo
+# predecesor "Alliance Laundry Systems LLC" CIK 0001063699 no aparece en
+# formerNames porque es un CIK distinto.
+
+_ENTITY_SUFFIXES = {
+    "INC", "INC.", "CORP", "CORP.", "CORPORATION", "COMPANY", "CO", "CO.",
+    "HOLDINGS", "HOLDING", "GROUP", "LLC", "L.L.C.", "LTD", "LTD.",
+    "LIMITED", "PLC", "TRUST", "LP", "L.P.", "PARTNERS", "PARTNERSHIP",
+    "SA", "S.A.", "NV", "N.V.", "AG", "THE",
+}
+
+_NAME_STOPWORDS = {
+    "AND", "OF", "FOR", "NEW", "THE", "AMERICAN", "UNITED", "GLOBAL",
+    "INTERNATIONAL", "NATIONAL", "FIRST",
+}
+
+
+def _normalize_company_name(title: str) -> str:
+    """
+    Strip trademark glyphs, parens, y sufijos de entidad recurrentes para
+    obtener el "núcleo" del nombre que sirve para EDGAR FTS.
+    "ALLIANCE LAUNDRY HOLDINGS INC." → "ALLIANCE LAUNDRY".
+    """
+    if not title:
+        return ""
+    s = title.upper()
+    # quitar marcas y parens
+    for ch in ("™", "®", "©"):
+        s = s.replace(ch, "")
+    # cortar cualquier paren (typically (TICKER) o (CIK ...))
+    if "(" in s:
+        s = s.split("(", 1)[0]
+    # quitar comas y collapsing whitespace
+    s = s.replace(",", " ")
+    tokens = [t for t in s.split() if t]
+    # quitar "THE" inicial — habitual en nombres tipo "The Walt Disney Company"
+    if tokens and tokens[0] == "THE":
+        tokens.pop(0)
+    # quitar sufijos de entidad de derecha a izquierda iterativamente
+    while tokens and tokens[-1] in _ENTITY_SUFFIXES:
+        tokens.pop()
+    return " ".join(tokens).strip()
+
+
+def _substantive_tokens(name: str) -> "set[str]":
+    """
+    Tokens >=3 chars, alphanumericos, sin stopwords genericas. Usado para
+    filtrar hits de EDGAR FTS por overlap con el nombre del emisor.
+    """
+    out: "set[str]" = set()
+    for tok in (name or "").upper().split():
+        cleaned = "".join(c for c in tok if c.isalnum())
+        if len(cleaned) >= 3 and cleaned not in _NAME_STOPWORDS:
+            out.add(cleaned)
+    return out
+
+
+def _cik_has_xbrl(cik: str, cache: "dict[str, bool]") -> bool:
+    """
+    Memoized check: ¿companyfacts/CIK{cik}.json devuelve datos us-gaap
+    no vacíos? True solo si status 200 + json + facts.us-gaap no vacío.
+    404 → False (y se cachea). 5xx u otros → False pero NO se cachea
+    (para no envenenar el run con un fallo transitorio).
+    """
+    cik = str(cik).zfill(10)
+    cached = cache.get(cik)
+    if cached is not None:
+        return cached
+    try:
+        resp = rate_limited_get(f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json")
+        if resp.status_code == 404:
+            cache[cik] = False
+            return False
+        if resp.status_code != 200:
+            return False  # no cachear: transient
+        if "json" not in resp.headers.get("Content-Type", "").lower():
+            cache[cik] = False
+            return False
+        body = resp.json()
+        usgaap = body.get("facts", {}).get("us-gaap", {})
+        ok = bool(usgaap)
+        cache[cik] = ok
+        return ok
+    except Exception:
+        return False  # no cachear
+
+
+def _edgar_fts_search(normalized_name: str) -> "list[dict]":
+    """
+    GET a EDGAR full-text search por frase entrecomillada, restringido a 10-K.
+    Devuelve la lista de hits (cada hit tiene _source con ciks, display_names,
+    file_date). En cualquier error → [].
+    """
+    if not normalized_name:
+        return []
+    quoted = f'"{normalized_name}"'
+    url = "https://efts.sec.gov/LATEST/search-index?q=" + urllib.parse.quote_plus(quoted) + "&forms=10-K"
+    try:
+        resp = rate_limited_get(url)
+        resp.raise_for_status()
+        return resp.json().get("hits", {}).get("hits", []) or []
+    except Exception:
+        return []
+
+
+def _rank_predecessor_candidates(
+    hits: "list[dict]",
+    current_cik: str,
+    exclude_ciks: "set[str]",
+    issuer_tokens: "set[str]",
+) -> "list[tuple[str, int, str]]":
+    """
+    Agrega los hits por CIK (todos los CIKs por hit — algunos filings son
+    multi-emisor), filtra el CIK actual y los aliases ya configurados, exige
+    overlap >=1 token sustantivo con el nombre del emisor para reducir falsos
+    positivos por nombres genéricos. Ordena por (filings desc, latest_date desc).
+
+    Deliberado: NO fetcheamos el SIC del candidato. Sería un GET extra por
+    candidato y el filtro de tokens ya mata la mayoría del ruido cross-industry.
+    """
+    agg: "dict[str, dict]" = {}
+    for h in hits:
+        src = h.get("_source", {}) or {}
+        ciks = src.get("ciks", []) or []
+        names = src.get("display_names", []) or []
+        date = src.get("file_date", "")
+        for i, cik in enumerate(ciks):
+            cik_pad = str(cik).zfill(10)
+            if cik_pad == current_cik or cik_pad in exclude_ciks:
+                continue
+            display = names[i] if i < len(names) else (names[0] if names else "")
+            entry = agg.setdefault(cik_pad, {"count": 0, "latest_date": "", "display_name": display})
+            entry["count"] += 1
+            if date and date > entry["latest_date"]:
+                entry["latest_date"] = date
+            if not entry["display_name"] and display:
+                entry["display_name"] = display
+    out: "list[tuple[str, int, str]]" = []
+    for cik, info in agg.items():
+        cand_tokens = _substantive_tokens(_normalize_company_name(info["display_name"]))
+        if not (cand_tokens & issuer_tokens):
+            continue
+        out.append((cik, info["count"], info["latest_date"]))
+    out.sort(key=lambda t: (t[1], t[2]), reverse=True)  # count desc, latest_date desc
+    return out
+
+
+def find_predecessor_candidates(
+    ticker: str,
+    current_cik: str,
+    issuer_title: str,
+    aliased_ciks: "list[str]",
+    xbrl_cache: "dict[str, bool]",
+    max_results: int = 3,
+) -> "tuple[list[str], bool]":
+    """
+    Orquestador del pase 3. Devuelve (suggested_ciks, had_raw_candidates).
+    had_raw_candidates distingue "FTS no devolvió nada" de "FTS devolvió hits
+    pero ninguno tiene XBRL". El segundo caso es la firma del problema ALH
+    (predecesor existe pero predata el mandato XBRL).
+    """
+    normalized = _normalize_company_name(issuer_title)
+    if not normalized:
+        return [], False
+    issuer_tokens = _substantive_tokens(normalized)
+    if not issuer_tokens:
+        return [], False
+    hits = _edgar_fts_search(normalized)
+    exclude = {str(c).zfill(10) for c in (aliased_ciks or []) if c}
+    ranked = _rank_predecessor_candidates(hits, current_cik, exclude, issuer_tokens)
+    had_raw = bool(ranked)
+    out: "list[str]" = []
+    for cik, _count, _date in ranked:
+        if len(out) >= max_results:
+            break
+        if _cik_has_xbrl(cik, xbrl_cache):
+            out.append(cik)
+    return out, had_raw
+
+
 def audit_ticker(ticker: str) -> dict:
     """
     Audita un ticker. Devuelve dict con todos los campos requeridos por el schema
@@ -373,23 +579,24 @@ def audit_ticker(ticker: str) -> dict:
     flag cuya action_recommended depende de formerNames).
     """
     base = {
-        "ticker":               ticker,
-        "current_cik":          None,
-        "aliased_ciks":         [],
-        "former_names":         [],
-        "first_10k_year":       None,
-        "last_10k_year":        None,
-        "n_10k":                0,
-        "years_revenue":        [],
-        "years_net_income":     [],
-        "years_assets":         [],
-        "flag_short_history":   False,
-        "flag_concept_gap":     False,
-        "flag_stub_years":      False,
-        "n_flags":              0,
-        "concept_max_coverage": None,
-        "action_recommended":   None,
-        "error":                None,
+        "ticker":                    ticker,
+        "current_cik":               None,
+        "aliased_ciks":              [],
+        "former_names":              [],
+        "suggested_predecessor_ciks": [],
+        "first_10k_year":            None,
+        "last_10k_year":             None,
+        "n_10k":                     0,
+        "years_revenue":             [],
+        "years_net_income":          [],
+        "years_assets":              [],
+        "flag_short_history":        False,
+        "flag_concept_gap":          False,
+        "flag_stub_years":           False,
+        "n_flags":                   0,
+        "concept_max_coverage":      None,
+        "action_recommended":        None,
+        "error":                     None,
     }
 
     # Resolver CIK primario
@@ -570,6 +777,60 @@ if flagged_idxs:
             results[i]["action_recommended"] = _build_action_recommended(results[i])
     print(f"  ✓ Pase lazy completo en {(time.monotonic()-lazy_started):.1f}s")
 
+# ── Pase FTS: buscar predecesores por nombre vía EDGAR full-text ─────────────
+# Solo se invoca para tickers donde flag_short_history disparó, formerNames
+# quedó vacío y NO hay un cik_alias ya configurado. Captura el caso LLC→Inc.
+# (ALH style) que el pase de /submissions no detecta. La sugerencia llega a una
+# nueva columna suggested_predecessor_ciks; nunca se auto-aplica.
+fts_candidates_idxs = [
+    i for i in flagged_idxs
+    if not results[i].get("former_names")
+    and results[i]["ticker"] not in _FAV_CIK_ALIASES
+    and results[i].get("current_cik")
+]
+if fts_candidates_idxs:
+    print(f"\n  Pase FTS para {len(fts_candidates_idxs)} candidato(s) sin formerNames ni alias…")
+    fts_started = time.monotonic()
+    n_with_suggestions = 0
+
+    def _fts_worker(idx: int):
+        rec = results[idx]
+        ticker = rec["ticker"]
+        title_info = TICKER_MAP.get(ticker.upper())
+        title = title_info[1] if title_info else ""
+        return idx, find_predecessor_candidates(
+            ticker=ticker,
+            current_cik=rec["current_cik"],
+            issuer_title=title,
+            aliased_ciks=rec.get("aliased_ciks") or [],
+            xbrl_cache=_XBRL_PROBE_CACHE,
+            max_results=3,
+        )
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futures = [pool.submit(_fts_worker, i) for i in fts_candidates_idxs]
+        for fut in as_completed(futures):
+            try:
+                idx, (suggested, had_raw) = fut.result()
+            except Exception as e:
+                print(f"    ⚠ pase FTS exception: {str(e)[:80]}")
+                continue
+            results[idx]["suggested_predecessor_ciks"] = suggested
+            results[idx]["_had_raw_predecessor_candidates"] = had_raw
+            if suggested:
+                n_with_suggestions += 1
+            results[idx]["action_recommended"] = _build_action_recommended(results[idx])
+
+    # Limpiar el campo transitorio antes del DataFrame (no está en el schema)
+    for r in results:
+        r.pop("_had_raw_predecessor_candidates", None)
+
+    print(
+        f"  ✓ Pase FTS completo en {(time.monotonic()-fts_started):.1f}s — "
+        f"sugerencias con XBRL para {n_with_suggestions}/{len(fts_candidates_idxs)} candidatos "
+        f"(XBRL probe cache: {len(_XBRL_PROBE_CACHE)} CIKs)"
+    )
+
 # Resumen de latencias HTTP (cap: últimas 20k requests del run)
 if _LATENCIES:
     lats_ms = sorted(l * 1000 for l in _LATENCIES)
@@ -602,11 +863,12 @@ from pyspark.sql.types import (
 )
 
 schema = StructType([
-    StructField("ticker",               StringType(),               False),
-    StructField("current_cik",          StringType(),               True),
-    StructField("aliased_ciks",         ArrayType(StringType()),    True),
-    StructField("former_names",         ArrayType(StringType()),    True),
-    StructField("first_10k_year",       IntegerType(),              True),
+    StructField("ticker",                     StringType(),               False),
+    StructField("current_cik",                StringType(),               True),
+    StructField("aliased_ciks",               ArrayType(StringType()),    True),
+    StructField("former_names",               ArrayType(StringType()),    True),
+    StructField("suggested_predecessor_ciks", ArrayType(StringType()),    True),
+    StructField("first_10k_year",             IntegerType(),              True),
     StructField("last_10k_year",        IntegerType(),              True),
     StructField("n_10k",                IntegerType(),              True),
     StructField("years_revenue",        ArrayType(IntegerType()),   True),
@@ -632,11 +894,15 @@ sdf = spark.createDataFrame(audit_df, schema=schema)
 if TICKERS_OVERRIDE:
     print(f"⚠ TICKERS_OVERRIDE activo — saltando write a {AUDIT_TABLE} para no clobberar el snapshot completo.")
     print(f"\n── Resultado del run ({len(audit_df)} ticker(s)) ──")
-    show_cols = ["ticker", "current_cik", "aliased_ciks", "n_flags",
-                 "flag_short_history", "flag_concept_gap", "flag_stub_years",
+    show_cols = ["ticker", "current_cik", "aliased_ciks", "suggested_predecessor_ciks",
+                 "n_flags", "flag_short_history", "flag_concept_gap", "flag_stub_years",
                  "n_10k", "first_10k_year", "last_10k_year",
                  "concept_max_coverage", "error"]
     print(audit_df[show_cols].to_string(index=False))
+    print("\n── action_recommended por ticker ──")
+    for _, row in audit_df.iterrows():
+        if row.get("action_recommended"):
+            print(f"  {row['ticker']}: {row['action_recommended']}")
 else:
     (
         sdf.write
@@ -690,12 +956,15 @@ if not top_suspects.empty:
     print("\n── TOP-20 TICKERS MÁS SOSPECHOSOS ──")
     show_cols = ["ticker", "current_cik", "n_flags", "flag_short_history",
                  "flag_concept_gap", "flag_stub_years", "n_10k",
-                 "first_10k_year", "last_10k_year", "concept_max_coverage"]
+                 "first_10k_year", "last_10k_year", "concept_max_coverage",
+                 "suggested_predecessor_ciks"]
     print(top_suspects[show_cols].to_string(index=False))
 
     print("\n── ACCIÓN RECOMENDADA (top 10) ──")
     for _, row in top_suspects.head(10).iterrows():
         print(f"\n  {row['ticker']}  (CIK {row['current_cik']}, flags={row['n_flags']})")
+        if row.get("suggested_predecessor_ciks"):
+            print(f"    suggested_predecessor_ciks: {list(row['suggested_predecessor_ciks'])}")
         if row["former_names"]:
             print(f"    formerNames: {row['former_names']}")
         print(f"    → {row['action_recommended']}")
@@ -720,4 +989,13 @@ else:
 # MAGIC SELECT ticker, current_cik, former_names, first_10k_year, last_10k_year
 # MAGIC FROM main.financials.history_audit
 # MAGIC WHERE flag_short_history = TRUE ORDER BY n_10k ASC;
+# MAGIC
+# MAGIC -- Work-queue: tickers con predecesor sugerido por EDGAR FTS (Pase 3).
+# MAGIC -- Estos son los candidatos accionables para añadir a cik_aliases en favorites.json.
+# MAGIC SELECT ticker, current_cik, suggested_predecessor_ciks, n_10k, last_10k_year, action_recommended
+# MAGIC FROM main.financials.history_audit
+# MAGIC WHERE flag_short_history = TRUE
+# MAGIC   AND ARRAY_SIZE(suggested_predecessor_ciks) > 0
+# MAGIC ORDER BY ARRAY_SIZE(suggested_predecessor_ciks) DESC, n_10k ASC
+# MAGIC LIMIT 40;
 # MAGIC ```
