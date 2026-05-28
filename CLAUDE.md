@@ -39,8 +39,15 @@ Databricks analytical pipeline that ingests SEC EDGAR XBRL filings (10-K/10-Q) f
 ## Sync GitHub → Databricks Repo
 
 GitHub `main` es la única fuente de verdad. El Databricks Repo (sincronizado por
-`.github/workflows/sync-databricks.yml`) es un **espejo de solo lectura**.
+`.github/workflows/sync-databricks.yml`) es un **espejo de solo lectura**, ubicado en
+`/Workspace/Shared/fundamentals_databricks_pj` (variable de Actions
+`DATABRICKS_REPO_PATH`).
 
+- **El Repo vive bajo `/Workspace/Shared/`, no bajo `/Repos/<tu-email>`.** El sync lo
+  hace el service principal `gh-actions-repo-sync`, que no puede recrear un Repo en el
+  namespace `/Repos/<email>` de un humano (es gestionado por su dueño). Por eso el
+  auto-repair (delete+recreate) exige una carpeta que el SP sí controle, como
+  `/Workspace/Shared`. El `REPO_ID` se resuelve por la URL del git, no por un id fijo.
 - **No edites ni ejecutes los notebooks directamente desde el Repo sincronizado.**
   Abrir un notebook `.py` en el editor del workspace lo reescribe (metadatos de
   celdas/reformateo) y crea cambios locales que rompen el pull con `GIT_CONFLICT`.
