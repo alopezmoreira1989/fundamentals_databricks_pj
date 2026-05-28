@@ -22,7 +22,7 @@
 # MAGIC **NO escribe** a `financials_raw`, `financials`, ni a otras tablas del pipeline.
 # MAGIC
 # MAGIC **Cómo correr**:
-# MAGIC - Por defecto: audita todos los `ACTIVE_TICKERS` (~3000 tickers, ~13 min con 8 workers).
+# MAGIC - Por defecto: audita todos los `ACTIVE_TICKERS` (~3000 tickers, ~20–25 min con 8 workers).
 # MAGIC - Override ad-hoc: setear `TICKERS_OVERRIDE = ["VNOM", "AAPL"]` antes de ejecutar.
 
 # COMMAND ----------
@@ -57,8 +57,10 @@ import json
 import time
 import requests
 import pandas as pd
+from collections import deque
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from requests.adapters import HTTPAdapter
 from threading import Lock
 
 # Windows console (cp1252) revienta con → ✓ ✗ ⚠ — fuerza UTF-8 si el stream lo soporta.
@@ -69,6 +71,19 @@ except Exception:
     pass
 
 HEADERS = {"User-Agent": SEC_USER_AGENT}
+
+# ── HTTP session compartida ──────────────────────────────────────────────────
+# Reusar la misma Session a través de todos los workers ahorra el handshake
+# TCP+TLS (~50–150ms por request) en cada llamada después de la primera. El
+# pool tiene que ser ≥ MAX_WORKERS para que no se convierta en un punto de
+# serialización oculto.
+SESSION = requests.Session()
+SESSION.headers.update(HEADERS)
+SESSION.mount("https://", HTTPAdapter(pool_connections=MAX_WORKERS, pool_maxsize=MAX_WORKERS * 2))
+
+# Buffer de latencias para el resumen p50/p95/p99 al final. Capped para que
+# no crezca sin límite en runs largos.
+_LATENCIES: "deque[float]" = deque(maxlen=20000)
 
 # COMMAND ----------
 
@@ -144,7 +159,10 @@ def rate_limited_get(url: str, timeout: int = REQUEST_TIMEOUT) -> requests.Respo
         if wait > 0:
             time.sleep(wait)
         _last_request_ts[0] = time.monotonic()
-    return requests.get(url, headers=HEADERS, timeout=timeout)
+    _t = time.monotonic()
+    resp = SESSION.get(url, timeout=timeout)
+    _LATENCIES.append(time.monotonic() - _t)
+    return resp
 
 
 print("Loading SEC ticker index...")
@@ -272,11 +290,87 @@ def merge_facts(*facts_dicts: dict) -> dict:
     return merged
 
 
+def derive_10k_stats(facts: dict) -> "tuple[int|None, int|None, int]":
+    """
+    Deriva (first_10k_year, last_10k_year, n_10k) de los rows de companyfacts
+    sin llamar /submissions. Recorre todos los conceptos sondeados y junta los
+    distintos (fy, accn) en form='10-K'/'10-K/A'.
+
+    Tradeoff respecto al método antiguo (contar filings desde /submissions):
+    si un 10-K no reporta NINGUNO de los conceptos en ALL_PROBES, no se cuenta.
+    Para emisores normales eso no pasa (todos reportan Revenue/NetIncome/Assets).
+    n_10k es ahora "cantidad de accessions 10-K observadas en conceptos sondeados".
+    """
+    fys: "set[int]" = set()
+    accns: "set[str]" = set()
+    ns_bucket = facts.get("facts", {}).get("us-gaap", {})
+    for concept in ALL_PROBES:
+        units = ns_bucket.get(concept, {}).get("units", {})
+        for unit_rows in units.values():
+            for row in unit_rows:
+                if row.get("form") not in ("10-K", "10-K/A"):
+                    continue
+                fy = row.get("fy")
+                if fy is not None:
+                    fys.add(int(fy))
+                accn = row.get("accn")
+                if accn:
+                    accns.add(accn)
+    return (min(fys) if fys else None, max(fys) if fys else None, len(accns))
+
+
+def _build_action_recommended(rec: dict) -> "str | None":
+    actions = []
+    if rec["flag_short_history"]:
+        fn_hint = rec["former_names"] or "sin formerNames; mirar Previous CIKs en EDGAR"
+        actions.append(
+            "CIK predecesor probable — buscar en EDGAR full-text por formerNames "
+            f"({fn_hint}) y anadir a cik_aliases en favorites.json"
+        )
+    if rec["flag_concept_gap"]:
+        best_tag = rec["concept_max_coverage"]
+        actions.append(
+            f"Sinonimo a anadir: el tag {best_tag} cubre mas anos que el canonico — "
+            "anadirlo a INCOME_STATEMENT en 01__tickers.py y al dict CONCEPT_SYNONYMS apuntando a Revenue"
+        )
+    if rec["flag_stub_years"]:
+        actions.append(
+            "Hay anos con period_shape=other_* (stubs/transiciones). La capa c de 21__clean_and_merge.py "
+            "(max-duration window) ya los captura — verificar que ese ticker tiene FY tras re-ingestar."
+        )
+    return " | ".join(actions) if actions else None
+
+
+def fetch_former_names(current_cik: str, aliased_ciks: "list[str]") -> "list[str]":
+    """
+    Llamada lazy a /submissions para popular formerNames. Se invoca SOLO para
+    tickers con flag_short_history en el segundo pase (post-paralelo). Errores
+    en alias son silenciosos; un error en el CIK primario devuelve [].
+    """
+    names: "set[str]" = set()
+    for c in [current_cik] + list(aliased_ciks or []):
+        if not c:
+            continue
+        try:
+            resp = rate_limited_get(f"https://data.sec.gov/submissions/CIK{c}.json")
+            resp.raise_for_status()
+            for fn in resp.json().get("formerNames", []):
+                if fn.get("name"):
+                    names.add(fn["name"])
+        except Exception:
+            continue
+    return sorted(names)
+
+
 def audit_ticker(ticker: str) -> dict:
     """
     Audita un ticker. Devuelve dict con todos los campos requeridos por el schema
     de la tabla destino. En caso de error, devuelve un dict con `error` poblado y
     los campos numéricos a NULL.
+
+    NOTA: este pase NO llama a /submissions. former_names queda vacío y se rellena
+    en un segundo pase lazy solo para tickers con flag_short_history (es el único
+    flag cuya action_recommended depende de formerNames).
     """
     base = {
         "ticker":               ticker,
@@ -314,34 +408,6 @@ def audit_ticker(ticker: str) -> dict:
     base["aliased_ciks"] = aliases
     cik_list = [cik] + [a for a in aliases if a != cik]
 
-    # ── Submissions: acumular formerNames + 10-K dates a través de todos los CIKs ─
-    all_former_names = set()
-    all_10k_dates    = []
-    for c in cik_list:
-        try:
-            sub_resp = rate_limited_get(f"https://data.sec.gov/submissions/CIK{c}.json")
-            sub_resp.raise_for_status()
-            subs = sub_resp.json()
-            for fn in subs.get("formerNames", []):
-                if fn.get("name"):
-                    all_former_names.add(fn["name"])
-            recent = subs.get("filings", {}).get("recent", {})
-            forms  = recent.get("form", [])
-            fdates = recent.get("filingDate", [])
-            all_10k_dates.extend([fdates[i] for i, f in enumerate(forms) if f in ("10-K", "10-K/A")])
-        except Exception as e:
-            if c == cik:
-                base["error"] = f"submissions_fetch_failed: {str(e)[:100]}"
-                return base
-            # alias roto — silencioso, seguimos
-
-    base["former_names"] = sorted(all_former_names)
-    if all_10k_dates:
-        years_10k = [int(d[:4]) for d in all_10k_dates]
-        base["first_10k_year"] = min(years_10k)
-        base["last_10k_year"]  = max(years_10k)
-        base["n_10k"]          = len(all_10k_dates)
-
     # ── Companyfacts: fetch en cada CIK y merge ────────────────────────────
     facts_list = []
     for c in cik_list:
@@ -373,6 +439,12 @@ def audit_ticker(ticker: str) -> dict:
     if not facts.get("facts"):
         base["error"] = "no_facts_after_merge"
         return base
+
+    # ── 10-K stats derivados de companyfacts (evita el fetch a /submissions) ─
+    first_y, last_y, n_10k = derive_10k_stats(facts)
+    base["first_10k_year"] = first_y
+    base["last_10k_year"]  = last_y
+    base["n_10k"]          = n_10k
 
     # Coverage por familia: nos quedamos con el sinónimo de mejor cobertura por familia
     family_results = {}  # family_name → {best_concept, best_years, all_concept_years}
@@ -437,26 +509,9 @@ def audit_ticker(ticker: str) -> dict:
 
     base["n_flags"] = int(base["flag_short_history"]) + int(base["flag_concept_gap"]) + int(base["flag_stub_years"])
 
-    # ── Acción recomendada ─────────────────────────────────────────────────
-    actions = []
-    if base["flag_short_history"]:
-        fn_hint = base["former_names"] or "sin formerNames; mirar Previous CIKs en EDGAR"
-        actions.append(
-            "CIK predecesor probable — buscar en EDGAR full-text por formerNames "
-            f"({fn_hint}) y anadir a cik_aliases en favorites.json"
-        )
-    if base["flag_concept_gap"]:
-        best_tag = base["concept_max_coverage"]
-        actions.append(
-            f"Sinonimo a anadir: el tag {best_tag} cubre mas anos que el canonico — "
-            "anadirlo a INCOME_STATEMENT en 01__tickers.py y al dict CONCEPT_SYNONYMS apuntando a Revenue"
-        )
-    if base["flag_stub_years"]:
-        actions.append(
-            "Hay anos con period_shape=other_* (stubs/transiciones). La capa c de 21__clean_and_merge.py "
-            "(max-duration window) ya los captura — verificar que ese ticker tiene FY tras re-ingestar."
-        )
-    base["action_recommended"] = " | ".join(actions) if actions else None
+    # action_recommended se calcula aquí; si flag_short_history dispara, el pase
+    # lazy de /submissions lo va a regenerar después con formerNames poblado.
+    base["action_recommended"] = _build_action_recommended(base)
     return base
 
 # COMMAND ----------
@@ -489,7 +544,43 @@ with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
         pass
 
 elapsed = time.monotonic() - started_at
-print(f"\n✓ Auditoría completa en {elapsed/60:.1f} min ({total/elapsed:.1f} t/s)")
+print(f"\n✓ Pase principal completo en {elapsed/60:.1f} min ({total/elapsed:.1f} t/s)")
+
+# ── Pase lazy: /submissions solo para flag_short_history ────────────────────
+# formerNames únicamente influye en action_recommended cuando flag_short_history
+# dispara. Saltarlo en el pase principal nos ahorra ~3000 requests (uno por
+# ticker). Aquí los recuperamos solo para los tickers flageados (típicamente
+# <100) y regeneramos action_recommended para esos.
+flagged_idxs = [i for i, r in enumerate(results) if r.get("flag_short_history")]
+if flagged_idxs:
+    print(f"\n  Pase lazy /submissions para {len(flagged_idxs)} ticker(s) flageados…")
+    lazy_started = time.monotonic()
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        fut_to_i = {
+            pool.submit(fetch_former_names, results[i]["current_cik"], results[i].get("aliased_ciks") or []): i
+            for i in flagged_idxs
+        }
+        for fut in as_completed(fut_to_i):
+            i = fut_to_i[fut]
+            try:
+                results[i]["former_names"] = fut.result()
+            except Exception as e:
+                results[i]["former_names"] = []
+                print(f"    ⚠ {results[i]['ticker']}: {str(e)[:80]}")
+            results[i]["action_recommended"] = _build_action_recommended(results[i])
+    print(f"  ✓ Pase lazy completo en {(time.monotonic()-lazy_started):.1f}s")
+
+# Resumen de latencias HTTP (cap: últimas 20k requests del run)
+if _LATENCIES:
+    lats_ms = sorted(l * 1000 for l in _LATENCIES)
+    n_lat   = len(lats_ms)
+    p50     = lats_ms[n_lat // 2]
+    p95     = lats_ms[min(n_lat - 1, int(n_lat * 0.95))]
+    p99     = lats_ms[min(n_lat - 1, int(n_lat * 0.99))]
+    print(f"  HTTP latency  p50: {p50:.0f}ms  p95: {p95:.0f}ms  p99: {p99:.0f}ms  (n={n_lat})")
+
+total_elapsed = time.monotonic() - started_at
+print(f"✓ Auditoría completa en {total_elapsed/60:.1f} min (total)")
 
 # COMMAND ----------
 
@@ -536,14 +627,25 @@ audit_df = audit_df[[f.name for f in schema.fields]]
 
 sdf = spark.createDataFrame(audit_df, schema=schema)
 
-(
-    sdf.write
-    .format("delta")
-    .mode("overwrite")
-    .option("overwriteSchema", "true")
-    .saveAsTable(AUDIT_TABLE)
-)
-print(f"✓ {sdf.count():,} filas escritas → {AUDIT_TABLE}")
+# Guard: cuando TICKERS_OVERRIDE está activo (modo test), NO sobreescribir la
+# tabla — preservamos el snapshot del último run completo y solo imprimimos.
+if TICKERS_OVERRIDE:
+    print(f"⚠ TICKERS_OVERRIDE activo — saltando write a {AUDIT_TABLE} para no clobberar el snapshot completo.")
+    print(f"\n── Resultado del run ({len(audit_df)} ticker(s)) ──")
+    show_cols = ["ticker", "current_cik", "aliased_ciks", "n_flags",
+                 "flag_short_history", "flag_concept_gap", "flag_stub_years",
+                 "n_10k", "first_10k_year", "last_10k_year",
+                 "concept_max_coverage", "error"]
+    print(audit_df[show_cols].to_string(index=False))
+else:
+    (
+        sdf.write
+        .format("delta")
+        .mode("overwrite")
+        .option("overwriteSchema", "true")
+        .saveAsTable(AUDIT_TABLE)
+    )
+    print(f"✓ {sdf.count():,} filas escritas → {AUDIT_TABLE}")
 
 # COMMAND ----------
 
