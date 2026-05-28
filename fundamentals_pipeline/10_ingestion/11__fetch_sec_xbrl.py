@@ -141,6 +141,7 @@ print(f"✓ Ticker index loaded — {len(TICKER_MAP):,} tickers known to SEC")
 
 # ── CIK overrides from favorites.json ────────────────────────────────────
 _FAV_CIK_OVERRIDES = {}   # ticker → (cik_padded, company)
+_FAV_CIK_ALIASES   = {}   # ticker → [cik_padded, ...]  (predecesores tras fusiones/reorgs)
 _ALIAS_MAP = {}            # alias → canonical_ticker
 try:
     with open(FAVORITES_JSON_PATH, "r", encoding="utf-8") as f:
@@ -150,12 +151,17 @@ try:
         _t = _entry["ticker"].upper().strip()
         if _entry.get("cik"):
             _FAV_CIK_OVERRIDES[_t] = (_entry["cik"].zfill(10), _entry.get("company", _t))
+        _cik_aliases = [str(c).zfill(10) for c in _entry.get("cik_aliases", []) if c]
+        if _cik_aliases:
+            _FAV_CIK_ALIASES[_t] = _cik_aliases
         for _alias in _entry.get("aliases", []):
             _ALIAS_MAP[_alias.upper().strip()] = _t
 except Exception as _e:
     print(f"  ⚠ Could not load favorites overrides: {_e}")
 if _FAV_CIK_OVERRIDES:
     print(f"  ✓ CIK overrides: {list(_FAV_CIK_OVERRIDES.keys())}")
+if _FAV_CIK_ALIASES:
+    print(f"  ✓ CIK aliases   : {_FAV_CIK_ALIASES}")
 
 
 def get_cik(ticker: str) -> tuple:
@@ -180,6 +186,44 @@ def get_facts(cik: str) -> dict:
     if "json" not in resp.headers.get("Content-Type", "").lower():
         raise ValueError(f"Non-JSON response (Content-Type: {resp.headers.get('Content-Type')})")
     return resp.json()
+
+
+def merge_facts(*facts_dicts: dict) -> dict:
+    """
+    Concatena los arrays `facts[ns][concept]["units"][unit]` a través de múltiples
+    JSONs de companyfacts. Útil cuando un ticker tiene CIKs predecesores (p.ej. tras
+    una fusión MLP→C-corp): el histórico vive bajo el CIK viejo y los filings recientes
+    bajo el nuevo. Mergeamos los facts crudos y dejamos que la dedup downstream en
+    21__clean_and_merge.py — Window por (ticker, stmt, concept, fy) con latest filed —
+    resuelva cualquier solape.
+    """
+    if not facts_dicts:
+        return {}
+    if len(facts_dicts) == 1:
+        return facts_dicts[0]
+
+    merged = {"facts": {}}
+    # Preservar metadatos del primer dict (que será el CIK primario)
+    for k, v in facts_dicts[0].items():
+        if k != "facts":
+            merged[k] = v
+
+    for fd in facts_dicts:
+        for ns, concepts in fd.get("facts", {}).items():
+            ns_bucket = merged["facts"].setdefault(ns, {})
+            for concept, payload in concepts.items():
+                if concept not in ns_bucket:
+                    # primera vez que vemos este concept: copiamos shallow + clonamos units
+                    ns_bucket[concept] = {
+                        "label":       payload.get("label"),
+                        "description": payload.get("description"),
+                        "units":       {u: list(rows) for u, rows in payload.get("units", {}).items()},
+                    }
+                else:
+                    existing_units = ns_bucket[concept]["units"]
+                    for unit_key, rows in payload.get("units", {}).items():
+                        existing_units.setdefault(unit_key, []).extend(rows)
+    return merged
 
 
 def extract_series(facts: dict, concept: str, kind: str, namespace: str = "us-gaap") -> pd.DataFrame:
@@ -260,6 +304,21 @@ def process_ticker(ticker: str, scraped_at_ts: datetime) -> tuple:
         facts = get_facts(cik)
     except Exception as e:
         return [], _classify_error(e, "fetch_facts")
+
+    # Fusionar CIKs predecesores (fusiones, MLP→C-corp, spinoffs). Un alias roto
+    # no debe romper la ingesta del ticker — log y seguir con lo que tengamos.
+    _aliases = _FAV_CIK_ALIASES.get(ticker.upper(), [])
+    if _aliases:
+        _alias_facts = []
+        for _alias_cik in _aliases:
+            if _alias_cik == cik:
+                continue
+            try:
+                _alias_facts.append(get_facts(_alias_cik))
+            except Exception as _alias_err:
+                print(f"    ⚠ {ticker}: alias CIK {_alias_cik} failed ({_alias_err})")
+        if _alias_facts:
+            facts = merge_facts(facts, *_alias_facts)
 
     try:
         for stmt_name, concept_map in STATEMENTS.items():

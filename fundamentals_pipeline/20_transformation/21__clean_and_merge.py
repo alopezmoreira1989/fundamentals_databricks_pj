@@ -78,17 +78,28 @@ spark.sql(f"""
 
 raw = spark.table(raw_full).filter(F.col("scraped_at") == latest_scrape)
 
-# Flow FY rows: 10-K with FY_or_TTM shape
+# Flow FY rows: 10-K, fp='FY'. Quitamos el filtro estricto period_shape='FY_or_TTM'
+# para no descartar años de transición/stub con duración fuera de 350–380d (típico
+# tras una conversión MLP→C-corp o un cambio de fiscal year-end). El Window de
+# dedup más abajo se queda con la fila de MÁXIMA duración por (ticker, stmt, concept, fy),
+# así que el comportamiento normal (un 365d existe) no cambia. Edge case conocido:
+# si un emisor solo reporta Q4 standalone (~90d) y nada anual, se escogerá el 90d —
+# es degenerado pero mejor que descartar el año entero.
+# Snapshot se excluye por defensa (no debería aparecer para flows).
 flow_fy = (
     raw
     .filter(F.col("kind").isin("flow_additive", "flow_nonadditive"))
     .filter(F.col("form").isin("10-K", "10-K/A"))
     .filter(F.col("fp") == "FY")
-    .filter(F.col("period_shape") == "FY_or_TTM")
+    .filter(F.col("period_shape") != "snapshot")
     .filter(F.col("value").isNotNull())
+    .withColumn("duration_days", F.datediff(F.col("period_end"), F.col("period_start")))
 )
 
 # Stock FY rows: snapshot from 10-K
+# Añadimos duration_days = NULL para que el unionByName con flow_fy cuadre el schema.
+# Para stocks no hay criterio de duración (todos son snapshots), así que el window
+# de dedup cae al siguiente criterio (filed desc) — comportamiento idéntico al previo.
 stock_fy = (
     raw
     .filter(F.col("kind") == "stock")
@@ -96,6 +107,7 @@ stock_fy = (
     .filter(F.col("fp") == "FY")
     .filter(F.col("period_shape") == "snapshot")
     .filter(F.col("value").isNotNull())
+    .withColumn("duration_days", F.lit(None).cast("int"))
 )
 
 incoming = flow_fy.unionByName(stock_fy)
@@ -110,14 +122,20 @@ print(f"FY rows incoming: {incoming.count():,}")
 
 # COMMAND ----------
 
-# Normalise: collapse "Revenue (contract)" into "Revenue" — when both reported, keep higher
-incoming = incoming.withColumn(
-    "concept",
-    F.when(F.col("concept") == "Revenue (contract)", "Revenue").otherwise(F.col("concept"))
-)
+# Normalise: colapsa sinónimos XBRL al concepto canónico via CONCEPT_SYNONYMS
+# (heredado del %run de 01__tickers). Si ambos reportan el mismo (ticker, stmt, fy),
+# la dedup posterior se queda con uno solo — latest filed, mayor value.
+for _alt, _canon in CONCEPT_SYNONYMS.items():
+    incoming = incoming.withColumn(
+        "concept",
+        F.when(F.col("concept") == _alt, _canon).otherwise(F.col("concept"))
+    )
 
-# Dedup keeping latest filed (restatement-aware), then if same filed keep higher value
+# Dedup: para flows, priorizar fila de MAYOR duración (capta stubs/transiciones donde
+# no hay un row de ~365d puro). Para stocks, duration_days es NULL y el window cae al
+# siguiente criterio (filed). En empate de filed, mayor value gana (restatement upside).
 w = Window.partitionBy("ticker", "stmt", "concept", "fy").orderBy(
+    F.col("duration_days").desc_nulls_last(),
     F.col("filed").desc_nulls_last(),
     F.col("value").desc_nulls_last()
 )
@@ -125,7 +143,7 @@ incoming = (
     incoming
     .withColumn("rn", F.row_number().over(w))
     .filter(F.col("rn") == 1)
-    .drop("rn")
+    .drop("rn", "duration_days")
     .withColumn("company", F.initcap(F.col("company")))
 )
 

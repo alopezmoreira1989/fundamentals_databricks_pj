@@ -22,6 +22,7 @@
 # COMMAND ----------
 
 from pyspark.sql import functions as F
+from pyspark.sql.window import Window
 
 full_tbl    = f"{CATALOG}.{SCHEMA}.{TABLE}"
 market_tbl  = f"{CATALOG}.{SCHEMA}.market_data"
@@ -30,13 +31,25 @@ metrics_tbl = f"{CATALOG}.{SCHEMA}.financials_metrics"
 # COMMAND ----------
 
 # MAGIC %md ## 1. Read FY-only rows and pivot to wide format
+# MAGIC
+# MAGIC Defensa contra company inconsistente por ticker: el MERGE de `21__clean_and_merge.py`
+# MAGIC solo actualiza `company` cuando cambia `value`, así que filas viejas pueden conservar
+# MAGIC un company stale (escapes raros de SEC, restructures LLC→Inc., overrides en
+# MAGIC favorites.json). Aquí normalizamos al primer non-null por ticker antes del pivot —
+# MAGIC si no, el `groupBy(ticker, company, fy)` produce filas duplicadas y el MERGE final
+# MAGIC peta con DELTA_MULTIPLE_SOURCE_ROW_MATCHING.
 
 # COMMAND ----------
 
-raw = (
+_raw_full = (
     spark.table(full_tbl)
     .filter(F.col("period_type") == "FY")
     .filter(F.col("value").isNotNull())
+)
+
+_company_w = Window.partitionBy("ticker")
+raw = _raw_full.withColumn(
+    "company", F.first("company", ignorenulls=True).over(_company_w)
 )
 
 wide = (
@@ -289,11 +302,14 @@ if mkt is not None:
         F.when(F.abs(F.col("EV/EBITDA")) > 500, F.lit(None)).otherwise(F.col("EV/EBITDA"))
     )
 
-    # Need company column for downstream join — pull from financials
+    # Need company column for downstream join — pull from financials.
+    # Misma defensa que arriba: si un ticker tiene >1 valor de company en financials
+    # (escapes raros de SEC, restructures, etc.), .distinct() devolvería múltiples
+    # filas y el join duplicaría. Tomamos el primer non-null por ticker.
     company_lookup = (
         spark.table(full_tbl)
-        .select("ticker", "company")
-        .distinct()
+        .groupBy("ticker")
+        .agg(F.first("company", ignorenulls=True).alias("company"))
     )
     val_metrics = val_metrics.join(company_lookup, on="ticker", how="left")
 

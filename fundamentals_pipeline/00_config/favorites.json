@@ -1,5 +1,11 @@
 [
   // Añade aquí tus tickers favoritos — se incluyen siempre, independientemente del índice
-  // Formato: {"ticker": "XXXX", "company": "Nombre opcional", "note": "Nota opcional"}
-  {"ticker": "VNOM", "company": "Viper Energy Inc", "cik": "0001602065", "note": "MLP→C-corp 2024"}
+  // Formato:
+  //   {"ticker": "XXXX",
+  //    "company": "Nombre opcional",
+  //    "cik": "0000123456",            // override del CIK primario (si SEC no resuelve el ticker)
+  //    "cik_aliases": ["0000999999"],  // CIKs predecesores (fusiones, MLP→C-corp, spinoffs)
+  //    "aliases": ["XXXX.OLD"],        // tickers alternativos que deben mapearse a este
+  //    "note": "Nota opcional"}
+  {"ticker": "VNOM", "company": "Viper Energy Inc", "cik": "0002074176", "cik_aliases": ["0001602065"], "note": "MLP→C-corp 2024 (former: Viper Energy Partners LP, CIK 0001602065). Confirmado por 33__history_audit run #2: formerNames=[New Cobra Pubco, Inc.]"}
 ]

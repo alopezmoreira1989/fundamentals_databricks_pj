@@ -63,6 +63,12 @@ print(f"  Quarterly window  : last {QUARTERLY_WINDOW} quarters per ticker")
 INCOME_STATEMENT = {
     "Revenue":                    ("Revenues",                                                                                  "flow_additive"),
     "Revenue (contract)":         ("RevenueFromContractWithCustomerExcludingAssessedTax",                                       "flow_additive"),
+    "Revenue (contract incl tax)":("RevenueFromContractWithCustomerIncludingAssessedTax",                                       "flow_additive"),
+    "Revenue (sales net)":        ("SalesRevenueNet",                                                                           "flow_additive"),
+    "Revenue (sales goods)":      ("SalesRevenueGoodsNet",                                                                      "flow_additive"),
+    "Revenue (sales services)":   ("SalesRevenueServicesNet",                                                                   "flow_additive"),
+    "Revenue (bank)":             ("InterestAndDividendIncomeOperating",                                                        "flow_additive"),
+    "Revenue (oil & gas)":        ("OilAndGasRevenue",                                                                          "flow_additive"),
     "Cost of Revenue":            ("CostOfRevenue",                                                                             "flow_additive"),
     "Gross Profit":               ("GrossProfit",                                                                               "flow_additive"),
     "Operating Expenses":         ("OperatingExpenses",                                                                         "flow_additive"),
@@ -122,6 +128,43 @@ STATEMENTS = {
     "Income Statement": INCOME_STATEMENT,
     "Balance Sheet":    BALANCE_SHEET,
     "Cash Flow":        CASH_FLOW,
+}
+
+# COMMAND ----------
+
+# MAGIC %md ## XBRL concept synonyms
+# MAGIC
+# MAGIC Algunos emisores cambian de tag XBRL entre años (fusiones, reorganizaciones,
+# MAGIC adopción de un taxonomy nuevo). Para que no perdamos histórico, el merge en
+# MAGIC `21__clean_and_merge.py` colapsa estos alias al concepto canónico **después**
+# MAGIC de la ingesta.
+# MAGIC
+# MAGIC Formato: `"label_alternativo": "label_canónico"` — ambos deben aparecer como
+# MAGIC keys en alguno de los STATEMENTS de arriba para que ingesten correctamente.
+# MAGIC Al fusionarlos, la dedup por `(ticker, stmt, concept, fy)` se queda con el
+# MAGIC `filed` más reciente.
+
+# COMMAND ----------
+
+CONCEPT_SYNONYMS = {
+    # Variantes ASC 606 post-2018
+    "Revenue (contract)":          "Revenue",   # RevenueFromContractWithCustomerExcludingAssessedTax
+    "Revenue (contract incl tax)": "Revenue",   # RevenueFromContractWithCustomerIncludingAssessedTax (FLUT, RGTI, SOUN, DJCO, …)
+
+    # Variantes Sales* pre-ASC 606 (PEP, KR, TPR, ECL, WULF, EPC, DJCO, …)
+    "Revenue (sales net)":         "Revenue",   # SalesRevenueNet
+    "Revenue (sales goods)":       "Revenue",   # SalesRevenueGoodsNet
+    "Revenue (sales services)":    "Revenue",   # SalesRevenueServicesNet
+
+    # Bancos (MS, GS, GSBC, BKU, WAFD, RC, ESQ, BMRC, BCAL, NBBK, AGM)
+    # Asunción de dominio: top-line de un banco = InterestAndDividendIncomeOperating.
+    # Riesgo: si un emisor reporta TANTO Revenues como InterestAndDividendIncomeOperating
+    # en el mismo fy, la dedup se queda con el valor mayor — raro en la práctica porque
+    # los bancos no suelen reportar el tag Revenues.
+    "Revenue (bank)":              "Revenue",   # InterestAndDividendIncomeOperating
+
+    # Oil & gas — emisores con concept específico del sector (sin overlap habitual con Revenues)
+    "Revenue (oil & gas)":         "Revenue",   # OilAndGasRevenue
 }
 
 # COMMAND ----------
