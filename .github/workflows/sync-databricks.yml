@@ -51,20 +51,10 @@ jobs:
           # de un humano: ese namespace es gestionado por su dueño y el SP no puede
           # recrearlo, lo que rompería el auto-repair (delete+recreate).
           # Emparejamos por URL ademas de por path porque es más robusto que el path.
-          resolve_repo_id() {  # imprime el id o vacío; pagina la lista completa
-            local token="" page id=""
-            while :; do
-              local q="/api/2.0/repos"
-              [ -n "$token" ] && q="${q}?next_page_token=$(jq -rn --arg t "$token" '$t|@uri')"
-              page=$(http_body "$(api GET "$q")")
-              id=$(echo "$page" | jq -r --arg u "$GIT_URL" --arg p "$REPO_PATH" \
-                '.repos[]? | select(.url==$u or .path==$p) | .id' | head -1)
-              [ -n "$id" ] && { echo "$id"; return 0; }
-              token=$(echo "$page" | jq -r '.next_page_token // empty')
-              [ -z "$token" ] && return 0
-            done
-          }
-          REPO_ID=$(resolve_repo_id)
+          # path_prefix acota la lista al Repo objetivo (la API lo exige para listar).
+          LIST=$(api GET "/api/2.0/repos?path_prefix=$(jq -rn --arg p "$REPO_PATH" '$p|@uri')")
+          REPO_ID=$(http_body "$LIST" | jq -r --arg u "$GIT_URL" --arg p "$REPO_PATH" \
+            '.repos[]? | select(.path==$p or .url==$u) | .id' | head -1)
 
           create_repo() {
             echo "Creando Repo en ${REPO_PATH}..."
