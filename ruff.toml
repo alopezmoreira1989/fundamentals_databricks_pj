@@ -1,9 +1,7 @@
-# Solo config de herramientas (ruff). Las dependencias de runtime viven en
-# requirements.txt (única fuente; Streamlit Cloud la instala con uv). No declarar
-# aquí un [project]/dependencies: Streamlit lo detectaría como una 2ª fuente de
-# requirements y avisaría. jinja2 (antiguo dep declarado) no se usa en el código.
-
-[tool.ruff]
+# Config de ruff en archivo dedicado (no en pyproject.toml) a propósito:
+# Streamlit Community Cloud trata cualquier pyproject.toml como una 2ª fuente de
+# requirements ("poetry") y avisa con "More than one requirements file detected",
+# aunque no declare dependencias. requirements.txt es la única fuente de deps.
 line-length = 120
 target-version = "py310"
 extend-exclude = [
@@ -12,7 +10,7 @@ extend-exclude = [
     "**/*.ipynb_checkpoints",
 ]
 
-[tool.ruff.lint]
+[lint]
 select = [
     "E",   # pycodestyle errors
     "F",   # pyflakes
@@ -29,10 +27,10 @@ ignore = [
     "B018",  # useless-expression (notebooks end cells with bare expressions to display values)
 ]
 
-[tool.ruff.lint.per-file-ignores]
+[lint.per-file-ignores]
 # Notebook .py source files use Databricks `# MAGIC` / `# COMMAND ----------` markers that linters treat oddly.
 "fundamentals_pipeline/**/*.py" = ["E265"]
 
-[tool.ruff.format]
+[format]
 quote-style = "double"
 indent-style = "space"
