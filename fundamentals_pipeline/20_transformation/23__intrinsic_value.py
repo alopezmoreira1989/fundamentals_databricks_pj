@@ -175,6 +175,16 @@ fin_subset = fin_subset.dropDuplicates(
     ["ticker", "stmt", "concept", "fiscal_year", "period_type", "period_end"]
 )
 
+# Defensa contra company inconsistente por ticker — misma razón que en 22__derived_metrics:
+# el MERGE de 21__clean_and_merge solo actualiza company cuando cambia value, así que
+# algunas filas viejas conservan un company stale (entityNames SEC con escapes, restructures,
+# overrides en favorites.json). Sin esto, el groupBy(ticker, company, fiscal_year) de abajo
+# produce filas duplicadas y el MERGE final peta con DELTA_MULTIPLE_SOURCE_ROW_MATCHING.
+_company_w = Window.partitionBy("ticker")
+fin_subset = fin_subset.withColumn(
+    "company", F.first("company", ignorenulls=True).over(_company_w)
+)
+
 print(f"✓ Concept subset prepared — {fin_subset.count():,} rows")
 
 # COMMAND ----------
