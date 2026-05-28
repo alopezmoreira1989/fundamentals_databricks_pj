@@ -18,7 +18,7 @@
 
 # COMMAND ----------
 
-# MAGIC %run "/Workspace/Users/al.lopez.moreira@gmail.com/fundamentals_databricks_pj/fundamentals_pipeline/00_config/01__tickers"
+# MAGIC %run "../00_config/01__tickers"
 
 # COMMAND ----------
 

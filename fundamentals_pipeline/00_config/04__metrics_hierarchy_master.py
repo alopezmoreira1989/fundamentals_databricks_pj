@@ -44,7 +44,7 @@
 import json
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, BooleanType
 
-HIERARCHY_JSON_PATH = "/Workspace/Users/al.lopez.moreira@gmail.com/fundamentals_databricks_pj/fundamentals_pipeline/00_config/metrics_hierarchy.json"
+HIERARCHY_JSON_PATH = "../00_config/metrics_hierarchy.json"
 TARGET_TABLE        = f"{CATALOG}.config.metrics_hierarchy"
 
 print(f"Source : {HIERARCHY_JSON_PATH}")
