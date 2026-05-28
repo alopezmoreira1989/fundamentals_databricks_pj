@@ -45,28 +45,39 @@ jobs:
             echo "::error::OAuth token exchange failed: $RESP"; exit 1
           fi
 
-          # La API de *crear* Repos usa el namespace /Repos/<user>/<repo> (sin el
-          # prefijo /Workspace); la *lista* en cambio devuelve la ruta con /Workspace.
-          # Normalizamos: CREATE_PATH es la forma sin prefijo para crear/mkdirs.
-          CREATE_PATH="${REPO_PATH#/Workspace}"
-
-          # --- 2. Resolver REPO_ID por path (clave estable; tolerante a ambas formas) ---
-          LIST=$(api GET "/api/2.0/repos?path_prefix=$(jq -rn --arg p "$REPO_PATH" '$p|@uri')")
-          REPO_ID=$(http_body "$LIST" | jq -r --arg p "$REPO_PATH" --arg c "$CREATE_PATH" \
-            '.repos[]? | select(.path==$p or .path==$c) | .id' | head -1)
+          # --- 2. Resolver REPO_ID por URL del git (clave estable) o por path ---
+          # NOTA: el Repo debe vivir en una carpeta que el service principal de CI
+          # pueda crear/borrar (p. ej. /Workspace/Shared/...), NO bajo /Repos/<email>
+          # de un humano: ese namespace es gestionado por su dueño y el SP no puede
+          # recrearlo, lo que rompería el auto-repair (delete+recreate).
+          # Emparejamos por URL ademas de por path porque es más robusto que el path.
+          resolve_repo_id() {  # imprime el id o vacío; pagina la lista completa
+            local token="" page id=""
+            while :; do
+              local q="/api/2.0/repos"
+              [ -n "$token" ] && q="${q}?next_page_token=$(jq -rn --arg t "$token" '$t|@uri')"
+              page=$(http_body "$(api GET "$q")")
+              id=$(echo "$page" | jq -r --arg u "$GIT_URL" --arg p "$REPO_PATH" \
+                '.repos[]? | select(.url==$u or .path==$p) | .id' | head -1)
+              [ -n "$id" ] && { echo "$id"; return 0; }
+              token=$(echo "$page" | jq -r '.next_page_token // empty')
+              [ -z "$token" ] && return 0
+            done
+          }
+          REPO_ID=$(resolve_repo_id)
 
           create_repo() {
-            echo "Creando Repo en ${CREATE_PATH}..."
-            # La API de Repos no crea directorios intermedios; al borrar el Repo
-            # puede desaparecer la carpeta padre del usuario. mkdirs es idempotente.
-            local parent; parent=$(dirname "$CREATE_PATH")
+            echo "Creando Repo en ${REPO_PATH}..."
+            # La API de Repos no crea directorios intermedios; mkdirs es idempotente.
+            # El padre (p. ej. /Workspace/Shared) debe ser escribible por el SP.
+            local parent; parent=$(dirname "$REPO_PATH")
             local MK; MK=$(api POST "/api/2.0/workspace/mkdirs" \
               "$(jq -nc --arg p "$parent" '{path:$p}')")
             if [ "$(http_code "$MK")" -ge 400 ]; then
               echo "::warning::mkdirs del padre ${parent} devolvió: $(http_body "$MK")"
             fi
             local R; R=$(api POST "/api/2.0/repos" \
-              "$(jq -nc --arg u "$GIT_URL" --arg pr "$GIT_PROVIDER" --arg p "$CREATE_PATH" \
+              "$(jq -nc --arg u "$GIT_URL" --arg pr "$GIT_PROVIDER" --arg p "$REPO_PATH" \
                  '{url:$u, provider:$pr, path:$p}')")
             if [ "$(http_code "$R")" -ge 400 ]; then
               echo "::error::Create repo falló: $(http_body "$R")"; exit 1
