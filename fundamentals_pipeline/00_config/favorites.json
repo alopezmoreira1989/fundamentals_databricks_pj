@@ -7,5 +7,9 @@
   //    "cik_aliases": ["0000999999"],  // CIKs predecesores (fusiones, MLP→C-corp, spinoffs)
   //    "aliases": ["XXXX.OLD"],        // tickers alternativos que deben mapearse a este
   //    "note": "Nota opcional"}
-  {"ticker": "VNOM", "company": "Viper Energy Inc", "cik": "0002074176", "cik_aliases": ["0001602065"], "note": "MLP→C-corp 2024 (former: Viper Energy Partners LP, CIK 0001602065). Confirmado por 33__history_audit run #2: formerNames=[New Cobra Pubco, Inc.]"}
+  {"ticker": "VNOM", "company": "Viper Energy Inc", "cik": "0002074176", "cik_aliases": ["0001602065"], "note": "MLP→C-corp 2024 (former: Viper Energy Partners LP, CIK 0001602065). Confirmado por 33__history_audit run #2: formerNames=[New Cobra Pubco, Inc.]"},
+  {"ticker": "UNIT", "company": "Uniti Group", "cik": "0002020795", "cik_aliases": ["0001620280"], "note": "Windstream merger 2025 creó CIK nuevo (predecesor: Uniti Group Inc. CIK 0001620280, formerNames: Communications Sales & Leasing, Inc.). Confirmado por 33__history_audit + EDGAR full-text (16x 10-K 2016-2025 bajo el CIK antiguo)"},
+  {"ticker": "SAIL", "company": "SailPoint, Inc.", "cik": "0002030781", "cik_aliases": ["0001627857"], "note": "Re-IPO 2025 tras LBO de Thoma Bravo 2022 (predecesor: Sailpoint Technologies Holdings, Inc. CIK 0001627857, 5x 10-K FY2017-FY2021). Hueco irreductible FY2022-FY2024 (período privado)."},
+  {"ticker": "PSKY", "company": "Paramount Skydance Corp", "cik": "0002041610", "cik_aliases": ["0000813828"], "note": "Paramount-Skydance merger 2025 creó CIK nuevo (predecesor: Paramount Global CIK 0000813828, formerNames: ViacomCBS Inc., CBS CORP, VIACOM INC — 10-Ks desde 1994). Confirmado por 33__history_audit + EDGAR."},
+  {"ticker": "ALH", "company": "Alliance Laundry Holdings Inc.", "cik": "0001317685", "cik_aliases": ["0001063699"], "note": "IPO 2025 tras período privado bajo BDT Capital desde 2014 (predecesor: Alliance Laundry Systems LLC CIK 0001063699, 11x 10-K FY1999-FY2009). Hueco irreductible FY2010-FY2024. Mismo negocio: equipamiento comercial de lavandería. Predecesor NO surge en formerNames (cambio de CIK LLC→Inc.); solo encontrado vía EDGAR full-text."}
 ]
