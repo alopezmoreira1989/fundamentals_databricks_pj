@@ -106,8 +106,9 @@ metrics_wide = (
     # ── Liquidity ─────────────────────────────────────────────────────────────
     .withColumn("Current Ratio",  safe_div("Total Current Assets", "Total Current Liabilities"))
 
-    # ── FCF Margin ────────────────────────────────────────────────────────────
-    .withColumn("FCF Margin %",   safe_div("Free Cash Flow", "Revenue") * 100)
+    # ── Cash-flow margins ───────────────────────────────────────────────────
+    .withColumn("FCF Margin %",          safe_div("Free Cash Flow",      "Revenue") * 100)
+    .withColumn("Op Cash Flow Margin %", safe_div("Operating Cash Flow", "Revenue") * 100)
 
     # ── Returns (%) — end-of-year denominators ───────────────────────────────
     .withColumn("Invested Capital",
@@ -166,8 +167,9 @@ base_metric_cols = [
     "Gross Margin %", "Operating Margin %", "Net Margin %", "FCF Margin %",
     # Returns
     "ROA %", "ROE %", "ROIC %", "ROCE %", "CROIC %",
-    # Cash Flow — Absolute
-    "Free Cash Flow",
+    # Cash Flow — Absolute (passthrough from the wide FY pivot) + cash-flow margin
+    "Operating Cash Flow", "CapEx", "Free Cash Flow",
+    "Op Cash Flow Margin %",
     # Growth — YoY
     "Revenue YoY %", "Net Income YoY %", "Operating Cash Flow YoY %", "Free Cash Flow YoY %",
     # Leverage

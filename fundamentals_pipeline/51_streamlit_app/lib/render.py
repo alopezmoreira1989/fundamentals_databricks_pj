@@ -6,6 +6,7 @@ st.markdown(..., unsafe_allow_html=True).
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -13,8 +14,12 @@ import pandas as pd
 import streamlit as st
 
 from .colors import (
+    AMBER,
+    CORAL,
     CREAM,
     GRAND_TOTAL_CONCEPTS,
+    GRAY,
+    GREEN,
     PER_SHARE_CONCEPTS,
     is_negative_concept,
     row_class as derive_row_class,
@@ -32,7 +37,8 @@ from .format import (
     short_quarter,
     short_year,
 )
-from .sparkline import mini_sparkline_svg, sparkline_svg
+from .signals import signal_absolute, signal_vs_history, threshold_text
+from .sparkline import mini_bars_svg, mini_sparkline_svg, sparkline_svg
 from .tables import get_year_columns
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -332,8 +338,31 @@ def render_waterfall(df_is: pd.DataFrame) -> str:
 # Derived metrics grid
 # ──────────────────────────────────────────────────────────────────────────────
 
-def render_metrics_grid(metrics: pd.DataFrame, ticker: str) -> str:
-    """Render the derived metrics cards — one per category from metrics_hierarchy.json."""
+# Categories whose rows render as 5-year mini-bars instead of a line sparkline.
+_USE_BARS = {"Profitability", "Growth"}
+# Valuation price-multiples that get a min–avg–max range bar + vs-history signal.
+_VALUATION_MULTIPLES = {"P/E", "P/S", "P/FCF", "P/B", "EV/EBITDA"}
+_SIGNAL_COLORS = {"good": GREEN, "warn": AMBER, "bad": CORAL}
+
+
+def _signal_color(sig: str | None) -> str | None:
+    return _SIGNAL_COLORS.get(sig) if sig else None
+
+
+def _clean_iv(name: str) -> str:
+    """Strip the (FY)/(TTM) period suffix from Intrinsic Value labels for display."""
+    name = re.sub(r"\s*\((FY|TTM)\)", "", name)
+    name = re.sub(r",\s*(FY|TTM)\)", ")", name)   # "MoS % (Graham Number, FY)" → "(Graham Number)"
+    return name
+
+
+def render_metrics_grid(metrics: pd.DataFrame, ticker: str, iv_period: str = "FY") -> str:
+    """Render the derived metrics cards — one per category from metrics_hierarchy.json.
+
+    `iv_period` ("FY" | "TTM") selects which Intrinsic Value flavour to show — the
+    two are distinguished only by the (FY)/(TTM) suffix in the metric/subcategory
+    names, never by `period_type` (both are stored as FY rows).
+    """
     sub = metrics[(metrics["ticker"] == ticker) & (metrics["period_type"] == "FY")].copy()
     if sub.empty:
         return '<p style="color:var(--ink-3)">No derived metrics available.</p>'
@@ -347,16 +376,26 @@ def render_metrics_grid(metrics: pd.DataFrame, ticker: str) -> str:
         cat_df = sub[sub["category"] == cat]
         subcategories = cat_df["subcategory"].dropna().unique().tolist()
 
-        # Tag = first subcategory as a label.
-        tag = subcategories[0] if subcategories else ""
+        is_iv = cat == "Intrinsic Value"
+        is_val = cat == "Valuation"
+        if is_iv:
+            # Keep only the FY or TTM flavour, per the toggle.
+            suffix = f"({iv_period})"
+            subcategories = [s for s in subcategories if s.endswith(suffix)]
+
+        # Tag = first (visible) subcategory as a label.
+        tag = _clean_iv(subcategories[0]) if (is_iv and subcategories) else (
+            subcategories[0] if subcategories else ""
+        )
 
         rows_html: list[str] = []
         first_sub = True
         for subcat in subcategories:
+            sub_display = _clean_iv(subcat) if is_iv else subcat
             # Subcategory subheader (skip for the first one since the card header serves).
             if not first_sub:
                 rows_html.append(
-                    f'<div class="metric-row"><div class="m-subheader">{subcat}</div></div>'
+                    f'<div class="metric-row"><div class="m-subheader">{sub_display}</div></div>'
                 )
             first_sub = False
 
@@ -366,24 +405,36 @@ def render_metrics_grid(metrics: pd.DataFrame, ticker: str) -> str:
                 unit = m_rows.iloc[0].get("unit", None)
                 values = m_rows["value"].tolist()
                 latest = values[-1] if values else None
-                formatted = fmt_metric(latest, unit)
+                display = _clean_iv(metric_name) if is_iv else metric_name
 
-                color = _metric_sparkline_color(cat, metric_name, latest)
-                svg = mini_sparkline_svg(values, color=color)
+                if is_val:
+                    rows_html.append(_render_valuation_row(metric_name, display, unit, values, latest))
+                    continue
 
+                # Direction metrics (growth, margin of safety) keep the "+" sign.
+                signed = ("YoY" in metric_name) or ("MoS %" in metric_name)
+                formatted = fmt_metric(latest, unit, signed=signed)
+                sig = signal_absolute(metric_name, latest)
+                tooltip = threshold_text(metric_name)
+
+                if cat in _USE_BARS:
+                    bar_color = _signal_color(sig) or _metric_sparkline_color(cat, metric_name, latest)
+                    svg = mini_bars_svg(values, color=bar_color, n=5)
+                else:
+                    svg = mini_sparkline_svg(values, color=_metric_sparkline_color(cat, metric_name, latest))
+
+                row_cls = f"metric-row {('row-' + sig) if sig else ''}".strip()
+                title_attr = f' title="{tooltip}"' if tooltip else ""
                 rows_html.append(
-                    f'<div class="metric-row">'
-                    f'  <div class="m-label">{metric_name}</div>'
+                    f'<div class="{row_cls}"{title_attr}>'
+                    f'  <div class="m-label">{display}</div>'
                     f'  <div class="m-value">{formatted}</div>'
                     f'  <div class="m-spark">{svg}</div>'
                     f'</div>'
                 )
 
-        # Full-width for Valuation card (matches spec: "spans both columns").
-        span_style = ' style="grid-column: 1 / -1;"' if cat == "Valuation" else ""
-
         cards.append(
-            f'<div class="metric-card"{span_style}>'
+            f'<div class="metric-card">'
             f'<div class="cat-header"><h4>{cat}</h4><div class="tag">{tag}</div></div>'
             f'{"".join(rows_html)}'
             f'</div>'
@@ -392,20 +443,69 @@ def render_metrics_grid(metrics: pd.DataFrame, ticker: str) -> str:
     return f'<div class="metrics-grid">{"".join(cards)}</div>'
 
 
+def _render_valuation_row(metric: str, display: str, unit, values, latest) -> str:
+    """A Valuation card row: dot-leader + value, plus a min–avg–max range bar for multiples."""
+    base = metric.split(" (")[0].strip()
+    is_multiple = base in _VALUATION_MULTIPLES
+    formatted = fmt_metric(latest, unit)              # multiples/yields: never signed
+    tooltip = threshold_text(metric)
+
+    if is_multiple:
+        sig = signal_vs_history(latest, values)
+        hist = [v for v in values if not is_missing(v)]
+    else:
+        # Yields (percent) use the absolute Graham bands; EV (usd) gets no signal.
+        sig = signal_absolute(metric, latest) if unit == "percent" else None
+        hist = []
+
+    sig_cls = f" row-{sig}" if sig else ""
+    title_attr = f' title="{tooltip}"' if tooltip else ""
+
+    # Range bar only for multiples with enough history; otherwise a dotted leader.
+    middle = '<div class="lead"></div>'
+    chip = ""
+    if is_multiple and len(hist) >= 3:
+        mn, mx = min(hist), max(hist)
+        avg = sum(hist[:-1]) / max(len(hist) - 1, 1)
+        now = hist[-1]
+        span = (mx - mn) or 1
+        p_now = max(0.0, min(100.0, (now - mn) / span * 100))
+        p_avg = max(0.0, min(100.0, (avg - mn) / span * 100))
+        mk_cls = f" row-{sig}" if sig else ""
+        middle = (
+            f'<div class="vbar">'
+            f'<div class="vbar-avg" style="left:{p_avg:.0f}%"></div>'
+            f'<div class="vbar-mk{mk_cls}" style="left:{p_now:.0f}%"></div>'
+            f'</div>'
+        )
+        if avg:
+            dev = (now - avg) / abs(avg)
+            chip = f'<span class="vchip">media {avg:.1f}x · {dev:+.0%}</span>'
+
+    return (
+        f'<div class="val-row{sig_cls}"{title_attr}>'
+        f'  <div class="m-label">{display}</div>'
+        f'  {middle}'
+        f'  <div class="m-value">{formatted}</div>'
+        f'  {chip}'
+        f'</div>'
+    )
+
+
 def _metric_sparkline_color(category: str, metric: str, latest_value) -> str:
     """Pick sparkline color for a metric row."""
     if category == "Valuation":
-        return "#185FA5"
+        return BLUE
     if "YoY" in metric or "Growth" in metric:
         if not is_missing(latest_value) and latest_value < 0:
-            return "#993C1D"
-        return "#888780"
+            return CORAL
+        return GRAY
     if category == "Financial Health":
         if "Debt" in metric:
-            return "#993C1D"
-        return "#888780"
+            return CORAL
+        return GRAY
     # Profitability / Cash Flow — positive trends are green.
-    return "#0F6E56"
+    return GREEN
 
 
 # ──────────────────────────────────────────────────────────────────────────────

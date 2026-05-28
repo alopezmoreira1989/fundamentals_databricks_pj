@@ -469,6 +469,52 @@ tr.headline td.cagr.up { color: var(--accent-ink); font-weight: 500; }
 }
 .metric-row.first-subheader .m-subheader { border-top: none; padding-top: 0; margin-top: 0; }
 
+/* ── Health signals (Graham-style green/amber/red) ──────────────────────────
+   Background only for green/red. Amber = neutral, value-only tint. */
+.metric-row.row-good { background: var(--positive-soft); }
+.metric-row.row-bad  { background: var(--negative-soft); }
+.metric-row.row-good, .metric-row.row-bad {
+  margin: 0 -10px; padding-left: 10px; padding-right: 10px; border-radius: 4px;
+}
+.metric-row.row-good .m-value { color: var(--positive); }
+.metric-row.row-bad  .m-value { color: var(--negative); }
+.metric-row.row-warn .m-value { color: var(--warning); }   /* ámbar: solo el valor, sin fondo */
+
+/* ── Valuation rows — dot leaders + min/avg/max range bar ───────────────────*/
+.metric-card .val-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 0; font-size: 12px;
+}
+.metric-card .val-row .m-label { color: var(--ink-2); white-space: nowrap; }
+.metric-card .val-row .lead {
+  flex: 1; border-bottom: 1px dotted var(--rule); margin-bottom: 4px;
+}
+.metric-card .val-row .m-value {
+  font-family: var(--mono); font-weight: 500; white-space: nowrap; color: var(--ink);
+}
+.metric-card .val-row.row-good .m-value { color: var(--positive); }
+.metric-card .val-row.row-bad  .m-value { color: var(--negative); }
+.metric-card .val-row.row-warn .m-value { color: var(--warning); }
+.metric-card .val-row .vchip {
+  font-family: var(--mono); font-size: 9.5px; color: var(--ink-3); white-space: nowrap;
+}
+
+.vbar {
+  position: relative; height: 6px; background: var(--bg-subtle);
+  border-radius: 3px; flex: 1;
+}
+.vbar-avg {
+  position: absolute; top: -3px; bottom: -3px; width: 1.5px; background: var(--ink-3);
+}
+.vbar-mk {
+  position: absolute; top: 50%; transform: translate(-50%, -50%);
+  width: 9px; height: 9px; border-radius: 50%;
+  border: 1.5px solid var(--bg-card); background: var(--ink-3);
+}
+.vbar-mk.row-good { background: var(--positive); }
+.vbar-mk.row-warn { background: var(--warning); }
+.vbar-mk.row-bad  { background: var(--negative); }
+
 /* ========= QUARTERLY ========= */
 .qchart {
   background: var(--bg-card);

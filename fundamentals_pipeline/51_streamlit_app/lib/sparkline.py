@@ -57,3 +57,29 @@ def mini_sparkline_svg(
 ) -> str:
     """Smaller sparkline for the derived metrics grid (60×16)."""
     return sparkline_svg(values, color=color, width=60, height=16, stroke=1.5)
+
+
+def mini_bars_svg(
+    values,
+    color: str = "#0F6E56",
+    n: int = 5,
+    width: int = 64,
+    height: int = 26,
+) -> str:
+    """Mini-columnas de los últimos `n` años; la última barra en color, el resto atenuadas."""
+    vals = [v for v in values if not is_missing(v)][-n:]
+    if len(vals) < 2:
+        return ""
+    vmin, vmax = min(vals), max(vals)
+    span = (vmax - vmin) or 1
+    bw = (width - (len(vals) - 1) * 3) / len(vals)
+    bars = []
+    for i, v in enumerate(vals):
+        h = 4 + (v - vmin) / span * (height - 6)
+        x = i * (bw + 3)
+        fill = color if i == len(vals) - 1 else "#CDD9CF"   # último resaltado
+        bars.append(
+            f'<rect x="{x:.1f}" y="{height - h:.1f}" width="{bw:.1f}" '
+            f'height="{h:.1f}" rx="1" fill="{fill}"/>'
+        )
+    return f'<svg width="{width}" height="{height}" viewBox="0 0 {width} {height}">{"".join(bars)}</svg>'

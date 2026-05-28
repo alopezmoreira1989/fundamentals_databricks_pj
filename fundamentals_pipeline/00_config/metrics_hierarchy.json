@@ -5,8 +5,7 @@
     "Margins": [
       { "metric": "Gross Margin %",     "unit": "percent", "requires_market_data": false },
       { "metric": "Operating Margin %", "unit": "percent", "requires_market_data": false },
-      { "metric": "Net Margin %",       "unit": "percent", "requires_market_data": false },
-      { "metric": "FCF Margin %",       "unit": "percent", "requires_market_data": false }
+      { "metric": "Net Margin %",       "unit": "percent", "requires_market_data": false }
     ],
     "Returns": [
       { "metric": "ROA %",   "unit": "percent", "requires_market_data": false },
@@ -19,7 +18,17 @@
 
   "Cash Flow": {
     "Absolute": [
-      { "metric": "Free Cash Flow", "unit": "usd", "requires_market_data": false }
+      { "metric": "Operating Cash Flow", "unit": "usd", "requires_market_data": false },
+      { "metric": "CapEx",               "unit": "usd", "requires_market_data": false },
+      { "metric": "Free Cash Flow",      "unit": "usd", "requires_market_data": false }
+    ],
+    "Margins": [
+      { "metric": "Op Cash Flow Margin %", "unit": "percent", "requires_market_data": false },
+      { "metric": "FCF Margin %",          "unit": "percent", "requires_market_data": false }
+    ],
+    "Yields": [
+      { "metric": "Op Cash Flow Yield %", "unit": "percent", "requires_market_data": true },
+      { "metric": "FCF Yield %",          "unit": "percent", "requires_market_data": true }
     ]
   },
 
@@ -54,12 +63,10 @@
       { "metric": "EV/EBITDA", "unit": "ratio", "requires_market_data": true }
     ],
     "Yields": [
-      { "metric": "Earnings Yield %",     "unit": "percent", "requires_market_data": true },
-      { "metric": "Sales Yield %",        "unit": "percent", "requires_market_data": true },
-      { "metric": "FCF Yield %",          "unit": "percent", "requires_market_data": true },
-      { "metric": "Op Cash Flow Yield %", "unit": "percent", "requires_market_data": true },
-      { "metric": "Book Yield %",         "unit": "percent", "requires_market_data": true },
-      { "metric": "EBITDA Yield %",       "unit": "percent", "requires_market_data": true }
+      { "metric": "Earnings Yield %", "unit": "percent", "requires_market_data": true },
+      { "metric": "Sales Yield %",    "unit": "percent", "requires_market_data": true },
+      { "metric": "Book Yield %",     "unit": "percent", "requires_market_data": true },
+      { "metric": "EBITDA Yield %",   "unit": "percent", "requires_market_data": true }
     ]
   },
 

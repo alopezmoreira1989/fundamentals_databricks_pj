@@ -47,12 +47,19 @@ def fmt_kpi(v) -> str:
     return f"{sign}${a:,.0f}"
 
 
-def fmt_metric(v, unit: Optional[str]) -> str:
-    """Derived metrics: format depending on unit (percent / ratio / usd)."""
+def fmt_metric(v, unit: Optional[str], signed: bool = False) -> str:
+    """Derived metrics: format depending on unit (percent / ratio / usd).
+
+    `signed=True` forces a leading "+" on positive percents — only for metrics
+    that represent *direction* (growth YoY, margin of safety), not level
+    (margins, returns, yields). Negatives always show "−" either way.
+    """
     if is_missing(v):
         return EM_DASH
     if unit == "percent":
-        return f"{v:+.1f}%" if v >= 0 else f"{v:.1f}%"
+        if signed:
+            return f"{v:+.1f}%"
+        return f"{v:.1f}%"
     if unit == "ratio":
         return f"{v:,.2f}x"
     if unit == "usd":

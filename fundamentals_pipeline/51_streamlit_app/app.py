@@ -104,7 +104,16 @@ with tab_dm:
         '<div class="meta">From metrics_hierarchy.json</div></div>',
         unsafe_allow_html=True,
     )
-    st.markdown(render_metrics_grid(metrics, ticker), unsafe_allow_html=True)
+    iv_period = st.segmented_control(
+        "Intrinsic value",
+        ["FY", "TTM"],
+        default="FY",
+        key="iv_period",
+        label_visibility="collapsed",
+    )
+    # segmented_control returns None if the user deselects the active chip.
+    iv_period = iv_period or "FY"
+    st.markdown(render_metrics_grid(metrics, ticker, iv_period=iv_period), unsafe_allow_html=True)
 
 with tab_qt:
     df_q = quarterly_df(data, ticker)

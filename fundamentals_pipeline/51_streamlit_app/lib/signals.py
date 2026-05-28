@@ -1,0 +1,66 @@
+"""Semáforo de salud para las derived metrics (umbrales tipo Graham defensivo)."""
+from __future__ import annotations
+
+from statistics import mean
+
+from .format import is_missing
+
+# (verde_máx, rojo_mín) para "lower is better"; o (verde_mín, rojo_máx) para "higher is better".
+# good = mejor que verde, bad = peor que rojo, warn = en medio.
+_LOWER_IS_BETTER = {          # caro/arriesgado cuanto más alto
+    "P/E": (15, 25), "P/S": (2, 5), "P/FCF": (15, 25), "P/B": (1.5, 3),
+    "EV/EBITDA": (15, 25),
+    "Debt / Equity": (0.5, 1.0), "Debt / Assets": (0.3, 0.5),
+}
+_HIGHER_IS_BETTER = {         # mejor cuanto más alto
+    "Current Ratio": (2.0, 1.5),
+    "ROE %": (15, 8), "ROIC %": (15, 8), "ROCE %": (15, 8),
+    "ROA %": (10, 5), "CROIC %": (15, 8),
+    "Gross Margin %": (40, 20), "Operating Margin %": (20, 10),
+    "Net Margin %": (20, 10), "FCF Margin %": (15, 8),
+    "Op Cash Flow Margin %": (15, 8),
+    "Earnings Yield %": (8, 4), "FCF Yield %": (6, 3),
+    "Op Cash Flow Yield %": (6, 3), "Sales Yield %": (10, 5),
+    "Book Yield %": (8, 4), "EBITDA Yield %": (8, 4),
+}
+
+
+def signal_absolute(metric: str, value) -> str | None:
+    if is_missing(value):
+        return None
+    base = metric.split(" (")[0].strip()      # tolera sufijos (FY)/(TTM)
+    if base in _LOWER_IS_BETTER:
+        g, b = _LOWER_IS_BETTER[base]
+        return "good" if value <= g else ("bad" if value >= b else "warn")
+    if base in _HIGHER_IS_BETTER:
+        g, b = _HIGHER_IS_BETTER[base]
+        return "good" if value >= g else ("bad" if value <= b else "warn")
+    if base.startswith("MoS %"):              # margen de seguridad intrínseco
+        return "good" if value > 30 else ("bad" if value < 0 else "warn")
+    return None
+
+
+def threshold_text(metric: str) -> str:
+    """Texto del umbral Graham para el tooltip de la fila."""
+    base = metric.split(" (")[0].strip()
+    if base in _LOWER_IS_BETTER:
+        g, b = _LOWER_IS_BETTER[base]
+        return f"{base}: verde ≤ {g:g}, rojo ≥ {b:g} (menor es mejor)"
+    if base in _HIGHER_IS_BETTER:
+        g, b = _HIGHER_IS_BETTER[base]
+        return f"{base}: verde ≥ {g:g}, rojo ≤ {b:g} (mayor es mejor)"
+    if base.startswith("MoS %"):
+        return "MoS %: verde > 30, ámbar 0–30, rojo < 0"
+    return ""
+
+
+def signal_vs_history(value, history, tol: float = 0.20) -> str | None:
+    """Para múltiplos de Valuation: hoy vs media de la serie (≈10 años)."""
+    hist = [h for h in history[:-1] if not is_missing(h)]  # excluye el año actual
+    if is_missing(value) or len(hist) < 3:
+        return None
+    avg = mean(hist)
+    if avg == 0:
+        return None
+    dev = (value - avg) / abs(avg)
+    return "bad" if dev > tol else ("good" if dev < -tol else "warn")
