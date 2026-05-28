@@ -66,9 +66,14 @@ def main():
 
     # 3. Metrics slice (joined with metrics_hierarchy).
     print("Fetching metrics...")
+    # financials_metrics is annual-only (no period_type/period_end columns) —
+    # synthesise them to match 51__export_dashboard_data so the app sees FY rows.
     metrics = spark.sql(f"""
         SELECT
-            m.ticker, m.period_type, m.period_end, m.fiscal_year,
+            m.ticker,
+            'FY' AS period_type,
+            MAKE_DATE(m.fiscal_year, 12, 31) AS period_end,
+            m.fiscal_year,
             h.category, h.subcategory, m.metric,
             h.unit, h.sort_order, m.value
         FROM {CATALOG}.{SCHEMA}.financials_metrics m
