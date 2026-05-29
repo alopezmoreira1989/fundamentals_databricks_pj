@@ -156,6 +156,20 @@ incoming = (
     .withColumn("company", F.initcap(F.col("company")))
 )
 
+# Guard: un period_end pertenece a EXACTAMENTE un fiscal year. Tras la dedup por fy,
+# el mismo period_end puede seguir apareciendo bajo varios fy (un 10-K reciente trae el
+# año en curso como current y los previos como comparativos, cada uno con su propio fy
+# en su filing original). Nos quedamos con el fy más pequeño (el filing del año en curso)
+# y descartamos el resto, para que un comparativo no se haga pasar por un año posterior.
+# El MERGE no borra, así que sin esto los duplicados cross-fy se acumulan en `financials`.
+w2 = Window.partitionBy("ticker", "stmt", "concept", "period_end").orderBy(F.col("fy").asc())
+incoming = (
+    incoming
+    .withColumn("rn2", F.row_number().over(w2))
+    .filter(F.col("rn2") == 1)
+    .drop("rn2")
+)
+
 # Project to clean schema
 clean_fy = incoming.select(
     F.col("ticker"),
