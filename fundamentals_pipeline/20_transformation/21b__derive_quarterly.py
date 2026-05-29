@@ -81,14 +81,24 @@ flow = (
     .filter(F.col("value").isNotNull())
 )
 
-# For each (ticker, stmt, concept, fy, fp, period_shape) keep latest filed.
+# For each (ticker, stmt, concept, fy, fp, period_shape) keep the CURRENT-YEAR fact.
 # NOTE: (fy, fp, period_shape) uniquely identifies what kind of fact this is.
 # Q4 standalone (fp="FY" + period_shape="Q_standalone") is distinct from
 # FY total (fp="FY" + period_shape="FY_or_TTM") thanks to period_shape,
 # so this dedup window correctly preserves both as separate rows.
+#
+# `period_end` desc PRIMERO: SEC companyfacts etiqueta el comparativo del año
+# anterior con el `fy/fp` DEL FILING (un 10-Q de fy=2022/Q1 trae también el Q1 de
+# fy=2021 como comparativo, ambos con fy=2022/fp=Q1/Q_standalone y el MISMO `filed`).
+# Ordenar solo por `filed` dejaba ganar a un comparativo arbitrario → el trimestre
+# salía con period_end del año anterior (fy desfasado +1). MAX(period_end) elige el
+# fact del año en curso. Misma regla que 21__clean_and_merge para las filas FY.
 w = Window.partitionBy(
     "ticker", "stmt", "concept", "fy", "fp", "period_shape"
-).orderBy(F.col("filed").desc_nulls_last())
+).orderBy(
+    F.col("period_end").desc_nulls_last(),
+    F.col("filed").desc_nulls_last(),
+)
 
 flow_dedup = (
     flow
