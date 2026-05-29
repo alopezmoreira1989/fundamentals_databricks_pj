@@ -21,8 +21,40 @@ META_FILE = "dashboard_meta.json"
 
 TARGET_NEW_TICKERS = 2000
 
+# Synthetic universe flags (schema v3). The base fixtures are the S&P 500; the
+# added tickers are a Russell 2000 proxy → all are in the (broader) Russell 3000.
+FAVORITES = {"AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "JPM", "V", "JNJ", "WMT"}
+
 random.seed(42)
 np.random.seed(42)
+
+
+def build_market_cap_rows(data: pd.DataFrame, metrics: pd.DataFrame) -> pd.DataFrame:
+    """Synthetic `Market Cap` metric rows = P/S × Revenue per (ticker, FY).
+
+    Mirrors the real export (50_publish/51): category/subcategory NULL so the
+    detail page ignores them, unit 'usd', period_type 'FY'.
+    """
+    rev = data[
+        (data["stmt"] == "Income Statement")
+        & (data["concept"] == "Revenue")
+        & (data["period_type"] == "FY")
+    ][["ticker", "fiscal_year", "period_end", "value"]].rename(columns={"value": "rev"})
+    ps = metrics[(metrics["metric"] == "P/S") & (metrics["period_type"] == "FY")][
+        ["ticker", "fiscal_year", "value"]
+    ].rename(columns={"value": "ps"})
+
+    mc = rev.merge(ps, on=["ticker", "fiscal_year"], how="inner")
+    if mc.empty:
+        return pd.DataFrame(columns=metrics.columns)
+    mc["value"] = (mc["rev"] * mc["ps"]).round(1)
+    mc["period_type"] = "FY"
+    mc["category"] = pd.NA
+    mc["subcategory"] = pd.NA
+    mc["metric"] = "Market Cap"
+    mc["unit"] = "usd"
+    mc["sort_order"] = pd.NA
+    return mc[metrics.columns]
 
 
 def fetch_smallcap_tickers(existing: set[str], n: int = TARGET_NEW_TICKERS) -> pd.DataFrame:
@@ -142,10 +174,22 @@ def main():
     merged_data = pd.concat([existing_data, new_data], ignore_index=True)
     merged_metrics = pd.concat([existing_metrics, new_metrics], ignore_index=True)
 
-    # 7. Build meta
-    all_tickers_info = existing_meta["tickers"] + [
-        {"ticker": r["ticker"], "company": r["company"]} for r in new_ticker_list
-    ]
+    # 6b. Inject synthetic Market Cap rows (schema v3).
+    market_cap = build_market_cap_rows(merged_data, merged_metrics)
+    merged_metrics = pd.concat([merged_metrics, market_cap], ignore_index=True)
+    print(f"   + Market Cap rows: {len(market_cap):,}")
+
+    # 7. Build meta — with universe flags (schema v3).
+    def _flags(t: str) -> dict:
+        return {
+            "is_favorite": t in FAVORITES,
+            "in_sp500":    t in existing_tickers,   # base fixtures = S&P 500
+            "in_r3000":    True,                     # proxy: all in Russell 3000
+        }
+
+    base_info = [{"ticker": e["ticker"], "company": e["company"]} for e in existing_meta["tickers"]]
+    new_info = [{"ticker": r["ticker"], "company": r["company"]} for r in new_ticker_list]
+    all_tickers_info = [{**info, **_flags(info["ticker"])} for info in base_info + new_info]
     all_tickers_info.sort(key=lambda x: x["ticker"])
 
     all_ticker_syms = sorted(merged_data["ticker"].unique())
@@ -164,7 +208,7 @@ def main():
             )
 
     meta = {
-        "schema_version": 2,
+        "schema_version": 3,
         "build_timestamp": datetime.now(timezone.utc).isoformat(),
         "tickers": all_tickers_info,
         "fy_ranges": fy_ranges,

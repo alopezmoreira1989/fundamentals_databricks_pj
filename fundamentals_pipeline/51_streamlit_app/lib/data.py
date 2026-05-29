@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import subprocess
 from pathlib import Path
 from typing import Any, NoReturn
@@ -46,21 +47,32 @@ def _optimize_dtypes(df: pd.DataFrame) -> pd.DataFrame:
 def load_latest_data() -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
     """Return (financials, metrics, meta).
 
-    Looks in `fixtures/` first (local dev), falls back to the GitHub Release URL
-    so the same app works locally and on Streamlit Cloud without code changes.
+    Primary source is the GitHub Release `latest` (real data, picked up
+    automatically when the pipeline publishes); committed `fixtures/` are the
+    fallback (synthetic preview when the Release is missing).
+
+    Dev override: set `DASHBOARD_USE_FIXTURES=1` to read the local `fixtures/`
+    directly and skip the network — handy for testing freshly regenerated
+    fixtures locally. Default off, so Streamlit Cloud behaviour is unchanged.
     """
-    try:
-        data    = _fetch_parquet(DATA_FILE)
-        metrics = _fetch_parquet(METRIC_FILE)
-        meta    = _fetch_json(META_FILE)
-    except Exception as exc:
-        # Fallback a fixtures locales (dev). Si no hay, error legible (sin traceback).
-        if (FIXTURE_DIR / DATA_FILE).exists():
-            data    = pd.read_parquet(FIXTURE_DIR / DATA_FILE)
-            metrics = pd.read_parquet(FIXTURE_DIR / METRIC_FILE)
-            meta    = json.loads((FIXTURE_DIR / META_FILE).read_text())
-        else:
-            _render_load_error(exc)   # st.error + st.stop(), no retorna
+    use_fixtures = os.environ.get("DASHBOARD_USE_FIXTURES") == "1"
+    if use_fixtures and (FIXTURE_DIR / DATA_FILE).exists():
+        data    = pd.read_parquet(FIXTURE_DIR / DATA_FILE)
+        metrics = pd.read_parquet(FIXTURE_DIR / METRIC_FILE)
+        meta    = json.loads((FIXTURE_DIR / META_FILE).read_text())
+    else:
+        try:
+            data    = _fetch_parquet(DATA_FILE)
+            metrics = _fetch_parquet(METRIC_FILE)
+            meta    = _fetch_json(META_FILE)
+        except Exception as exc:
+            # Fallback a fixtures locales (dev). Si no hay, error legible (sin traceback).
+            if (FIXTURE_DIR / DATA_FILE).exists():
+                data    = pd.read_parquet(FIXTURE_DIR / DATA_FILE)
+                metrics = pd.read_parquet(FIXTURE_DIR / METRIC_FILE)
+                meta    = json.loads((FIXTURE_DIR / META_FILE).read_text())
+            else:
+                _render_load_error(exc)   # st.error + st.stop(), no retorna
 
     # Normalize types: parquet preserves None (not NaN) for missing strings,
     # which breaks pandas groupby/pivot. Convert to proper NaN.
