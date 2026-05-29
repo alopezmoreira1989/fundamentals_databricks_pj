@@ -25,6 +25,7 @@
 # COMMAND ----------
 
 import json
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -130,6 +131,45 @@ def upload_asset(release: dict, file_path: Path) -> None:
     size_kb = file_path.stat().st_size / 1024
     print(f"  ✓ uploaded {file_path.name} ({size_kb:.1f} KB)")
 
+
+def delete_dangling_drafts(tag: str) -> None:
+    # `get_release_by_tag` queries /releases/tags/<tag>, which does NOT resolve DRAFT
+    # releases — so a half-finished prior run can leave a draft with tag_name=<tag> that
+    # the delete-and-recreate below never cleans. A draft also shadows the public download
+    # URL (drafts don't expose `releases/download/<tag>/…` → the Streamlit app 404s). Sweep
+    # the full release list and drop any draft carrying this tag before we recreate it.
+    r = requests.get(f"{API_BASE}/releases", headers=HEADERS, params={"per_page": 100}, timeout=10)
+    r.raise_for_status()
+    for rel in r.json():
+        if rel.get("draft") and rel.get("tag_name") == tag:
+            print(f"  ! dangling draft for tag {tag} (id={rel['id']}) — deleting")
+            delete_release(rel)
+
+
+def verify_public_download(tag: str, asset_name: str, attempts: int = 6, delay: float = 5.0) -> None:
+    # Mirror exactly what the public app does: an UNAUTHENTICATED GET of the floating-tag
+    # download URL. Availability is eventually consistent right after publishing, so retry
+    # with a fixed backoff before failing the job loudly (better than a silently-404ing app).
+    url = f"https://github.com/{OWNER}/{REPO}/releases/download/{tag}/{asset_name}"
+    last = None
+    for i in range(1, attempts + 1):
+        try:
+            resp = requests.get(url, timeout=20)  # follows the redirect to the signed asset URL
+            if resp.status_code == 200:
+                print(f"  ✓ public URL reachable: {asset_name} ({len(resp.content):,} bytes)")
+                return
+            last = resp.status_code
+        except requests.RequestException as exc:
+            last = repr(exc)
+        if i < attempts:
+            print(f"    …not ready (last={last}), retry {i}/{attempts - 1} in {delay:.0f}s")
+            time.sleep(delay)
+    raise RuntimeError(
+        f"`{tag}` release published but its public download still fails after {attempts} tries "
+        f"(last={last}): {url} — the Streamlit app would 404. Check the release isn't a draft "
+        f"and the assets uploaded."
+    )
+
 # COMMAND ----------
 
 # MAGIC %md
@@ -168,7 +208,8 @@ print(f"Replacing floating release {LATEST_TAG}...")
 existing_latest = get_release_by_tag(LATEST_TAG)
 if existing_latest:
     delete_release(existing_latest)
-    delete_ref(LATEST_TAG)
+delete_dangling_drafts(LATEST_TAG)  # catch drafts the tag lookup above can't see
+delete_ref(LATEST_TAG)              # always clear the tag ref (tolerates 422 if absent)
 
 latest_release = create_release(
     LATEST_TAG,
@@ -181,6 +222,12 @@ latest_release = create_release(
 )
 for f in ARTIFACTS:
     upload_asset(latest_release, f)
+
+# Fail the job if `latest` didn't actually become publicly fetchable — otherwise the
+# app silently 404s and shows "datos aún no publicados" despite a "successful" run.
+if latest_release.get("draft"):
+    raise RuntimeError(f"`{LATEST_TAG}` came back as a draft — the app would 404. Aborting.")
+verify_public_download(LATEST_TAG, ARTIFACTS[-1].name)  # dashboard_meta.json (smallest)
 
 print(f"\n✓ Published {len(ARTIFACTS)} artifact(s) to {DATED_TAG} and {LATEST_TAG}")
 print(f"  https://github.com/{OWNER}/{REPO}/releases/tag/{LATEST_TAG}")
