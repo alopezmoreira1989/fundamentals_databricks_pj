@@ -30,7 +30,7 @@ from pathlib import Path
 
 import pandas as pd
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 FY_YEARS       = 10
 QUARTERS       = 12
 
@@ -46,8 +46,14 @@ META_JSON      = OUT_DIR / "dashboard_meta.json"
 
 # COMMAND ----------
 
+# Universe flags (is_favorite / in_sp500 / in_r3000) drive the Streamlit
+# screener's universe filter. COALESCE to false so NULLs don't leak through.
 tickers_df = spark.sql(f"""
-    SELECT t.ticker, t.company
+    SELECT
+      t.ticker, t.company,
+      COALESCE(t.is_favorite, false) AS is_favorite,
+      COALESCE(t.in_sp500,    false) AS in_sp500,
+      COALESCE(t.in_r3000,    false) AS in_r3000
     FROM {CATALOG}.config.tickers t
     JOIN (SELECT DISTINCT ticker FROM {CATALOG}.{SCHEMA}.financials) f
       ON f.ticker = t.ticker
@@ -58,7 +64,18 @@ if tickers_df.empty:
     raise ValueError("No tickers with financial data found")
 
 tickers = tickers_df["ticker"].tolist()
-ticker_meta = tickers_df.to_dict(orient="records")
+# Build records with native Python bools — pandas/numpy bool_ would be stringified
+# to "True"/"False" by json.dumps(default=str) and break boolean parsing in the app.
+ticker_meta = [
+    {
+        "ticker":      r.ticker,
+        "company":     r.company,
+        "is_favorite": bool(r.is_favorite),
+        "in_sp500":    bool(r.in_sp500),
+        "in_r3000":    bool(r.in_r3000),
+    }
+    for r in tickers_df.itertuples()
+]
 print(f"✓ Exporting {len(tickers)} ticker(s)")
 
 tickers_sql = ",".join(f"'{t}'" for t in tickers)
@@ -147,6 +164,34 @@ metrics = spark.sql(f"""
     WHERE m.ticker IN ({tickers_sql})
       AND m.fiscal_year BETWEEN 1990 AND 2099
 """).toPandas()
+
+# Market Cap lives in market_data (not financials_metrics) — inject it as a
+# `Market Cap` metric row so the Streamlit screener can pivot it like any other
+# metric. category/subcategory are NULL on purpose: the detail page's metrics
+# grid filters on category.dropna(), so these rows are invisible there but the
+# screener still picks them up.
+# ⚠️ market_data.fiscal_year is the CALENDAR year, while metrics.fiscal_year is
+# the FISCAL year — for non-December fiscal-year-end tickers (AAPL/Sep, MSFT/Jun,
+# WMT/Jan) there's a known 0–11 month offset. Acceptable for the screener.
+market_cap = spark.sql(f"""
+    SELECT
+      md.ticker,
+      'FY'                  AS period_type,
+      MAKE_DATE(md.fiscal_year, 12, 31) AS period_end,
+      md.fiscal_year,
+      CAST(NULL AS STRING)  AS category,
+      CAST(NULL AS STRING)  AS subcategory,
+      'Market Cap'          AS metric,
+      'usd'                 AS unit,
+      CAST(NULL AS DOUBLE)  AS sort_order,
+      md.market_cap         AS value
+    FROM {CATALOG}.{SCHEMA}.market_data md
+    WHERE md.ticker IN ({tickers_sql})
+      AND md.market_cap IS NOT NULL
+""").toPandas()
+
+metrics = pd.concat([metrics, market_cap], ignore_index=True)
+print(f"  + Market Cap rows: {len(market_cap):,}")
 
 # Trim: last N fiscal years per ticker
 metrics = metrics.sort_values("fiscal_year", ascending=False)

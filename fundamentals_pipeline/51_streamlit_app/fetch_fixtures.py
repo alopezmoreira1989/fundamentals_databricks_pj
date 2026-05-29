@@ -30,9 +30,13 @@ def main():
     spark = DatabricksSession.builder.getOrCreate()
     print("✓ Connected")
 
-    # 1. Ticker universe (favorites only).
+    # 1. Ticker universe (favorites only) — with universe flags (schema v3).
     tickers_df = spark.sql(f"""
-        SELECT ticker, company
+        SELECT
+            ticker, company,
+            COALESCE(is_favorite, false) AS is_favorite,
+            COALESCE(in_sp500,    false) AS in_sp500,
+            COALESCE(in_r3000,    false) AS in_r3000
         FROM {CATALOG}.config.tickers
         WHERE is_favorite = true
         ORDER BY ticker
@@ -42,7 +46,17 @@ def main():
         raise ValueError("No favorite tickers in main.config.tickers")
 
     tickers = tickers_df["ticker"].tolist()
-    ticker_meta = tickers_df.to_dict(orient="records")
+    # Native bools so json.dumps(default=str) doesn't stringify numpy bool_.
+    ticker_meta = [
+        {
+            "ticker":      r.ticker,
+            "company":     r.company,
+            "is_favorite": bool(r.is_favorite),
+            "in_sp500":    bool(r.in_sp500),
+            "in_r3000":    bool(r.in_r3000),
+        }
+        for r in tickers_df.itertuples()
+    ]
     tickers_sql = ",".join(f"'{t}'" for t in tickers)
     print(f"✓ {len(tickers)} ticker(s): {tickers}")
 
@@ -84,7 +98,31 @@ def main():
 
     metrics = _trim_recent(metrics, ["FY"], FY_YEARS)
     metrics = _trim_recent(metrics, ["Q1", "Q2", "Q3", "Q4"], QUARTERS)
-    print(f"  metrics: {len(metrics):,} rows")
+
+    # Market Cap (from market_data) as a `Market Cap` metric row — see
+    # 50_publish/51__export_dashboard_data.py for rationale. category NULL keeps
+    # it out of the detail page's metrics grid but visible to the screener.
+    # ⚠️ market_data.fiscal_year is the calendar year (0–11mo offset vs fiscal).
+    import pandas as pd
+
+    market_cap = spark.sql(f"""
+        SELECT
+            md.ticker,
+            'FY'                  AS period_type,
+            MAKE_DATE(md.fiscal_year, 12, 31) AS period_end,
+            md.fiscal_year,
+            CAST(NULL AS STRING)  AS category,
+            CAST(NULL AS STRING)  AS subcategory,
+            'Market Cap'          AS metric,
+            'usd'                 AS unit,
+            CAST(NULL AS DOUBLE)  AS sort_order,
+            md.market_cap         AS value
+        FROM {CATALOG}.{SCHEMA}.market_data md
+        WHERE md.ticker IN ({tickers_sql})
+          AND md.market_cap IS NOT NULL
+    """).toPandas()
+    metrics = pd.concat([metrics, market_cap], ignore_index=True)
+    print(f"  metrics: {len(metrics):,} rows (incl. {len(market_cap):,} Market Cap)")
 
     # 4. Write fixtures.
     data_path   = OUT_DIR / "dashboard_data.parquet"
@@ -104,7 +142,7 @@ def main():
     )
 
     meta = {
-        "schema_version":  2,
+        "schema_version":  3,
         "build_timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "tickers":         ticker_meta,
         "fy_ranges":       fy_ranges,
@@ -122,7 +160,7 @@ def main():
     print(f"\n✓ Fixtures written to {OUT_DIR}/")
     print(f"  {data_path.name}    ({data_path.stat().st_size / 1024:.1f} KB)")
     print(f"  {metric_path.name}  ({metric_path.stat().st_size / 1024:.1f} KB)")
-    print(f"  {meta_path.name}    (schema v2)")
+    print(f"  {meta_path.name}    (schema v3)")
 
 
 def _trim_recent(df, period_types: list[str], n_periods: int):
