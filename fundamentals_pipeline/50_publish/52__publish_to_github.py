@@ -114,6 +114,25 @@ def create_release(tag: str, name: str, body: str, target_commitish: str = "main
     return rel
 
 
+def publish_release(release: dict) -> dict:
+    """Force a release to published (draft=false) and return the updated release.
+
+    GitHub occasionally hands back a *draft* from create_release even when
+    draft=False was requested — typically a race right after the delete-and-
+    recreate of the floating tag below. A draft exposes no public
+    `releases/download/<tag>/…` URL, so the Streamlit app 404s. PATCH it back to
+    published instead of failing the whole job.
+    """
+    rid = release["id"]
+    r = requests.patch(
+        f"{API_BASE}/releases/{rid}", headers=HEADERS, json={"draft": False}, timeout=10
+    )
+    r.raise_for_status()
+    rel = r.json()
+    print(f"  ✓ re-published release id={rid} (draft={rel.get('draft')})")
+    return rel
+
+
 def upload_asset(release: dict, file_path: Path) -> None:
     # GitHub uses a separate upload host; the URL template includes a `{?name,label}` suffix.
     upload_url = release["upload_url"].split("{", 1)[0]
@@ -223,10 +242,18 @@ latest_release = create_release(
 for f in ARTIFACTS:
     upload_asset(latest_release, f)
 
+# GitHub sometimes returns a draft despite draft=False (race after the
+# delete-and-recreate above) — a draft has no public download URL, so the app
+# 404s. Auto-publish it instead of failing the job; only abort if it's somehow
+# still a draft after the PATCH.
+if latest_release.get("draft"):
+    print(f"  ! {LATEST_TAG} came back as a draft — auto-publishing")
+    latest_release = publish_release(latest_release)
+    if latest_release.get("draft"):
+        raise RuntimeError(f"`{LATEST_TAG}` is still a draft after re-publish — aborting.")
+
 # Fail the job if `latest` didn't actually become publicly fetchable — otherwise the
 # app silently 404s and shows "datos aún no publicados" despite a "successful" run.
-if latest_release.get("draft"):
-    raise RuntimeError(f"`{LATEST_TAG}` came back as a draft — the app would 404. Aborting.")
 verify_public_download(LATEST_TAG, ARTIFACTS[-1].name)  # dashboard_meta.json (smallest)
 
 print(f"\n✓ Published {len(ARTIFACTS)} artifact(s) to {DATED_TAG} and {LATEST_TAG}")
