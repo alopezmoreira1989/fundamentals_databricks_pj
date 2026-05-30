@@ -59,8 +59,14 @@ def build_screener_frame() -> tuple[pd.DataFrame, dict[str, str], list[str]]:
     # pivot doesn't materialise ghost columns for unused categories.
     m["metric"] = m["metric"].astype(str)
 
-    # Quédate con el último fiscal_year disponible por ticker.
-    latest = m.groupby("ticker", observed=True)["fiscal_year"].transform("max")
+    # Para cada (ticker, métrica) quédate con SU último fiscal_year disponible —
+    # NO un único año por ticker. Filas como las métricas TTM de Intrinsic Value
+    # (estampadas en un fiscal_year futuro, p.ej. 2026) o el Market Cap (año
+    # CALENDARIO) van por delante del último FY de las métricas core; un MAX por
+    # ticker congelaría toda la fila a ese año y dejaría Net Margin/ROE/P-E… en
+    # None aunque sí existan en el año anterior (bug VNOM). Esta es además la
+    # misma semántica que usa la página de detalle (último valor por métrica).
+    latest = m.groupby(["ticker", "metric"], observed=True)["fiscal_year"].transform("max")
     m = m[m["fiscal_year"] == latest]
 
     # unit por métrica (para formateo) y orden por metrics_hierarchy.

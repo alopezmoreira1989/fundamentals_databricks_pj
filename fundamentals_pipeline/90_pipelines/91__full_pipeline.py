@@ -183,6 +183,26 @@ print("=" * 55)
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ## 5b. Ingestion — dimensional 10-K facts (combined-filers) ⚠️ experimental
+# MAGIC `financials_raw` — recupera los totales primarios anuales de combined-filers
+# MAGIC (REIT + Operating Partnership, p.ej. SKT) que SEC `companyfacts` omite por ser
+# MAGIC facts dimensionales. **No-op** si ningún ticker en `favorites.json` tiene el campo
+# MAGIC `combined_filer_member`. Debe correr DESPUÉS de `11` (sincroniza `scraped_at`) y
+# MAGIC ANTES de `21`.
+
+# COMMAND ----------
+
+print("=" * 55)
+print("STEP 3b / 12 — Dimensional 10-K (combined-filers)")
+print("=" * 55)
+
+# COMMAND ----------
+
+# MAGIC %run "../10_ingestion/13__fetch_dimensional_10k"
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## 6. Ingestion — fetch market data from Yahoo Finance
 # MAGIC `market_data` — year-end prices + market cap
 
@@ -234,6 +254,27 @@ print("=" * 55)
 # COMMAND ----------
 
 # MAGIC %run "../20_transformation/21b__derive_quarterly"
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 7c. FY-from-quarterly fallback
+# MAGIC `financials` — sintetiza filas FY (Σ Q1..Q4) **solo** para conceptos `flow_additive`
+# MAGIC que no tienen FY real (emisores cuyo total anual no se expone sin dimensión en el
+# MAGIC 10-K). Nunca sobrescribe una FY reportada; `is_derived=True`. Rendimiento bajo hoy
+# MAGIC (el conjunto afectado suele carecer de Q4), pero cubre casos futuros.
+# MAGIC
+# MAGIC Requiere que `21b__derive_quarterly` haya escrito los trimestres antes.
+
+# COMMAND ----------
+
+print("=" * 55)
+print("STEP 6b / 12 — FY from Quarterly (fallback)")
+print("=" * 55)
+
+# COMMAND ----------
+
+# MAGIC %run "../20_transformation/21e__derive_fy_from_quarterly"
 
 # COMMAND ----------
 
