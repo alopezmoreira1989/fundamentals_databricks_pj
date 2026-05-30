@@ -134,6 +134,15 @@ for _alt, _canon in CONCEPT_SYNONYMS.items():
         F.when(F.col("concept") == _alt, _canon).otherwise(F.col("concept"))
     )
 
+# Drop comparativos mal etiquetados: un fact del año en curso SIEMPRE termina en un
+# año calendario >= su fiscal_year (cierre en dic = año fy; Jan-enders cierran en fy+1).
+# Un period_end cuyo año < fy es un comparativo de un filing posterior etiquetado con el
+# fy de ese filing — nunca un dato genuino del año en curso (ningún emisor del universo
+# etiqueta su fiscal year por ADELANTE; verificado vía modal offset por ticker). Sin esto,
+# un fy cuyo único fact disponible es un comparativo produce una fila desalineada que el
+# MERGE no borra y se acumula.
+incoming = incoming.filter(F.year(F.col("period_end")) >= F.col("fy"))
+
 # Dedup: nos quedamos con el fact del AÑO EN CURSO por (ticker, stmt, concept, fy).
 # Un 10-K etiqueta los comparativos de años previos con el `fy` DEL FILING, así que una
 # partición fy contiene varios facts FY; el año en curso es el de `period_end` MÁS RECIENTE
