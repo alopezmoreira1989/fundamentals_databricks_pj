@@ -1,5 +1,18 @@
 # Databricks notebook source
 # MAGIC %md
+# MAGIC ## 0a. Session dependencies
+# MAGIC `lxml` is required by `13__fetch_dimensional_10k` (XBRL instance parsing) and is
+# MAGIC NOT preinstalled on serverless. Install it FIRST — `%pip` restarts the Python
+# MAGIC interpreter, so it must run before any state is built. It then persists for the
+# MAGIC notebooks pulled in via `%run` (shared session), including `13`.
+
+# COMMAND ----------
+
+# MAGIC %pip install lxml
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC # 90_pipelines / 91__full_pipeline
 # MAGIC
 # MAGIC **Entry point for the Databricks Job.**

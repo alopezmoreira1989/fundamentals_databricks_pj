@@ -219,7 +219,11 @@ if _allowlist:
     print(f"scraped_at sincronizado: {latest_scrape}")
 
     for ticker, cfg in _allowlist.items():
-        cik = _get_cik(ticker, cfg["cik"])
+        try:
+            cik = _get_cik(ticker, cfg["cik"])
+        except Exception as exc:
+            print(f"  ✗ {ticker}: resolución de CIK falló ({exc})")
+            continue
         if not cik:
             continue
         try:
@@ -275,10 +279,14 @@ if records:
     df["filed"] = None
     df = df[[f.name for f in SCHEMA_DEF.fields]]
 
-    sdf = spark.createDataFrame(df, schema=SCHEMA_DEF)
-    sdf.write.mode("append").option("mergeSchema", "true").saveAsTable(raw_full)
-    print(f"✓ {len(df):,} filas dimensionales → {raw_full}")
-    print("Muestra:")
-    sdf.select("ticker", "stmt", "concept", "fy", "value").orderBy("ticker", "concept", "fy").show(40, truncate=False)
+    # Stage experimental: un fallo al escribir NO debe tumbar el pipeline (91 lo corre vía %run).
+    try:
+        sdf = spark.createDataFrame(df, schema=SCHEMA_DEF)
+        sdf.write.mode("append").option("mergeSchema", "true").saveAsTable(raw_full)
+        print(f"✓ {len(df):,} filas dimensionales → {raw_full}")
+        print("Muestra:")
+        sdf.select("ticker", "stmt", "concept", "fy", "value").orderBy("ticker", "concept", "fy").show(40, truncate=False)
+    except Exception as exc:
+        print(f"⚠ Append dimensional falló (no fatal): {exc}")
 else:
     print("⊘ Nada que escribir.")
