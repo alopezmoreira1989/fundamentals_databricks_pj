@@ -125,9 +125,18 @@ print(f"FY rows incoming: {incoming.count():,}")
 
 # COMMAND ----------
 
+# Prioridad de sinónimo (menor = preferido) calculada ANTES del rename, desde el label
+# de ORIGEN. Net Income coexiste como NetIncomeLoss + ProfitLoss + (to common) en el
+# mismo fy, así que el desempate no puede ser `value desc`. CONCEPT_PRIORITY fuerza
+# attributable-first; labels no listados → 0 (comportamiento previo de Revenue intacto).
+_prio = F.lit(0)
+for _label, _rank in CONCEPT_PRIORITY.items():
+    _prio = F.when(F.col("concept") == _label, F.lit(_rank)).otherwise(_prio)
+incoming = incoming.withColumn("prio", _prio)
+
 # Normalise: colapsa sinónimos XBRL al concepto canónico via CONCEPT_SYNONYMS
 # (heredado del %run de 01__tickers). Si ambos reportan el mismo (ticker, stmt, fy),
-# la dedup posterior se queda con uno solo — latest filed, mayor value.
+# la dedup posterior se queda con uno solo — prio asc, latest filed, mayor value.
 for _alt, _canon in CONCEPT_SYNONYMS.items():
     incoming = incoming.withColumn(
         "concept",
@@ -152,8 +161,11 @@ incoming = incoming.filter(F.year(F.col("period_end")) >= F.col("fy"))
 # MAX(period_end) que usa 21b. `filed` desc resuelve restatements; `value` desc es desempate
 # final. Para stocks (BS) period_end desc también elige el snapshot del año en curso (antes
 # caía a `value` desc y podía elegir el snapshot comparativo mayor).
+# `prio asc` va DESPUÉS de period_end (elegir año en curso vs comparativo) pero ANTES
+# de value: entre tags que coexisten en el mismo fy/period_end gana el preferido.
 w = Window.partitionBy("ticker", "stmt", "concept", "fy").orderBy(
     F.col("period_end").desc_nulls_last(),
+    F.col("prio").asc_nulls_last(),
     F.col("filed").desc_nulls_last(),
     F.col("value").desc_nulls_last()
 )
@@ -161,7 +173,7 @@ incoming = (
     incoming
     .withColumn("rn", F.row_number().over(w))
     .filter(F.col("rn") == 1)
-    .drop("rn", "duration_days")
+    .drop("rn", "duration_days", "prio")
     .withColumn("company", F.initcap(F.col("company")))
 )
 

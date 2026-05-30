@@ -56,11 +56,22 @@ print(f"Latest scrape: {latest_scrape}")
 
 raw = spark.table(raw_full).filter(F.col("scraped_at") == latest_scrape)
 
-# Normalise: collapse "Revenue (contract)" → "Revenue"
-raw = raw.withColumn(
-    "concept",
-    F.when(F.col("concept") == "Revenue (contract)", "Revenue").otherwise(F.col("concept"))
-)
+# Prioridad de sinónimo (menor = preferido), calculada ANTES del rename desde el label
+# de ORIGEN, igual que en 21__clean_and_merge. Necesario porque Net Income / Equity / OCF
+# tienen tags que COEXISTEN en el mismo fy y el desempate no puede ser `value desc`.
+_prio = F.lit(0)
+for _label, _rank in CONCEPT_PRIORITY.items():
+    _prio = F.when(F.col("concept") == _label, F.lit(_rank)).otherwise(_prio)
+raw = raw.withColumn("prio", _prio)
+
+# Normalise: colapsa TODOS los sinónimos XBRL al concepto canónico via CONCEPT_SYNONYMS
+# (heredado del %run de 01__tickers) — antes aquí solo se colapsaba "Revenue (contract)".
+# Afecta a flow (Net Income, OCF) y stock (Total Equity), igual que 21.
+for _alt, _canon in CONCEPT_SYNONYMS.items():
+    raw = raw.withColumn(
+        "concept",
+        F.when(F.col("concept") == _alt, _canon).otherwise(F.col("concept"))
+    )
 
 # COMMAND ----------
 
@@ -97,6 +108,7 @@ w = Window.partitionBy(
     "ticker", "stmt", "concept", "fy", "fp", "period_shape"
 ).orderBy(
     F.col("period_end").desc_nulls_last(),
+    F.col("prio").asc_nulls_last(),   # tag preferido cuando varios sinónimos coexisten
     F.col("filed").desc_nulls_last(),
 )
 
@@ -367,12 +379,13 @@ print(f"Flow quarterly rows derived: {flow_quarterly.count():,}")
 
 # MAGIC %md ## 2. STOCK concepts — snapshot-based quarterly
 # MAGIC
-# MAGIC SEC re-reports prior-period BS snapshots in later 10-Qs as comparatives.
-# MAGIC We dedupe by `(ticker, concept, period_end)` keeping `MAX(filed)`.
-# MAGIC
-# MAGIC Then assign `period_type` based on `fp` from the filing it appears in.
-# MAGIC The FY snapshot from the 10-K (already in clean table via `21__clean_and_merge`)
-# MAGIC is excluded here.
+# MAGIC SEC re-reports prior-period BS snapshots in later 10-Qs as comparatives, each tagged
+# MAGIC with the *containing filing's* `fy/fp`. We pick the **current** snapshot per filing
+# MAGIC (`MAX(period_end)` within each `filed`) so each row keeps the `(fy, fp)` that genuinely
+# MAGIC owns its `period_end`, then resolve restatements (10-Q vs 10-Q/A) by latest `filed`.
+# MAGIC A proximity guard (`filed − period_end ≤ 100d`) drops deep comparatives / stale
+# MAGIC carried-forward facts. `period_type` comes from `fp`. The FY snapshot from the 10-K
+# MAGIC (already in the clean table via `21__clean_and_merge`) is excluded here.
 
 # COMMAND ----------
 
@@ -382,33 +395,51 @@ stock = (
     .filter(F.col("form").isin("10-Q", "10-Q/A"))   # Q snapshots only; FY snapshots come from 10-K via 21
     .filter(F.col("fp").isin("Q1", "Q2", "Q3"))
     .filter(F.col("value").isNotNull())
+    # Proximity guard: el balance "as of" de un 10-Q es la fecha de cierre del trimestre,
+    # presentada como mucho ~1 trimestre antes del `filed` (plazo SEC 40-45d + holgura). Un
+    # period_end MUY anterior al `filed` es un comparativo profundo o un fact arrastrado de un
+    # concepto que el emisor dejó de reportar en curso. Descartarlo evita que un snapshot viejo
+    # gane el MAX(period_end) por filing cuando el del trimestre en curso no aparece en ese
+    # filing (origen de los ~990 cross-labels residuales tras el fix del window de abajo).
+    .filter(F.datediff(F.col("filed"), F.col("period_end")) <= 100)
 )
 
-# Dedup: (ticker, concept, period_end) → MAX(filed)
-w_stock = Window.partitionBy("ticker", "stmt", "concept", "period_end").orderBy(
-    F.col("filed").desc_nulls_last()
+# El snapshot del AÑO EN CURSO de un filing es el de period_end MÁS RECIENTE; los period_end
+# anteriores del MISMO filing son comparativos. `filed` identifica el filing (accession), así
+# que MAX(period_end) por filing fija el (fy, fp) que de verdad "posee" ese period_end.
+#
+# La dedup previa por (ticker, concept, period_end) → MAX(filed) era INCORRECTA para stocks:
+# reasignaba cada snapshot al (fy, fp) de su ÚLTIMO filing, pero un 10-Q posterior trae ese
+# mismo period_end como comparativo del año anterior (p.ej. el Total Assets de Q3-2011 aparece
+# en el 10-Q de Q3-2012). Eso empujaba el tag ~1 año hacia adelante y expulsaba el snapshot del
+# año en curso de su propia partición fy → el trimestre salía con el period_end del CIERRE
+# FISCAL previo (~19k filas mal etiquetadas; el window period_end-desc posterior corría
+# demasiado tarde para deshacerlo). Misma intención que 21__clean_and_merge para las filas FY.
+# `prio` rompe el empate cuando el MISMO filing trae dos tags del concepto (p.ej. equity
+# StockholdersEquity vs incl-NCI) con el mismo period_end.
+w_filing = Window.partitionBy("ticker", "stmt", "concept", "filed").orderBy(
+    F.col("period_end").desc_nulls_last(),
+    F.col("prio").asc_nulls_last(),
 )
 
 stock_dedup = (
     stock
-    .withColumn("rn", F.row_number().over(w_stock))
+    .withColumn("rn", F.row_number().over(w_filing))
     .filter(F.col("rn") == 1)
     .drop("rn")
 )
 
-# Drop comparatives: SEC companyfacts returns every BS fact tagged with the
-# containing filing's fp/fy, so a 10-Q for fy=2025/Q3 carries ~12 historical
-# period_ends (the issuer's prior quarters/years as comparatives). Each of
-# those older quarter ends is already captured as the current row in its
-# own original 10-Q, so per (ticker, stmt, concept, fy, fp) keep only the
-# row with the latest period_end (the filing's actual reporting period).
-w_stock_current = Window.partitionBy(
-    "ticker", "stmt", "concept", "fy", "fp"
-).orderBy(F.col("period_end").desc_nulls_last())
+# Restatements: el mismo (fy, fp) en curso puede venir en 10-Q y 10-Q/A → latest `filed`
+# (period_end desc como desempate determinista final).
+w_restate = Window.partitionBy("ticker", "stmt", "concept", "fy", "fp").orderBy(
+    F.col("filed").desc_nulls_last(),
+    F.col("prio").asc_nulls_last(),
+    F.col("period_end").desc_nulls_last(),
+)
 
 stock_dedup = (
     stock_dedup
-    .withColumn("rn", F.row_number().over(w_stock_current))
+    .withColumn("rn", F.row_number().over(w_restate))
     .filter(F.col("rn") == 1)
     .drop("rn")
 )

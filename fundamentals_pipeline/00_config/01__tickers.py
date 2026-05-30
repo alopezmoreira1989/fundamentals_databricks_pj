@@ -79,6 +79,8 @@ INCOME_STATEMENT = {
     "Income Before Tax":          ("IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest","flow_additive"),
     "Income Tax":                 ("IncomeTaxExpenseBenefit",                                                                   "flow_additive"),
     "Net Income":                 ("NetIncomeLoss",                                                                             "flow_additive"),
+    "Net Income (to common)":     ("NetIncomeLossAvailableToCommonStockholdersBasic",                                           "flow_additive"),
+    "Net Income (incl NCI)":      ("ProfitLoss",                                                                                "flow_additive"),
     "EPS Basic":                  ("EarningsPerShareBasic",                                                                     "flow_nonadditive"),
     "EPS Diluted":                ("EarningsPerShareDiluted",                                                                   "flow_nonadditive"),
     "Shares Diluted":             ("WeightedAverageNumberOfDilutedSharesOutstanding",                                           "flow_nonadditive"),
@@ -102,15 +104,19 @@ BALANCE_SHEET = {
     "Additional Paid-in Capital": ("AdditionalPaidInCapital",                    "stock"),
     "Retained Earnings":          ("RetainedEarningsAccumulatedDeficit",         "stock"),
     "Total Stockholders Equity":  ("StockholdersEquity",                         "stock"),
+    "Total Equity (incl NCI)":    ("StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest", "stock"),
     "Total Liabilities & Equity": ("LiabilitiesAndStockholdersEquity",           "stock"),
 }
 
 CASH_FLOW = {
     "Net Income":                  ("NetIncomeLoss",                                                                                                     "flow_additive"),
+    "Net Income (to common)":      ("NetIncomeLossAvailableToCommonStockholdersBasic",                                                                   "flow_additive"),
+    "Net Income (incl NCI)":       ("ProfitLoss",                                                                                                        "flow_additive"),
     "Depreciation & Amortization": ("DepreciationDepletionAndAmortization",                                                                              "flow_additive"),
     "Stock-based Compensation":    ("ShareBasedCompensation",                                                                                            "flow_additive"),
     "Changes in Working Capital":  ("IncreaseDecreaseInOperatingCapital",                                                                                "flow_additive"),
     "Operating Cash Flow":         ("NetCashProvidedByUsedInOperatingActivities",                                                                       "flow_additive"),
+    "Operating Cash Flow (cont ops)": ("NetCashProvidedByUsedInOperatingActivitiesContinuingOperations",                                                "flow_additive"),
     "CapEx":                       ("PaymentsToAcquirePropertyPlantAndEquipment",                                                                       "flow_additive"),
     "Acquisitions":                ("PaymentsToAcquireBusinessesNetOfCashAcquired",                                                                     "flow_additive"),
     "Purchases of Investments":    ("PaymentsToAcquireInvestments",                                                                                     "flow_additive"),
@@ -165,6 +171,80 @@ CONCEPT_SYNONYMS = {
 
     # Oil & gas — emisores con concept específico del sector (sin overlap habitual con Revenues)
     "Revenue (oil & gas)":         "Revenue",   # OilAndGasRevenue
+
+    # ── Net Income ─────────────────────────────────────────────────────────────
+    # Muchas empresas dejan de etiquetar `NetIncomeLoss` en el 10-K y pasan a
+    # `ProfitLoss` (incl. participaciones no controladoras) o a la línea
+    # "available to common" (tras dividendos preferentes). Sin estos sinónimos el
+    # FY Net Income queda ausente o congelado años atrás (→ ROE/Net Margin/P-E
+    # obsoletos). Afecta ~125 tickers: AEE, OXY, LYB, QSR, JEF, MORN, PAYX, VRSN…
+    # ⚠️ A DIFERENCIA de Revenue, aquí los tres tags COEXISTEN en el mismo fy, así
+    # que el desempate no puede ser `value desc` (elegiría el mayor = incl-NCI).
+    # CONCEPT_PRIORITY (abajo) fuerza la preferencia attributable-first.
+    "Net Income (to common)":      "Net Income",   # NetIncomeLossAvailableToCommonStockholdersBasic
+    "Net Income (incl NCI)":       "Net Income",   # ProfitLoss
+
+    # ── Total Stockholders Equity ──────────────────────────────────────────────
+    # Empresas con NCI material reportan `…IncludingPortionAttributableToNoncontrollingInterest`.
+    # Preferimos el equity atribuible al accionista (StockholdersEquity) para ROE.
+    "Total Equity (incl NCI)":     "Total Stockholders Equity",  # StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest
+
+    # ── Operating Cash Flow ────────────────────────────────────────────────────
+    # Muchas reportan la variante "continuing operations" en vez de la base.
+    "Operating Cash Flow (cont ops)": "Operating Cash Flow",  # NetCashProvidedByUsedInOperatingActivitiesContinuingOperations
+}
+
+# COMMAND ----------
+
+# MAGIC %md ## Concept priority (tie-break entre sinónimos que coexisten)
+# MAGIC
+# MAGIC Cuando varios tags XBRL colapsan al mismo concepto canónico vía
+# MAGIC `CONCEPT_SYNONYMS` y **coexisten en el mismo `fy`** (típico de Net Income:
+# MAGIC `NetIncomeLoss` + `ProfitLoss` en el mismo 10-K), el desempate por `value desc`
+# MAGIC del merge es INCORRECTO (elegiría el mayor). `CONCEPT_PRIORITY` define el orden
+# MAGIC de preferencia por **label de origen** (menor = preferido). `21` y `21b` lo
+# MAGIC insertan en el `ORDER BY` del Window de dedup, ANTES de `value desc`.
+# MAGIC
+# MAGIC Cualquier label no listado → prioridad 0 (preserva el comportamiento previo de
+# MAGIC Revenue, cuyos sinónimos rara vez coexisten y se resuelven por `value desc`).
+
+# COMMAND ----------
+
+CONCEPT_PRIORITY = {
+    # Net Income: attributable > to-common > incl-NCI
+    "Net Income":             0,
+    "Net Income (to common)": 1,
+    "Net Income (incl NCI)":  2,
+    # Equity: atribuible al accionista > incl-NCI
+    "Total Stockholders Equity": 0,
+    "Total Equity (incl NCI)":   1,
+    # OCF: base > continuing-operations
+    "Operating Cash Flow":            0,
+    "Operating Cash Flow (cont ops)": 1,
+}
+
+# COMMAND ----------
+
+# MAGIC %md ## Combined-filers (10-K dimensional)
+# MAGIC
+# MAGIC Tickers cuyo 10-K cubre **dos registrantes** (REIT + Operating Partnership, p.ej.
+# MAGIC Tanger Inc. / SKT). Cada línea del estado primario lleva un miembro `dei:LegalEntityAxis`,
+# MAGIC así que la API SEC `companyfacts` (que descarta facts dimensionales) NO devuelve los
+# MAGIC totales anuales → `21` no encuentra FY. `10_ingestion/13__fetch_dimensional_10k`
+# MAGIC procesa SOLO los tickers de este dict: baja la instancia XBRL del 10-K y extrae el
+# MAGIC fact del **miembro de la entidad padre** (`member`), emitiéndolo sin dimensión.
+# MAGIC
+# MAGIC Config separada de `favorites.json` **a propósito**: estar aquí NO marca el ticker como
+# MAGIC favorito; solo activa la recuperación dimensional. `cik` es opcional (override si SEC no
+# MAGIC resuelve el ticker). Dict vacío → `13` es no-op.
+# MAGIC
+# MAGIC `member` = local-name del miembro padre (validado contra la instancia del 10-K, no
+# MAGIC adivinado). SKT→`TangerIncMember` verificado FY2024: Revenue 526.06M, Net Income 98.595M.
+
+# COMMAND ----------
+
+COMBINED_FILERS = {
+    "SKT": {"member": "TangerIncMember", "cik": "0000899715"},  # Tanger Inc. + Tanger Properties LP
 }
 
 # COMMAND ----------
