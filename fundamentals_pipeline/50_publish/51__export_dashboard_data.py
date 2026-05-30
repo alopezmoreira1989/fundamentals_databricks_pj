@@ -92,54 +92,41 @@ tickers_sql = ",".join(f"'{t}'" for t in tickers)
 
 # COMMAND ----------
 
+# Precise retention done IN SQL so toPandas() pulls only the final slice (no driver-side
+# loop over ~2.5k tickers). DENSE_RANK over DISTINCT period_end — not ROW_NUMBER over rows —
+# keeps ALL concept rows for the last N periods regardless of how many concepts a period has
+# (the old ROW_NUMBER `* 30` cap was a guess that broke as concept counts grew, and forced an
+# over-pull + pandas trim_recent loop that pushed 51 past its 600s timeout). FY and the
+# quarterly bucket (Q1..Q4 combined) are ranked independently, matching the previous behaviour:
+# last FY_YEARS distinct FY period_ends + last QUARTERS distinct quarter period_ends per ticker.
 financials = spark.sql(f"""
-    WITH ranked AS (
+    WITH base AS (
       SELECT
         f.ticker, f.period_type, f.period_end, f.fiscal_year,
         f.stmt, f.concept, f.value,
         h.section, h.group, h.sort_order,
         COALESCE(h.display_name, f.concept) AS display_name,
-        -- FY / quarterly windows are computed per ticker × period_type
-        ROW_NUMBER() OVER (
-          PARTITION BY f.ticker, f.period_type
-          ORDER BY f.period_end DESC
-        ) AS recency_rank
+        CASE WHEN f.period_type = 'FY' THEN 'FY' ELSE 'Q' END AS pt_bucket
       FROM {CATALOG}.{SCHEMA}.financials f
       LEFT JOIN {CATALOG}.config.concept_hierarchy h
         ON h.stmt = f.stmt AND h.concept = f.concept
       WHERE f.ticker IN ({tickers_sql})
+        AND f.period_type IN ('FY', 'Q1', 'Q2', 'Q3', 'Q4')
+    ),
+    ranked AS (
+      SELECT *,
+        DENSE_RANK() OVER (
+          PARTITION BY ticker, pt_bucket ORDER BY period_end DESC
+        ) AS period_rank
+      FROM base
     )
     SELECT
       ticker, period_type, period_end, fiscal_year,
       stmt, section, `group`, concept, display_name, sort_order, value
     FROM ranked
-    WHERE
-      (period_type = 'FY'  AND recency_rank <= {FY_YEARS} * 30)   -- ~30 concepts/yr cap
-      OR
-      (period_type IN ('Q1','Q2','Q3','Q4') AND recency_rank <= {QUARTERS} * 30)
+    WHERE (pt_bucket = 'FY' AND period_rank <= {FY_YEARS})
+       OR (pt_bucket = 'Q'  AND period_rank <= {QUARTERS})
 """).toPandas()
-
-# The recency_rank cap above is rough (rank counts per row, not per period).
-# Apply a precise trim on the pandas side: last N distinct (period_type, period_end)
-# groups per ticker, where N = 10 for FY and 12 for quarterly.
-
-def trim_recent(df: pd.DataFrame, period_types: list[str], n_periods: int) -> pd.DataFrame:
-    mask = df["period_type"].isin(period_types)
-    sub  = df[mask]
-    keep_rows = []
-    for ticker, sub_t in sub.groupby("ticker"):
-        recent_ends = (
-            sub_t[["period_end"]]
-            .drop_duplicates()
-            .sort_values("period_end", ascending=False)
-            .head(n_periods)["period_end"]
-            .tolist()
-        )
-        keep_rows.append(sub_t[sub_t["period_end"].isin(recent_ends)])
-    return pd.concat([df[~mask]] + keep_rows, ignore_index=True) if keep_rows else df[~mask]
-
-financials = trim_recent(financials, ["FY"], FY_YEARS)
-financials = trim_recent(financials, ["Q1", "Q2", "Q3", "Q4"], QUARTERS)
 
 print(f"  financials rows: {len(financials):,}")
 print(financials.groupby(["ticker", "period_type"]).size().unstack(fill_value=0))
@@ -152,17 +139,24 @@ print(financials.groupby(["ticker", "period_type"]).size().unstack(fill_value=0)
 # COMMAND ----------
 
 metrics = spark.sql(f"""
-    SELECT
-      m.ticker, 'FY' AS period_type,
-      MAKE_DATE(m.fiscal_year, 12, 31) AS period_end,
-      m.fiscal_year,
-      h.category, h.subcategory, m.metric,
-      h.unit, h.sort_order, m.value
-    FROM {CATALOG}.{SCHEMA}.financials_metrics m
-    LEFT JOIN {CATALOG}.config.metrics_hierarchy h
-      ON h.metric = m.metric
-    WHERE m.ticker IN ({tickers_sql})
-      AND m.fiscal_year BETWEEN 1990 AND 2099
+    WITH ranked AS (
+      SELECT
+        m.ticker, 'FY' AS period_type,
+        MAKE_DATE(m.fiscal_year, 12, 31) AS period_end,
+        m.fiscal_year,
+        h.category, h.subcategory, m.metric,
+        h.unit, h.sort_order, m.value,
+        DENSE_RANK() OVER (PARTITION BY m.ticker ORDER BY m.fiscal_year DESC) AS yr_rank
+      FROM {CATALOG}.{SCHEMA}.financials_metrics m
+      LEFT JOIN {CATALOG}.config.metrics_hierarchy h
+        ON h.metric = m.metric
+      WHERE m.ticker IN ({tickers_sql})
+        AND m.fiscal_year BETWEEN 1990 AND 2099
+    )
+    SELECT ticker, period_type, period_end, fiscal_year,
+           category, subcategory, metric, unit, sort_order, value
+    FROM ranked
+    WHERE yr_rank <= {FY_YEARS}
 """).toPandas()
 
 # Market Cap lives in market_data (not financials_metrics) — inject it as a
@@ -174,29 +168,33 @@ metrics = spark.sql(f"""
 # the FISCAL year — for non-December fiscal-year-end tickers (AAPL/Sep, MSFT/Jun,
 # WMT/Jan) there's a known 0–11 month offset. Acceptable for the screener.
 market_cap = spark.sql(f"""
-    SELECT
-      md.ticker,
-      'FY'                  AS period_type,
-      MAKE_DATE(md.fiscal_year, 12, 31) AS period_end,
-      md.fiscal_year,
-      CAST(NULL AS STRING)  AS category,
-      CAST(NULL AS STRING)  AS subcategory,
-      'Market Cap'          AS metric,
-      'usd'                 AS unit,
-      CAST(NULL AS DOUBLE)  AS sort_order,
-      md.market_cap         AS value
-    FROM {CATALOG}.{SCHEMA}.market_data md
-    WHERE md.ticker IN ({tickers_sql})
-      AND md.market_cap IS NOT NULL
+    WITH ranked AS (
+      SELECT
+        md.ticker,
+        'FY'                  AS period_type,
+        MAKE_DATE(md.fiscal_year, 12, 31) AS period_end,
+        md.fiscal_year,
+        CAST(NULL AS STRING)  AS category,
+        CAST(NULL AS STRING)  AS subcategory,
+        'Market Cap'          AS metric,
+        'usd'                 AS unit,
+        CAST(NULL AS DOUBLE)  AS sort_order,
+        md.market_cap         AS value,
+        DENSE_RANK() OVER (PARTITION BY md.ticker ORDER BY md.fiscal_year DESC) AS yr_rank
+      FROM {CATALOG}.{SCHEMA}.market_data md
+      WHERE md.ticker IN ({tickers_sql})
+        AND md.market_cap IS NOT NULL
+    )
+    SELECT ticker, period_type, period_end, fiscal_year,
+           category, subcategory, metric, unit, sort_order, value
+    FROM ranked
+    WHERE yr_rank <= {FY_YEARS}
 """).toPandas()
 
+# Retention now enforced in SQL (last FY_YEARS years per ticker, per source), so no
+# driver-side trim needed — just stack the two long-format metric frames.
 metrics = pd.concat([metrics, market_cap], ignore_index=True)
 print(f"  + Market Cap rows: {len(market_cap):,}")
-
-# Trim: last N fiscal years per ticker
-metrics = metrics.sort_values("fiscal_year", ascending=False)
-metrics = metrics.groupby("ticker").head(FY_YEARS * 40)  # ~40 metrics/yr cap
-
 print(f"  metrics rows: {len(metrics):,}")
 
 # COMMAND ----------
