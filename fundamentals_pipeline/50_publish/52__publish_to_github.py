@@ -82,6 +82,15 @@ def get_release_by_tag(tag: str) -> dict | None:
     return r.json()
 
 
+def get_release_by_id(release_id: int) -> dict:
+    # Unlike get_release_by_tag (/releases/tags/<tag> does NOT resolve DRAFTs), fetch by id so
+    # we can read the PERSISTED draft state of a release we just created/PATCHed — GitHub's
+    # create/patch response JSON can claim draft=False while the stored release is still a draft.
+    r = requests.get(f"{API_BASE}/releases/{release_id}", headers=HEADERS, timeout=10)
+    r.raise_for_status()
+    return r.json()
+
+
 def delete_release(release: dict) -> None:
     rid = release["id"]
     requests.delete(f"{API_BASE}/releases/{rid}", headers=HEADERS, timeout=10).raise_for_status()
@@ -165,7 +174,7 @@ def delete_dangling_drafts(tag: str) -> None:
             delete_release(rel)
 
 
-def verify_public_download(tag: str, asset_name: str, attempts: int = 6, delay: float = 5.0) -> None:
+def verify_public_download(tag: str, asset_name: str, attempts: int = 8, delay: float = 5.0) -> None:
     # Mirror exactly what the public app does: an UNAUTHENTICATED GET of the floating-tag
     # download URL. Availability is eventually consistent right after publishing, so retry
     # with a fixed backoff before failing the job loudly (better than a silently-404ing app).
@@ -242,19 +251,29 @@ latest_release = create_release(
 for f in ARTIFACTS:
     upload_asset(latest_release, f)
 
-# GitHub sometimes returns a draft despite draft=False (race after the
-# delete-and-recreate above) — a draft has no public download URL, so the app
-# 404s. Auto-publish it instead of failing the job; only abort if it's somehow
-# still a draft after the PATCH.
-if latest_release.get("draft"):
-    print(f"  ! {LATEST_TAG} came back as a draft — auto-publishing")
-    latest_release = publish_release(latest_release)
-    if latest_release.get("draft"):
-        raise RuntimeError(f"`{LATEST_TAG}` is still a draft after re-publish — aborting.")
+# GitHub can persist `latest` as a DRAFT even when create_release returned draft=False in its
+# response JSON: the floating tag ref was just deleted above and may not be resolvable yet, so
+# GitHub auto-drafts the release. A draft exposes no public download URL → the app 404s. The old
+# code only re-published when the *create response* said draft, so this race slipped through
+# (observed 2026-05-31). Don't trust that response: ALWAYS PATCH to published, then RE-FETCH by
+# id to confirm the PERSISTED state, retrying the PATCH until the tag propagates. Idempotent.
+for attempt in range(1, 7):
+    latest_release = publish_release(latest_release)          # PATCH draft=false (idempotent)
+    persisted = get_release_by_id(latest_release["id"])       # GET by id — reads true draft state
+    if not persisted.get("draft"):
+        latest_release = persisted
+        break
+    print(f"    …{LATEST_TAG} still persists as a draft (attempt {attempt}/6) — retrying in 3s")
+    time.sleep(3)
+else:
+    raise RuntimeError(f"`{LATEST_TAG}` stuck as a draft after 6 re-publish attempts — aborting.")
 
-# Fail the job if `latest` didn't actually become publicly fetchable — otherwise the
-# app silently 404s and shows "datos aún no publicados" despite a "successful" run.
-verify_public_download(LATEST_TAG, ARTIFACTS[-1].name)  # dashboard_meta.json (smallest)
+# Fail the job if `latest` didn't actually become publicly fetchable — otherwise the app
+# silently 404s and shows "datos aún no publicados" despite a "successful" run. Verify ALL
+# THREE assets the app needs (not just the smallest): the 12.8MB parquet can lag the others on
+# GitHub's CDN right after publishing, so a single-asset check could pass while the app 404s.
+for art in ARTIFACTS:
+    verify_public_download(LATEST_TAG, art.name)
 
 print(f"\n✓ Published {len(ARTIFACTS)} artifact(s) to {DATED_TAG} and {LATEST_TAG}")
 print(f"  https://github.com/{OWNER}/{REPO}/releases/tag/{LATEST_TAG}")
