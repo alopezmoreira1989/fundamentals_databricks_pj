@@ -377,12 +377,14 @@ except Exception as e:
 # MAGIC `dashboard_data.parquet` + `dashboard_metrics.parquet` + `dashboard_meta.json`
 # MAGIC written to `/tmp/` on the driver. Consumed by step 13 (GitHub publish).
 # MAGIC
-# MAGIC Uses `dbutils.notebook.run` (not `%run`) so we can catch exceptions and
-# MAGIC keep going to the summary. The upstream Delta tables are already updated
-# MAGIC by the time we get here, but a failed export/publish leaves the public
-# MAGIC GitHub Release stale — so we record the failure and **raise at the end**
-# MAGIC (step 14) to mark the Job run FAILED. Silently swallowing it let the
-# MAGIC dashboard go stale unnoticed.
+# MAGIC Runs **inline via `%run`** (same Spark/driver context, shared `/tmp`) — NOT
+# MAGIC `dbutils.notebook.run`. The child-notebook spawn that `dbutils.notebook.run`
+# MAGIC requires was stalling on serverless and burning the full `timeout_seconds`
+# MAGIC cap (`TIMEDOUT`) even though the export work is only ~3–4 min; inline has no
+# MAGIC per-notebook timeout (same fix as `50_publish/53__republish`). If export or
+# MAGIC publish raises, the cell aborts the run → Job marked FAILED with the real
+# MAGIC error (alerts fire) — the Delta tables are already committed by this point,
+# MAGIC so a red run flags a stale Release instead of hiding it behind a green one.
 
 # COMMAND ----------
 
@@ -392,17 +394,7 @@ print("=" * 55)
 
 # COMMAND ----------
 
-publish_errors = []
-try:
-    dbutils.notebook.run(
-        "../50_publish/51__export_dashboard_data",
-        timeout_seconds=1800,   # export work is ~4 min; headroom for serverless child startup/queue
-    )
-    export_ok = True
-except Exception as e:
-    print(f"⚠ Export failed: {e}")
-    publish_errors.append(f"51__export_dashboard_data: {e}")
-    export_ok = False
+# MAGIC %run "../50_publish/51__export_dashboard_data"
 
 # COMMAND ----------
 
@@ -420,18 +412,7 @@ print("=" * 55)
 
 # COMMAND ----------
 
-if export_ok:
-    try:
-        dbutils.notebook.run(
-            "../50_publish/52__publish_to_github",
-            timeout_seconds=600,
-        )
-    except Exception as e:
-        print(f"⚠ Publish failed: {e}")
-        publish_errors.append(f"52__publish_to_github: {e}")
-else:
-    print("⊘ Skipping GitHub publish — export step failed")
-    publish_errors.append("52__publish_to_github: skipped (export failed)")
+# MAGIC %run "../50_publish/52__publish_to_github"
 
 # COMMAND ----------
 
@@ -496,17 +477,11 @@ else:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 14. Surface publish failures
-# MAGIC The Delta tables are updated regardless, but if export/publish failed the
-# MAGIC public GitHub Release is stale. Raise so the Job run is marked FAILED and
-# MAGIC alerts fire — instead of a green run hiding a stale dashboard.
+# MAGIC ## 14. Done
+# MAGIC Export + publish ran inline above. A failure in either aborts the run before
+# MAGIC reaching here (→ Job marked FAILED), so getting here means the Delta tables are
+# MAGIC refreshed **and** the public GitHub Release is current.
 
 # COMMAND ----------
 
-if publish_errors:
-    raise RuntimeError(
-        "Pipeline data steps succeeded but dashboard publish FAILED — the public "
-        "GitHub Release is stale. Re-run 51__export_dashboard_data + "
-        "52__publish_to_github. Details:\n  - " + "\n  - ".join(publish_errors)
-    )
-print("✓ Export + publish OK — dashboard Release is current.")
+print("✓ Pipeline complete — Delta tables refreshed and dashboard Release published.")
