@@ -138,7 +138,16 @@ def quarterly_df(data: pd.DataFrame, ticker: str) -> pd.DataFrame:
     pivot = pivot[meta_cols + q_cols_in_pivot]
 
     pivot = pivot.sort_values("sort_order", na_position="last").reset_index(drop=True)
-    return _decorate(pivot)
+    pivot = _decorate(pivot)
+
+    # Surface derived quarters (Q4 = FY − YTD_Q3) for the renderer, but only if the
+    # export carries the `is_derived` flag — older artifacts won't, so degrade
+    # gracefully (empty set → no markers). Stored on .attrs since the wide pivot
+    # has no per-quarter row to hang it on.
+    if "is_derived" in sub.columns:
+        derived = sub[sub["is_derived"].fillna(False).astype(bool)]
+        pivot.attrs["derived_quarters"] = set(derived["q_label"].unique())
+    return pivot
 
 
 def get_year_columns(df: pd.DataFrame) -> list:

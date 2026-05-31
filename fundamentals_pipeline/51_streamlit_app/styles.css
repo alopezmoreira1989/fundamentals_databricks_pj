@@ -617,11 +617,11 @@ header[data-testid="stHeader"] { display: none !important; }
 /* Reset the top padding Streamlit adds. */
 [data-testid="stAppViewContainer"] > .main { padding-top: 0 !important; }
 .block-container {
-  max-width: 1280px !important;
+  max-width: 1400px !important;
   padding-top: 32px !important;
   padding-bottom: 64px !important;
-  padding-left: 20px !important;
-  padding-right: 20px !important;
+  padding-left: 3rem !important;
+  padding-right: 3rem !important;
 }
 
 /* The whole page background. */

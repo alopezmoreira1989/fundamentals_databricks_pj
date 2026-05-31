@@ -6,6 +6,7 @@ st.markdown(..., unsafe_allow_html=True).
 
 from __future__ import annotations
 
+import html
 import re
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,7 @@ import streamlit as st
 
 from .colors import (
     AMBER,
+    BLUE,
     CORAL,
     CREAM,
     GRAND_TOTAL_CONCEPTS,
@@ -89,14 +91,14 @@ def render_masthead(ticker: str, data: pd.DataFrame, meta: dict[str, Any]) -> st
         '<div class="masthead">'
         '  <div class="masthead-left">'
         '    <div class="eyebrow">Fundamentals · Annual filings</div>'
-        f'    <h1>{company}</h1>'
+        f'    <h1>{html.escape(str(company))}</h1>'
         '    <div class="ticker-row">'
         f'      <span class="ticker-chip">{ticker}</span>'
         '    </div>'
         '  </div>'
         '  <div class="masthead-right">'
         f'    <div class="date">{fy_range}</div>'
-        f'    <div>{n_years} fiscal years · USD millions</div>'
+        f'    <div>{n_years} fiscal years · USD</div>'
         f'    <div style="margin-top:6px;">main.financials.financials</div>'
         '  </div>'
         '</div>'
@@ -120,16 +122,20 @@ def render_table_html(
     year_cols = get_year_columns(df)
     is_quarterly = statement == "qt"
     n_cols = len(year_cols) + 3  # label + N years + trend + cagr (not in qt)
+    # Quarter labels reconstructed as FY − YTD_Q3 (Q4), if the export flags them.
+    derived_qs = df.attrs.get("derived_quarters", set()) if is_quarterly else set()
 
-    # Header row.
-    header_cells = ['<th class="col-label">$M</th>']
+    # Header row. Values are stored as raw USD (fmt_num prints them at full
+    # resolution), so the label is "USD" — NOT "$M"/millions.
+    header_cells = ['<th class="col-label">USD</th>']
     for i, yr in enumerate(year_cols):
         is_last = i == len(year_cols) - 1
         cls = "col-num col-latest" if is_last else "col-num"
         if is_quarterly:
             # Quarter labels are already strings like "'24-Q4".
             cls_extra = " col-latest-q" if is_last else ""
-            header_cells.append(f'<th class="col-num{cls_extra}">{yr}</th>')
+            marker = '<sup class="derived-mark">ᵈ</sup>' if yr in derived_qs else ""
+            header_cells.append(f'<th class="col-num{cls_extra}">{yr}{marker}</th>')
         else:
             label = short_year(yr) if isinstance(yr, (int, float)) else yr
             header_cells.append(f'<th class="{cls}">{label}</th>')
@@ -157,7 +163,7 @@ def render_table_html(
         if section and section != prev_section:
             s_cls = section_class(stmt_value, section)
             rows_html.append(
-                f'<tr class="section-row {s_cls}"><td colspan="{n_cols}">{section}</td></tr>'
+                f'<tr class="section-row {s_cls}"><td colspan="{n_cols}">{html.escape(str(section))}</td></tr>'
             )
             prev_section = section
             prev_group = None  # Reset group tracking within new section.
@@ -165,7 +171,7 @@ def render_table_html(
         # Emit group subheader if nested group changed.
         if group and group != section and group != prev_group:
             rows_html.append(
-                f'<tr class="group-row"><td colspan="{n_cols}">{group}</td></tr>'
+                f'<tr class="group-row"><td colspan="{n_cols}">{html.escape(str(group))}</td></tr>'
             )
             prev_group = group
 
@@ -174,7 +180,7 @@ def render_table_html(
 
         # Label cell.
         indent_cls = f" indent-{indent}" if indent else ""
-        label_td = f'<td class="label{indent_cls}">{display_name}</td>'
+        label_td = f'<td class="label{indent_cls}">{html.escape(str(display_name))}</td>'
 
         # Number cells.
         is_per_share = concept in PER_SHARE_CONCEPTS
@@ -231,11 +237,22 @@ def render_table_html(
     tbody = f'<tbody>{"".join(rows_html)}</tbody>'
 
     table_class = "q-table" if is_quarterly else "fs"
-    html = f'<div class="fs-table-wrap"><table class="{table_class}">{thead}{tbody}</table></div>'
+    table_html = f'<div class="fs-table-wrap"><table class="{table_class}">{thead}{tbody}</table></div>'
+
+    # Footnote explaining the derived-quarter marker (only when some are present).
+    derived_note = ""
+    if derived_qs:
+        derived_note = (
+            '<div class="footnote" style="margin-top:12px;">'
+            '<span style="color:var(--ink); font-weight:500;">ᵈ Derived quarter</span>'
+            '<span class="pipe">|</span>Q4 is reconstructed as FY − YTD&nbsp;Q3 to capture '
+            'year-end audit adjustments, so it is not a directly reported figure.'
+            '</div>'
+        )
 
     # Append notes for this ticker/statement if any.
     note_html = _render_notes(ticker, statement, notes)
-    return html + note_html
+    return table_html + derived_note + note_html
 
 
 def _render_notes(ticker: str, statement: str, notes: dict[str, Any]) -> str:
@@ -255,10 +272,11 @@ def _render_notes(ticker: str, statement: str, notes: dict[str, Any]) -> str:
             continue
         if isinstance(concepts, dict):
             for concept_name, note_text in concepts.items():
+                label = html.escape(f"{period_key} {concept_name}")
                 parts.append(
                     f'<div class="footnote" style="margin-top:20px;">'
-                    f'<strong style="color:var(--ink);font-weight:500;">Note · {period_key} {concept_name}</strong>'
-                    f'<span class="pipe">|</span>{note_text}</div>'
+                    f'<strong style="color:var(--ink);font-weight:500;">Note · {label}</strong>'
+                    f'<span class="pipe">|</span>{html.escape(str(note_text))}</div>'
                 )
     return "".join(parts)
 
