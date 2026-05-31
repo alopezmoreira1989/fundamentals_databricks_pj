@@ -303,3 +303,34 @@ def classify_period_shape(start, end):
     elif 350 <= days <=  380: return "FY_or_TTM"
     else:                     return f"other_{days}d"
 
+
+def classify_period_shape_series(start, end):
+    """Vectorized equivalent of `classify_period_shape` over pandas Series.
+
+    Produces identical labels (snapshot iff `start` is NaT; same inclusive day
+    buckets; same `other_<days>d` fallback) but without the per-row Python call and
+    per-row `pd.to_datetime`/`import pandas` of the scalar version. This is the hot
+    path in `11__fetch_sec_xbrl.extract_series`, called ~60 concepts × ~2.5k tickers;
+    the old `df.apply(..., axis=1)` was GIL-bound and dominated stage-11 CPU time.
+    """
+    import numpy as np
+    import pandas as pd
+    start = pd.to_datetime(start, errors="coerce")
+    end   = pd.to_datetime(end,   errors="coerce")
+    days  = (end - start).dt.days                       # NaN where start is NaT
+    days_str = days.astype("Int64").astype("string")    # "91" / <NA>, no ".0"
+    return pd.Series(
+        np.select(
+            [
+                start.isna(),
+                (days >= 70)  & (days <= 100),
+                (days >= 160) & (days <= 200),
+                (days >= 250) & (days <= 290),
+                (days >= 350) & (days <= 380),
+            ],
+            ["snapshot", "Q_standalone", "YTD_6M", "YTD_9M", "FY_or_TTM"],
+            default=("other_" + days_str + "d"),         # unused where start is NaT
+        ),
+        index=end.index,
+    )
+

@@ -261,9 +261,7 @@ def extract_series(facts: dict, concept: str, kind: str, namespace: str = "us-ga
     else:
         df["start"] = pd.NaT
 
-    df["period_shape"] = df.apply(
-        lambda r: classify_period_shape(r["start"], r["end"]), axis=1
-    )
+    df["period_shape"] = classify_period_shape_series(df["start"], df["end"])
 
     if kind == "stock":
         df = df[df["period_shape"] == "snapshot"].copy()
