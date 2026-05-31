@@ -21,7 +21,10 @@ test_connection.py
 
 # Claude Code — instrucciones personales (no compartir)
 CLAUDE.local.md
-.claude/
+# Ignora todo bajo .claude/ MENOS las skills del proyecto (validación de datos),
+# que sí se versionan/comparten. settings/agents/worktrees siguen siendo locales.
+.claude/*
+!.claude/skills/
 
 # Dashboards generados (HTML autocontenidos)
 fundamentals_pipeline/40_dashboards/output/
