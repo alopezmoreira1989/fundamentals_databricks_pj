@@ -72,7 +72,7 @@ with tab_is:
     df_is = income_statement_df(data, ticker)
     st.markdown(
         '<div class="panel-header"><h2>Income statement</h2>'
-        '<div class="meta">Up to 10 fiscal years · USD millions · concept_hierarchy.json</div></div>',
+        '<div class="meta">Up to 10 fiscal years · USD · concept_hierarchy.json</div></div>',
         unsafe_allow_html=True,
     )
     st.markdown(render_table_html(df_is, statement="is", ticker=ticker, notes=notes), unsafe_allow_html=True)
@@ -82,7 +82,7 @@ with tab_bs:
     df_bs = balance_sheet_df(data, ticker)
     st.markdown(
         '<div class="panel-header"><h2>Balance sheet</h2>'
-        '<div class="meta">Fiscal year-end snapshots · USD millions</div></div>',
+        '<div class="meta">Fiscal year-end snapshots · USD</div></div>',
         unsafe_allow_html=True,
     )
     st.markdown(render_table_html(df_bs, statement="bs", ticker=ticker, notes=notes), unsafe_allow_html=True)
@@ -118,7 +118,7 @@ with tab_qt:
     df_q = quarterly_df(data, ticker)
     st.markdown(
         '<div class="panel-header"><h2>Quarterly</h2>'
-        '<div class="meta">Last 12 quarters · USD billions · YoY = same quarter prior year</div></div>',
+        '<div class="meta">Last 12 quarters · USD · YoY = same quarter prior year</div></div>',
         unsafe_allow_html=True,
     )
     st.markdown(render_quarterly_combo(df_q), unsafe_allow_html=True)

@@ -37,9 +37,12 @@ def _optimize_dtypes(df: pd.DataFrame) -> pd.DataFrame:
             df[col] = df[col].astype("category")
     if "fiscal_year" in df.columns:
         df["fiscal_year"] = pd.to_numeric(df["fiscal_year"], downcast="integer")
-    for col in ("value", "sort_order"):
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], downcast="float")
+    # NOTE: do NOT downcast `value` to float32 — it has ~7 significant digits,
+    # which corrupts large raw-USD figures (e.g. 274,515,000,000) that the
+    # IS/BS/CF tables render at full resolution via fmt_num ({v:,.0f}). The
+    # category conversions above already deliver the real RAM savings.
+    if "sort_order" in df.columns:
+        df["sort_order"] = pd.to_numeric(df["sort_order"], downcast="float")
     return df
 
 
@@ -103,19 +106,19 @@ def _render_load_error(exc: Exception) -> NoReturn:
     )
     if is_404:
         st.error(
-            "**Los datos del dashboard aún no se han publicado.**\n\n"
-            "El app descarga los datos desde el Release `latest` de GitHub, "
-            "que ahora mismo no existe o no es accesible. "
-            "Publícalos ejecutando en Databricks:\n\n"
+            "**The dashboard data has not been published yet.**\n\n"
+            "The app downloads its data from the GitHub `latest` Release, which "
+            "right now does not exist or is not accessible. "
+            "Publish it by running in Databricks:\n\n"
             "1. `50_publish/51__export_dashboard_data`\n"
             "2. `50_publish/52__publish_to_github`\n\n"
-            "Cuando el Release `latest` esté disponible, recarga esta página."
+            "Once the `latest` Release is available, reload this page."
         )
     else:
         st.error(
-            "**No se pudieron cargar los datos del dashboard.**\n\n"
-            f"Error al contactar con la fuente de datos: `{type(exc).__name__}`. "
-            "Reintenta en unos minutos; si persiste, revisa el Release `latest` del repo."
+            "**The dashboard data could not be loaded.**\n\n"
+            f"Error contacting the data source: `{type(exc).__name__}`. "
+            "Retry in a few minutes; if it persists, check the repo's `latest` Release."
         )
     st.stop()
 

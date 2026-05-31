@@ -19,7 +19,7 @@ import streamlit as st
 from lib.render import inject_css
 
 st.set_page_config(
-    page_title="Financials Dashboard",
+    page_title="US Stock FA Screener",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="collapsed",

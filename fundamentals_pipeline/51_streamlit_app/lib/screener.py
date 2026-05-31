@@ -25,14 +25,12 @@ MARKET_CAP = "Market Cap"
 DEFAULT_COLUMNS = [
     "Market Cap", "P/E", "P/S", "Net Margin %", "ROE %", "Revenue YoY %", "EV/EBITDA",
 ]
-# Métricas con slider de rango siempre visible.
-RANGE_METRICS = ["Market Cap", "P/E", "Net Margin %", "ROE %", "Revenue YoY %"]
 # Universo → columna de flag en el frame ("" = sin filtro).
 UNIVERSE_FLAGS = {
-    "Todos":        "",
+    "All":          "",
     "S&P 500":      "in_sp500",
     "Russell 3000": "in_r3000",
-    "Favoritos":    "is_favorite",
+    "Favorites":    "is_favorite",
 }
 _FLAG_COLS = ("is_favorite", "in_sp500", "in_r3000")
 
@@ -42,7 +40,7 @@ def _as_bool(s: pd.Series) -> pd.Series:
     return s.map(lambda v: v is True or str(v).strip().lower() in ("true", "1")).astype(bool)
 
 
-@st.cache_data(ttl=3600, show_spinner="Construyendo el screener…")
+@st.cache_data(ttl=3600, show_spinner="Building screener…")
 def build_screener_frame() -> tuple[pd.DataFrame, dict[str, str], list[str]]:
     """Return ``(wide, unit_map, metric_order)``.
 
@@ -126,30 +124,189 @@ def search_mask(df: pd.DataFrame, query: str) -> pd.Series:
     )
 
 
-def range_bounds(series: pd.Series) -> tuple[float, float] | None:
-    """Slider bounds clamped to the 1st–99th percentile (robust to outliers)."""
-    s = pd.to_numeric(series, errors="coerce").dropna()
-    if s.empty:
-        return None
-    lo, hi = float(s.quantile(0.01)), float(s.quantile(0.99))
-    if lo == hi:
-        hi = lo + 1.0
-    return lo, hi
+# ──────────────────────────────────────────────────────────────────────────────
+# Fixed bucket system (replaces percentile-clamped range sliders)
+# ──────────────────────────────────────────────────────────────────────────────
+# Each bucket is ``(label, lo_inclusive, hi_exclusive)``; open ends use ±inf.
+# Boundaries deliberately track the green/amber/red bands in ``lib.signals`` so a
+# screener chip means the same thing as the detail-page health signal.
+_INF = float("inf")
+_NINF = float("-inf")
+
+# Valuation multiples where "lower is cheaper" and a loss flips the sign.
+_VALUATION_MULTIPLE_BAND = [
+    ("Loss", _NINF, 0.0),
+    ("Cheap", 0.0, 10.0),
+    ("Fair", 10.0, 15.0),
+    ("Full", 15.0, 25.0),
+    ("Rich", 25.0, _INF),
+]
+# P/S and P/B sit on a smaller scale than earnings multiples.
+_SALES_BOOK_BAND = [
+    ("<1", _NINF, 1.0),
+    ("1–2", 1.0, 2.0),
+    ("2–5", 2.0, 5.0),
+    (">5", 5.0, _INF),
+]
+# Capital-return ratios (Graham bands: 8% / 15%).
+_RETURN_BAND = [
+    ("Negative", _NINF, 0.0),
+    ("0–8%", 0.0, 8.0),
+    ("8–15%", 8.0, 15.0),
+    (">15%", 15.0, _INF),
+]
+_ROA_BAND = [
+    ("Negative", _NINF, 0.0),
+    ("0–5%", 0.0, 5.0),
+    ("5–10%", 5.0, 10.0),
+    (">10%", 10.0, _INF),
+]
+_MARGIN_BAND = [
+    ("Negative", _NINF, 0.0),
+    ("0–10%", 0.0, 10.0),
+    ("10–20%", 10.0, 20.0),
+    ("20–40%", 20.0, 40.0),
+    (">40%", 40.0, _INF),
+]
+_YOY_BAND = [
+    ("Declining", _NINF, 0.0),
+    ("0–15%", 0.0, 15.0),
+    ("15–30%", 15.0, 30.0),
+    (">30%", 30.0, _INF),
+]
+_YIELD_BAND = [
+    ("<3%", _NINF, 3.0),
+    ("3–6%", 3.0, 6.0),
+    ("6–10%", 6.0, 10.0),
+    (">10%", 10.0, _INF),
+]
+_MOS_BAND = [
+    ("Overvalued", _NINF, 0.0),
+    ("Slim", 0.0, 15.0),
+    ("Decent", 15.0, 30.0),
+    ("Wide", 30.0, _INF),
+]
+_DEBT_EQUITY_BAND = [
+    ("Low", _NINF, 0.5),
+    ("Mod", 0.5, 1.0),
+    ("High", 1.0, _INF),
+]
+_DEBT_ASSETS_BAND = [
+    ("Low", _NINF, 0.3),
+    ("Mod", 0.3, 0.5),
+    ("High", 0.5, _INF),
+]
+_CURRENT_RATIO_BAND = [
+    ("Tight", _NINF, 1.0),
+    ("OK", 1.0, 1.5),
+    ("Healthy", 1.5, _INF),
+]
+# Raw-USD market-cap / enterprise-value size buckets.
+_CAP_SIZE_BAND = [
+    ("Micro", _NINF, 300e6),
+    ("Small", 300e6, 2e9),
+    ("Mid", 2e9, 10e9),
+    ("Large", 10e9, 200e9),
+    ("Mega", 200e9, _INF),
+]
+
+# Metric (or (FY)/(TTM)-stripped base name) → explicit bucket table.
+EXPLICIT_BUCKETS: dict[str, list[tuple[str, float, float]]] = {
+    "P/E": _VALUATION_MULTIPLE_BAND,
+    "P/FCF": _VALUATION_MULTIPLE_BAND,
+    "EV/EBITDA": _VALUATION_MULTIPLE_BAND,
+    "P/S": _SALES_BOOK_BAND,
+    "P/B": _SALES_BOOK_BAND,
+    "ROE %": _RETURN_BAND,
+    "ROIC %": _RETURN_BAND,
+    "ROCE %": _RETURN_BAND,
+    "CROIC %": _RETURN_BAND,
+    "ROA %": _ROA_BAND,
+    "Gross Margin %": _MARGIN_BAND,
+    "Operating Margin %": _MARGIN_BAND,
+    "Net Margin %": _MARGIN_BAND,
+    "FCF Margin %": _MARGIN_BAND,
+    "Op Cash Flow Margin %": _MARGIN_BAND,
+    "Revenue YoY %": _YOY_BAND,
+    "Net Income YoY %": _YOY_BAND,
+    "Operating Cash Flow YoY %": _YOY_BAND,
+    "Free Cash Flow YoY %": _YOY_BAND,
+    "Op Cash Flow Yield %": _YIELD_BAND,
+    "FCF Yield %": _YIELD_BAND,
+    "Earnings Yield %": _YIELD_BAND,
+    "Sales Yield %": _YIELD_BAND,
+    "Book Yield %": _YIELD_BAND,
+    "EBITDA Yield %": _YIELD_BAND,
+    "Debt / Equity": _DEBT_EQUITY_BAND,
+    "Debt / Assets": _DEBT_ASSETS_BAND,
+    "Current Ratio": _CURRENT_RATIO_BAND,
+    "Market Cap": _CAP_SIZE_BAND,
+    "EV": _CAP_SIZE_BAND,
+}
+
+# Generic fallback by display unit for any metric without an explicit band.
+_UNIT_BUCKETS: dict[str, list[tuple[str, float, float]]] = {
+    "usd": [
+        ("Negative", _NINF, 0.0),
+        ("<$100M", 0.0, 100e6),
+        ("$100M–1B", 100e6, 1e9),
+        ("$1–10B", 1e9, 10e9),
+        (">$10B", 10e9, _INF),
+    ],
+    "percent": [
+        ("Negative", _NINF, 0.0),
+        ("0–10%", 0.0, 10.0),
+        ("10–25%", 10.0, 25.0),
+        (">25%", 25.0, _INF),
+    ],
+    "ratio": [
+        ("<1", _NINF, 1.0),
+        ("1–2", 1.0, 2.0),
+        ("2–5", 2.0, 5.0),
+        (">5", 5.0, _INF),
+    ],
+}
 
 
-def range_mask(
-    series: pd.Series, sel_lo: float, sel_hi: float, bound_lo: float, bound_hi: float
-) -> pd.Series:
-    """Mask for a range slider.
+def buckets_for(metric: str, unit: str | None) -> list[tuple[str, float, float]]:
+    """Resolve the bucket table for a metric.
 
-    A bound left at its slider extreme is treated as open-ended, so companies
-    with values beyond the clamped percentile bounds are NOT filtered out at the
-    default (full-span) position. NaN never hides a company (``| isna``).
+    Resolution order: exact metric name → the name with its ``(FY)``/``(TTM)``
+    suffix stripped → ``MoS %`` prefix (margin-of-safety band) → unit fallback
+    ('usd' / 'percent' / 'ratio'). Returns ``[]`` if nothing matches (e.g. an
+    unknown unit), which the UI treats as "no filterable buckets".
     """
+    if metric in EXPLICIT_BUCKETS:
+        return EXPLICIT_BUCKETS[metric]
+    base = metric.split(" (")[0].strip()
+    if base in EXPLICIT_BUCKETS:
+        return EXPLICIT_BUCKETS[base]
+    if base.startswith("MoS %"):
+        return _MOS_BAND
+    return _UNIT_BUCKETS.get(unit or "", [])
+
+
+def bucket_mask(
+    series: pd.Series, selected: list[str], buckets: list[tuple[str, float, float]]
+) -> pd.Series:
+    """Boolean mask for the buckets selected for one metric.
+
+    The selected buckets are OR-ed together (a company in *any* selected band
+    passes). An empty selection is "no filter" → an all-True mask.
+
+    When a filter IS active, NaN rows are EXCLUDED: a company with no value for
+    this metric belongs in no bucket. This is intentionally stricter than the
+    old ``range_mask``, which kept NaN rows visible at the slider extremes.
+    """
+    if not selected:
+        return pd.Series(True, index=series.index)
     s = pd.to_numeric(series, errors="coerce")
-    m = pd.Series(True, index=s.index)
-    if sel_lo > bound_lo:
-        m &= s >= sel_lo
-    if sel_hi < bound_hi:
-        m &= s <= sel_hi
-    return m | s.isna()
+    bounds = {label: (lo, hi) for label, lo, hi in buckets}
+    mask = pd.Series(False, index=series.index)
+    for label in selected:
+        if label not in bounds:
+            continue
+        lo, hi = bounds[label]
+        # NaN comparisons evaluate to False, so missing values drop out here.
+        mask |= (s >= lo) & (s < hi)
+    return mask
