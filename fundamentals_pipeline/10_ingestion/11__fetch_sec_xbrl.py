@@ -278,27 +278,62 @@ def extract_series(facts: dict, concept: str, kind: str, namespace: str = "us-ga
 
 
 def extract_series_multi(facts: dict, concepts, kind: str, namespace: str = "us-gaap") -> pd.DataFrame:
-    """Extract one concept from a priority list of XBRL tags — first non-empty wins.
+    """Extract one concept from a priority list of XBRL tags, resolved PER PERIOD.
 
-    `concepts` may be a single tag (str) or a list[str] of fallback tags tried in
-    PRIORITY ORDER. We return the FIRST tag that yields data for this company's
-    filings and stop; remaining tags are ignored. We deliberately do NOT merge
-    values across tags within one concept — summing e.g. ``LongTermDebtNoncurrent``
-    and the aggregate ``LongTermDebt`` would double-count, since the latter already
-    includes the current portion. A single str preserves the original single-tag
-    behaviour exactly (one-element loop).
+    `concepts` may be a single tag (str) or a list[str] of fallback tags in PRIORITY
+    ORDER (index 0 = most preferred). For each reporting period we keep the value from
+    the HIGHEST-priority tag that actually carries data for THAT period.
 
-    Caveat (documented in the debt mapping in 01__tickers.py): if a filer reports
-    ONLY the aggregate ``LongTermDebt`` (which folds in the current portion) while
-    also reporting a current-debt tag under "Short-term Debt", the current portion
-    can be counted twice. Acceptable approximation for a leverage ratio.
+    Why per-period and NOT first-non-empty-wins-for-the-whole-company: issuers switch
+    tags across years. AT&T/VZ tag the long-term line ``LongTermDebtNoncurrent`` in old
+    filings (≤2011) but ``LongTermDebt`` in recent ones. The old "first tag with any rows
+    anywhere wins" locked onto ``LongTermDebtNoncurrent`` — which only has the stale early
+    years — and never fell back, so recent long-term debt came back NULL → Total Debt =
+    current portion only → Debt/Equity ≈ 0.07x. Resolving per period fixes the recent
+    years while leaving single-tag concepts (the common case) byte-identical.
+
+    No-double-count is preserved: only the best-priority tag's rows survive for each
+    period — we never SUM two candidates within a period. So the aggregate ``LongTermDebt``
+    (which folds in the current maturities) is used only when the noncurrent split is
+    absent for that period; adding the separate "Short-term Debt" concept then does not
+    count the current portion twice.
+
+    A single str preserves the original single-tag behaviour exactly (fast path, no merge).
+
+    Caveat (documented in the debt mapping in 01__tickers.py): if a filer reports ONLY the
+    aggregate ``LongTermDebt`` (already incl. the current portion) for a period AND a
+    separate current-debt tag under "Short-term Debt", the current portion can be counted
+    twice that year. Acceptable approximation for a leverage ratio.
     """
     tags = [concepts] if isinstance(concepts, str) else list(concepts)
-    for tag in tags:
+    if len(tags) == 1:
+        # Single-tag concept (every non-debt concept): unchanged behaviour, no overhead.
+        return extract_series(facts, tags[0], kind, namespace=namespace)
+
+    frames = []
+    for priority, tag in enumerate(tags):
         series = extract_series(facts, tag, kind, namespace=namespace)
         if not series.empty:
-            return series
-    return pd.DataFrame()
+            series = series.copy()
+            series["_priority"] = priority   # 0 = most preferred
+            frames.append(series)
+    if not frames:
+        return pd.DataFrame()
+    if len(frames) == 1:
+        return frames[0].drop(columns="_priority")
+
+    merged = pd.concat(frames, ignore_index=True)
+    # Per reporting period, keep only the rows from the best (lowest-index) tag present.
+    # Key on the full period span so it is correct for BOTH stock snapshots (period_start
+    # is NaT → keyed by period_end alone) and flow periods that can share a period_end
+    # across shapes (e.g. Q_standalone vs YTD). String key is NaT-safe (NaT → "").
+    period_key = (
+        merged["period_start"].astype("string").fillna("")
+        + "|" + merged["period_end"].astype("string")
+    )
+    best = merged.groupby(period_key)["_priority"].transform("min")
+    merged = merged[merged["_priority"] == best]
+    return merged.drop(columns="_priority").reset_index(drop=True)
 
 # COMMAND ----------
 

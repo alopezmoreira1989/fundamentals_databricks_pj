@@ -96,9 +96,18 @@ metrics_wide = (
     )
 
     # ── Leverage ──────────────────────────────────────────────────────────────
+    # Total Debt = Long-term (noncurrent) + Short-term (current). A missing side is
+    # treated as 0 (a co. may genuinely report only one). BUT if BOTH debt tags are
+    # absent for the year we leave Total Debt NULL — reporting 0 would mask genuinely
+    # missing data as "debt-free" and yield a misleading Debt/Equity ≈ 0.00x for a
+    # levered issuer (the original AT&T symptom). NULL then propagates through safe_div
+    # so Debt/Equity and Debt/Assets are NULL (absent) rather than 0.
     .withColumn("Total Debt",
-        F.coalesce(F.col("Long-term Debt"),  F.lit(0)) +
-        F.coalesce(F.col("Short-term Debt"), F.lit(0))
+        F.when(
+            F.col("Long-term Debt").isNotNull() | F.col("Short-term Debt").isNotNull(),
+            F.coalesce(F.col("Long-term Debt"),  F.lit(0)) +
+            F.coalesce(F.col("Short-term Debt"), F.lit(0))
+        )
     )
     .withColumn("Debt / Equity",  safe_div("Total Debt", "Total Stockholders Equity"))
     .withColumn("Debt / Assets",  safe_div("Total Debt", "Total Assets"))
@@ -255,6 +264,13 @@ if mkt is not None:
                 F.col("Operating Cash Flow") - F.col("CapEx")
             )
         )
+        # EV debt bridge. Reads the SAME "Long-term Debt"/"Short-term Debt" concept
+        # columns from `financials`, so it AUTOMATICALLY picks up the per-period tag
+        # fallback fixed in 11__fetch_sec_xbrl.extract_series_multi — AT&T/VZ now carry
+        # their real long-term debt here instead of NULL. Unlike the leverage "Total Debt"
+        # above we deliberately keep coalesce-to-0 (not NULL): EV must stay defined for
+        # genuinely low-/no-debt firms, and the understatement risk for levered issuers is
+        # gone now that their debt is captured per year.
         .withColumn("_total_debt",
             F.coalesce(F.col("Long-term Debt"),  F.lit(0))
             + F.coalesce(F.col("Short-term Debt"), F.lit(0))
