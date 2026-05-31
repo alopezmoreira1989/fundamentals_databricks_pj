@@ -97,9 +97,24 @@ BALANCE_SHEET = {
     "Intangible Assets":          ("FiniteLivedIntangibleAssetsNet",             "stock"),
     "Total Assets":               ("Assets",                                     "stock"),
     "Accounts Payable":           ("AccountsPayableCurrent",                     "stock"),
-    "Short-term Debt":            ("ShortTermBorrowings",                        "stock"),
+    # Debt usa LISTA de tags en orden de prioridad (first-hit-wins en la ingesta,
+    # ver extract_series_multi en 11__fetch_sec_xbrl.py). Muchos filers (p.ej. T/VZ)
+    # NO reportan bajo ShortTermBorrowings/LongTermDebtNoncurrent → la columna salía
+    # NULL → Total Debt=0 → Debt/Equity=0.00. El fallback cubre las variantes us-gaap.
+    "Short-term Debt":            (["DebtCurrent",            # porción corriente de la deuda total (más general)
+                                    "LongTermDebtCurrent",    # porción corriente de la deuda LP
+                                    "ShortTermBorrowings"],   # original
+                                   "stock"),
     "Total Current Liabilities":  ("LiabilitiesCurrent",                         "stock"),
-    "Long-term Debt":             ("LongTermDebtNoncurrent",                     "stock"),
+    # Orden: preferir el split noncurrent/current primero para NO doble-contar;
+    # caer al agregado LongTermDebt sólo si el split no se reporta.
+    # ⚠ Riesgo doble-conteo: si un filer reporta SÓLO LongTermDebt (que YA incluye la
+    # porción corriente) y además un tag de Short-term Debt, la porción corriente se
+    # cuenta dos veces. Aproximación aceptable para un ratio de apalancamiento.
+    "Long-term Debt":             (["LongTermDebtNoncurrent",                    # original (estándar actual)
+                                    "LongTermDebt",                              # deuda LP total — usada por muchos grandes emisores (estilo AT&T)
+                                    "LongTermDebtAndCapitalLeaseObligations"],   # cuando los leases van incluidos
+                                   "stock"),
     "Total Liabilities":          ("Liabilities",                                "stock"),
     "Additional Paid-in Capital": ("AdditionalPaidInCapital",                    "stock"),
     "Retained Earnings":          ("RetainedEarningsAccumulatedDeficit",         "stock"),

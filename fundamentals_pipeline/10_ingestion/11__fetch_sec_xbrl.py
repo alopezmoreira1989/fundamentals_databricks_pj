@@ -278,6 +278,30 @@ def extract_series(facts: dict, concept: str, kind: str, namespace: str = "us-ga
         "val":   "value",
     })
 
+
+def extract_series_multi(facts: dict, concepts, kind: str, namespace: str = "us-gaap") -> pd.DataFrame:
+    """Extract one concept from a priority list of XBRL tags — first non-empty wins.
+
+    `concepts` may be a single tag (str) or a list[str] of fallback tags tried in
+    PRIORITY ORDER. We return the FIRST tag that yields data for this company's
+    filings and stop; remaining tags are ignored. We deliberately do NOT merge
+    values across tags within one concept — summing e.g. ``LongTermDebtNoncurrent``
+    and the aggregate ``LongTermDebt`` would double-count, since the latter already
+    includes the current portion. A single str preserves the original single-tag
+    behaviour exactly (one-element loop).
+
+    Caveat (documented in the debt mapping in 01__tickers.py): if a filer reports
+    ONLY the aggregate ``LongTermDebt`` (which folds in the current portion) while
+    also reporting a current-debt tag under "Short-term Debt", the current portion
+    can be counted twice. Acceptable approximation for a leverage ratio.
+    """
+    tags = [concepts] if isinstance(concepts, str) else list(concepts)
+    for tag in tags:
+        series = extract_series(facts, tag, kind, namespace=namespace)
+        if not series.empty:
+            return series
+    return pd.DataFrame()
+
 # COMMAND ----------
 
 # MAGIC %md ## 4. Per-ticker worker
@@ -334,7 +358,8 @@ def process_ticker(ticker: str, scraped_at_ts: datetime) -> tuple:
     try:
         for stmt_name, concept_map in STATEMENTS.items():
             for label, (xbrl_concept, kind) in concept_map.items():
-                series = extract_series(facts, xbrl_concept, kind)
+                # xbrl_concept may be a single tag (str) or a priority list[str].
+                series = extract_series_multi(facts, xbrl_concept, kind)
                 if series.empty:
                     continue
                 for _, row in series.iterrows():

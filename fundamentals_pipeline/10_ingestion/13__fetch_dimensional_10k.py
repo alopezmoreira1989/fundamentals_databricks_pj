@@ -60,11 +60,15 @@ _allowlist = {
 print(f"Combined-filers en allowlist: {list(_allowlist) or '(ninguno — no-op)'}")
 
 # Mapa xbrl_concept → (stmt, label, kind) para los conceptos que nos interesan.
-CONCEPT_LOOKUP = {
-    xbrl: (stmt, label, kind)
-    for stmt, cmap in STATEMENTS.items()
-    for label, (xbrl, kind) in cmap.items()
-}
+# El slot de tag puede ser un str o una LISTA de tags-fallback en orden de prioridad
+# (ver extract_series_multi en 11__fetch_sec_xbrl.py). Expandimos cada tag a la misma
+# (stmt, label, kind); con setdefault, el PRIMER label que reclama un tag gana —
+# coherente con el first-hit-wins de la ingesta.
+CONCEPT_LOOKUP: dict[str, tuple] = {}
+for stmt, cmap in STATEMENTS.items():
+    for label, (xbrl, kind) in cmap.items():
+        for tag in ([xbrl] if isinstance(xbrl, str) else xbrl):
+            CONCEPT_LOOKUP.setdefault(tag, (stmt, label, kind))
 
 # COMMAND ----------
 
