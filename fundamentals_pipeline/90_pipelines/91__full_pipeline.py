@@ -396,7 +396,7 @@ publish_errors = []
 try:
     dbutils.notebook.run(
         "../50_publish/51__export_dashboard_data",
-        timeout_seconds=600,
+        timeout_seconds=1800,   # export work is ~4 min; headroom for serverless child startup/queue
     )
     export_ok = True
 except Exception as e:
@@ -424,7 +424,7 @@ if export_ok:
     try:
         dbutils.notebook.run(
             "../50_publish/52__publish_to_github",
-            timeout_seconds=300,
+            timeout_seconds=600,
         )
     except Exception as e:
         print(f"⚠ Publish failed: {e}")
