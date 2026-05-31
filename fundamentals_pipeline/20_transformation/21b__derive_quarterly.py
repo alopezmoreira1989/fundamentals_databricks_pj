@@ -73,6 +73,15 @@ for _alt, _canon in CONCEPT_SYNONYMS.items():
         F.when(F.col("concept") == _alt, _canon).otherwise(F.col("concept"))
     )
 
+# Descarta `fy` basura de companyfacts: a veces el tag llega malformado — un serial de
+# fecha de Excel (43101 = 2018-01-01, 43830 = 2019-12-31) o un typo (2107 ← 2017). El
+# `period_end` siempre es correcto, pero un fy enorme se cuela como "último año" en las
+# métricas derivadas (22/23) y rompe la fila más reciente del screener (WTBA, ACIC…).
+# Aquí NO podemos usar `year(period_end) >= fy` como 21 (las filas FY): un Q1/Q2 de un
+# emisor con cierre fiscal a mitad de año termina en el año calendario ANTERIOR a su fy,
+# así que ese test borraría trimestres legítimos. Usamos un rango plausible (preserva NULL).
+raw = raw.filter(F.col("fy").isNull() | F.col("fy").between(1990, 2030))
+
 # COMMAND ----------
 
 # MAGIC %md ## 1. FLOW concepts — quarterly derivation
