@@ -220,8 +220,8 @@ CONCEPT_SYNONYMS = {
 # MAGIC de preferencia por **label de origen** (menor = preferido). `21` y `21b` lo
 # MAGIC insertan en el `ORDER BY` del Window de dedup, ANTES de `value desc`.
 # MAGIC
-# MAGIC Cualquier label no listado → prioridad 0 (preserva el comportamiento previo de
-# MAGIC Revenue, cuyos sinónimos rara vez coexisten y se resuelven por `value desc`).
+# MAGIC Cualquier label no listado → prioridad 0. Revenue YA está priorizado abajo (como
+# MAGIC Net Income): sus sinónimos coexisten mucho (~6.5k fy) y `value desc` elegía el mayor.
 
 # COMMAND ----------
 
@@ -236,6 +236,21 @@ CONCEPT_PRIORITY = {
     # OCF: base > continuing-operations
     "Operating Cash Flow":            0,
     "Operating Cash Flow (cont ops)": 1,
+    # Revenue: línea de ingresos totales (Revenues) > contrato ASC-606 > variantes Sales >
+    # tags de sector. Los sinónimos de Revenue COEXISTEN mucho más de lo que asumía el
+    # comentario viejo (~6.5k fy, ~4.2k difieren >2%): sin prioridad, `value desc` elegía el
+    # tag MAYOR (p.ej. WMB fy2024: 12.632 del contrato sobre 10.503 de Revenues, que es el
+    # total de la cuenta de resultados y lo que suman sus trimestres). `Revenues` casa con ΣQ
+    # 1982 vs 1103 del contrato cuando ambos coexisten. Los emisores puro-ASC606 reportan solo
+    # `contract` (sin coexistencia → la prioridad es no-op para ellos, sin regresión).
+    "Revenue":                     0,   # us-gaap:Revenues (total en la cara del estado)
+    "Revenue (contract)":          1,   # RevenueFromContractWithCustomerExcludingAssessedTax
+    "Revenue (contract incl tax)": 2,   # …IncludingAssessedTax (incluye sales tax → menos preferido)
+    "Revenue (sales net)":         3,   # SalesRevenueNet (pre-ASC606)
+    "Revenue (sales goods)":       4,   # SalesRevenueGoodsNet
+    "Revenue (sales services)":    5,   # SalesRevenueServicesNet
+    "Revenue (oil & gas)":         6,   # OilAndGasRevenue
+    "Revenue (bank)":              7,   # InterestAndDividendIncomeOperating
 }
 
 # COMMAND ----------
