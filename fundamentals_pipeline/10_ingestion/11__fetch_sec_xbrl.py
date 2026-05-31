@@ -324,11 +324,21 @@ def extract_series_multi(facts: dict, concepts, kind: str, namespace: str = "us-
 
     merged = pd.concat(frames, ignore_index=True)
     # Per reporting period, keep only the rows from the best (lowest-index) tag present.
-    # Key on the full period span so it is correct for BOTH stock snapshots (period_start
-    # is NaT → keyed by period_end alone) and flow periods that can share a period_end
-    # across shapes (e.g. Q_standalone vs YTD). String key is NaT-safe (NaT → "").
+    # Key on (fy, period span): fy MUST be in the key, not just period_start|period_end.
+    # A single balance-sheet date appears in several filings — the current-year filing and
+    # later 10-Ks that re-report it as a comparative — and an issuer can switch tags across
+    # those filings. AT&T fy2019: the current-year (fy=2019) long-term line is tagged
+    # ``LongTermDebtAndCapitalLeaseObligations`` (priority 2), while the higher-priority
+    # ``LongTermDebt`` (priority 1) exists for 2019-12-31 ONLY as the fy=2020 comparative.
+    # Keying on period_end alone let that fy=2020 comparative suppress the fy=2019 row; 21's
+    # comparative guard (year(period_end) >= fy) then dropped the fy=2020 row → fy2019 NULL.
+    # Keying on fy resolves priority WITHIN each fiscal-year occurrence, so fy2019 keeps its
+    # only tag. Finer-grained than before → cannot reintroduce the global-suppression bug.
+    # The period span stays in the key so flows that share a period_end across shapes
+    # (Q_standalone vs YTD) don't collapse. String key is NaT-safe (NaT/NA → "").
     period_key = (
-        merged["period_start"].astype("string").fillna("")
+        merged["fy"].astype("string").fillna("")
+        + "|" + merged["period_start"].astype("string").fillna("")
         + "|" + merged["period_end"].astype("string")
     )
     best = merged.groupby(period_key)["_priority"].transform("min")
