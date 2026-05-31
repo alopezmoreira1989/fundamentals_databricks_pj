@@ -19,16 +19,22 @@ from databricks.connect import DatabricksSession
 spark = DatabricksSession.builder.getOrCreate()
 RAW = "main.financials.financials_raw"
 
+# Pin to the wipe date instead of CURRENT_DATE(): quota may only return after the
+# calendar date rolls over, at which point CURRENT_DATE() would match no rows and the
+# step-2 cleanup would silently no-op (leaving the superseded scrapes). The wipe is a
+# fixed historical event, so a literal is correct regardless of when this runs.
+WIPE_DATE = "DATE'2026-05-31'"
+
 print("=== RESTORE to version 119 (pre-bad-delete) ===")
 spark.sql(f"RESTORE TABLE {RAW} TO VERSION AS OF 119")
 spark.sql(f"""SELECT scraped_at, COUNT(*) AS rows FROM {RAW}
-             WHERE DATE(scraped_at)=CURRENT_DATE() GROUP BY scraped_at ORDER BY scraped_at""").show(truncate=False)
+             WHERE DATE(scraped_at)={WIPE_DATE} GROUP BY scraped_at ORDER BY scraped_at""").show(truncate=False)
 
 print("=== tz-safe delete of today's superseded scrapes (keep latest) ===")
 spark.sql(f"""CREATE OR REPLACE TEMP VIEW _today_max AS
-              SELECT MAX(scraped_at) AS m FROM {RAW} WHERE DATE(scraped_at)=CURRENT_DATE()""")
+              SELECT MAX(scraped_at) AS m FROM {RAW} WHERE DATE(scraped_at)={WIPE_DATE}""")
 spark.sql(f"""DELETE FROM {RAW}
-              WHERE DATE(scraped_at)=CURRENT_DATE()
+              WHERE DATE(scraped_at)={WIPE_DATE}
                 AND scraped_at < (SELECT m FROM _today_max)""")
 print("DELETE done")
 
@@ -38,4 +44,4 @@ spark.sql(f"OPTIMIZE {RAW}").show(truncate=False)
 print("=== AFTER (today should show only the single latest scrape) ===")
 spark.sql(f"SELECT COUNT(*) AS total_rows FROM {RAW}").show()
 spark.sql(f"""SELECT scraped_at, COUNT(*) AS rows FROM {RAW}
-             WHERE DATE(scraped_at)=CURRENT_DATE() GROUP BY scraped_at ORDER BY scraped_at""").show(truncate=False)
+             WHERE DATE(scraped_at)={WIPE_DATE} GROUP BY scraped_at ORDER BY scraped_at""").show(truncate=False)
