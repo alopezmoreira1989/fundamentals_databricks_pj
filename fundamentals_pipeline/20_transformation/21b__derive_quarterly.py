@@ -128,6 +128,35 @@ flow_dedup = (
     .drop("rn")
 )
 
+# Tag-pin: por (ticker, stmt, concept, fy) quédate SOLO con las filas del MISMO tag XBRL que
+# alimenta el valor FY, para que FY, los standalones y los YTD (que alimentan Q4 = FY − YTD_Q3)
+# salgan todos del mismo tag. CONCEPT_SYNONYMS colapsa NetIncomeLoss / (to common) / (incl NCI)
+# en un solo "Net Income"; el tag preferido (prio 0 = NetIncomeLoss, el que usa 21 para FY) a
+# menudo NO tiene fila YTD (bancos/emisores con preferentes: el YTD solo está bajo los sinónimos),
+# así que `pick("Q3","YTD_9M")` caía a otro tag que `pick("FY")` → Q4 mezclaba medidas y
+# Q1+Q2+Q3+Q4 ≠ FY. `_fy_prio` = prio de la fila FY_or_TTM (10-K) que YA elige `fy_val` (tras la
+# dedup hay una sola; `min` = su prio = la elección prio-asc de 21), así que FY NO cambia.
+# Filtramos al tag FY; si ese tag no tiene YTD, Q4 = FY − YTD_Q3 queda NULL y `unpivot_quarter`
+# lo descarta (no fabricamos un Q4 con tags mezclados). `prio` = 0 para conceptos no sinónimos →
+# no-op fuera de CONCEPT_PRIORITY. Grupos sin fila FY (`_fy_prio` NULL) se preservan tal cual.
+_w_fyprio = Window.partitionBy("ticker", "stmt", "concept", "fy")
+flow_dedup = (
+    flow_dedup
+    .withColumn(
+        "_fy_prio",
+        F.min(
+            F.when(
+                (F.col("fp") == "FY")
+                & (F.col("period_shape") == "FY_or_TTM")
+                & (F.col("form").isin("10-K", "10-K/A")),
+                F.col("prio"),
+            )
+        ).over(_w_fyprio),
+    )
+    .filter(F.col("_fy_prio").isNull() | (F.col("prio") == F.col("_fy_prio")))
+    .drop("_fy_prio")
+)
+
 # COMMAND ----------
 
 # MAGIC %md ### 1a. Build wide table: one row per (ticker, stmt, concept, fy)
