@@ -207,6 +207,12 @@ print(f"  metrics rows: {len(metrics):,}")
 
 # COMMAND ----------
 
+# Spark Connect's toPandas() stashes a non-JSON-serializable PlanMetrics object in
+# df.attrs (query execution metrics). pandas' to_parquet (PyArrow) then tries
+# json.dumps(df.attrs) as file metadata and crashes with
+# "TypeError: Object of type PlanMetrics is not JSON serializable". Clear attrs first.
+financials.attrs = {}
+metrics.attrs = {}
 financials.to_parquet(DATA_PARQUET, index=False)
 metrics.to_parquet(METRIC_PARQUET, index=False)
 
