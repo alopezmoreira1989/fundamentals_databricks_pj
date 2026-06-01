@@ -76,6 +76,8 @@ INCOME_STATEMENT = {
     "SG&A Expense":               ("SellingGeneralAndAdministrativeExpense",                                                    "flow_additive"),
     "Operating Income":           ("OperatingIncomeLoss",                                                                       "flow_additive"),
     "Interest Expense":           ("InterestExpense",                                                                           "flow_additive"),
+    "Interest Expense (nonoperating)": ("InterestExpenseNonoperating",                                                          "flow_additive"),
+    "Interest Expense (incl debt)":    ("InterestAndDebtExpense",                                                               "flow_additive"),
     "Income Before Tax":          ("IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest","flow_additive"),
     "Income Tax":                 ("IncomeTaxExpenseBenefit",                                                                   "flow_additive"),
     "Net Income":                 ("NetIncomeLoss",                                                                             "flow_additive"),
@@ -207,6 +209,16 @@ CONCEPT_SYNONYMS = {
     # ── Operating Cash Flow ────────────────────────────────────────────────────
     # Muchas reportan la variante "continuing operations" en vez de la base.
     "Operating Cash Flow (cont ops)": "Operating Cash Flow",  # NetCashProvidedByUsedInOperatingActivitiesContinuingOperations
+
+    # ── Interest Expense ───────────────────────────────────────────────────────
+    # Emisores migran la línea de intereses de la cuenta de resultados fuera de
+    # `InterestExpense`: VZ usa `InterestExpenseNonoperating` desde fy2024 (InterestExpense
+    # ausente → Interest Coverage salía NULL); otros usan el agregado `InterestAndDebtExpense`.
+    # Ambos son gasto BRUTO (magnitud positiva), así que el F.abs(...) de Interest Coverage es
+    # seguro. Tags NETOS (InterestIncomeExpenseNet, …) se EXCLUYEN a propósito: netean ingreso
+    # contra gasto → signo ambiguo → corromperían el ratio (un net-cash daría cobertura basura).
+    "Interest Expense (nonoperating)": "Interest Expense",   # InterestExpenseNonoperating (VZ fy2024+)
+    "Interest Expense (incl debt)":    "Interest Expense",   # InterestAndDebtExpense
 }
 
 # COMMAND ----------
@@ -251,6 +263,12 @@ CONCEPT_PRIORITY = {
     "Revenue (sales services)":    5,   # SalesRevenueServicesNet
     "Revenue (oil & gas)":         6,   # OilAndGasRevenue
     "Revenue (bank)":              7,   # InterestAndDividendIncomeOperating
+    # Interest Expense: línea primaria de la cuenta de resultados > nonoperating > agregado.
+    # Raramente coexisten en un mismo fy (los emisores migran de uno a otro), así que esto
+    # es casi siempre no-op; va por si algún 10-K reporta más de uno.
+    "Interest Expense":                0,   # InterestExpense
+    "Interest Expense (nonoperating)": 1,   # InterestExpenseNonoperating
+    "Interest Expense (incl debt)":    2,   # InterestAndDebtExpense
 }
 
 # COMMAND ----------
