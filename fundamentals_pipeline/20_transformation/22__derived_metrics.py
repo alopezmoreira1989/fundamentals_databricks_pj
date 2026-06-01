@@ -137,6 +137,32 @@ metrics_wide = (
     .withColumn("ROIC %",  safe_div("Operating Income",   "Invested Capital")          * 100)
     .withColumn("ROCE %",  safe_div("Operating Income",   "Capital Employed")          * 100)
     .withColumn("CROIC %", safe_div("Free Cash Flow",     "Invested Capital")          * 100)
+
+    # ── Capital Returns — payout ratios (base block; no market data) ─────────────
+    # SEC reports Dividends Paid / Share Repurchases as positive magnitudes (the repo
+    # flips their sign only at display time), so wrap both in F.abs(...) to be
+    # sign-agnostic. NULL guards are on the DENOMINATOR: a loss (Net Income ≤ 0) or a
+    # negative FCF returns NULL instead of a misleading negative ratio. The two ADDITIVE
+    # numerators coalesce a missing side to 0 so a dividend-only or buyback-only issuer
+    # still gets a Total figure (a firm returning nothing → 0); single-source ratios stay
+    # NULL when their one component is absent (a non-payer has no Dividend Payout Ratio).
+    .withColumn("Dividend Payout Ratio",
+        F.when(F.col("Net Income") > 0,
+               F.abs(F.col("Dividends Paid")) / F.col("Net Income")))
+    .withColumn("Buyback Payout Ratio",
+        F.when(F.col("Net Income") > 0,
+               F.abs(F.col("Share Repurchases")) / F.col("Net Income")))
+    .withColumn("Total Payout Ratio",
+        F.when(F.col("Net Income") > 0,
+               (F.coalesce(F.abs(F.col("Dividends Paid")),    F.lit(0)) +
+                F.coalesce(F.abs(F.col("Share Repurchases")), F.lit(0))) / F.col("Net Income")))
+    .withColumn("Payout / FCF",
+        F.when(F.col("Free Cash Flow") > 0,
+               (F.coalesce(F.abs(F.col("Dividends Paid")),    F.lit(0)) +
+                F.coalesce(F.abs(F.col("Share Repurchases")), F.lit(0))) / F.col("Free Cash Flow")))
+    .withColumn("Dividend Coverage (FCF)",
+        F.when(F.abs(F.col("Dividends Paid")) != 0,
+               F.col("Free Cash Flow") / F.abs(F.col("Dividends Paid"))))
 )
 
 # COMMAND ----------
@@ -163,6 +189,10 @@ metrics_wide = (
     .withColumn("Net Income YoY %",          yoy("Net Income"))
     .withColumn("Operating Cash Flow YoY %", yoy("Operating Cash Flow"))
     .withColumn("Free Cash Flow YoY %",      yoy("Free Cash Flow"))
+    # Net Buyback Yield % = negative of the YoY % change in diluted share count.
+    # A shrinking share count → positive yield. Dilution-aware (it nets SBC/issuance
+    # against buybacks), unlike the gross cash-based Buyback Yield %. Reuses w_yoy via yoy().
+    .withColumn("Net Buyback Yield %", -yoy("Shares Diluted"))
 )
 
 # COMMAND ----------
@@ -185,6 +215,9 @@ base_metric_cols = [
     "Debt / Equity", "Debt / Assets",
     # Liquidity
     "Current Ratio",
+    # Capital Returns — payout ratios + net buyback yield (all base / no market data)
+    "Dividend Payout Ratio", "Buyback Payout Ratio", "Total Payout Ratio",
+    "Payout / FCF", "Dividend Coverage (FCF)", "Net Buyback Yield %",
 ]
 
 def unpivot(df, metric_cols):
@@ -230,7 +263,8 @@ if mkt is not None:
                 & (F.col("concept").isin("Net Income", "Revenue", "Operating Income"))
             ) | (
                 (F.col("stmt") == "Cash Flow")
-                & (F.col("concept").isin("Operating Cash Flow", "CapEx", "Depreciation & Amortization"))
+                & (F.col("concept").isin("Operating Cash Flow", "CapEx", "Depreciation & Amortization",
+                                          "Dividends Paid", "Share Repurchases"))
             ) | (
                 (F.col("stmt") == "Balance Sheet")
                 & (F.col("concept").isin(
@@ -294,6 +328,7 @@ if mkt is not None:
         "P/E", "P/S", "P/FCF", "P/B", "EV", "EV/EBITDA",
         "Earnings Yield %", "Sales Yield %", "FCF Yield %",
         "Op Cash Flow Yield %", "Book Yield %", "EBITDA Yield %",
+        "Dividend Yield %", "Buyback Yield %", "Shareholder Yield %",
     ]
 
     val_metrics = (
@@ -312,6 +347,14 @@ if mkt is not None:
         .withColumn("Op Cash Flow Yield %", safe_div_col(F.col("Operating Cash Flow"),       F.col("market_cap")) * 100)
         .withColumn("Book Yield %",         safe_div_col(F.col("Total Stockholders Equity"), F.col("market_cap")) * 100)
         .withColumn("EBITDA Yield %",       safe_div_col(F.col("_ebitda"),                   F.col("market_cap")) * 100)
+        # Capital Returns — cash yields. Sign-agnostic via F.abs; the additive Shareholder
+        # Yield coalesces a missing side to 0 so buyback-only / dividend-only firms still
+        # get a value. Single yields stay NULL when their component is absent.
+        .withColumn("Dividend Yield %",     safe_div_col(F.abs(F.col("Dividends Paid")),    F.col("market_cap")) * 100)
+        .withColumn("Buyback Yield %",      safe_div_col(F.abs(F.col("Share Repurchases")), F.col("market_cap")) * 100)
+        .withColumn("Shareholder Yield %",  safe_div_col(
+            F.coalesce(F.abs(F.col("Dividends Paid")),    F.lit(0)) +
+            F.coalesce(F.abs(F.col("Share Repurchases")), F.lit(0)),    F.col("market_cap")) * 100)
     )
 
     # Filter EV/EBITDA outliers (|x| > 500)

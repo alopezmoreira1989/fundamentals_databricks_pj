@@ -22,6 +22,10 @@ _HIGHER_IS_BETTER = {         # mejor cuanto más alto
     "Earnings Yield %": (8, 4), "FCF Yield %": (6, 3),
     "Op Cash Flow Yield %": (6, 3), "Sales Yield %": (10, 5),
     "Book Yield %": (8, 4), "EBITDA Yield %": (8, 4),
+    # Capital Returns — yields (higher is better). Payout RATIOS get no band on purpose:
+    # a high payout is neither clearly good (mature cash-returner) nor bad (over-distribution).
+    "Dividend Yield %": (4, 1), "Buyback Yield %": (4, 1),
+    "Shareholder Yield %": (6, 2), "Net Buyback Yield %": (3, 0),
 }
 
 

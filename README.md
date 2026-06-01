@@ -148,7 +148,7 @@ Ambas jerarquías son archivos JSON en `00_config/` editables desde el repo. El 
 
 **`concept_hierarchy.json`** — árbol contable (Income Statement, Balance Sheet, Cash Flow): qué conceptos van bajo qué grupo y en qué orden aparecen en el dashboard.
 
-**`metrics_hierarchy.json`** — organización de las derived metrics en 2 niveles: `category → subcategory → metric`. Seis categorías: Profitability, Cash Flow, Growth, Financial Health, Valuation, Intrinsic Value.
+**`metrics_hierarchy.json`** — organización de las derived metrics en 2 niveles: `category → subcategory → metric`. Siete categorías: Profitability, Cash Flow, Growth, Financial Health, Valuation, Capital Returns, Intrinsic Value.
 
 Para modificarlas: edita el JSON, commit + push, y el siguiente run del pipeline reconstruye la tabla automáticamente.
 
@@ -304,8 +304,8 @@ Lookup table organising derived metrics into categories. Rebuilt every run from 
 
 | Column | Type | Description |
 |---|---|---|
-| `category` | STRING | Profitability, Cash Flow, Growth, Financial Health, Valuation, Intrinsic Value |
-| `subcategory` | STRING | Margins, YoY, Leverage, Liquidity, Price Multiples, Enterprise Value, Absolute |
+| `category` | STRING | Profitability, Cash Flow, Growth, Financial Health, Valuation, Capital Returns, Intrinsic Value |
+| `subcategory` | STRING | Margins, YoY, Leverage, Liquidity, Price Multiples, Enterprise Value, Absolute, Payout, Yield |
 | `metric` | STRING | Nombre exacto tal como aparece en `financials_metrics.metric` |
 | `unit` | STRING | `percent` / `usd` / `ratio` |
 | `requires_market_data` | BOOLEAN | `true` para las métricas que dependen de `market_data` |
@@ -401,6 +401,32 @@ Las métricas están organizadas en 6 categorías. La jerarquía completa vive e
 | `Op Cash Flow Yield %` | `Operating Cash Flow / Market Cap × 100` |
 | `Book Yield %` | `Total Stockholders Equity / Market Cap × 100` |
 | `EBITDA Yield %` | `EBITDA / Market Cap × 100` |
+
+### Capital Returns — Payout
+
+SEC reports `Dividends Paid` and `Share Repurchases` as **positive magnitudes** (the repo flips
+their sign only at display time), so every formula below takes their absolute value — written
+`abs(...)` here — to be sign-agnostic. Denominators are guarded so a loss or negative FCF yields
+**NULL** rather than a misleading negative ratio. The two *additive* numerators treat a missing
+side as 0, so a dividend-only or buyback-only issuer still gets a Total figure; single-source
+ratios stay NULL when their one component is absent.
+
+| Metric | Formula |
+|---|---|
+| `Dividend Payout Ratio` | `abs(Dividends Paid) / Net Income` — NULL unless Net Income > 0 |
+| `Buyback Payout Ratio` | `abs(Share Repurchases) / Net Income` — NULL unless Net Income > 0 |
+| `Total Payout Ratio` | `(abs(Dividends Paid) + abs(Share Repurchases)) / Net Income` — NULL unless Net Income > 0 |
+| `Payout / FCF` | `(abs(Dividends Paid) + abs(Share Repurchases)) / Free Cash Flow` — NULL unless FCF > 0 |
+| `Dividend Coverage (FCF)` | `Free Cash Flow / abs(Dividends Paid)` — NULL unless dividends ≠ 0 |
+
+### Capital Returns — Yield
+
+| Metric | Formula | Notes |
+|---|---|---|
+| `Dividend Yield %` | `abs(Dividends Paid) / Market Cap × 100` | *requires `market_data`* |
+| `Buyback Yield %` | `abs(Share Repurchases) / Market Cap × 100` | gross cash spent on buybacks; *requires `market_data`* |
+| `Shareholder Yield %` | `(abs(Dividends Paid) + abs(Share Repurchases)) / Market Cap × 100` | *requires `market_data`* |
+| `Net Buyback Yield %` | `−(YoY % change in Shares Diluted)` | **share-count based, dilution-aware** — nets SBC/issuance against buybacks (a shrinking share count → positive yield), unlike the gross cash-based `Buyback Yield %`. No market data needed. |
 
 ### Intrinsic Value *(requires `market_data`)*
 

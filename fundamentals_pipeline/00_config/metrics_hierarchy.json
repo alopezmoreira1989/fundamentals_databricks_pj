@@ -70,6 +70,22 @@
     ]
   },
 
+  "Capital Returns": {
+    "Payout": [
+      { "metric": "Dividend Payout Ratio",   "unit": "ratio",   "requires_market_data": false },
+      { "metric": "Buyback Payout Ratio",     "unit": "ratio",   "requires_market_data": false },
+      { "metric": "Total Payout Ratio",       "unit": "ratio",   "requires_market_data": false },
+      { "metric": "Payout / FCF",             "unit": "ratio",   "requires_market_data": false },
+      { "metric": "Dividend Coverage (FCF)",  "unit": "ratio",   "requires_market_data": false }
+    ],
+    "Yield": [
+      { "metric": "Dividend Yield %",     "unit": "percent", "requires_market_data": true  },
+      { "metric": "Buyback Yield %",      "unit": "percent", "requires_market_data": true  },
+      { "metric": "Shareholder Yield %",  "unit": "percent", "requires_market_data": true  },
+      { "metric": "Net Buyback Yield %",  "unit": "percent", "requires_market_data": false }
+    ]
+  },
+
   "Intrinsic Value": {
     "Graham (FY)": [
       { "metric": "Graham Number (FY)",          "unit": "usd",     "requires_market_data": false },

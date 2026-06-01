@@ -30,7 +30,7 @@ from pathlib import Path
 
 import pandas as pd
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4   # +Capital Returns category (payout ratios + dividend/buyback/shareholder/net-buyback yields)
 FY_YEARS       = 10
 QUARTERS       = 12
 
