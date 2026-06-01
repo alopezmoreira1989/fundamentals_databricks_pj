@@ -43,8 +43,13 @@
 
   "Financial Health": {
     "Leverage": [
-      { "metric": "Debt / Equity", "unit": "ratio", "requires_market_data": false },
-      { "metric": "Debt / Assets", "unit": "ratio", "requires_market_data": false }
+      { "metric": "Debt / Equity",     "unit": "ratio", "requires_market_data": false },
+      { "metric": "Debt / Assets",     "unit": "ratio", "requires_market_data": false },
+      { "metric": "Net Debt / EBITDA", "unit": "ratio", "requires_market_data": false }
+    ],
+    "Coverage": [
+      { "metric": "Interest Coverage", "unit": "ratio", "requires_market_data": false },
+      { "metric": "Cash Flow to Debt", "unit": "ratio", "requires_market_data": false }
     ],
     "Liquidity": [
       { "metric": "Current Ratio", "unit": "ratio", "requires_market_data": false }

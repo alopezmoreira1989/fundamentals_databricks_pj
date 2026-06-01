@@ -11,6 +11,9 @@ _LOWER_IS_BETTER = {          # caro/arriesgado cuanto más alto
     "P/E": (15, 25), "P/S": (2, 5), "P/FCF": (15, 25), "P/B": (1.5, 3),
     "EV/EBITDA": (15, 25),
     "Debt / Equity": (0.5, 1.0), "Debt / Assets": (0.3, 0.5),
+    # Net Debt / EBITDA: lower = healthier. A NEGATIVE value (net cash) is < green_max,
+    # so it correctly reads "good" — better than zero leverage, no special-casing needed.
+    "Net Debt / EBITDA": (3.0, 4.0),   # green ≤ 3× (healthy), red ≥ 4× (stretched)
     # Capital Returns — payout ratios (sustainability: a higher payout is riskier).
     # Stored as FRACTIONS (0.85 = 85%), same 0–1.x scale as Debt/Equity — not percents.
     "Dividend Payout Ratio": (0.6, 0.9),   # green ≤ 60% of NI, red ≥ 90%
@@ -20,6 +23,9 @@ _LOWER_IS_BETTER = {          # caro/arriesgado cuanto más alto
 }
 _HIGHER_IS_BETTER = {         # mejor cuanto más alto
     "Current Ratio": (2.0, 1.5),
+    # Financial Health — Coverage (more coverage = safer).
+    "Interest Coverage": (6.0, 2.0),   # green ≥ 6× EBIT covers interest, red ≤ 2× (distress)
+    "Cash Flow to Debt": (0.4, 0.15),  # green ≥ 40% of debt retired per yr of OCF, red ≤ 15%
     "ROE %": (15, 8), "ROIC %": (15, 8), "ROCE %": (15, 8),
     "ROA %": (10, 5), "CROIC %": (15, 8),
     "Gross Margin %": (40, 20), "Operating Margin %": (20, 10),

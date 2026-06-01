@@ -368,6 +368,16 @@ Las métricas están organizadas en 6 categorías. La jerarquía completa vive e
 |---|---|
 | `Debt / Equity` | `(LT Debt + ST Debt) / Total Stockholders Equity` |
 | `Debt / Assets` | `(LT Debt + ST Debt) / Total Assets` |
+| `Net Debt / EBITDA` | `(Total Debt − Cash & Equivalents − ST Investments) / (Operating Income + D&A)`; clamped to ±100× |
+
+### Financial Health — Coverage
+
+| Metric | Formula | Notes |
+|---|---|---|
+| `Interest Coverage` | `Operating Income / abs(Interest Expense)` | EBIT / interest; NULL when interest absent/≈0; clamped to ±1000× |
+| `Cash Flow to Debt` | `Operating Cash Flow / Total Debt` | Fraction of total debt coverable by one year of operating cash |
+
+> `Net Debt / EBITDA` can be **negative** for net-cash companies (more cash + ST investments than debt) — healthier than zero leverage, and it renders green.
 
 ### Financial Health — Liquidity
 

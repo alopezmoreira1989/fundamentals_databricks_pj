@@ -112,6 +112,37 @@ metrics_wide = (
     .withColumn("Debt / Equity",  safe_div("Total Debt", "Total Stockholders Equity"))
     .withColumn("Debt / Assets",  safe_div("Total Debt", "Total Assets"))
 
+    # ── Solvency / Coverage ─────────────────────────────────────────────────────
+    # All reuse the existing `Total Debt` column (NULL when both debt tags absent).
+    # EBITDA approximated as Operating Income + D&A (same definition as the EV/EBITDA
+    # block). Interest Expense is stored as a positive magnitude → F.abs() is belt-and-
+    # suspenders in case any issuer reports it signed. safe_div takes column NAMES, so the
+    # intermediates are materialized as named columns first, then divided (not in
+    # base_metric_cols — they're internals like _fcf in the val block).
+    .withColumn("_ebitda_fh",
+        F.when(
+            F.col("Operating Income").isNotNull(),
+            F.col("Operating Income")
+            + F.coalesce(F.col("Depreciation & Amortization"), F.lit(0))
+        )
+    )
+    .withColumn("_net_debt",
+        F.when(
+            F.col("Total Debt").isNotNull(),
+            F.col("Total Debt")
+            - F.coalesce(F.col("Cash & Equivalents"),     F.lit(0))
+            - F.coalesce(F.col("Short-term Investments"), F.lit(0))
+        )
+    )
+    # NULL when interest is absent or ~0 (net-cash firms like AAPL report negligible
+    # interest, which would otherwise explode the ratio); safe_div NULLs on 0 denominator.
+    .withColumn("_abs_interest",
+        F.when(F.col("Interest Expense").isNotNull(), F.abs(F.col("Interest Expense")))
+    )
+    .withColumn("Interest Coverage", safe_div("Operating Income", "_abs_interest"))
+    .withColumn("Net Debt / EBITDA", safe_div("_net_debt", "_ebitda_fh"))
+    .withColumn("Cash Flow to Debt", safe_div("Operating Cash Flow", "Total Debt"))
+
     # ── Liquidity ─────────────────────────────────────────────────────────────
     .withColumn("Current Ratio",  safe_div("Total Current Assets", "Total Current Liabilities"))
 
@@ -195,6 +226,17 @@ metrics_wide = (
     .withColumn("Net Buyback Yield %", -yoy("Shares Diluted"))
 )
 
+# Outlier caps for the coverage ratios most prone to blow-ups (mirrors the EV/EBITDA
+# |x|>500 filter in the val block). Cash Flow to Debt is left uncapped — it's naturally
+# bounded for any real debt load; a huge value just means trivially small debt.
+metrics_wide = (
+    metrics_wide
+    .withColumn("Interest Coverage",
+        F.when(F.abs(F.col("Interest Coverage")) > 1000, F.lit(None)).otherwise(F.col("Interest Coverage")))
+    .withColumn("Net Debt / EBITDA",
+        F.when(F.abs(F.col("Net Debt / EBITDA")) > 100, F.lit(None)).otherwise(F.col("Net Debt / EBITDA")))
+)
+
 # COMMAND ----------
 
 # MAGIC %md ## 4. Unpivot to long format (without valuation)
@@ -213,6 +255,8 @@ base_metric_cols = [
     "Revenue YoY %", "Net Income YoY %", "Operating Cash Flow YoY %", "Free Cash Flow YoY %",
     # Leverage
     "Debt / Equity", "Debt / Assets",
+    # Financial Health — Solvency / Coverage
+    "Interest Coverage", "Net Debt / EBITDA", "Cash Flow to Debt",
     # Liquidity
     "Current Ratio",
     # Capital Returns — payout ratios + net buyback yield (all base / no market data)
