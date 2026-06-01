@@ -132,6 +132,7 @@ NEEDED = [
     ("Balance Sheet",    "Short-term Debt",             "st_debt"),
     ("Balance Sheet",    "Cash & Equivalents",          "cash"),
     ("Balance Sheet",    "Short-term Investments",      "st_inv"),
+    ("Balance Sheet",    "Retained Earnings",           "retained_earnings"),  # for Graham applicability guard
 
     ("Cash Flow",        "Operating Cash Flow",         "ocf"),
     ("Cash Flow",        "CapEx",                       "capex"),
@@ -141,7 +142,7 @@ NEEDED = [
 ]
 
 # Conceptos de tipo "flow" (sumables a TTM). Los Balance Sheet son "stock" (snapshot).
-STOCK_ALIASES = {"equity", "assets", "lt_debt", "st_debt", "cash", "st_inv"}
+STOCK_ALIASES = {"equity", "assets", "lt_debt", "st_debt", "cash", "st_inv", "retained_earnings"}
 # Shares también es "stock" en sentido TTM: usamos las del quarter más reciente,
 # no las sumamos (el alias 'shares' es weighted-average diluted del periodo).
 STOCK_ALIASES.add("shares")
@@ -375,6 +376,20 @@ def graham_number(row, a):
     if pd.isna(eps) or pd.isna(bvps) or eps <= 0 or bvps <= 0:
         return None, {"skipped": "eps or bvps non-positive", "magic": magic}
 
+    # Applicability guard: the Graham Number assumes book value reflects asset value.
+    # Buyback-heavy, asset-light firms (e.g. AAPL) run Retained Earnings negative and a
+    # tiny BVPS, so sqrt(22.5·EPS·BVPS) lands far below price → MoS ≈ −900%. The formula
+    # is correct but INAPPLICABLE to this profile; skip it (DCF / Owner Earnings stay sane).
+    # bvps is > 0 here (checked above), so price/bvps is safe.
+    retained = row.get("retained_earnings")
+    price    = row.get("price_close")
+    if (pd.notna(retained) and retained < 0) or (pd.notna(price) and price / bvps > 10):
+        return None, {
+            "skipped": "book value distorted (neg. retained earnings or P/B > 10)",
+            "magic": magic, "bvps": bvps,
+            "retained_earnings": float(retained) if pd.notna(retained) else None,
+        }
+
     iv = math.sqrt(magic * eps * bvps)
     return iv, {"magic": magic, "eps": eps, "bvps": bvps}
 
@@ -386,6 +401,9 @@ def graham_revised(row, a):
     if pd.isna(eps) or eps <= 0:
         return None, {"skipped": "eps non-positive"}
 
+    # NOTE: g is sourced from the forward DCF growth ASSUMPTION (dcf.growth_stage1), not
+    # historical EPS growth as Graham's original revised formula intended — so Graham
+    # Revised tracks the DCF inputs rather than the past. Deliberate, documented choice.
     g = min(a["dcf"]["growth_stage1"], cfg["growth_cap"])
     base_pe     = cfg["base_pe"]
     growth_mult = cfg["growth_multiplier"]

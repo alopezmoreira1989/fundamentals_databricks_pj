@@ -67,6 +67,20 @@ def fmt_metric(v, unit: Optional[str], signed: bool = False) -> str:
     return f"{v:,.2f}"
 
 
+def fmt_mos(v) -> str:
+    """Margin-of-safety %: clamp the DISPLAY to ±100% so an extreme value (e.g. a method
+    whose book value is distorted) doesn't render as a broken-looking huge number. The
+    underlying signal still uses the true (unclamped) value, so the color is unaffected.
+    """
+    if is_missing(v):
+        return EM_DASH
+    if v >= 100:
+        return ">+100%"
+    if v <= -100:
+        return "<−100%"          # real minus sign (U+2212)
+    return f"{v:+.1f}%"
+
+
 def fmt_delta(yoy_pct: Optional[float]) -> tuple[str, str]:
     """Returns (label_html, css_class) for a YoY delta in the KPI strip."""
     if is_missing(yoy_pct):

@@ -34,6 +34,7 @@ from .format import (
     fmt_eps,
     fmt_kpi,
     fmt_metric,
+    fmt_mos,
     fmt_num,
     is_missing,
     short_quarter,
@@ -429,9 +430,14 @@ def render_metrics_grid(metrics: pd.DataFrame, ticker: str, iv_period: str = "FY
                     rows_html.append(_render_valuation_row(metric_name, display, unit, values, latest))
                     continue
 
-                # Direction metrics (growth, margin of safety) keep the "+" sign.
-                signed = ("YoY" in metric_name) or ("MoS %" in metric_name)
-                formatted = fmt_metric(latest, unit, signed=signed)
+                # MoS rows clamp the display to ±100% (a distorted method can produce an
+                # extreme MoS); the signal below still reflects the true, unclamped sign.
+                if metric_name.startswith("MoS %"):
+                    formatted = fmt_mos(latest)
+                else:
+                    # Direction metrics (growth) keep the "+" sign.
+                    signed = ("YoY" in metric_name)
+                    formatted = fmt_metric(latest, unit, signed=signed)
                 sig = signal_absolute(metric_name, latest)
                 tooltip = threshold_text(metric_name)
 
