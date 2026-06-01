@@ -355,6 +355,15 @@ for pdf in (fy_pdf, ttm_pdf):
     pdf["fcf"]  = pdf["ocf"].astype(float) - pdf["capex"].fillna(0).astype(float)
     pdf["bvps"] = pdf["equity"] / pdf["shares"]
 
+# Universe of tickers EVALUATED this run. The exposure/iv MERGEs below only upsert, so a
+# method that is now SKIPPED for a ticker (e.g. Graham Number suppressed for a distorted
+# book value) would keep its previously-published rows forever. We use this view to scope
+# the orphan-deletes (steps 8b / 9b) so we only clean stale rows for tickers we recomputed.
+spark.createDataFrame(
+    pd.DataFrame({"ticker": pd.Series(
+        sorted(set(fy_pdf["ticker"]).union(set(ttm_pdf["ticker"]))), dtype="string")})
+).createOrReplaceTempView("iv_processed_tickers")
+
 print(f"✓ FY pandas : {len(fy_pdf):,} rows")
 print(f"✓ TTM pandas: {len(ttm_pdf):,} rows")
 
@@ -649,6 +658,40 @@ if len(iv_pdf):
     """)
 
     print(f"✓ Merged into {iv_tbl}")
+
+    # ── 8b. Orphan cleanup ──────────────────────────────────────────────────────
+    # The MERGE above only upserts. For tickers EVALUATED this run, delete (method,
+    # period, year) combinations absent from the freshly-computed `incoming_iv` — i.e.
+    # methods that became inapplicable (e.g. Graham Number skipped on a distorted book
+    # value) or turned non-positive. Mirrors 21's step-4 orphan DELETE. Scoped to
+    # iv_processed_tickers so it never touches tickers not recomputed this run.
+    n_orphan_iv = spark.sql(f"""
+        SELECT t.ticker FROM {iv_tbl} t
+        JOIN iv_processed_tickers p ON t.ticker = p.ticker
+        WHERE NOT EXISTS (
+            SELECT 1 FROM incoming_iv s
+            WHERE s.ticker = t.ticker AND s.period_type = t.period_type
+              AND COALESCE(s.fiscal_year, -1) = COALESCE(t.fiscal_year, -1)
+              AND s.method = t.method)
+    """).count()
+    spark.sql(f"""
+        MERGE INTO {iv_tbl} AS t
+        USING (
+            SELECT t.ticker, t.period_type, t.fiscal_year, t.method
+            FROM {iv_tbl} t
+            JOIN iv_processed_tickers p ON t.ticker = p.ticker
+            WHERE NOT EXISTS (
+                SELECT 1 FROM incoming_iv s
+                WHERE s.ticker = t.ticker AND s.period_type = t.period_type
+                  AND COALESCE(s.fiscal_year, -1) = COALESCE(t.fiscal_year, -1)
+                  AND s.method = t.method)
+        ) AS s
+        ON  t.ticker = s.ticker AND t.period_type = s.period_type
+        AND COALESCE(t.fiscal_year, -1) = COALESCE(s.fiscal_year, -1)
+        AND t.method = s.method
+        WHEN MATCHED THEN DELETE
+    """)
+    print(f"✓ Orphan cleanup on {iv_tbl}: {n_orphan_iv:,} stale method-rows deleted")
 else:
     print(f"⊘ No valuations computed — {iv_tbl} unchanged.")
 
@@ -747,6 +790,31 @@ if exposed_frames:
         """)
 
         print(f"✓ Exposed {len(exposed_pdf):,} rows in {metrics_tbl}")
+
+        # ── 9b. Orphan cleanup ──────────────────────────────────────────────────────
+        # Same rationale as 8b: the exposure MERGE only upserts, so a skipped method's
+        # label rows (e.g. "Graham Number (FY)" / "MoS % (Graham Number, FY)") would
+        # linger in financials_metrics. Delete IV-label rows absent from the fresh set,
+        # for evaluated tickers only. The IN-list confines the delete to the intrinsic
+        # labels this notebook owns — it never touches metrics produced by 22.
+        _iv_labels = [lbl for *_, lbl in EXPOSED] + ["Owner Earnings (FY)", "Owner Earnings (TTM)"]
+        _iv_labels_sql = ", ".join("'" + lbl.replace("'", "''") + "'" for lbl in _iv_labels)
+        spark.sql(f"""
+            MERGE INTO {metrics_tbl} AS t
+            USING (
+                SELECT t.ticker, t.{year_col} AS yr, t.metric
+                FROM {metrics_tbl} t
+                JOIN iv_processed_tickers p ON t.ticker = p.ticker
+                WHERE t.metric IN ({_iv_labels_sql})
+                  AND NOT EXISTS (
+                    SELECT 1 FROM incoming_iv_metrics s
+                    WHERE s.ticker = t.ticker AND s.{year_col} = t.{year_col}
+                      AND s.metric = t.metric)
+            ) AS s
+            ON  t.ticker = s.ticker AND t.{year_col} = s.yr AND t.metric = s.metric
+            WHEN MATCHED THEN DELETE
+        """)
+        print(f"✓ Orphan IV-metric cleanup on {metrics_tbl} complete")
     else:
         print(f"⊘ {metrics_tbl} not found — skipping exposure step (run 22__derived_metrics first).")
 else:
