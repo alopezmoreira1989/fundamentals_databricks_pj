@@ -295,7 +295,7 @@ tr.subtotal td.num { font-weight: 500; }
 tr.subtotal td.label::before { content: "▸ "; color: var(--ink-3); margin-right: 2px; }
 
 /* Grand total rows */
-tr.grand-total td {
+table.fs tbody tr.grand-total td {
   border-top: 1px solid var(--ink);
   border-bottom: 2px solid var(--ink);
   padding-top: 14px;
@@ -303,7 +303,7 @@ tr.grand-total td {
   background: var(--ink);
   color: var(--bg);
 }
-tr.grand-total td.label {
+table.fs tbody tr.grand-total td.label {
   color: var(--bg);
   font-family: var(--display);
   font-size: 14px;
@@ -311,39 +311,41 @@ tr.grand-total td.label {
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
-tr.grand-total td.num {
+table.fs tbody tr.grand-total td.num,
+table.fs tbody tr.grand-total td.num.latest {
   color: var(--bg);
   font-weight: 500;
-  font-size: 13px;
 }
-tr.grand-total td.num.latest { font-size: 14px; }
-tr.grand-total td.cagr { color: var(--bg-subtle); }
+table.fs tbody tr.grand-total td.num        { font-size: 13px; }
+table.fs tbody tr.grand-total td.num.latest { font-size: 14px; }
+table.fs tbody tr.grand-total td.cagr       { color: var(--bg-subtle); }
 
 /* Accent for Net Income / Net Change in Cash */
-tr.headline td {
+table.fs tbody tr.headline td {
   background: var(--accent-soft);
   border-top: 1px solid var(--accent);
   border-bottom: 2px solid var(--accent);
   padding-top: 12px;
   padding-bottom: 12px;
 }
-tr.headline td.label {
+table.fs tbody tr.headline td.label {
   color: var(--accent-ink);
   font-weight: 500;
   font-family: var(--sans);
   font-size: 13px;
 }
-tr.headline td.label::before {
+table.fs tbody tr.headline td.label::before {
   content: "▸ ";
   color: var(--accent);
   margin-right: 2px;
 }
-tr.headline td.num {
+table.fs tbody tr.headline td.num,
+table.fs tbody tr.headline td.num.latest {
   color: var(--accent-ink);
   font-weight: 500;
 }
-tr.headline td.num.latest { font-size: 13.5px; }
-tr.headline td.cagr.up { color: var(--accent-ink); font-weight: 500; }
+table.fs tbody tr.headline td.num.latest { font-size: 13.5px; }
+table.fs tbody tr.headline td.cagr.up { color: var(--accent-ink); font-weight: 500; }
 
 /* ========= WATERFALL ========= */
 .breakdown {
