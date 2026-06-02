@@ -16,6 +16,8 @@ _LOWER_IS_BETTER = {          # caro/arriesgado cuanto más alto
     "Net Debt / EBITDA": (3.0, 4.0),   # green ≤ 3× (healthy), red ≥ 4× (stretched)
     # Capital Returns — payout ratios (sustainability: a higher payout is riskier).
     # Stored as FRACTIONS (0.85 = 85%), same 0–1.x scale as Debt/Equity — not percents.
+    # Quality & Risk — Accruals Ratio (earnings quality: lower = cash-backed earnings).
+    "Accruals Ratio":        (0.05, 0.15),  # green ≤ 5% of assets, red ≥ 15% (poor quality)
     "Dividend Payout Ratio": (0.6, 0.9),   # green ≤ 60% of NI, red ≥ 90%
     "Buyback Payout Ratio":  (0.6, 1.0),   # green ≤ 60% of NI, red ≥ 100%
     "Total Payout Ratio":    (0.8, 1.2),   # green ≤ 80% of NI, red ≥ 120% (over-distributing)
@@ -42,6 +44,9 @@ _HIGHER_IS_BETTER = {         # mejor cuanto más alto
     # trailing " (...)" (to tolerate (FY)/(TTM)), so "Dividend Coverage (FCF)" is looked
     # up as "Dividend Coverage". Keying it with the suffix would never match.
     "Dividend Coverage": (2.0, 1.0),   # green ≥ 2× FCF covers dividend, red ≤ 1×
+    # Quality & Risk — composite scores (higher = healthier / safer).
+    "Altman Z-Score":    (3.0, 1.8),   # > 3 safe, < 1.8 distress zone
+    "Piotroski F-Score": (7.0, 3.0),   # ≥ 7 strong, ≤ 3 weak (0–9 scale)
 }
 
 

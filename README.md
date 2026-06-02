@@ -438,6 +438,14 @@ ratios stay NULL when their one component is absent.
 | `Shareholder Yield %` | `(abs(Dividends Paid) + abs(Share Repurchases)) / Market Cap × 100` | *requires `market_data`* |
 | `Net Buyback Yield %` | `−(YoY % change in Shares Diluted)` | **share-count based, dilution-aware** — nets SBC/issuance against buybacks (a shrinking share count → positive yield), unlike the gross cash-based `Buyback Yield %`. No market data needed. |
 
+### Quality & Risk
+
+| Metric | Formula | Notes |
+|---|---|---|
+| `Altman Z-Score` | `1.2·X1 + 1.4·X2 + 3.3·X3 + 0.6·X4 + 1.0·X5` where X1 = Working Capital / Total Assets, X2 = Retained Earnings / Total Assets, X3 = Operating Income (EBIT) / Total Assets, X4 = Market Cap / Total Liabilities, X5 = Revenue / Total Assets | Bankruptcy risk. > 3 safe, 1.8–3 grey, < 1.8 distress. *Requires `market_data`* (X4). **Original manufacturing model** — less meaningful for financial firms / non-manufacturers (same caveat class as EV/EBITDA for banks). NULL unless Total Assets and Total Liabilities are both present and > 0. |
+| `Piotroski F-Score` | Sum of 9 binary signals (0–9 integer) | Fundamental health. Profitability: ROA > 0, Operating CF > 0, ΔROA > 0, Operating CF > Net Income. Leverage/liquidity/dilution: Δ(Debt/Assets) < 0, ΔCurrent Ratio > 0, no share dilution (≤ +0.1%). Efficiency: ΔGross Margin > 0, ΔAsset Turnover > 0. NULL in a ticker's first year (no prior to compare). ≥ 7 strong, ≤ 3 weak. |
+| `Accruals Ratio` | `(Net Income − Operating Cash Flow) / Total Assets` | Earnings quality. High positive accruals = earnings not backed by cash → **lower is better** (≤ 0.05 good, ≥ 0.15 poor). A company with operating cash flow above net income shows a negative (good) accrual. |
+
 ### Intrinsic Value *(requires `market_data`)*
 
 | Metric | Formula |

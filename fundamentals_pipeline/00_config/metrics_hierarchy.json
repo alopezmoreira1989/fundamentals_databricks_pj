@@ -91,6 +91,16 @@
     ]
   },
 
+  "Quality & Risk": {
+    "Risk": [
+      { "metric": "Altman Z-Score", "unit": "ratio", "requires_market_data": true  }
+    ],
+    "Quality": [
+      { "metric": "Piotroski F-Score", "unit": "ratio", "requires_market_data": false },
+      { "metric": "Accruals Ratio",    "unit": "ratio", "requires_market_data": false }
+    ]
+  },
+
   "Intrinsic Value": {
     "Graham (FY)": [
       { "metric": "Graham Number (FY)",          "unit": "usd",     "requires_market_data": false },

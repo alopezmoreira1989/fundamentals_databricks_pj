@@ -455,6 +455,14 @@ def render_metrics_grid(metrics: pd.DataFrame, ticker: str, iv_period: str = "FY
                 # extreme MoS); the signal below still reflects the true, unclamped sign.
                 if metric_name.startswith("MoS %"):
                     formatted = fmt_mos(latest)
+                # Quality & Risk scores: the generic ratio→"x" is wrong (a Z of 3.1 isn't
+                # "3.1x"; the F-Score is an integer 0–9). Render them cleanly without "x".
+                elif metric_name == "Piotroski F-Score":
+                    formatted = EM_DASH if is_missing(latest) else f"{latest:.0f}/9"
+                elif metric_name == "Altman Z-Score":
+                    formatted = EM_DASH if is_missing(latest) else f"{latest:.2f}"
+                elif metric_name == "Accruals Ratio":
+                    formatted = EM_DASH if is_missing(latest) else f"{latest:.3f}"
                 else:
                     # Direction metrics (growth) keep the "+" sign.
                     signed = ("YoY" in metric_name)

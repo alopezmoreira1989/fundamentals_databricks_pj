@@ -194,6 +194,14 @@ metrics_wide = (
     .withColumn("Dividend Coverage (FCF)",
         F.when(F.abs(F.col("Dividends Paid")) != 0,
                F.col("Free Cash Flow") / F.abs(F.col("Dividends Paid"))))
+
+    # ── Quality & Risk — Accruals Ratio (base block; no market data) ────────────
+    # (Net Income − Operating Cash Flow) / Total Assets. High positive accruals = earnings
+    # not backed by cash → lower quality, so LOWER is better. safe_div takes column names,
+    # so the signed numerator is materialized first; NULL if a component or Total Assets
+    # is missing (no coalescing — a real gap should read NULL, not 0).
+    .withColumn("_accruals_num", F.col("Net Income") - F.col("Operating Cash Flow"))
+    .withColumn("Accruals Ratio", safe_div("_accruals_num", "Total Assets"))
 )
 
 # COMMAND ----------
@@ -224,6 +232,32 @@ metrics_wide = (
     # A shrinking share count → positive yield. Dilution-aware (it nets SBC/issuance
     # against buybacks), unlike the gross cash-based Buyback Yield %. Reuses w_yoy via yoy().
     .withColumn("Net Buyback Yield %", -yoy("Shares Diluted"))
+
+    # ── Quality & Risk — Piotroski F-Score (base; uses w_yoy lag) ───────────────
+    # Nine 1-pt signals. Profitability: ROA>0, CFO>0, ΔROA>0, CFO>NI (accrual quality).
+    # Leverage/liquidity/dilution: ΔDebt/Assets<0, ΔCurrentRatio>0, no share dilution
+    # (≤ +0.1% tolerance). Efficiency: ΔGrossMargin>0, ΔAssetTurnover>0. Each
+    # F.when(cond,1).otherwise(0); the whole score is set NULL in a ticker's first year
+    # (no prior to compare) via the lag(Total Assets) guard below — can't score 9 on year 1.
+    # _pf_* / _pf_at are internals, NOT exported (absent from base_metric_cols).
+    .withColumn("_pf_at", safe_div("Revenue", "Total Assets"))    # asset turnover (current yr)
+    .withColumn("_pf_roa_pos", F.when(F.col("ROA %") > 0, 1).otherwise(0))
+    .withColumn("_pf_cfo_pos", F.when(F.col("Operating Cash Flow") > 0, 1).otherwise(0))
+    .withColumn("_pf_d_roa",   F.when(F.col("ROA %") > F.lag(F.col("ROA %")).over(w_yoy), 1).otherwise(0))
+    .withColumn("_pf_accr",    F.when(F.col("Operating Cash Flow") > F.col("Net Income"), 1).otherwise(0))
+    .withColumn("_pf_d_lev",   F.when(F.col("Debt / Assets") < F.lag(F.col("Debt / Assets")).over(w_yoy), 1).otherwise(0))
+    .withColumn("_pf_d_cr",    F.when(F.col("Current Ratio") > F.lag(F.col("Current Ratio")).over(w_yoy), 1).otherwise(0))
+    .withColumn("_pf_no_dil",  F.when(F.col("Shares Diluted") <= F.lag(F.col("Shares Diluted")).over(w_yoy) * 1.001, 1).otherwise(0))
+    .withColumn("_pf_d_gm",    F.when(F.col("Gross Margin %") > F.lag(F.col("Gross Margin %")).over(w_yoy), 1).otherwise(0))
+    .withColumn("_pf_d_at",    F.when(F.col("_pf_at") > F.lag(F.col("_pf_at")).over(w_yoy), 1).otherwise(0))
+    .withColumn("Piotroski F-Score",
+        F.when(
+            F.lag(F.col("Total Assets")).over(w_yoy).isNotNull(),   # need a prior year to score
+            (F.col("_pf_roa_pos") + F.col("_pf_cfo_pos") + F.col("_pf_d_roa")
+             + F.col("_pf_accr") + F.col("_pf_d_lev") + F.col("_pf_d_cr")
+             + F.col("_pf_no_dil") + F.col("_pf_d_gm") + F.col("_pf_d_at"))
+        ).cast("double")   # double so the unpivot stack() matches the other (double) metrics
+    )
 )
 
 # Outlier caps for the coverage ratios most prone to blow-ups (mirrors the EV/EBITDA
@@ -262,6 +296,8 @@ base_metric_cols = [
     # Capital Returns — payout ratios + net buyback yield (all base / no market data)
     "Dividend Payout Ratio", "Buyback Payout Ratio", "Total Payout Ratio",
     "Payout / FCF", "Dividend Coverage (FCF)", "Net Buyback Yield %",
+    # Quality & Risk — base (Altman Z is market-gated → val block / val_metric_cols)
+    "Piotroski F-Score", "Accruals Ratio",
 ]
 
 def unpivot(df, metric_cols):
@@ -313,7 +349,10 @@ if mkt is not None:
                 (F.col("stmt") == "Balance Sheet")
                 & (F.col("concept").isin(
                     "Total Stockholders Equity", "Cash & Equivalents",
-                    "Short-term Investments", "Long-term Debt", "Short-term Debt"
+                    "Short-term Investments", "Long-term Debt", "Short-term Debt",
+                    # Altman Z inputs (Revenue / Operating Income already in the IS branch):
+                    "Total Assets", "Total Liabilities", "Total Current Assets",
+                    "Total Current Liabilities", "Retained Earnings"
                 ))
             )
         )
@@ -373,6 +412,7 @@ if mkt is not None:
         "Earnings Yield %", "Sales Yield %", "FCF Yield %",
         "Op Cash Flow Yield %", "Book Yield %", "EBITDA Yield %",
         "Dividend Yield %", "Buyback Yield %", "Shareholder Yield %",
+        "Altman Z-Score",
     ]
 
     val_metrics = (
@@ -399,6 +439,26 @@ if mkt is not None:
         .withColumn("Shareholder Yield %",  safe_div_col(
             F.coalesce(F.abs(F.col("Dividends Paid")),    F.lit(0)) +
             F.coalesce(F.abs(F.col("Share Repurchases")), F.lit(0)),    F.col("market_cap")) * 100)
+        # ── Quality & Risk — Altman Z-Score (market-gated; X4 needs market_cap) ─────
+        # Original 5-factor MANUFACTURING model. Less meaningful for financial firms /
+        # non-manufacturers (known limitation, same caveat class as EV/EBITDA for banks) —
+        # documented, not sector-branched. NULL unless Total Assets and Total Liabilities are
+        # both present and > 0; no coalescing, so any missing component (e.g. Retained
+        # Earnings, working-capital pieces) makes Z NULL rather than silently understating it.
+        .withColumn("_altman_wc",
+            F.when(
+                F.col("Total Current Assets").isNotNull() & F.col("Total Current Liabilities").isNotNull(),
+                F.col("Total Current Assets") - F.col("Total Current Liabilities")
+            ))
+        .withColumn("Altman Z-Score",
+            F.when(
+                (F.col("Total Assets") > 0) & (F.col("Total Liabilities") > 0),
+                1.2 * (F.col("_altman_wc")        / F.col("Total Assets"))
+              + 1.4 * (F.col("Retained Earnings") / F.col("Total Assets"))
+              + 3.3 * (F.col("Operating Income")  / F.col("Total Assets"))
+              + 0.6 * (F.col("market_cap")        / F.col("Total Liabilities"))
+              + 1.0 * (F.col("Revenue")           / F.col("Total Assets"))
+            ))
     )
 
     # Filter EV/EBITDA outliers (|x| > 500)
