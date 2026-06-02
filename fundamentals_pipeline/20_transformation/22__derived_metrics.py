@@ -450,13 +450,26 @@ if mkt is not None:
                 F.col("Total Current Assets").isNotNull() & F.col("Total Current Liabilities").isNotNull(),
                 F.col("Total Current Assets") - F.col("Total Current Liabilities")
             ))
+        # Total Liabilities fallback: many issuers (e.g. VZ) don't tag us-gaap:Liabilities
+        # directly (they report Total Liabilities & Equity instead), which left Altman Z NULL.
+        # Fall back to the balance-sheet identity Total Assets − Total Stockholders Equity so
+        # X4 can still compute. Approximation: with attributable-only equity this folds any
+        # (usually small) noncontrolling interest into liabilities — acceptable for a risk score.
+        .withColumn("_total_liab",
+            F.coalesce(
+                F.col("Total Liabilities"),
+                F.when(
+                    F.col("Total Assets").isNotNull() & F.col("Total Stockholders Equity").isNotNull(),
+                    F.col("Total Assets") - F.col("Total Stockholders Equity")
+                )
+            ))
         .withColumn("Altman Z-Score",
             F.when(
-                (F.col("Total Assets") > 0) & (F.col("Total Liabilities") > 0),
+                (F.col("Total Assets") > 0) & (F.col("_total_liab") > 0),
                 1.2 * (F.col("_altman_wc")        / F.col("Total Assets"))
               + 1.4 * (F.col("Retained Earnings") / F.col("Total Assets"))
               + 3.3 * (F.col("Operating Income")  / F.col("Total Assets"))
-              + 0.6 * (F.col("market_cap")        / F.col("Total Liabilities"))
+              + 0.6 * (F.col("market_cap")        / F.col("_total_liab"))
               + 1.0 * (F.col("Revenue")           / F.col("Total Assets"))
             ))
     )
