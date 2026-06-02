@@ -23,6 +23,26 @@ def fmt_num(v) -> str:
     return f"{v:,.0f}"
 
 
+def fmt_num_scaled(v, divisor: int = 1, decimals: int | None = None) -> str:
+    """Statement-table cells with an optional unit scale.
+
+    divisor: 1 / 1e3 / 1e6 / 1e9. When divisor == 1, behaves exactly like
+    fmt_num (thousands-separated integer, accounting-style negatives) so the
+    'Units' view is byte-identical to today. When scaled, defaults to 1 decimal
+    so small magnitudes don't collapse to 0 / round away signal (e.g. $391.0B
+    rather than $391B; a $40M line under 'Billions' shows 0.0 rather than 0).
+    """
+    if is_missing(v):
+        return EM_DASH
+    if divisor == 1:
+        return fmt_num(v)                       # unchanged Units path
+    scaled = v / divisor
+    dp = 1 if decimals is None else decimals
+    if scaled < 0:
+        return f"({abs(scaled):,.{dp}f})"
+    return f"{scaled:,.{dp}f}"
+
+
 def fmt_eps(v) -> str:
     """Per-share rows: 2 decimals, accounting-style negatives."""
     if is_missing(v):

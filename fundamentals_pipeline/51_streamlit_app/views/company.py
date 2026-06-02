@@ -66,6 +66,22 @@ with back_col:
 st.markdown(render_masthead(ticker, data, meta), unsafe_allow_html=True)
 st.markdown(render_kpi_strip(ticker, data, metrics), unsafe_allow_html=True)
 
+# Unit scale for the statement tables (IS / BS / CF / Quarterly). One control governs
+# all four. Billion = 1e9 (US short scale); a Spanish label would be "Miles de millones",
+# NOT "Billones" (Spanish billón = 1e12). Default "Units" → unchanged full-resolution USD.
+SCALE_OPTIONS = {
+    "Units":     (1,             ""),
+    "Thousands": (1_000,         "thousands"),
+    "Millions":  (1_000_000,     "millions"),
+    "Billions":  (1_000_000_000, "billions"),
+}
+scale_label = st.segmented_control(
+    "Units", options=list(SCALE_OPTIONS), default="Units",
+    key="unit_scale",
+    help="Scale all money amounts in the statement tables. Billion = 1e9 (US short scale).",
+)
+divisor, scale_word = SCALE_OPTIONS[scale_label or "Units"]
+
 tab_is, tab_bs, tab_cf, tab_dm, tab_qt = st.tabs(
     ["Income statement", "Balance sheet", "Cash flow", "Derived metrics", "Quarterly"]
 )
@@ -77,7 +93,7 @@ with tab_is:
         '<div class="meta">Up to 10 fiscal years · USD · concept_hierarchy.json</div></div>',
         unsafe_allow_html=True,
     )
-    st.markdown(render_table_html(df_is, statement="is", ticker=ticker, notes=notes), unsafe_allow_html=True)
+    st.markdown(render_table_html(df_is, statement="is", ticker=ticker, notes=notes, divisor=divisor, scale_word=scale_word), unsafe_allow_html=True)
     st.markdown(render_waterfall(df_is), unsafe_allow_html=True)
 
 with tab_bs:
@@ -87,7 +103,7 @@ with tab_bs:
         '<div class="meta">Fiscal year-end snapshots · USD</div></div>',
         unsafe_allow_html=True,
     )
-    st.markdown(render_table_html(df_bs, statement="bs", ticker=ticker, notes=notes), unsafe_allow_html=True)
+    st.markdown(render_table_html(df_bs, statement="bs", ticker=ticker, notes=notes, divisor=divisor, scale_word=scale_word), unsafe_allow_html=True)
     st.markdown(render_balance_check(df_bs), unsafe_allow_html=True)
 
 with tab_cf:
@@ -97,7 +113,7 @@ with tab_cf:
         '<div class="meta">Operating · Investing · Financing</div></div>',
         unsafe_allow_html=True,
     )
-    st.markdown(render_table_html(df_cf, statement="cf", ticker=ticker, notes=notes), unsafe_allow_html=True)
+    st.markdown(render_table_html(df_cf, statement="cf", ticker=ticker, notes=notes, divisor=divisor, scale_word=scale_word), unsafe_allow_html=True)
 
 with tab_dm:
     st.markdown(
@@ -131,6 +147,6 @@ with tab_qt:
         unsafe_allow_html=True,
     )
     st.markdown(render_quarterly_combo(df_q), unsafe_allow_html=True)
-    st.markdown(render_table_html(df_q, statement="qt", ticker=ticker, notes=notes), unsafe_allow_html=True)
+    st.markdown(render_table_html(df_q, statement="qt", ticker=ticker, notes=notes, divisor=divisor, scale_word=scale_word), unsafe_allow_html=True)
 
 st.markdown(render_footnote_bar(meta, app_version()), unsafe_allow_html=True)

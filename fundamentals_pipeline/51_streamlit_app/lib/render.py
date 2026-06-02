@@ -37,6 +37,7 @@ from .format import (
     fmt_metric,
     fmt_mos,
     fmt_num,
+    fmt_num_scaled,
     is_missing,
     short_quarter,
     short_year,
@@ -111,13 +112,26 @@ def render_masthead(ticker: str, data: pd.DataFrame, meta: dict[str, Any]) -> st
 # Financial-statement table
 # ──────────────────────────────────────────────────────────────────────────────
 
+# Non-money rows that must NOT be divided by the money scale selector. Per-share rows
+# (PER_SHARE_CONCEPTS) keep fmt_eps; share counts keep full-resolution fmt_num — a count
+# is not USD, so scaling it under a "USD millions" header would be wrong/misleading.
+_SHARE_COUNT_CONCEPTS = {"Shares Diluted"}
+
+
 def render_table_html(
     df: pd.DataFrame,
     statement: str,
     ticker: str,
     notes: dict[str, Any],
+    divisor: int = 1,
+    scale_word: str = "",
 ) -> str:
-    """Render IS / BS / CF / quarterly tables as full <table> HTML."""
+    """Render IS / BS / CF / quarterly tables as full <table> HTML.
+
+    `divisor` / `scale_word` re-scale the money cells (1 / 1e3 / 1e6 / 1e9). Defaults
+    keep every existing caller at full-resolution USD, unchanged. Per-share and
+    share-count rows are never scaled (see the cell loop below).
+    """
     if df.empty:
         return '<p style="color:var(--ink-3)">No data available.</p>'
 
@@ -127,9 +141,10 @@ def render_table_html(
     # Quarter labels reconstructed as FY − YTD_Q3 (Q4), if the export flags them.
     derived_qs = df.attrs.get("derived_quarters", set()) if is_quarterly else set()
 
-    # Header row. Values are stored as raw USD (fmt_num prints them at full
-    # resolution), so the label is "USD" — NOT "$M"/millions.
-    header_cells = ['<th class="col-label">USD</th>']
+    # Header row. Values are stored as raw USD; the corner label reflects the unit
+    # scale chosen by the selector ("USD" at full resolution, else "USD millions" etc.).
+    usd_label = "USD" if divisor == 1 else f"USD {scale_word}"
+    header_cells = [f'<th class="col-label">{usd_label}</th>']
     for i, yr in enumerate(year_cols):
         is_last = i == len(year_cols) - 1
         cls = "col-num col-latest" if is_last else "col-num"
@@ -186,6 +201,7 @@ def render_table_html(
 
         # Number cells.
         is_per_share = concept in PER_SHARE_CONCEPTS
+        is_count = concept in _SHARE_COUNT_CONCEPTS   # non-money → never scaled
         num_cells: list[str] = []
         for i, v in enumerate(row_values):
             is_last = i == len(row_values) - 1
@@ -194,12 +210,16 @@ def render_table_html(
             if is_missing(v):
                 num_cells.append(f'<td class="num{latest_cls}">{EM_DASH}</td>')
             elif is_per_share:
-                formatted = fmt_eps(v)
+                formatted = fmt_eps(v)                       # per-share: never scaled
+                muted = " muted" if v < 0 else ""
+                num_cells.append(f'<td class="num{latest_cls}{muted}">{formatted}</td>')
+            elif is_count:
+                formatted = fmt_num(v)                       # share count: full resolution, never scaled
                 muted = " muted" if v < 0 else ""
                 num_cells.append(f'<td class="num{latest_cls}{muted}">{formatted}</td>')
             else:
                 neg = v < 0
-                formatted = fmt_num(v)
+                formatted = fmt_num_scaled(v, divisor)       # money: apply the unit scale
                 muted = " muted" if neg else ""
                 num_cells.append(f'<td class="num{latest_cls}{muted}">{formatted}</td>')
 
