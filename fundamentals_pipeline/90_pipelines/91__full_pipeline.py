@@ -12,6 +12,23 @@
 
 # COMMAND ----------
 
+# Per-step wall-clock timing. Defined right AFTER the %pip cell because %pip restarts the
+# Python interpreter (wiping earlier state). STEP_TIMINGS accumulates {step, minutes} as each
+# %run completes; the summary cell at the end prints + persists them. Relies on shared-session
+# state surviving across %run cells — the SAME Databricks-only assumption `pipeline_start`
+# already depends on. `_record_step` runs only AFTER its %run, so a failed step (which aborts
+# the run) is simply absent → abort behaviour is unchanged.
+import time
+
+STEP_TIMINGS = []
+
+def _record_step(name, t0):
+    mins = (time.monotonic() - t0) / 60.0
+    STEP_TIMINGS.append({"step": name, "minutes": mins})
+    print(f"  ⏱ {name}: {mins:.1f} min")
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC # 90_pipelines / 91__full_pipeline
 # MAGIC
@@ -92,7 +109,15 @@ force_full_refresh = dbutils.widgets.get("force_full_refresh")
 
 # COMMAND ----------
 
+_t0 = time.monotonic()
+
+# COMMAND ----------
+
 # MAGIC %run "../00_config/01__tickers"
+
+# COMMAND ----------
+
+_record_step("Load config", _t0)
 
 # COMMAND ----------
 
@@ -152,10 +177,15 @@ else:
 print("=" * 55)
 print("STEP 1 / 12 — Concept Hierarchy")
 print("=" * 55)
+_t0 = time.monotonic()
 
 # COMMAND ----------
 
 # MAGIC %run "../00_config/03__concept_hierarchy_master"
+
+# COMMAND ----------
+
+_record_step("Concept Hierarchy", _t0)
 
 # COMMAND ----------
 
@@ -172,10 +202,15 @@ print("=" * 55)
 print("=" * 55)
 print("STEP 2 / 12 — Metrics Hierarchy")
 print("=" * 55)
+_t0 = time.monotonic()
 
 # COMMAND ----------
 
 # MAGIC %run "../00_config/04__metrics_hierarchy_master"
+
+# COMMAND ----------
+
+_record_step("Metrics Hierarchy", _t0)
 
 # COMMAND ----------
 
@@ -188,10 +223,15 @@ print("=" * 55)
 print("=" * 55)
 print("STEP 3 / 12 — SEC Ingestion")
 print("=" * 55)
+_t0 = time.monotonic()
 
 # COMMAND ----------
 
 # MAGIC %run "../10_ingestion/11__fetch_sec_xbrl"
+
+# COMMAND ----------
+
+_record_step("SEC Ingestion", _t0)
 
 # COMMAND ----------
 
@@ -208,10 +248,15 @@ print("=" * 55)
 print("=" * 55)
 print("STEP 3b / 12 — Dimensional 10-K (combined-filers)")
 print("=" * 55)
+_t0 = time.monotonic()
 
 # COMMAND ----------
 
 # MAGIC %run "../10_ingestion/13__fetch_dimensional_10k"
+
+# COMMAND ----------
+
+_record_step("Dimensional 10-K", _t0)
 
 # COMMAND ----------
 
@@ -224,10 +269,15 @@ print("=" * 55)
 print("=" * 55)
 print("STEP 4 / 12 — Market Data")
 print("=" * 55)
+_t0 = time.monotonic()
 
 # COMMAND ----------
 
 # MAGIC %run "../10_ingestion/12__fetch_market_data"
+
+# COMMAND ----------
+
+_record_step("Market Data", _t0)
 
 # COMMAND ----------
 
@@ -240,10 +290,15 @@ print("=" * 55)
 print("=" * 55)
 print("STEP 5 / 12 — Clean & Merge")
 print("=" * 55)
+_t0 = time.monotonic()
 
 # COMMAND ----------
 
 # MAGIC %run "../20_transformation/21__clean_and_merge"
+
+# COMMAND ----------
+
+_record_step("Clean & Merge", _t0)
 
 # COMMAND ----------
 
@@ -263,10 +318,15 @@ print("=" * 55)
 print("=" * 55)
 print("STEP 6 / 12 — Derive Quarterly")
 print("=" * 55)
+_t0 = time.monotonic()
 
 # COMMAND ----------
 
 # MAGIC %run "../20_transformation/21b__derive_quarterly"
+
+# COMMAND ----------
+
+_record_step("Derive Quarterly", _t0)
 
 # COMMAND ----------
 
@@ -284,10 +344,15 @@ print("=" * 55)
 print("=" * 55)
 print("STEP 6b / 12 — FY from Quarterly (fallback)")
 print("=" * 55)
+_t0 = time.monotonic()
 
 # COMMAND ----------
 
 # MAGIC %run "../20_transformation/21e__derive_fy_from_quarterly"
+
+# COMMAND ----------
+
+_record_step("FY from Quarterly", _t0)
 
 # COMMAND ----------
 
@@ -300,10 +365,15 @@ print("=" * 55)
 print("=" * 55)
 print("STEP 7 / 12 — Derived Metrics")
 print("=" * 55)
+_t0 = time.monotonic()
 
 # COMMAND ----------
 
 # MAGIC %run "../20_transformation/22__derived_metrics"
+
+# COMMAND ----------
+
+_record_step("Derived Metrics", _t0)
 
 # COMMAND ----------
 
@@ -323,10 +393,15 @@ print("=" * 55)
 print("=" * 55)
 print("STEP 8 / 12 — Intrinsic Value")
 print("=" * 55)
+_t0 = time.monotonic()
 
 # COMMAND ----------
 
 # MAGIC %run "../20_transformation/23__intrinsic_value"
+
+# COMMAND ----------
+
+_record_step("Intrinsic Value", _t0)
 
 # COMMAND ----------
 
@@ -339,10 +414,15 @@ print("=" * 55)
 print("=" * 55)
 print("STEP 9 / 12 — Analysis")
 print("=" * 55)
+_t0 = time.monotonic()
 
 # COMMAND ----------
 
 # MAGIC %run "../30_analysis/31__company_analysis"
+
+# COMMAND ----------
+
+_record_step("Analysis", _t0)
 
 # COMMAND ----------
 
@@ -357,6 +437,7 @@ print("=" * 55)
 print("=" * 55)
 print("STEP 10 / 12 — Coverage Check")
 print("=" * 55)
+_t0 = time.monotonic()
 
 # COMMAND ----------
 
@@ -369,6 +450,9 @@ try:
 except Exception as e:
     print(f"⚠ Coverage check failed: {e}")
     coverage_ok = False
+
+# Non-fatal step (caught above), so record regardless of success.
+_record_step("Coverage Check", _t0)
 
 # COMMAND ----------
 
@@ -391,10 +475,15 @@ except Exception as e:
 print("=" * 55)
 print("STEP 11 / 12 — Export dashboard data")
 print("=" * 55)
+_t0 = time.monotonic()
 
 # COMMAND ----------
 
 # MAGIC %run "../50_publish/51__export_dashboard_data"
+
+# COMMAND ----------
+
+_record_step("Export dashboard data", _t0)
 
 # COMMAND ----------
 
@@ -409,10 +498,15 @@ print("=" * 55)
 print("=" * 55)
 print("STEP 12 / 12 — Publish to GitHub")
 print("=" * 55)
+_t0 = time.monotonic()
 
 # COMMAND ----------
 
 # MAGIC %run "../50_publish/52__publish_to_github"
+
+# COMMAND ----------
+
+_record_step("Publish to GitHub", _t0)
 
 # COMMAND ----------
 
@@ -451,6 +545,67 @@ for schema, tbl in summary_tables:
         print(f"  {full}: {n:,} rows")
     except Exception:
         print(f"  {full}: (not found)")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 13b. Per-step timings — where the wall-clock went
+# MAGIC
+# MAGIC Prints the per-step breakdown (slowest first) and persists it to an append-only Delta
+# MAGIC history table `pipeline_run_timings`, mirroring the `ingestion_failures` pattern.
+# MAGIC `run_ts = pipeline_start` ties all step rows of one run together. The Σ-steps total
+# MAGIC should ≈ the wall-clock (the small gap is the untimed `%pip` + banner cells).
+
+# COMMAND ----------
+
+_total_min = sum(s["minutes"] for s in STEP_TIMINGS)
+_wall_min  = (datetime.utcnow() - pipeline_start).total_seconds() / 60.0
+print(f"\n{'='*55}")
+print(f"  PER-STEP TIMINGS")
+print(f"{'='*55}")
+print(f"  {'Step':<26}{'min':>8}{'% total':>10}")
+print(f"  {'-'*44}")
+for s in sorted(STEP_TIMINGS, key=lambda x: x["minutes"], reverse=True):
+    pct = (s["minutes"] / _total_min * 100) if _total_min else 0.0
+    print(f"  {s['step']:<26}{s['minutes']:>8.1f}{pct:>9.0f}%")
+print(f"  {'-'*44}")
+print(f"  {'Σ steps':<26}{_total_min:>8.1f}")
+print(f"  {'Wall-clock (start→now)':<26}{_wall_min:>8.1f}")
+
+# Persist to append-only history (same CREATE-IF-NOT-EXISTS + append idiom as ingestion_failures).
+_timings_tbl = f"{CATALOG}.{SCHEMA}.pipeline_run_timings"
+spark.sql(f"""
+    CREATE TABLE IF NOT EXISTS {_timings_tbl} (
+        run_ts     TIMESTAMP NOT NULL,
+        step       STRING    NOT NULL,
+        minutes    DOUBLE,
+        n_tickers  INT
+    )
+    USING DELTA
+    TBLPROPERTIES (
+        'delta.autoOptimize.optimizeWrite' = 'true',
+        'delta.autoOptimize.autoCompact'   = 'true'
+    )
+""")
+
+if STEP_TIMINGS:
+    from pyspark.sql.types import (
+        StructType, StructField, StringType, DoubleType, TimestampType, IntegerType,
+    )
+    _tm_schema = StructType([
+        StructField("run_ts",    TimestampType(), False),
+        StructField("step",      StringType(),    False),
+        StructField("minutes",   DoubleType(),    True),
+        StructField("n_tickers", IntegerType(),   True),
+    ])
+    _tm_records = [
+        {"run_ts": pipeline_start, "step": s["step"],
+         "minutes": float(s["minutes"]), "n_tickers": int(len(ACTIVE_TICKERS))}
+        for s in STEP_TIMINGS
+    ]
+    spark.createDataFrame(_tm_records, schema=_tm_schema) \
+         .write.mode("append").saveAsTable(_timings_tbl)
+    print(f"✓ {len(_tm_records)} step timings → {_timings_tbl}")
 
 # COMMAND ----------
 
