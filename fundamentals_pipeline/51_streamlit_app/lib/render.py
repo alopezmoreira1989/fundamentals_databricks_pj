@@ -7,6 +7,7 @@ st.markdown(..., unsafe_allow_html=True).
 from __future__ import annotations
 
 import html
+import math
 import re
 from pathlib import Path
 from typing import Any
@@ -512,6 +513,157 @@ def _render_valuation_row(metric: str, display: str, unit, values, latest) -> st
         f'  {middle}'
         f'  <div class="m-value">{formatted}</div>'
         f'  {chip}'
+        f'</div>'
+    )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Valuation football field — horizontal range chart of IV methods vs market price
+# ──────────────────────────────────────────────────────────────────────────────
+
+FF_BAND = 0.15   # ±15% presentational sensitivity envelope around each point estimate
+# Methods shown, in display order. Graham Number is EXCLUDED on purpose: it is suppressed
+# upstream for distorted-book firms and, where present, is often a wild outlier that would
+# crush the shared x-scale. (value-metric base, MoS method tag, display label)
+FF_METHODS = [
+    ("DCF Value per Share",        "DCF",            "DCF"),
+    ("Owner Earnings Value/Share", "Owner Earnings", "Owner Earnings"),
+    ("Graham Revised Value",       "Graham Revised", "Graham Revised"),
+]
+# Soft tints — hex mirrors of --positive-soft / --negative-soft / --accent-soft. SVG
+# presentation attributes don't resolve var(), so we use the established hex tokens
+# (same approach as the sparklines), with INK for labels.
+_FF_POS_SOFT, _FF_NEG_SOFT, _FF_ACC_SOFT = "#E1F5EE", "#FAECE7", "#E6F1FB"
+_FF_INK = "#1C1B18"
+
+
+def iv_price_from_metrics(metrics: pd.DataFrame, ticker: str, iv_period: str = "FY"):
+    """Back out the market price the IV methods were scored against, from a method's value
+    and its MoS row: 23 stores MoS = (iv − price)/iv × 100, so price = iv·(1 − MoS/100).
+    Every method shares the same price; take the first sane one. None if unavailable —
+    the dashboard never stores price per share directly, so this is how the page gets it.
+    """
+    sub = metrics[(metrics["ticker"] == ticker) & (metrics["period_type"] == "FY")]
+    if sub.empty:
+        return None
+    for base, tag, _label in FF_METHODS:
+        vrows = sub[sub["metric"] == f"{base} ({iv_period})"]
+        mrows = sub[sub["metric"] == f"MoS % ({tag}, {iv_period})"]
+        common = set(vrows["fiscal_year"]) & set(mrows["fiscal_year"])
+        if not common:
+            continue
+        y = max(common)
+        v = vrows[vrows["fiscal_year"] == y]["value"].iloc[-1]
+        mos = mrows[mrows["fiscal_year"] == y]["value"].iloc[-1]
+        if is_missing(v) or is_missing(mos) or v <= 0:
+            continue
+        price = float(v) * (1 - float(mos) / 100.0)
+        if math.isfinite(price) and price > 0:
+            return price
+    return None
+
+
+def render_valuation_football_field(metrics: pd.DataFrame, ticker: str, price,
+                                    iv_period: str = "FY") -> str:
+    """Horizontal 'football field' of intrinsic-value methods vs the market price.
+
+    Each method is a bar over [base·(1−FF_BAND), base·(1+FF_BAND)] with a base-case dot;
+    a single vertical line marks `price`. Bars tint by base-vs-price — base above price →
+    undervalued → positive; base below → overvalued → negative; neutral when price is
+    unknown. Returns "" when no method has a usable (finite, >0) value so the page shows
+    nothing. Render-layer only.
+    TODO: if a real low/high is ever stored from the DCF assumption sweep, read it here
+    instead of constructing the ±FF_BAND envelope.
+    """
+    sub = metrics[(metrics["ticker"] == ticker) & (metrics["period_type"] == "FY")]
+    if sub.empty:
+        return ""
+
+    bars = []  # (label, base, low, high)
+    for base_metric, _tag, label in FF_METHODS:
+        vals = [v for v in sub[sub["metric"] == f"{base_metric} ({iv_period})"]
+                .sort_values("fiscal_year")["value"].tolist() if not is_missing(v)]
+        base = vals[-1] if vals else None
+        # Skip NaN / ≤0 — a non-positive per-share value can't anchor a ±band bar.
+        if base is None or not math.isfinite(base) or base <= 0:
+            continue
+        bars.append((label, float(base), float(base) * (1 - FF_BAND), float(base) * (1 + FF_BAND)))
+    if not bars:
+        return ""
+
+    has_price = price is not None and math.isfinite(price) and price > 0
+    lo = min(b[2] for b in bars)
+    hi = max(b[3] for b in bars)
+    if has_price:
+        lo, hi = min(lo, price), max(hi, price)
+    pad = (hi - lo) * 0.10 or hi * 0.10 or 1.0   # ~10% domain padding so nothing clips
+    dmin, dmax = lo - pad, hi + pad
+    span = (dmax - dmin) or 1.0
+
+    # Geometry (viewBox units; width:100% scales it responsively).
+    W, label_w, rpad, row_h, top, axis_h = 720, 150, 28, 32, 12, 30
+    x0, x1 = label_w, W - rpad
+    plot_bottom = top + len(bars) * row_h
+    H = plot_bottom + axis_h
+
+    def X(v):
+        return x0 + (v - dmin) / span * (x1 - x0)
+
+    svg = [f'<svg viewBox="0 0 {W} {H}" width="100%" preserveAspectRatio="xMidYMid meet" '
+           f'font-family="JetBrains Mono, SF Mono, monospace">']
+
+    # Price line first (the bars' base dots draw on top).
+    if has_price:
+        px = X(price)
+        svg.append(f'<line x1="{px:.1f}" y1="{top:.0f}" x2="{px:.1f}" y2="{plot_bottom:.0f}" '
+                   f'stroke="{CORAL}" stroke-width="1.5" stroke-dasharray="3 2"/>')
+        svg.append(f'<text x="{px:.1f}" y="{top - 2:.0f}" fill="{CORAL}" font-size="11" '
+                   f'text-anchor="middle">${price:,.0f}</text>')
+
+    for i, (label, base, low, high) in enumerate(bars):
+        cy = top + i * row_h + row_h / 2
+        # Coloring rule: base above price → undervalued (positive); below → overvalued
+        # (negative); neutral accent when price unknown. Accent-blue base dot on top either way.
+        if has_price:
+            fill, edge = (_FF_POS_SOFT, GREEN) if base >= price else (_FF_NEG_SOFT, CORAL)
+        else:
+            fill, edge = _FF_ACC_SOFT, BLUE
+        xl, xh, xb = X(low), X(high), X(base)
+        svg.append(f'<rect x="{xl:.1f}" y="{cy - 7:.1f}" width="{max(xh - xl, 1):.1f}" height="14" '
+                   f'rx="3" fill="{fill}" stroke="{edge}" stroke-width="1"/>')
+        svg.append(f'<circle cx="{xb:.1f}" cy="{cy:.1f}" r="4" fill="{BLUE}"/>')
+        svg.append(f'<text x="8" y="{cy + 4:.1f}" fill="{_FF_INK}" font-size="12" '
+                   f'font-family="-apple-system, system-ui, sans-serif">{html.escape(label)}</text>')
+        # Base $ value: right of the bar, or left of it when near the right edge (anti-clip).
+        if xh > x0 + 0.72 * (x1 - x0):
+            svg.append(f'<text x="{xl - 6:.1f}" y="{cy + 4:.1f}" fill="{GRAY}" font-size="10.5" '
+                       f'text-anchor="end">${base:,.0f}</text>')
+        else:
+            svg.append(f'<text x="{xh + 6:.1f}" y="{cy + 4:.1f}" fill="{GRAY}" font-size="10.5">${base:,.0f}</text>')
+
+    # X-axis: 5 ticks across the shared domain, rounded $ labels.
+    for t in range(5):
+        v = dmin + span * t / 4
+        xt = X(v)
+        svg.append(f'<line x1="{xt:.1f}" y1="{plot_bottom:.0f}" x2="{xt:.1f}" y2="{plot_bottom + 4:.0f}" '
+                   f'stroke="{GRAY}" stroke-width="1"/>')
+        svg.append(f'<text x="{xt:.1f}" y="{plot_bottom + 16:.0f}" fill="{GRAY}" font-size="11" '
+                   f'text-anchor="middle">${v:,.0f}</text>')
+    svg.append("</svg>")
+
+    notes = [f"bars show ±{int(FF_BAND * 100)}% sensitivity band around each method's "
+             f"point estimate (not a confidence interval)"]
+    if len(bars) == 1:
+        notes.append("only one method available")
+    if not has_price:
+        notes.append("no market price available")
+
+    return (
+        f'<div class="ff-card">'
+        f'<div class="ff-head"><h3>Valuation football field</h3>'
+        f'<div class="sub">{html.escape(iv_period)} · intrinsic value vs price</div></div>'
+        f'<div class="ff-plot">{"".join(svg)}</div>'
+        f'<div class="ff-caption">{html.escape(" · ".join(notes))}</div>'
         f'</div>'
     )
 

@@ -16,9 +16,11 @@ from lib.quarterly import render_quarterly_combo
 from lib.render import (
     render_balance_check,
     render_footnote_bar,
+    iv_price_from_metrics,
     render_masthead,
     render_metrics_grid,
     render_table_html,
+    render_valuation_football_field,
     render_waterfall,
 )
 from lib.tables import (
@@ -113,6 +115,13 @@ with tab_dm:
     # segmented_control returns None if the user deselects the active chip.
     iv_period = iv_period or "FY"
     st.markdown(render_metrics_grid(metrics, ticker, iv_period=iv_period), unsafe_allow_html=True)
+    # Valuation football field — fills the gap below the grid. Price is backed out of the
+    # IV methods' MoS rows (the app stores no per-share price directly). Returns "" → hidden.
+    ff_price = iv_price_from_metrics(metrics, ticker, iv_period=iv_period)
+    st.markdown(
+        render_valuation_football_field(metrics, ticker, ff_price, iv_period=iv_period),
+        unsafe_allow_html=True,
+    )
 
 with tab_qt:
     df_q = quarterly_df(data, ticker)

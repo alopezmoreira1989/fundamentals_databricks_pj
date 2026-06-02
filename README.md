@@ -459,6 +459,15 @@ ratios stay NULL when their one component is absent.
 
 A read-only dashboard at Streamlit Community Cloud renders the same data without Databricks credentials. Currently serves ~2,500 tickers (S&P 500 + Russell 2000 proxy) with synthetic data for preview; production data is published via GitHub Release. See [`51_streamlit_app/README.md`](fundamentals_pipeline/51_streamlit_app/README.md) for details.
 
+### Valuation football field
+
+The company detail page (Derived metrics tab) renders a horizontal "football field" below the metrics grid: one bar per intrinsic-value method spanning its estimate range, with a base-case dot and a single vertical line for the current market price (`render_valuation_football_field` in `lib/render.py`, inline SVG).
+
+- **The bars are a presentational ±15% sensitivity band** (`FF_BAND`) around each method's stored point estimate — **not** a confidence interval. There is no stored low/high triple; the envelope is constructed for readability (a caption says so). The market price is backed out of any method's `MoS %` row (`price = IV × (1 − MoS/100)`), since the app stores no per-share price directly.
+- **`Graham Number` is intentionally excluded** — it's suppressed upstream for distorted-book firms and is often a wild outlier that would crush the shared x-scale. Only Graham Revised, DCF, and Owner Earnings are shown (`FF_METHODS`).
+- **Over/under-valued color rule:** a method's base **above** the price line → undervalued → green (`--positive`); **below** → overvalued → red (`--negative`); neutral blue when no price is available. So "every bar below the line" reads instantly as overvalued (e.g. AAPL), "every bar above" as undervalued (e.g. VZ).
+- **Graceful degradation:** no methods → the card is hidden (returns `""`); a single method still renders (with a note); no `market_data` price → bars render neutral with no price line and a "no market price" caption; non-finite or ≤0 base values are skipped.
+
 ---
 
 ## Dashboard — `Main Dashboard.lvdash.json`

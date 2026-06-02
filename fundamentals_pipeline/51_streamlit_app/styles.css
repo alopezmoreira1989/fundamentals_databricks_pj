@@ -700,3 +700,41 @@ div[data-baseweb="popover"] div[role="listbox"] {
 div[data-baseweb="popover"] div[role="option"]:hover {
   background: var(--bg-hover) !important;
 }
+
+/* ========= VALUATION FOOTBALL FIELD ========= */
+/* Streamlit-app-only (below the synced section). Chrome matches .breakdown / .qchart;
+   bar/dot/price-line geometry + colors live in the inline SVG (see render.py). */
+.ff-card {
+  margin-top: 28px;
+  background: var(--bg-card);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 22px 24px;
+}
+.ff-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+.ff-head h3 {
+  font-family: var(--display);
+  font-size: 18px;
+  font-weight: 500;
+  font-variation-settings: "opsz" 144;
+}
+.ff-head .sub {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--ink-3);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.ff-plot { width: 100%; }
+.ff-caption {
+  margin-top: 8px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--ink-3);
+  letter-spacing: 0.02em;
+}
