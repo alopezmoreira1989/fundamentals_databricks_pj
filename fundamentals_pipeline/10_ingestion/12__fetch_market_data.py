@@ -15,6 +15,11 @@
 # MAGIC (AAPL, MSFT, WMT…), this introduces a known 0–11 month offset between
 # MAGIC fundamentals (fiscal) and price (calendar). Acceptable for trend analysis;
 # MAGIC for precise valuation use `period_end`-based pricing in a future revision.
+# MAGIC
+# MAGIC **Fetch strategy:** one **batched** `yf.download(...)` per ~60 tickers (instead of
+# MAGIC one `yf.Ticker().history()` call per ticker). yfinance threads within a batch, so
+# MAGIC ~3000 full-history downloads collapse to ~50 batched calls — far faster. The
+# MAGIC year-end semantics (last Close of each calendar year) are identical to before.
 
 # COMMAND ----------
 
@@ -47,9 +52,27 @@ from pyspark.sql import functions as F
 market_tbl = f"{CATALOG}.{SCHEMA}.market_data"
 full_tbl   = f"{CATALOG}.{SCHEMA}.{TABLE}"
 
-MAX_WORKERS        = 3
-STALENESS_DAYS     = 7
-FORCE_FULL_REFRESH = False
+# ── Batched download config ──────────────────────────────────────────────────────
+# yf.download already parallelizes WITHIN a batch (threads=True), so batch-level
+# parallelism is kept conservative to avoid Yahoo throttling.
+BATCH_SIZE     = 60      # tickers per yf.download call
+BATCH_WORKERS  = 2       # concurrent batches (yf threads internally on top of this)
+STALENESS_DAYS = 7
+
+# ── Refresh policy ────────────────────────────────────────────────────────────
+# Inherit force_full_refresh from the parent 91 via globals() — SAME handoff as
+# 11__fetch_sec_xbrl. dbutils.widgets.get() does NOT reliably read the parent's widget
+# under %run, so we read the variable 91 already set. Standalone runs fall back to this
+# notebook's own widget, else False (normal incremental behaviour).
+# (Previously this was hardcoded `FORCE_FULL_REFRESH = False`, so a job-level force refresh
+#  re-fetched SEC filings but NOT prices — now the two are consistent.)
+if "force_full_refresh" in globals():
+    FORCE_FULL_REFRESH = str(force_full_refresh).strip().lower() == "true"
+else:
+    try:
+        FORCE_FULL_REFRESH = dbutils.widgets.get("force_full_refresh").strip().lower() == "true"
+    except Exception:
+        FORCE_FULL_REFRESH = False
 
 # COMMAND ----------
 
@@ -86,7 +109,7 @@ if not RUN_TICKERS:
 
 # COMMAND ----------
 
-# MAGIC %md ## 2. Fetch year-end prices
+# MAGIC %md ## 2. Fetch year-end prices (batched)
 
 # COMMAND ----------
 
@@ -104,30 +127,80 @@ def _classify_mkt_error(e: Exception) -> dict:
     return {"error_type": error_type, "error_message": msg, "step": "market_data"}
 
 
-def fetch_year_end_prices(ticker: str) -> tuple:
-    """Returns (rows, error_dict | None)."""
+def _empty_err(ticker: str) -> dict:
+    """Same shape as the old per-ticker empty-history failure."""
+    return {"error_type": "empty_facts",
+            "error_message": f"No price history for {ticker}",
+            "step": "market_data"}
+
+
+def _year_end_rows(ticker: str, close: pd.Series, fetched_at) -> list:
+    """Last Close of each calendar year → rows. SAME semantics as the per-ticker version:
+    fiscal_year = calendar year, price_close = last Close of that year."""
+    close = close.dropna()
+    if close.empty:
+        return []
+    tmp = close.to_frame("Close")
+    tmp["fiscal_year"] = tmp.index.year
+    yearly = tmp.groupby("fiscal_year").tail(1)
+    return [
+        {
+            "ticker":      ticker.upper(),
+            "fiscal_year": int(r["fiscal_year"]),
+            "price_close": float(r["Close"]),
+            "fetched_at":  fetched_at,
+        }
+        for _, r in yearly.iterrows()
+    ]
+
+
+def fetch_batch(batch: list) -> tuple:
+    """Download a batch of tickers in ONE yf.download call and extract per-ticker year-end
+    closes. Returns (rows, failed).
+
+    yf.download(group_by="ticker") returns MultiIndex columns (ticker × OHLC); a single-ticker
+    batch collapses to flat OHLC columns — both are handled. A ticker yf drops, or that comes
+    back with no/all-NaN Close, is logged in `failed` with the SAME _classify_mkt_error
+    classification used by the per-ticker version (empty_facts). A whole-batch exception
+    classifies every ticker in the batch — so no ticker is silently lost.
+    """
+    fetched_at = datetime.utcnow()
     try:
-        tk = yf.Ticker(ticker)
-        hist = tk.history(period="max", auto_adjust=True)
-        if hist.empty:
-            return [], {"error_type": "empty_facts", "error_message": f"No price history for {ticker}", "step": "market_data"}
-        # Take last close of each calendar year
-        hist = hist.copy()
-        hist["fiscal_year"] = hist.index.year
-        yearly = hist.groupby("fiscal_year").tail(1)
-        rows = [
-            {
-                "ticker":      ticker.upper(),
-                "fiscal_year": int(row["fiscal_year"]),
-                "price_close": float(row["Close"]),
-                "fetched_at":  datetime.utcnow(),
-            }
-            for _, row in yearly.iterrows()
-        ]
-        return rows, None
+        data = yf.download(
+            batch, period="max", auto_adjust=True,
+            group_by="ticker", threads=True, progress=False,
+        )
     except Exception as e:
-        print(f"  ✗ {ticker}: {e}")
-        return [], _classify_mkt_error(e)
+        err = _classify_mkt_error(e)
+        return [], [{"ticker": t, "error": err} for t in batch]
+
+    if data is None or data.empty:
+        return [], [{"ticker": t, "error": _empty_err(t)} for t in batch]
+
+    multi = isinstance(data.columns, pd.MultiIndex)
+    present = set(data.columns.get_level_values(0)) if multi else set(batch)
+
+    rows, failed_local = [], []
+    for t in batch:
+        try:
+            if multi:
+                if t not in present:                 # yf dropped this ticker entirely
+                    failed_local.append({"ticker": t, "error": _empty_err(t)})
+                    continue
+                sub = data[t]
+            else:
+                sub = data                           # single-ticker batch → flat columns
+            if "Close" not in sub.columns:
+                failed_local.append({"ticker": t, "error": _empty_err(t)})
+                continue
+            r = _year_end_rows(t, sub["Close"], fetched_at)
+            if r:
+                rows.extend(r)
+            else:                                    # present but all-NaN Close
+                failed_local.append({"ticker": t, "error": _empty_err(t)})
+        except Exception as e:
+            failed_local.append({"ticker": t, "error": _classify_mkt_error(e)})
+    return rows, failed_local
 
 # COMMAND ----------
 
@@ -135,26 +208,27 @@ if RUN_TICKERS:
     all_prices = []
     failed = []
     progress_lock = Lock()
-    completed = [0]
+    done = [0]
     total = len(RUN_TICKERS)
     _mkt_scraped_at = datetime.utcnow()
 
-    def worker(ticker):
-        rows, err = fetch_year_end_prices(ticker)
-        with progress_lock:
-            completed[0] += 1
-            n = completed[0]
-            if err:
-                failed.append({"ticker": ticker, "error": err})
-            else:
-                all_prices.extend(rows)
-            if n % 50 == 0 or n == total:
-                print(f"  [{n:>4}/{total}]")
+    batches = [RUN_TICKERS[i:i + BATCH_SIZE] for i in range(0, total, BATCH_SIZE)]
+    print(f"  {total:,} tickers → {len(batches)} batches of ≤{BATCH_SIZE} "
+          f"({BATCH_WORKERS} concurrent)")
 
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
-        futures = [pool.submit(worker, t) for t in RUN_TICKERS]
-        for _ in as_completed(futures):
-            pass
+    with ThreadPoolExecutor(max_workers=BATCH_WORKERS) as pool:
+        futures = {pool.submit(fetch_batch, b): b for b in batches}
+        for fut in as_completed(futures):
+            b = futures[fut]
+            try:
+                rows, fl = fut.result()
+            except Exception as e:        # defensive — fetch_batch already catches internally
+                rows, fl = [], [{"ticker": t, "error": _classify_mkt_error(e)} for t in b]
+            with progress_lock:
+                all_prices.extend(rows)
+                failed.extend(fl)
+                done[0] += len(b)
+                print(f"  [{done[0]:>4}/{total}] batch done (+{len(rows)} rows, +{len(fl)} failed)")
 
     print(f"\n  Fetched : {len(all_prices):,} price rows")
     print(f"  Failed  : {len(failed)} tickers")
