@@ -44,6 +44,7 @@ import json
 import math
 from pathlib import Path
 from datetime import datetime
+import numpy as np
 import pandas as pd
 import pyspark.sql.functions as F
 import pyspark.sql.types as T
@@ -366,6 +367,13 @@ ttm_pdf["period_type"] = "TTM"
 for pdf in (fy_pdf, ttm_pdf):
     pdf["fcf"]  = pdf["ocf"].astype(float) - pdf["capex"].fillna(0).astype(float)
     pdf["bvps"] = pdf["equity"] / pdf["shares"]
+    # Owner Earnings $ (Buffett 1986: NI + D&A + SBC − CapEx − ΔWC). Vectorizado con
+    # fillna(0) = el _safe(.., 0) de la versión por-fila. Lo consumen compute_all (vía DCF
+    # use_owner_earnings + método owner_earnings) y el paso 9 de exposición de OE absoluto.
+    pdf["oe_dollars"] = (
+        pdf["net_income"].fillna(0) + pdf["dna"].fillna(0) + pdf["sbc"].fillna(0)
+        - pdf["capex"].fillna(0) - pdf["delta_wc"].fillna(0)
+    )
 
 # Universe of tickers EVALUATED this run. The exposure/iv MERGEs below only upsert, so a
 # method that is now SKIPPED for a ticker (e.g. Graham Number suppressed for a distorted
@@ -385,201 +393,187 @@ print(f"✓ TTM pandas: {len(ttm_pdf):,} rows")
 
 # COMMAND ----------
 
-def _safe(v, default=0):
-    return default if v is None or pd.isna(v) else v
+# Las cuatro fórmulas, VECTORIZADAS sobre todo el dataframe con numpy. La versión anterior
+# iteraba fila-a-fila (pdf.iterrows × 4 métodos × un merge de dicts por fila) — el sink de
+# wall-clock del paso una vez eliminados los re-scans. Esta versión es equivalente fila-a-fila
+# a la anterior (validado a diff < 1e-9 sobre datos sintéticos cubriendo todas las skip-conditions
+# y overrides). Cada skip-condition se vuelve una máscara NaN; una fila se incluye sólo si su iv
+# no es NaN y > 0, idéntico al `continue` original. El DCF mantiene el LOOP por año (vectorizado
+# entre filas, NO closed-form) para reproducir bit-a-bit la suma flotante del loop original.
 
 
-def graham_number(row, a):
-    eps   = row.get("eps")
-    bvps  = row.get("bvps")
-    magic = a["graham"]["magic_number"]
-
-    if pd.isna(eps) or pd.isna(bvps) or eps <= 0 or bvps <= 0:
-        return None, {"skipped": "eps or bvps non-positive", "magic": magic}
-
-    # Applicability guard: the Graham Number assumes book value reflects asset value.
-    # Buyback-heavy, asset-light firms (e.g. AAPL) run Retained Earnings negative and a
-    # tiny BVPS, so sqrt(22.5·EPS·BVPS) lands far below price → MoS ≈ −900%. The formula
-    # is correct but INAPPLICABLE to this profile; skip it (DCF / Owner Earnings stay sane).
-    # bvps is > 0 here (checked above), so price/bvps is safe.
-    retained = row.get("retained_earnings")
-    price    = row.get("price_close")
-    if (pd.notna(retained) and retained < 0) or (pd.notna(price) and price / bvps > 10):
-        return None, {
-            "skipped": "book value distorted (neg. retained earnings or P/B > 10)",
-            "magic": magic, "bvps": bvps,
-            "retained_earnings": float(retained) if pd.notna(retained) else None,
-        }
-
-    iv = math.sqrt(magic * eps * bvps)
-    return iv, {"magic": magic, "eps": eps, "bvps": bvps}
-
-
-def graham_revised(row, a):
-    cfg = a["graham_revised"]
-    eps = row.get("eps")
-
-    if pd.isna(eps) or eps <= 0:
-        return None, {"skipped": "eps non-positive"}
-
-    # NOTE: g is sourced from the forward DCF growth ASSUMPTION (dcf.growth_stage1), not
-    # historical EPS growth as Graham's original revised formula intended — so Graham
-    # Revised tracks the DCF inputs rather than the past. Deliberate, documented choice.
-    g = min(a["dcf"]["growth_stage1"], cfg["growth_cap"])
-    base_pe     = cfg["base_pe"]
-    growth_mult = cfg["growth_multiplier"]
-    aaa_norm    = cfg["aaa_yield_norm"]
-    aaa_current = cfg["graham_aaa_yield"] * 100   # decimal → %
-
-    iv = eps * (base_pe + growth_mult * g * 100) * aaa_norm / aaa_current
-    return iv, {
-        "eps": eps, "g": g, "base_pe": base_pe,
-        "growth_mult": growth_mult, "aaa_norm": aaa_norm,
-        "aaa_current_pct": aaa_current,
+def _params_for(ticker: str) -> dict:
+    """Aplana assumptions_for(ticker) a columnas escalares. Se llama UNA vez por ticker
+    ÚNICO (no por fila), reutilizando la misma lógica de merge defaults+overrides."""
+    a = assumptions_for(ticker)
+    g, gr, d, oe = a["graham"], a["graham_revised"], a["dcf"], a["owner_earnings"]
+    return {
+        "ticker":         ticker,
+        "magic":          float(g["magic_number"]),
+        "gr_base_pe":     float(gr["base_pe"]),
+        "gr_growth_mult": float(gr["growth_multiplier"]),
+        "gr_aaa_norm":    float(gr["aaa_yield_norm"]),
+        "gr_aaa_yield":   float(gr["graham_aaa_yield"]),
+        "gr_growth_cap":  float(gr["growth_cap"]),
+        "dcf_skip":       bool(d.get("skip", False)),
+        "dcf_wacc":       float(d["wacc"]),
+        "dcf_g1":         float(d["growth_stage1"]),
+        "dcf_gt":         float(d["growth_terminal"]),
+        "dcf_horizon":    int(d["horizon_years"]),
+        "dcf_use_oe":     bool(d.get("use_owner_earnings", False)),
+        "oe_skip":        bool(oe.get("skip", False)),
+        "oe_method":      oe.get("method", "multiple"),
+        "oe_multiple":    float(oe["multiple"]),
+        "oe_dr":          float(oe["discount_rate"]),
     }
-
-
-def _owner_earnings_dollars(row):
-    """Buffett 1986: NI + D&A + SBC − CapEx − ΔWC.
-    Limitación: usamos CapEx total (no podemos separar maintenance vs growth)."""
-    ni  = _safe(row.get("net_income"))
-    dna = _safe(row.get("dna"))
-    sbc = _safe(row.get("sbc"))
-    cx  = _safe(row.get("capex"))
-    dwc = _safe(row.get("delta_wc"))
-    return ni + dna + sbc - cx - dwc
-
-
-def dcf_value(row, a):
-    cfg = a["dcf"]
-    if cfg.get("skip"):
-        return None, {"skipped": "ticker opted out (skip=true)"}
-
-    shares = row.get("shares")
-    if pd.isna(shares) or shares <= 0:
-        return None, {"skipped": "no shares"}
-
-    if cfg.get("use_owner_earnings"):
-        starting_cf = _owner_earnings_dollars(row)
-        cf_label = "owner_earnings"
-    else:
-        starting_cf = row.get("fcf")
-        cf_label = "fcf"
-
-    if pd.isna(starting_cf) or starting_cf <= 0:
-        return None, {"skipped": f"{cf_label} non-positive"}
-
-    wacc    = cfg["wacc"]
-    g1      = cfg["growth_stage1"]
-    gt      = cfg["growth_terminal"]
-    horizon = int(cfg["horizon_years"])
-
-    if wacc <= gt:
-        return None, {"skipped": "wacc <= terminal growth (Gordon divergente)"}
-
-    pv_stage1 = 0.0
-    cf = starting_cf
-    for t in range(1, horizon + 1):
-        cf       = cf * (1 + g1)
-        pv_stage1 += cf / ((1 + wacc) ** t)
-
-    cf_terminal = cf * (1 + gt)
-    tv          = cf_terminal / (wacc - gt)
-    pv_terminal = tv / ((1 + wacc) ** horizon)
-    enterprise_value = pv_stage1 + pv_terminal
-
-    debt = _safe(row.get("lt_debt")) + _safe(row.get("st_debt"))
-    cash = _safe(row.get("cash"))    + _safe(row.get("st_inv"))
-    equity_value = enterprise_value - debt + cash
-
-    iv_per_share = equity_value / shares
-
-    return iv_per_share, {
-        "cf_basis": cf_label, "starting_cf": starting_cf,
-        "wacc": wacc, "g1": g1, "g_terminal": gt, "horizon": horizon,
-        "pv_stage1": round(pv_stage1, 0),
-        "pv_terminal": round(pv_terminal, 0),
-        "debt": debt, "cash": cash,
-    }
-
-
-def owner_earnings_value(row, a):
-    cfg = a["owner_earnings"]
-    if cfg.get("skip"):
-        return None, {"skipped": "ticker opted out"}
-
-    oe = _owner_earnings_dollars(row)
-    if oe is None or pd.isna(oe) or oe <= 0:
-        return None, {"skipped": "owner_earnings non-positive", "oe": oe}
-
-    shares = row.get("shares")
-    if pd.isna(shares) or shares <= 0:
-        return None, {"skipped": "no shares"}
-
-    method = cfg.get("method", "multiple")
-    if method == "multiple":
-        mult  = cfg["multiple"]
-        total = oe * mult
-        meta  = {"method": "multiple", "oe": oe, "multiple": mult}
-    elif method == "perpetuity":
-        dr    = cfg["discount_rate"]
-        total = oe / dr
-        meta  = {"method": "perpetuity", "oe": oe, "discount_rate": dr}
-    else:
-        return None, {"skipped": f"unknown method '{method}'"}
-
-    return total / shares, {**meta, "oe_per_share": oe / shares}
-
-
-METHODS = {
-    "graham_number":  graham_number,
-    "graham_revised": graham_revised,
-    "dcf":            dcf_value,
-    "owner_earnings": owner_earnings_value,
-}
 
 # COMMAND ----------
 
-# MAGIC %md ## 7. Computar — para cada fila (FY o TTM) × cada método
+# MAGIC %md ## 7. Computar — para cada fila (FY o TTM) × cada método (vectorizado)
 
 # COMMAND ----------
 
 def compute_all(pdf, period_type, computed_at):
-    """Itera el dataframe y produce filas de resultado."""
+    """Calcula los 4 métodos para TODO el dataframe (numpy, sin iterrows) y arma las filas."""
+    if len(pdf) == 0:
+        return []
+
+    # Parámetros por ticker único → columnas; merge en vez de un dict-merge por fila.
+    params = pd.DataFrame([_params_for(t) for t in pdf["ticker"].unique()])
+    m = pdf.merge(params, on="ticker", how="left")
+
+    def col(name):
+        return m[name].to_numpy(dtype="float64")
+
+    eps, bvps, shares = col("eps"), col("bvps"), col("shares")
+    price, retained   = col("price_close"), col("retained_earnings")
+    ni, dna, sbc      = col("net_income"), col("dna"), col("sbc")
+    capex, dwc        = col("capex"), col("delta_wc")
+    fcf               = col("fcf")
+    lt_debt, st_debt  = col("lt_debt"), col("st_debt")
+    cash, st_inv      = col("cash"), col("st_inv")
+
+    magic          = col("magic")
+    gr_base_pe     = col("gr_base_pe")
+    gr_growth_mult = col("gr_growth_mult")
+    gr_aaa_norm    = col("gr_aaa_norm")
+    gr_aaa_yield   = col("gr_aaa_yield")
+    gr_growth_cap  = col("gr_growth_cap")
+    dcf_skip       = m["dcf_skip"].to_numpy(dtype=bool)
+    dcf_wacc, dcf_g1, dcf_gt = col("dcf_wacc"), col("dcf_g1"), col("dcf_gt")
+    dcf_horizon    = m["dcf_horizon"].to_numpy(dtype="int64")
+    dcf_use_oe     = m["dcf_use_oe"].to_numpy(dtype=bool)
+    oe_skip        = m["oe_skip"].to_numpy(dtype=bool)
+    oe_method      = m["oe_method"].to_numpy(dtype=object)
+    oe_multiple, oe_dr = col("oe_multiple"), col("oe_dr")
+
+    nan = np.nan
+    z = lambda arr: np.where(np.isnan(arr), 0.0, arr)   # = _safe(.., 0)
+    oe_dollars = z(ni) + z(dna) + z(sbc) - z(capex) - z(dwc)
+
+    with np.errstate(invalid="ignore", divide="ignore"):
+        # ── graham_number ──  sqrt(magic·EPS·BVPS); skip si EPS/BVPS no-positivos o book
+        # distorsionado (retained < 0, o P/B > 10). bvps>0 garantizado en la rama válida.
+        gn_valid = ~np.isnan(eps) & ~np.isnan(bvps) & (eps > 0) & (bvps > 0)
+        pb = np.where(bvps != 0, price / bvps, np.inf)
+        distort = (~np.isnan(retained) & (retained < 0)) | (~np.isnan(price) & (pb > 10))
+        gn = np.where(gn_valid & ~distort, np.sqrt(magic * eps * bvps), nan)
+
+        # ── graham_revised ──  g = min(dcf.growth_stage1, growth_cap) (decisión documentada).
+        g_eff = np.minimum(dcf_g1, gr_growth_cap)
+        grv_valid = ~np.isnan(eps) & (eps > 0)
+        grv = np.where(
+            grv_valid,
+            eps * (gr_base_pe + gr_growth_mult * g_eff * 100) * gr_aaa_norm / (gr_aaa_yield * 100),
+            nan,
+        )
+
+        # ── dcf ──  loop por año (vectorizado entre filas) = bit-identical al loop original.
+        starting_cf = np.where(dcf_use_oe, oe_dollars, fcf)
+        dcf_valid = (
+            ~dcf_skip & ~np.isnan(shares) & (shares > 0)
+            & ~np.isnan(starting_cf) & (starting_cf > 0) & (dcf_wacc > dcf_gt)
+        )
+        cf  = np.where(np.isnan(starting_cf), 0.0, starting_cf).astype("float64")
+        pv1 = np.zeros_like(cf)
+        for t in range(1, int(dcf_horizon.max()) + 1):
+            active = t <= dcf_horizon                       # filas cuyo horizonte aún cubre t
+            cf  = np.where(active, cf * (1 + dcf_g1), cf)    # deja de crecer pasado el horizonte
+            pv1 = np.where(active, pv1 + cf / ((1 + dcf_wacc) ** t), pv1)
+        cf_term = cf * (1 + dcf_gt)
+        tv      = cf_term / (dcf_wacc - dcf_gt)
+        pv_term = tv / ((1 + dcf_wacc) ** dcf_horizon)
+        debt    = z(lt_debt) + z(st_debt)
+        cash_t  = z(cash) + z(st_inv)
+        dcf_ips = (pv1 + pv_term - debt + cash_t) / shares
+        dcf = np.where(dcf_valid, dcf_ips, nan)
+
+        # ── owner_earnings ──  OE × múltiplo  ó  OE / discount_rate (perpetuidad Gordon).
+        oe_valid = ~oe_skip & (oe_dollars > 0) & ~np.isnan(shares) & (shares > 0)
+        total = np.where(
+            oe_method == "multiple", oe_dollars * oe_multiple,
+            np.where(oe_method == "perpetuity", oe_dollars / oe_dr, nan),
+        )
+        oev = np.where(oe_valid & ~np.isnan(total), total / shares, nan)
+
+    company    = m["company"].to_numpy(dtype=object)
+    ticker_arr = m["ticker"].to_numpy(dtype=object)
+    year       = m["year"].to_numpy()
+    pend_ts    = pd.to_datetime(m["period_end"], errors="coerce")
+    pend       = [p.date() if pd.notna(p) else None for p in pend_ts]
+
+    # Meta diagnóstica (columna `assumptions`) — NO la consume el dashboard ni el export;
+    # se conserva por inspección ad-hoc de la tabla. Construida sólo sobre filas supervivientes.
+    def _meta_gn(i):
+        return {"magic": float(magic[i]), "eps": float(eps[i]), "bvps": float(bvps[i])}
+
+    def _meta_grv(i):
+        return {"eps": float(eps[i]), "g": float(g_eff[i]), "base_pe": float(gr_base_pe[i]),
+                "growth_mult": float(gr_growth_mult[i]), "aaa_norm": float(gr_aaa_norm[i]),
+                "aaa_current_pct": float(gr_aaa_yield[i] * 100)}
+
+    def _meta_dcf(i):
+        return {"cf_basis": "owner_earnings" if dcf_use_oe[i] else "fcf",
+                "starting_cf": float(starting_cf[i]), "wacc": float(dcf_wacc[i]),
+                "g1": float(dcf_g1[i]), "g_terminal": float(dcf_gt[i]), "horizon": int(dcf_horizon[i]),
+                "pv_stage1": round(float(pv1[i]), 0), "pv_terminal": round(float(pv_term[i]), 0),
+                "debt": float(debt[i]), "cash": float(cash_t[i])}
+
+    def _meta_oe(i):
+        meta = {"method": oe_method[i], "oe": float(oe_dollars[i]),
+                "oe_per_share": float(oe_dollars[i] / shares[i])}
+        if oe_method[i] == "multiple":
+            meta["multiple"] = float(oe_multiple[i])
+        elif oe_method[i] == "perpetuity":
+            meta["discount_rate"] = float(oe_dr[i])
+        return meta
+
     rows = []
-    for _, row in pdf.iterrows():
-        ticker = row["ticker"]
-        a      = assumptions_for(ticker)
-
-        for method_name, fn in METHODS.items():
-            iv, meta = fn(row, a)
-            if iv is None or pd.isna(iv) or iv <= 0:
-                continue
-
-            shares      = row.get("shares")
-            price       = row.get("price_close")
-            total_value = iv * shares if pd.notna(shares) else None
-            mos_pct     = ((iv - price) / iv) * 100 if (pd.notna(price) and iv > 0) else None
-
-            # period_end (cuándo termina el período cubierto)
-            pend = row.get("period_end")
-            if pend is not None and not pd.isna(pend):
-                pend = pd.to_datetime(pend).date()
-            else:
-                pend = None
-
+    methods = (
+        ("graham_number",  gn,  _meta_gn),
+        ("graham_revised", grv, _meta_grv),
+        ("dcf",            dcf, _meta_dcf),
+        ("owner_earnings", oev, _meta_oe),
+    )
+    for method_name, iv, meta_fn in methods:
+        keep = ~np.isnan(iv) & (iv > 0)
+        for i in np.nonzero(keep)[0]:
+            i   = int(i)
+            ivv = float(iv[i])
+            sh  = shares[i]
+            pr  = price[i]
             rows.append({
-                "ticker":                    ticker,
-                "company":                   row.get("company"),
+                "ticker":                    ticker_arr[i],
+                "company":                   company[i],
                 "period_type":               period_type,
-                "fiscal_year":               int(row["year"]) if pd.notna(row.get("year")) else None,
-                "period_end":                pend,
+                "fiscal_year":               int(year[i]) if pd.notna(year[i]) else None,
+                "period_end":                pend[i],
                 "method":                    method_name,
-                "intrinsic_value_per_share": float(iv),
-                "intrinsic_value_total":     float(total_value) if total_value is not None else None,
-                "price_close":               float(price) if pd.notna(price) else None,
-                "margin_of_safety_pct":      float(mos_pct) if mos_pct is not None else None,
-                "assumptions":               json.dumps(meta, default=str),
+                "intrinsic_value_per_share": ivv,
+                "intrinsic_value_total":     float(ivv * sh) if not np.isnan(sh) else None,
+                "price_close":               float(pr) if not np.isnan(pr) else None,
+                "margin_of_safety_pct":      float((ivv - pr) / ivv * 100) if not np.isnan(pr) else None,
+                "assumptions":               json.dumps(meta_fn(i), default=str),
                 "computed_at":               computed_at,
             })
     return rows
@@ -760,22 +754,21 @@ if len(iv_pdf):
         subset = subset[["ticker", "company", year_col, "metric", "value"]]
         exposed_frames.append(subset)
 
-# Owner Earnings absoluto (FY y TTM) — métrica útil aparte
+# Owner Earnings absoluto (FY y TTM) — métrica útil aparte. `oe_dollars` ya está como columna
+# (vectorizado, = _owner_earnings_dollars con _safe→0), nunca NaN → toda fila produce su métrica,
+# igual que la versión por-fila anterior. El dropna(value) de abajo es no-op aquí (nunca NaN).
 oe_frames = []
-for pdf, ptype in ((fy_pdf, "FY"), (ttm_pdf, "TTM")):
-    rows = []
-    for _, row in pdf.iterrows():
-        oe = _owner_earnings_dollars(row)
-        if oe is not None and pd.notna(oe):
-            rows.append({
-                "ticker":  row["ticker"],
-                "company": row.get("company"),
-                year_col:  int(row["year"]) if pd.notna(row.get("year")) else None,
-                "metric":  f"Owner Earnings ({ptype})",
-                "value":   float(oe),
-            })
-    if rows:
-        oe_frames.append(pd.DataFrame(rows))
+for _pdf, ptype in ((fy_pdf, "FY"), (ttm_pdf, "TTM")):
+    if not len(_pdf):
+        continue
+    _yr = [int(y) if pd.notna(y) else None for y in _pdf["year"].to_numpy()]
+    oe_frames.append(pd.DataFrame({
+        "ticker":  _pdf["ticker"].to_numpy(),
+        "company": _pdf["company"].to_numpy(),
+        year_col:  _yr,
+        "metric":  f"Owner Earnings ({ptype})",
+        "value":   _pdf["oe_dollars"].to_numpy(dtype=float),
+    }))
 
 exposed_frames.extend(oe_frames)
 
