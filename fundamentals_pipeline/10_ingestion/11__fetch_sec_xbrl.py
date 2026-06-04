@@ -399,31 +399,42 @@ def process_ticker(ticker: str, scraped_at_ts: datetime) -> tuple:
             facts = merge_facts(facts, *_alias_facts)
 
     try:
+        # Construcción VECTORIZADA de filas. Antes: series.iterrows() por concepto — el ~42% del
+        # CPU por-ticker. El CPU es el cuello de botella REAL de la ingesta: está GIL-serializado,
+        # así que los 8 threads solo solapan la descarga de red (I/O libera el GIL), NO el
+        # parseo/pandas/construcción de filas → throughput ≈ 1 core (~1.5 t/s vs el techo de 8 req/s).
+        # Cada `series` ya es un DataFrame; añadimos las columnas constantes vectorialmente y volcamos
+        # con to_dict en vez de fila-a-fila. Parity validada sobre 12 tickers reales (incl. multi-tag
+        # T/VZ/WMB): mismos conteos y valores. (El extract — el otro ~50% — necesitaría paralelismo
+        # real para mejorar; ver investigación del cuello de botella de ingesta.)
+        frames = []
         for stmt_name, concept_map in STATEMENTS.items():
             for label, (xbrl_concept, kind) in concept_map.items():
                 # xbrl_concept may be a single tag (str) or a priority list[str].
                 series = extract_series_multi(facts, xbrl_concept, kind)
                 if series.empty:
                     continue
-                for _, row in series.iterrows():
-                    records.append({
-                        "ticker":       ticker.upper(),
-                        "company":      company_name,
-                        "stmt":         stmt_name,
-                        "concept":      label,
-                        "kind":         kind,
-                        "fy":           int(row["fy"])   if pd.notna(row["fy"])   else None,
-                        "fp":           row["fp"]        if pd.notna(row["fp"])   else None,
-                        "form":         row["form"],
-                        "period_start": row["period_start"].date() if pd.notna(row["period_start"]) else None,
-                        "period_end":   row["period_end"].date(),
-                        "period_shape": row["period_shape"],
-                        "value":        float(row["value"]) if pd.notna(row["value"]) else None,
-                        "filed":        row["filed"].date() if pd.notna(row["filed"]) else None,
-                        "scraped_at":   scraped_at_ts,
-                    })
-        if not records:
+                frames.append(series.assign(stmt=stmt_name, concept=label, kind=kind))
+
+        if not frames:
             return [], {"error_type": "empty_facts", "error_message": f"No XBRL facts extracted for {ticker}", "step": "extract"}
+
+        allf = pd.concat(frames, ignore_index=True)
+        allf["ticker"]     = ticker.upper()
+        allf["company"]    = company_name
+        allf["scraped_at"] = scraped_at_ts
+        # Normaliza tipos para casar EXACTAMENTE con el dict por-fila anterior (lo que luego
+        # consume flush_batch): fy → Int nullable; fechas → date|None; value/fp → valor|None.
+        allf["fy"] = allf["fy"].astype("Int64")
+        for _dc in ("period_start", "period_end", "filed"):
+            allf[_dc] = allf[_dc].dt.date.where(allf[_dc].notna(), None)
+        allf["value"] = allf["value"].astype(float).where(allf["value"].notna(), None)
+        allf["fp"]    = allf["fp"].where(allf["fp"].notna(), None)
+
+        records = allf[[
+            "ticker", "company", "stmt", "concept", "kind", "fy", "fp", "form",
+            "period_start", "period_end", "period_shape", "value", "filed", "scraped_at",
+        ]].to_dict("records")
         return records, None
     except Exception as e:
         return records, _classify_error(e, "extract")
