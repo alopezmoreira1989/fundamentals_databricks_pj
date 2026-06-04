@@ -186,6 +186,11 @@ fin_subset = fin_subset.withColumn(
     "company", F.first("company", ignorenulls=True).over(_company_w)
 )
 
+# Materializa fin_subset (el scan de financials filtrado a ~16 conceptos): lo consumen fy_wide,
+# quarters y varios count() → sin esto se re-escanea ~7×. localCheckpoint(eager) lo materializa
+# una vez y trunca el linaje. .cache()/.persist() NO van en serverless ([NOT_SUPPORTED_WITH_SERVERLESS]).
+fin_subset = fin_subset.localCheckpoint(eager=True)
+
 print(f"✓ Concept subset prepared — {fin_subset.count():,} rows")
 
 # COMMAND ----------
@@ -224,6 +229,10 @@ quarters = (
 w_recent = Window.partitionBy("ticker", "alias").orderBy(F.col("period_end").desc())
 quarters_ranked = quarters.withColumn("rn", F.row_number().over(w_recent)) \
                           .filter(F.col("rn") <= 4)
+
+# Materializa quarters_ranked (window de los 4 quarters más recientes): alimenta ttm_flow Y
+# ttm_stock → dos lecturas del mismo window. localCheckpoint una vez (cache no va en serverless).
+quarters_ranked = quarters_ranked.localCheckpoint(eager=True)
 
 # Aggregate: SUM si flow, FIRST (rn=1) si stock
 ttm_flow = (
@@ -340,6 +349,9 @@ print(f"✓ TTM rows: {ttm_with_price.count():,}")
 # Bajar a pandas — volumen razonable (~30k FY + ~3k TTM)
 fy_pdf  = fy_with_price.toPandas()
 ttm_pdf = ttm_with_price.toPandas()
+
+# (Sin unpersist: tampoco soportado en serverless. Los localCheckpoint se liberan al cerrar
+# la sesión; a partir de aquí todo es pandas/numpy en el driver + escrituras Delta.)
 
 # Asegurar columnas auxiliares
 if "period_end" not in fy_pdf.columns:

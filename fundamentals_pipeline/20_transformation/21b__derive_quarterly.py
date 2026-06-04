@@ -157,6 +157,13 @@ flow_dedup = (
     .drop("_fy_prio")
 )
 
+# Materializa flow_dedup (resultado de los windows pesados dedup + tag-pin sobre el scan del
+# raw). Lo consumen agg_base, q4_std_rows y q4_xcheck → sin esto esos 3 branches re-ejecutan el
+# scan de 81M filas + windows cada vez. localCheckpoint(eager) lo materializa UNA vez y trunca el
+# linaje. OJO serverless: .cache()/.persist()/.unpersist() NO están soportados en serverless
+# compute ([NOT_SUPPORTED_WITH_SERVERLESS]); localCheckpoint sí. Se libera al cerrar la sesión.
+flow_dedup = flow_dedup.localCheckpoint(eager=True)
+
 # COMMAND ----------
 
 # MAGIC %md ### 1a. Build wide table: one row per (ticker, stmt, concept, fy)
@@ -411,6 +418,10 @@ flow_quarterly = (
 
 flow_quarterly = flow_quarterly.withColumn("scraped_at", F.lit(latest_scrape).cast("timestamp"))
 
+# Materializa flow_quarterly: se lee 3× (count aquí + union en all_quarterly → count + MERGE).
+# localCheckpoint en vez de cache (no soportado en serverless).
+flow_quarterly = flow_quarterly.localCheckpoint(eager=True)
+
 print(f"Flow quarterly rows derived: {flow_quarterly.count():,}")
 
 # COMMAND ----------
@@ -495,6 +506,10 @@ stock_quarterly = stock_dedup.select(
     F.lit(latest_scrape).cast("timestamp").alias("scraped_at"),
 )
 
+# Materializa stock_quarterly: se lee 3× (count aquí + union en all_quarterly → count + MERGE).
+# localCheckpoint materializa el scan/dedup del path stock una sola vez (cache no va en serverless).
+stock_quarterly = stock_quarterly.localCheckpoint(eager=True)
+
 print(f"Stock quarterly rows: {stock_quarterly.count():,}")
 
 # COMMAND ----------
@@ -546,6 +561,9 @@ spark.sql(f"""
 """)
 
 print(f"✓ MERGE complete → {full_tbl} (quarterly rows)")
+
+# (Sin unpersist explícito: .unpersist() tampoco está soportado en serverless. Los
+# localCheckpoint de arriba viven en disco local del cluster y se liberan al cerrar la sesión.)
 
 # COMMAND ----------
 
