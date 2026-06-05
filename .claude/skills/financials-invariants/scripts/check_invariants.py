@@ -6,7 +6,7 @@ Asserts the invariants documented in CLAUDE.md and this skill's SKILL.md:
   INV1  Balance Sheet rows unique on (ticker, concept, period_end)   [hard]
   INV2  Q1+Q2+Q3+Q4 reconciles to FY (structural rate gate)          [hard]
   INV3  Two-statement concepts (Net Income, D&A, SBC) present in 2x   [info]
-  INV4  TTM windows end at the latest period_end per ticker/concept   [hard, skips if absent]
+  INV4  TTM ordering by period_end                                    [code-level, SKIP]
   INV5  market_data.fiscal_year is calendar-plausible (not future)    [hard, skips if absent]
 
 CONTRACT: this script issues ONLY SELECT statements. It never writes, MERGEs, or DELETEs.
@@ -123,29 +123,16 @@ def check_two_statement(spark) -> tuple[str, str]:
 
 
 def check_ttm_ordering(spark) -> tuple[str, str]:
-    """INV4 — TTM windows must end at the latest period_end (not fiscal_year)."""
-    if not _table_exists(spark, FIN):
-        return "SKIP", "financials table unavailable."
-    # Reconstruct each ticker/concept's latest quarter vs the newest quarter actually present.
-    # A TTM that ranks by fiscal_year would skip the genuine max period_end when a fiscal year
-    # straddles calendar years. We flag tickers where the top-by-period_end quarter is NOT the
-    # global max period_end for that ticker/concept (a contradiction that only arises if ranking
-    # was done on the wrong column upstream).
-    bad = _scalar(spark, f"""
-        WITH ranked AS (
-            SELECT ticker, stmt, concept, period_end,
-                   ROW_NUMBER() OVER (PARTITION BY ticker, stmt, concept
-                                      ORDER BY period_end DESC) AS rn,
-                   MAX(period_end) OVER (PARTITION BY ticker, stmt, concept) AS max_pe
-            FROM {FIN}
-            WHERE period_type IN ('Q1','Q2','Q3','Q4')
-        )
-        SELECT COUNT(*) FROM ranked
-        WHERE rn = 1 AND period_end <> max_pe
-    """)
-    if bad == 0:
-        return "PASS", "TTM quarter ranking by period_end is internally consistent."
-    return "FAIL", f"{bad:,} ticker/concept groups where rank-1 quarter is not the max period_end."
+    """INV4 — TTM ordering is a CODE invariant, not observable from published tables.
+
+    TTM must take the 4 most recent quarters ordered by `period_end` (not `fiscal_year`);
+    that ordering lives in 23__intrinsic_value.py and the published tables do not record
+    which quarters fed each TTM row, so there is no honest data assertion for it (a
+    `ROW_NUMBER ... ORDER BY period_end DESC` self-check is a tautology). Verify by code
+    review of 23, or use the descriptive probe in references/invariants.md.
+    """
+    return "SKIP", ("code-level invariant in 23__intrinsic_value.py (ranks by period_end); "
+                    "not observable from published tables — verify by code review.")
 
 
 def check_market_calendar(spark) -> tuple[str, str]:
@@ -166,7 +153,7 @@ CHECKS = [
     ("INV1 BS dedup uniqueness", check_bs_dedup, True),
     ("INV2 Q-sum structural gate", check_qsum, True),
     ("INV3 two-statement concepts", check_two_statement, False),
-    ("INV4 TTM ordering", check_ttm_ordering, True),
+    ("INV4 TTM ordering", check_ttm_ordering, False),
     ("INV5 market_data calendar-year", check_market_calendar, True),
 ]
 

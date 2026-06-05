@@ -457,6 +457,38 @@ _record_step("Coverage Check", _t0)
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ## 11b. Invariants check
+# MAGIC Structural-invariant gate over `main.financials.financials` (BS dedup uniqueness,
+# MAGIC Q-sum rate, two-statement concepts, market_data calendar-year). Mirrors the
+# MAGIC `financials-invariants` skill's read-only validator. Non-fatal here: a hard fail is
+# MAGIC logged and the pipeline continues (the Delta tables are already committed; a red
+# MAGIC invariant flags data to investigate without blocking the dashboard refresh).
+
+# COMMAND ----------
+
+print("=" * 55)
+print("STEP 10b / 12 — Invariants Check")
+print("=" * 55)
+_t0 = time.monotonic()
+
+# COMMAND ----------
+
+try:
+    dbutils.notebook.run(
+        "../30_analysis/34__invariants_check",
+        timeout_seconds=300,
+    )
+    invariants_ok = True
+except Exception as e:
+    print(f"⚠ Invariants check failed: {e}")
+    invariants_ok = False
+
+# Non-fatal step (caught above), so record regardless of success.
+_record_step("Invariants Check", _t0)
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## 12. Export dashboard data
 # MAGIC `dashboard_data.parquet` + `dashboard_metrics.parquet` + `dashboard_meta.json`
 # MAGIC written to `/tmp/` on the driver. Consumed by step 13 (GitHub publish).

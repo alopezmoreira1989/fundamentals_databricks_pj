@@ -41,7 +41,9 @@ Or from a Databricks notebook cell (the global `spark` is reused automatically):
 %run ./.claude/skills/financials-invariants/scripts/check_invariants.py
 ```
 
-It prints PASS / FAIL / SKIP per invariant and exits non-zero if any hard invariant fails. It only issues SELECTs — no writes, no MERGE, no DELETE. See `scripts/check_invariants.py` for the exact queries.
+It prints PASS / FAIL / SKIP per invariant and exits non-zero if any hard invariant fails. It only issues SELECTs — no writes, no MERGE, no DELETE. See `scripts/check_invariants.py` for the exact queries. Hard checks: BS dedup uniqueness, Q-sum rate gate, market_data calendar-year. INFO: two-statement concepts. SKIP: TTM ordering (a code-level invariant in `23__intrinsic_value.py`, not observable from the published tables — verify by code review).
+
+This same gate also runs inside the pipeline as **STEP 10b** of `90_pipelines/91__full_pipeline.py` via the notebook twin `30_analysis/34__invariants_check.py` (same queries, notebook form, raises on hard fail; the orchestrator wraps it non-fatally so a red invariant is logged without blocking the dashboard refresh). Keep the two in sync if you change a threshold.
 
 For the full SQL of each check and how to read borderline results, see:
 
@@ -52,7 +54,7 @@ For the full SQL of each check and how to read borderline results, see:
 
 - **All PASS** → report in one line.
 - **Balance Sheet dedup FAIL** → duplicate `(ticker, concept, period_end)` rows. The fix is upstream in `21__clean_and_merge.py` / `21b__derive_quarterly.py` (the `ROW_NUMBER() OVER (PARTITION BY ticker, concept, period_end ORDER BY filed DESC)` window), then re-run. Do NOT delete rows directly — the next pass recreates them. Details in `references/balance-sheet-dedup.md`.
-- **TTM ordering FAIL** → a ticker's TTM row draws on quarters that are not its 4 latest by `period_end`; suspect a regression in `23__intrinsic_value.py` that re-introduced `fiscal_year` ordering.
+- **TTM ordering (SKIP)** → not data-checkable. If TTM-based valuations look wrong, review `23__intrinsic_value.py` for `period_end` (not `fiscal_year`) ordering, and use the descriptive probe in `references/invariants.md`.
 - **Two-statement check FAIL/INFO** → a concept that should appear under two statements appears under one (or a downstream query dropped `stmt`). Cross-check [[validate-quarters]] (the same omission produces a fake ~100% Q-sum divergence).
 - **Q-sum structural gate above ceiling** → escalate to [[validate-quarters]] for the per-concept / per-year breakdown; a single dominant concept usually points at a missing [[xbrl-concept-mapping]] priority/synonym.
 
