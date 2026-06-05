@@ -357,6 +357,30 @@ _record_step("FY from Quarterly", _t0)
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ## 7d. Dedup Balance Sheet
+# MAGIC `financials` — refuerza la invariante "un snapshot de BS por `(ticker, stmt, concept,
+# MAGIC period_end)`", colapsando huérfanas mal etiquetadas (fiscal_year/period_type) que el MERGE
+# MAGIC nunca borra. Recurrente e idempotente: si no hay duplicados, no reescribe nada. Debe correr
+# MAGIC después de todos los escritores de filas BS (21, 21b) y antes de las métricas.
+
+# COMMAND ----------
+
+print("=" * 55)
+print("STEP 6c / 12 — Dedup Balance Sheet")
+print("=" * 55)
+_t0 = time.monotonic()
+
+# COMMAND ----------
+
+# MAGIC %run "../20_transformation/21f__dedup_balance_sheet"
+
+# COMMAND ----------
+
+_record_step("Dedup Balance Sheet", _t0)
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## 8. Derived metrics
 # MAGIC `financials_metrics` — margins, FCF, YoY growth, leverage, valuation ratios
 

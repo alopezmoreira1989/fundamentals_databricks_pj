@@ -384,6 +384,7 @@ Las métricas están organizadas en 6 categorías. La jerarquía completa vive e
 | Metric | Formula |
 |---|---|
 | `Current Ratio` | `Total Current Assets / Total Current Liabilities` |
+| `Quick Ratio` | `(Total Current Assets − Inventory) / Total Current Liabilities` — acid-test; missing Inventory treated as 0 |
 
 ### Valuation — Price Multiples *(requires `market_data`)*
 
@@ -411,6 +412,16 @@ Las métricas están organizadas en 6 categorías. La jerarquía completa vive e
 | `Op Cash Flow Yield %` | `Operating Cash Flow / Market Cap × 100` |
 | `Book Yield %` | `Total Stockholders Equity / Market Cap × 100` |
 | `EBITDA Yield %` | `EBITDA / Market Cap × 100` |
+
+### Valuation — Net-Net *(Graham net current asset value)*
+
+`Total Liabilities` uses the same fallback as Altman Z — `COALESCE(Total Liabilities, Total Assets − Total Stockholders Equity)` — for issuers that don't tag `us-gaap:Liabilities` directly. NCAV is **negative for most firms**; only genuine net-nets are positive (not clamped).
+
+| Metric | Formula | Notes |
+|---|---|---|
+| `NCAV` | `Total Current Assets − Total Liabilities` | net current asset value, USD |
+| `NCAV / Share` | `NCAV / Shares Diluted` | per-share net-net value |
+| `NCAV Ratio` | `Market Cap / NCAV` *(only when NCAV > 0)* | price-over-NCAV; lower = cheaper, `< 1` = cap below net current assets, net-net buy ≈ `≤ 0.67`. NULL for negative-NCAV firms. *requires `market_data`* |
 
 ### Capital Returns — Payout
 
