@@ -218,6 +218,13 @@ clean_fy = incoming.select(
     F.col("scraped_at"),
 )
 
+# clean_fy se consume 3× aguas abajo: count() aquí, el MERGE de §3 y `_kept_keys` del
+# orphan-DELETE de §4. Su linaje es caro (scan de `raw` + union + synonym-loops + dos
+# window functions de dedup) — sin materializar se recomputa entero cada vez. localCheckpoint
+# (eager) lo calcula UNA vez y trunca el linaje. OJO serverless: .cache()/.persist() NO van
+# ([NOT_SUPPORTED_WITH_SERVERLESS]); localCheckpoint sí. Se libera al cerrar la sesión.
+clean_fy = clean_fy.localCheckpoint(eager=True)
+
 print(f"After dedupe & normalize: {clean_fy.count():,} FY rows ready for MERGE")
 
 # COMMAND ----------

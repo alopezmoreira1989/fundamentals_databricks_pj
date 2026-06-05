@@ -66,6 +66,11 @@ if "Revenue" in wide.columns and "Revenue (contract)" in wide.columns:
         F.coalesce(F.col("Revenue"), F.col("Revenue (contract)"))
     ).drop("Revenue (contract)")
 
+# El pivot de `wide` (FY full-scan + pivot sobre todos los conceptos) es caro y se consume
+# 2×: el count() de sanity aquí y todo el bloque `metrics_wide` aguas abajo. localCheckpoint
+# (eager) lo materializa una vez. .cache()/.persist() NO van en serverless; localCheckpoint sí.
+wide = wide.localCheckpoint(eager=True)
+
 print(f"Wide table: {wide.count():,} rows × {len(wide.columns)} columns")
 
 # COMMAND ----------
@@ -311,6 +316,9 @@ def unpivot(df, metric_cols):
     ).filter(F.col("value").isNotNull())
 
 long_base = unpivot(metrics_wide, base_metric_cols)
+# long_base se reusa 4×: count() aquí, el unionByName con long_val, el count() final y el MERGE.
+# Materializar evita re-derivar todo el bloque de métricas (withColumns + stack) cada vez.
+long_base = long_base.localCheckpoint(eager=True)
 print(f"Base metrics long: {long_base.count():,} rows")
 
 # COMMAND ----------
@@ -500,6 +508,9 @@ if mkt is not None:
         F.expr(stack_expr)
     ).filter(F.col("value").isNotNull())
 
+    # long_val arrastra su propio FY full-scan + pivot val + withColumns + stack, y se reusa 4×
+    # (count aquí, union, count final, MERGE). Checkpoint para no recomputar el pivot val cada vez.
+    long_val = long_val.localCheckpoint(eager=True)
     print(f"Valuation metrics long: {long_val.count():,} rows")
 else:
     long_val = None
