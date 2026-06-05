@@ -1,13 +1,16 @@
 ---
 name: pipeline-preflight
-description: Pre-flight checks before submitting 90_pipelines/91__full_pipeline.py as a Databricks Job. Verifies SEC User-Agent is no longer the placeholder, Databricks Connect credentials are usable (if running locally), valuation_assumptions.json is well-formed, and main.financials / main.config schemas exist in Unity Catalog. Use whenever the user is about to kick off a full pipeline run or after they've cloned the repo for the first time.
+description: Pre-flight checks before submitting 90_pipelines/91__full_pipeline.py as a Databricks Job. Verifies SEC User-Agent is no longer the placeholder, Databricks Connect credentials are usable (if running locally), valuation_assumptions.json is well-formed, and main.financials / main.config schemas exist in Unity Catalog. Use whenever the user is about to kick off a full pipeline run, after cloning the repo for the first time, or when the pipeline fails and the cause is not obvious. Runs BEFORE a run; for post-run data checks use financials-invariants or validate-quarters.
+metadata:
+  author: Alejandro López Moreira
+  version: 1.1.0
 ---
 
 # pipeline-preflight
 
 ## Purpose
 
-The full pipeline (`FA PJ (Basic)/90_pipelines/91__full_pipeline.py`, Databricks notebook source format) hits SEC EDGAR, yfinance, and Unity Catalog, and runs for many minutes per scrape. A few cheap upfront checks catch the failure modes that waste the most time. CLAUDE.md spells out three of them explicitly — this skill turns them into a script.
+The full pipeline (`fundamentals_pipeline/90_pipelines/91__full_pipeline.py`, Databricks notebook source format) hits SEC EDGAR, yfinance, and Unity Catalog, and runs for many minutes per scrape. A few cheap upfront checks catch the failure modes that waste the most time. CLAUDE.md spells out three of them explicitly — this skill turns them into a script.
 
 ## When to run
 
@@ -21,7 +24,7 @@ Run all four; report each as PASS / FAIL / SKIP with a one-line reason. Don't fa
 
 ### 1. SEC User-Agent is not the placeholder
 
-Read `FA PJ (Basic)/00_config/01__tickers.py`. Find the line:
+Read `fundamentals_pipeline/00_config/01__tickers.py`. Find the line:
 
 ```python
 SEC_USER_AGENT = "..."
@@ -45,7 +48,7 @@ If the user wants to actually test the connection, suggest they run `test_connec
 
 ### 3. valuation_assumptions.json is well-formed
 
-Read `FA PJ (Basic)/00_config/valuation_assumptions.json` and verify:
+Read `fundamentals_pipeline/00_config/valuation_assumptions.json` and verify:
 
 - Valid JSON (parses without error).
 - Top-level keys include `defaults` and `overrides`.

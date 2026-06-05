@@ -1,15 +1,25 @@
 ---
 name: validate-quarters
-description: Verify that Q1+Q2+Q3+Q4 ≈ FY in main.financials.financials (additive Income Statement and Cash Flow concepts), within a rounding tolerance. Lists divergent (ticker, stmt, concept, fiscal_year) rows. Use after running the pipeline, when investigating a suspect ticker, or when changes touch 21__clean_and_merge.py or 21b__derive_quarterly.py.
+description: Numeric reconciliation that Q1+Q2+Q3+Q4 is approximately equal to FY in main.financials.financials for additive Income Statement and Cash Flow concepts, within a rounding tolerance, reporting the divergent rate with per-year and per-concept breakdown. Use when asked is the quarterly data sane, when a quarter total does not add up to the annual, when investigating a suspect ticker, or after changes to 21__clean_and_merge.py / 21b__derive_quarterly.py / 21c__prune_quarterly.py. For structural invariants (dedup keys, TTM ordering, Q4 derivation method) use financials-invariants instead.
+metadata:
+  author: Alejandro López Moreira
+  version: 1.1.0
 ---
 
 # validate-quarters
+
+## CRITICAL
+
+- **Judge by the divergent RATE and its shape, not the raw count.** The universe is ~400k (ticker, stmt, concept, fy) tuples; ~3–4% divergent at 0.1% is the healthy floor, not a bug.
+- **GROUP BY must include `stmt`.** Net Income, D&A, SBC appear in both Income Statement and Cash Flow with identical values; dropping `stmt` double-counts the quarters into a fake ~100% divergence.
+- **Never "fix" a divergence by changing Q4 to `Q1+Q2+Q3+Q4`.** Per CLAUDE.md, Q4 must stay `FY − YTD_Q3` to preserve year-end audit adjustments. This skill validates; it does not mutate the pipeline.
+- This is the **numeric reconciliation** half. For *structural* invariants (balance-sheet dedup-key uniqueness, TTM = 4 most recent quarters by `period_end`, the two-statement Net Income rule) use [[financials-invariants]].
 
 ## Purpose
 
 Sanity-check that the quarterly decomposition of FY values in `main.financials.financials` reconciles to within rounding error. This is the validation query the README documents but never automates.
 
-Recall the invariant from the project's CLAUDE.md: **Q4 is intentionally derived as `FY − YTD_Q3`** to capture year-end audit adjustments. So `Q1+Q2+Q3+Q4` should equal FY by construction, modulo float rounding. Material divergence indicates either (a) a bug in `21b__derive_quarterly.py`, (b) a stale prune in `21c__prune_quarterly.py`, or (c) an SEC re-statement that didn't merge cleanly.
+Recall the invariant from CLAUDE.md: **Q4 is intentionally derived as `FY − YTD_Q3`** to capture year-end audit adjustments. So `Q1+Q2+Q3+Q4` should equal FY by construction, modulo float rounding. Material divergence indicates either (a) a bug in `20_transformation/21b__derive_quarterly.py`, (b) a stale prune in `20_transformation/21c__prune_quarterly.py`, or (c) an SEC re-statement that didn't merge cleanly.
 
 ## When to run
 
@@ -19,7 +29,7 @@ Recall the invariant from the project's CLAUDE.md: **Q4 is intentionally derived
 
 ## How to run
 
-Default tolerance is 0.1% (`0.001`). Default scope is **additive** Income Statement + Cash Flow concepts, grouped **per statement** (Balance Sheet `stock` concepts don't sum and are never checked this way; `flow_nonadditive` per-share/share-count concepts are excluded because they don't sum either). Grouping by `stmt` is mandatory — a concept that lives in two statements (e.g. Net Income, in both IS and CF) would otherwise be double-counted into a fake ~100% divergence.
+Default tolerance is 0.1% (`0.001`). Default scope is **additive** Income Statement + Cash Flow concepts, grouped **per statement** (Balance Sheet `stock` concepts don't sum and are never checked this way; `flow_nonadditive` per-share / share-count concepts are excluded because they don't sum either). Grouping by `stmt` is mandatory — a concept that lives in two statements (e.g. Net Income, in both IS and CF) would otherwise be double-counted into a fake ~100% divergence.
 
 Run this SQL against the Databricks SQL warehouse the user works against (ask which one if not obvious; the dashboard uses the same one):
 
@@ -72,11 +82,11 @@ Interpret the **rate** (divergent / checked), not the raw count — the universe
   if one jumps, suspect a recent change. Likely culprits in order:
   1. `21__clean_and_merge.py` — wrong FY row selected (e.g. a sub-annual `Q_standalone`/`other_Nd`
      shape, or a coexisting synonym tag winning `value desc` for a concept missing from
-     `CONCEPT_PRIORITY`).
+     `CONCEPT_PRIORITY`). See [[xbrl-concept-mapping]].
   2. `21b__derive_quarterly.py` — `kind` mis-tagged (`flow_additive` vs `flow_nonadditive`), or the
      FY-tag pin drawing YTD from a different tag than FY.
   3. `21c__prune_quarterly.py` — pruned a quarter still load-bearing for an old fiscal_year. Check
-     `QUARTERLY_WINDOW` vs the row's `fiscal_year`.
+     `QUARTERLY_WINDOW` (= 12 in `00_config/01__tickers.py`) vs the row's `fiscal_year`.
 - **Concept appears at ~100% divergence** → you almost certainly dropped `stmt` from the GROUP BY
   (double-counting a two-statement concept like Net Income). Re-add it.
 
@@ -99,3 +109,9 @@ Interpret the **rate** (divergent / checked), not the raw count — the universe
 - Don't drop the `flow_nonadditive` exclusion — EPS/shares don't sum and will swamp the results with astronomical `rel_diff`.
 - Don't read the raw count as a health verdict — ~3–4% is the normal baseline; judge by per-year/per-concept *shape* (a spike or a single dominant concept), not the absolute number.
 - Don't "fix" a divergence by mutating `21b__derive_quarterly.py` to use `Q1+Q2+Q3+Q4` for Q4. Re-read the CLAUDE.md note: Q4 must stay `FY − YTD_Q3` to preserve year-end adjustments.
+
+## Related
+
+- [[financials-invariants]] — the structural-invariant gate (dedup uniqueness, TTM ordering, Q4-derivation method); run its `scripts/check_invariants.py` for a fast pass/fail, then come here for deep per-concept interpretation.
+- [[xbrl-concept-mapping]] — when a single concept dominates the divergence, the cause is often a missing `CONCEPT_PRIORITY` / synonym mapping.
+- [[validate-concept-hierarchy]] — verifies the `kind` field that drives this derivation is set correctly.
