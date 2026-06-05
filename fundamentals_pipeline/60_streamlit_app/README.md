@@ -1,6 +1,6 @@
 ﻿# 60_streamlit_app — public financials dashboard
 
-**Live app: https://alm-fundamentals.streamlit.app/**
+**Live app: https://alm-equity-fundamentals.streamlit.app/**
 
 A public, editorial-style financial statements dashboard powered by Streamlit
 Community Cloud. Serves ~2,500 tickers (S&P 500 + Russell 2000 proxy) with

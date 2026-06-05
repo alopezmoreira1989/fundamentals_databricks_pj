@@ -463,7 +463,7 @@ ratios stay NULL when their one component is absent.
 
 ## Public Streamlit Dashboard
 
-**Live app: https://alm-fundamentals.streamlit.app/**
+**Live app: https://alm-equity-fundamentals.streamlit.app/**
 
 A read-only dashboard at Streamlit Community Cloud renders the same data without Databricks credentials. Currently serves ~2,500 tickers (S&P 500 + Russell 2000 proxy) with synthetic data for preview; production data is published via GitHub Release. See [`60_streamlit_app/README.md`](fundamentals_pipeline/60_streamlit_app/README.md) for details.
 
