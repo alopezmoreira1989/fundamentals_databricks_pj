@@ -245,6 +245,24 @@ table.fs tbody td.cagr {
 table.fs tbody td.cagr.up { color: var(--positive); }
 table.fs tbody td.cagr.down { color: var(--negative); }
 
+/* Robust trend-growth column (log-linear OLS) — mirrors .cagr; rightmost, so it carries the
+   trailing padding. The R² badge is kept visually subordinate to the number. */
+table.fs thead th.col-trend-cagr { text-align: right; min-width: 72px; padding-right: 20px; }
+table.fs tbody td.trend-cagr {
+  text-align: right;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-3);
+  padding-right: 20px;
+}
+table.fs tbody td.trend-cagr.up { color: var(--positive); }
+table.fs tbody td.trend-cagr.down { color: var(--negative); }
+table.fs tbody td.trend-cagr .r2-badge {
+  font-size: 10px;
+  color: var(--ink-3);
+  margin-left: 4px;
+}
+
 /* Section divider rows */
 tr.section-row td {
   padding: 18px 20px 6px;
@@ -318,7 +336,8 @@ table.fs tbody tr.grand-total td.num.latest {
 }
 table.fs tbody tr.grand-total td.num        { font-size: 13px; }
 table.fs tbody tr.grand-total td.num.latest { font-size: 14px; }
-table.fs tbody tr.grand-total td.cagr       { color: var(--bg-subtle); }
+table.fs tbody tr.grand-total td.cagr,
+table.fs tbody tr.grand-total td.trend-cagr { color: var(--bg-subtle); }
 
 /* Accent for Net Income / Net Change in Cash */
 table.fs tbody tr.headline td {
@@ -345,7 +364,8 @@ table.fs tbody tr.headline td.num.latest {
   font-weight: 500;
 }
 table.fs tbody tr.headline td.num.latest { font-size: 13.5px; }
-table.fs tbody tr.headline td.cagr.up { color: var(--accent-ink); font-weight: 500; }
+table.fs tbody tr.headline td.cagr.up,
+table.fs tbody tr.headline td.trend-cagr.up { color: var(--accent-ink); font-weight: 500; }
 
 /* ========= WATERFALL ========= */
 .breakdown {

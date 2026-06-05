@@ -134,6 +134,54 @@ def fmt_cagr(start, end, years: int) -> tuple[str, str]:
     return (label, cls)
 
 
+def trend_growth(values) -> tuple[Optional[float], Optional[float]]:
+    """Robust annual growth over the whole series via log-linear regression.
+    Fits OLS to ln(value) vs. year offset, annualizes the slope:
+        growth% = (exp(slope) - 1) * 100
+    Every observation pulls on the fit, so a single anomalous endpoint can't
+    swing the read. Returns (growth_pct, r_squared):
+      * strictly positive series -> log-linear fit; r_squared is in LOG space
+        (how steadily exponential the trend is -- itself a quality signal);
+      * all-negative series -> fit on |value|, sign flipped, mirroring fmt_cagr;
+      * sign-crossing, or < 3 usable points -> (None, None).
+    """
+    pts = [(i, v) for i, v in enumerate(values) if not is_missing(v)]
+    if len(pts) < 3:
+        return (None, None)
+    vals = [v for _, v in pts]
+    all_pos = all(v > 0 for v in vals)
+    all_neg = all(v < 0 for v in vals)
+    if not (all_pos or all_neg):
+        return (None, None)
+    xs = [float(i) for i, _ in pts]
+    ys = [math.log(abs(v)) for _, v in pts]
+    n = len(xs)
+    x_bar, y_bar = sum(xs) / n, sum(ys) / n
+    sxx = sum((x - x_bar) ** 2 for x in xs)
+    if sxx == 0:
+        return (None, None)
+    slope = sum((x - x_bar) * (y - y_bar) for x, y in zip(xs, ys)) / sxx
+    growth = (math.exp(slope) - 1) * 100.0
+    if all_neg:
+        growth = -growth
+    intercept = y_bar - slope * x_bar
+    ss_tot = sum((y - y_bar) ** 2 for y in ys)
+    ss_res = sum((y - (slope * x + intercept)) ** 2 for x, y in zip(xs, ys))
+    r2 = (1.0 - ss_res / ss_tot) if ss_tot > 0 else None
+    return (growth, r2)
+
+
+def fmt_trend_cagr(values) -> tuple[str, str, str]:
+    """Robust trend growth for display. Returns (label, css_class, r2_badge)."""
+    growth, r2 = trend_growth(values)
+    if growth is None:
+        return ("n/a", "", "")
+    label = f"{growth:+.1f}%"
+    cls = "up" if growth > 0.05 else ("down" if growth < -0.05 else "")
+    badge = f"R²&nbsp;{r2:.2f}" if r2 is not None else ""
+    return (label, cls, badge)
+
+
 def short_year(fiscal_year: int) -> str:
     """2024 → '24."""
     return f"'{str(fiscal_year)[-2:]}"

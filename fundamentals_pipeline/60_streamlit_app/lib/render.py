@@ -38,6 +38,7 @@ from .format import (
     fmt_mos,
     fmt_num,
     fmt_num_scaled,
+    fmt_trend_cagr,
     is_missing,
     short_quarter,
     short_year,
@@ -137,7 +138,7 @@ def render_table_html(
 
     year_cols = get_year_columns(df)
     is_quarterly = statement == "qt"
-    n_cols = len(year_cols) + 3  # label + N years + trend + cagr (not in qt)
+    n_cols = len(year_cols) + 4  # label + N years + trend + cagr + trend-cagr (not in qt)
     # Quarter labels reconstructed as FY − YTD_Q3 (Q4), if the export flags them.
     derived_qs = df.attrs.get("derived_quarters", set()) if is_quarterly else set()
 
@@ -159,6 +160,7 @@ def render_table_html(
     if not is_quarterly:
         header_cells.append('<th class="col-trend">10y trend</th>')
         header_cells.append('<th class="col-cagr">CAGR</th>')
+        header_cells.append('<th class="col-trend-cagr">Trend</th>')
 
     thead = f'<thead><tr>{"".join(header_cells)}</tr></thead>'
 
@@ -246,7 +248,17 @@ def render_table_html(
             else:
                 cagr_extra = f" {cagr_cls}" if cagr_cls else ""
             cagr_td = f'<td class="cagr{cagr_extra}">{cagr_label}</td>'
-            extra_cells = trend_td + cagr_td
+
+            # Robust trend growth (log-linear OLS across ALL years) + R² steadiness badge.
+            # A NEW 3-tuple; fmt_cagr stays a 2-tuple so the two columns never disagree on
+            # which rows are "n/a".
+            t_label, t_cls, t_badge = fmt_trend_cagr(row_values)
+            trend_cagr_td = (
+                f'<td class="trend-cagr {t_cls}">{t_label}'
+                + (f'<span class="r2-badge">{t_badge}</span>' if t_badge else '')
+                + '</td>'
+            )
+            extra_cells = trend_td + cagr_td + trend_cagr_td
 
         # Quarterly: add col-latest-q class to last cell for bold weight.
         if is_quarterly and num_cells:
