@@ -73,7 +73,7 @@ fundamentals_databricks_pj/
 │   ├── 51__export_dashboard_data.py  ← slice financials + metrics → /tmp/ parquet artifacts
 │   └── 52__publish_to_github.py      ← upload to GitHub Release (latest tag)
 │
-├── 51_streamlit_app/                 ← public Streamlit Cloud dashboard (see its own README)
+├── 60_streamlit_app/                 ← public Streamlit Cloud dashboard (see its own README)
 │
 └── 90_pipelines/
     └── 91__full_pipeline.py          ← entry point del Job — ejecuta los 11 steps en secuencia
@@ -465,7 +465,7 @@ ratios stay NULL when their one component is absent.
 
 **Live app: https://alm-fundamentals.streamlit.app/**
 
-A read-only dashboard at Streamlit Community Cloud renders the same data without Databricks credentials. Currently serves ~2,500 tickers (S&P 500 + Russell 2000 proxy) with synthetic data for preview; production data is published via GitHub Release. See [`51_streamlit_app/README.md`](fundamentals_pipeline/51_streamlit_app/README.md) for details.
+A read-only dashboard at Streamlit Community Cloud renders the same data without Databricks credentials. Currently serves ~2,500 tickers (S&P 500 + Russell 2000 proxy) with synthetic data for preview; production data is published via GitHub Release. See [`60_streamlit_app/README.md`](fundamentals_pipeline/60_streamlit_app/README.md) for details.
 
 ### Valuation football field
 

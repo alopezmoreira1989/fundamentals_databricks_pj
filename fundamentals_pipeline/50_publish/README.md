@@ -2,7 +2,7 @@
 
 Final stage of the pipeline. Takes a slice of `main.financials.*` and pushes it
 to a GitHub Release so the public Streamlit app at
-[../51_streamlit_app](../51_streamlit_app) (live at https://alm-fundamentals.streamlit.app/)
+[../60_streamlit_app](../60_streamlit_app) (live at https://alm-fundamentals.streamlit.app/)
 can fetch it without authenticating to Databricks.
 
 ```
@@ -59,7 +59,7 @@ always moves the `latest` tag. No accumulation, no manual cleanup needed.
 
 ## Pulling a local fixture for Streamlit dev
 
-The repo ships with committed synthetic fixtures in `51_streamlit_app/fixtures/`
+The repo ships with committed synthetic fixtures in `60_streamlit_app/fixtures/`
 (~2,500 tickers). For local Streamlit dev, these work out of the box.
 
 To replace synthetic data with real pipeline data, two options:
@@ -69,15 +69,15 @@ and set `COPY_TO_VOLUME = True` (point `VOLUME_PATH` at a Volume you can read).
 After the notebook runs:
 
 ```bash
-databricks fs cp -r dbfs:/Volumes/main/financials/_publish "fundamentals_pipeline/51_streamlit_app/fixtures/"
+databricks fs cp -r dbfs:/Volumes/main/financials/_publish "fundamentals_pipeline/60_streamlit_app/fixtures/"
 ```
 
 **Option B — download directly from the GitHub `latest` release** once the
 publish step has run at least once:
 
 ```bash
-mkdir -p "fundamentals_pipeline/51_streamlit_app/fixtures"
-cd       "fundamentals_pipeline/51_streamlit_app/fixtures"
+mkdir -p "fundamentals_pipeline/60_streamlit_app/fixtures"
+cd       "fundamentals_pipeline/60_streamlit_app/fixtures"
 curl -sLO https://github.com/alopezmoreira1989/fundamentals_databricks_pj/releases/download/latest/dashboard_data.parquet
 curl -sLO https://github.com/alopezmoreira1989/fundamentals_databricks_pj/releases/download/latest/dashboard_metrics.parquet
 curl -sLO https://github.com/alopezmoreira1989/fundamentals_databricks_pj/releases/download/latest/dashboard_meta.json

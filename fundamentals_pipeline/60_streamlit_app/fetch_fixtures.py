@@ -1,6 +1,6 @@
 """One-shot script to extract dashboard fixtures via Databricks Connect.
 
-Run from the 51_streamlit_app/ directory:
+Run from the 60_streamlit_app/ directory:
     python fetch_fixtures.py
 
 Requires:

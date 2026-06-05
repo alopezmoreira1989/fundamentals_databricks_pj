@@ -1,4 +1,4 @@
-﻿# 51_streamlit_app — public financials dashboard
+﻿# 60_streamlit_app — public financials dashboard
 
 **Live app: https://alm-fundamentals.streamlit.app/**
 
@@ -73,7 +73,7 @@ instead of GitHub.
 3. Configure:
    - **Repository:** `alopezmoreira1989/fundamentals_databricks_pj`
    - **Branch:** `main`
-   - **Main file path:** `fundamentals_pipeline/51_streamlit_app/app.py`
+   - **Main file path:** `fundamentals_pipeline/60_streamlit_app/app.py`
 4. Deploy. Streamlit Cloud auto-installs from `requirements.txt`.
 
 **No secrets are needed in Streamlit Cloud** — synthetic fixtures are committed
