@@ -25,7 +25,8 @@ from pyspark.sql import functions as F
 from pyspark.sql.window import Window
 
 full_tbl    = f"{CATALOG}.{SCHEMA}.{TABLE}"
-market_tbl  = f"{CATALOG}.{SCHEMA}.market_data"
+market_tbl  = f"{CATALOG}.{SCHEMA}.market_data"            # legacy (deprecated; not read here)
+prices_tbl  = f"{CATALOG}.{SCHEMA}.market_prices_daily"   # daily price store — pricing source
 metrics_tbl = f"{CATALOG}.{SCHEMA}.financials_metrics"
 
 # COMMAND ----------
@@ -323,24 +324,88 @@ print(f"Base metrics long: {long_base.count():,} rows")
 
 # COMMAND ----------
 
-# MAGIC %md ## 5. Valuation metrics & Yields (requires `market_data`)
+# MAGIC %md ## 5. Valuation metrics & Yields (requires `market_prices_daily`)
+# MAGIC
+# MAGIC `market_cap` is computed **as-of each FY `period_end`** from the daily price store —
+# MAGIC NOT the calendar-Dec-31 `market_data` join. This removes the 0–11 month fiscal/calendar
+# MAGIC offset that distorted every multiple for non-December filers. `market_cap` = raw `close`
+# MAGIC on the latest trading day ≤ `period_end` × `Shares Diluted` reported as-of `period_end`.
+# MAGIC Raw `close` (not `adj_close`): the historical market cap that actually existed at `t` uses
+# MAGIC the unadjusted price; `adj_close` would fold future splits back into it.
 
 # COMMAND ----------
 
 try:
-    mkt = (
-        spark.table(market_tbl)
-        .select("ticker", "fiscal_year", "market_cap")
-        .filter(F.col("market_cap").isNotNull())
+    _prices = (
+        spark.table(prices_tbl)
+        .select("ticker", "date", "close")
+        .filter(F.col("close").isNotNull())
     )
-    print(f"✓ market_data loaded — {mkt.count():,} rows")
+    _has_prices = _prices.limit(1).count() > 0
 except Exception:
-    print("⚠ market_data not found — skipping valuation metrics.")
-    mkt = None
+    _has_prices = False
+
+if not _has_prices:
+    print("⚠ market_prices_daily not found/empty — skipping valuation metrics.")
+    pe_mcap = None
+else:
+    # FY period_end per (ticker, fiscal_year). One fiscal close per FY; MAX is defensive.
+    fy_dates = (
+        spark.table(full_tbl)
+        .filter(F.col("period_type") == "FY")
+        .groupBy("ticker", "fiscal_year")
+        .agg(F.max("period_end").alias("period_end"))
+    )
+
+    # As-of close: latest trading day on/before period_end (handles weekends/holidays).
+    _w_px = Window.partitionBy("ticker", "fiscal_year").orderBy(F.col("date").desc())
+    asof_close = (
+        fy_dates.join(_prices, on="ticker", how="inner")
+        .filter(F.col("date") <= F.col("period_end"))
+        .withColumn("_rn", F.row_number().over(_w_px))
+        .filter(F.col("_rn") == 1)
+        .select("ticker", "fiscal_year", F.col("close").alias("asof_close"))
+    )
+
+    # As-of shares: most recent Shares Diluted (ANY period_type) with period_end ≤ FY period_end;
+    # FY-preferred on a tie so a normal FY uses its own reported figure, falling back across
+    # periods when the FY value is NULL (approved fallback). NOTE: Shares Diluted is the
+    # weighted-average diluted count, not shares-outstanding-at-date — see the out-of-scope note.
+    _sh = (
+        spark.table(full_tbl)
+        .filter((F.col("concept") == "Shares Diluted") & F.col("value").isNotNull())
+        .select("ticker", F.col("period_end").alias("sh_end"),
+                F.col("value").alias("shares"),
+                (F.col("period_type") == "FY").alias("_is_fy"))
+    )
+    _w_sh = Window.partitionBy("ticker", "fiscal_year").orderBy(
+        F.col("sh_end").desc(), F.col("_is_fy").desc())
+    asof_shares = (
+        fy_dates.join(_sh, on="ticker", how="inner")
+        .filter(F.col("sh_end") <= F.col("period_end"))
+        .withColumn("_rn", F.row_number().over(_w_sh))
+        .filter(F.col("_rn") == 1)
+        .select("ticker", "fiscal_year", F.col("shares").alias("asof_shares"))
+    )
+
+    pe_mcap = (
+        asof_close.join(asof_shares, on=["ticker", "fiscal_year"], how="inner")
+        .withColumn("market_cap",
+            F.when(
+                F.col("asof_close").isNotNull() & F.col("asof_shares").isNotNull(),
+                F.col("asof_close") * F.col("asof_shares"),
+            ))
+        .filter(F.col("market_cap").isNotNull())
+        .select("ticker", "fiscal_year", "market_cap")
+    )
+    # Range-join over the daily store is reused by every downstream count/MERGE; materialize
+    # once. Serverless: localCheckpoint(eager), not .cache()/.persist().
+    pe_mcap = pe_mcap.localCheckpoint(eager=True)
+    print(f"✓ period_end-aligned market_cap — {pe_mcap.count():,} (ticker, fy) rows")
 
 # COMMAND ----------
 
-if mkt is not None:
+if pe_mcap is not None:
 
     val_concepts = (
         spark.table(full_tbl)
@@ -372,7 +437,7 @@ if mkt is not None:
         .groupBy("ticker", "fiscal_year")
         .pivot("concept")
         .agg(F.first("value"))
-        .join(mkt, on=["ticker", "fiscal_year"], how="inner")
+        .join(pe_mcap, on=["ticker", "fiscal_year"], how="inner")
     )
 
     def safe_div_col(num, den):
