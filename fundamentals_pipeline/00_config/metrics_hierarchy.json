@@ -52,7 +52,8 @@
       { "metric": "Cash Flow to Debt", "unit": "ratio", "requires_market_data": false }
     ],
     "Liquidity": [
-      { "metric": "Current Ratio", "unit": "ratio", "requires_market_data": false }
+      { "metric": "Current Ratio", "unit": "ratio", "requires_market_data": false },
+      { "metric": "Quick Ratio",   "unit": "ratio", "requires_market_data": false }
     ]
   },
 
@@ -72,6 +73,11 @@
       { "metric": "Sales Yield %",    "unit": "percent", "requires_market_data": true },
       { "metric": "Book Yield %",     "unit": "percent", "requires_market_data": true },
       { "metric": "EBITDA Yield %",   "unit": "percent", "requires_market_data": true }
+    ],
+    "Net-Net": [
+      { "metric": "NCAV",         "unit": "usd",   "requires_market_data": false },
+      { "metric": "NCAV / Share", "unit": "usd",   "requires_market_data": false },
+      { "metric": "NCAV Ratio",   "unit": "ratio", "requires_market_data": true  }
     ]
   },
 

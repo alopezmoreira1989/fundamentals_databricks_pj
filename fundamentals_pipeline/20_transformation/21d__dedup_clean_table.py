@@ -8,6 +8,12 @@
 # MAGIC
 # MAGIC **Remediación puntual** — NO forma parte del pipeline recurrente.
 # MAGIC
+# MAGIC > **Superseded para el caso BS:** `21f__dedup_balance_sheet` es el paso RECURRENTE que
+# MAGIC > refuerza "un snapshot de BS por `(ticker, stmt, concept, period_end)`" en cada run y cubre
+# MAGIC > las clases que el predicado de §1/§2 de aquí NO veía (mismo `period_end` con `fiscal_year`
+# MAGIC > distinto, y cierres fiscales mal etiquetados como trimestre del MISMO `fiscal_year`). Este
+# MAGIC > notebook se mantiene solo como remediación histórica de cross-labels.
+# MAGIC
 # MAGIC El `MERGE` de `21__clean_and_merge` / `21b__derive_quarterly` hace upsert pero
 # MAGIC **nunca borra**. Cuando una versión previa de `21b` escribió una clave de MERGE con
 # MAGIC un `period_end` equivocado y la versión parcheada ya no re-emite esa clave, la fila

@@ -85,6 +85,14 @@ def safe_div(num, den):
         F.col(num) / F.col(den)
     ).otherwise(F.lit(None))
 
+# Guarded refs for concepts NOT already consumed unguarded in the base block: Inventory
+# (Quick Ratio) and Total Liabilities (NCAV fallback) may be absent from the wide pivot for a
+# small universe. lit(None) when absent → the dependent metric NULLs out instead of raising.
+# (Total Current Assets/Liabilities, Total Assets, Total Stockholders Equity, Shares Diluted are
+# already referenced unguarded above by Current Ratio / ROA / ROE / Net Buyback Yield, so present.)
+_inv_expr = F.col("Inventory")         if "Inventory"         in wide.columns else F.lit(None)
+_tl_expr  = F.col("Total Liabilities") if "Total Liabilities" in wide.columns else F.lit(None)
+
 metrics_wide = (
     wide
     # ── Margins (%) ───────────────────────────────────────────────────────────
@@ -150,6 +158,17 @@ metrics_wide = (
 
     # ── Liquidity ─────────────────────────────────────────────────────────────
     .withColumn("Current Ratio",  safe_div("Total Current Assets", "Total Current Liabilities"))
+    # Quick (acid-test) Ratio: liquid current assets (ex-inventory) over current liabilities.
+    # Inventory missing → coalesce to 0 (treat as no inventory); NULL if either current-side
+    # column is absent or Total Current Liabilities is 0.
+    .withColumn("Quick Ratio",
+        F.when(
+            F.col("Total Current Assets").isNotNull()
+            & F.col("Total Current Liabilities").isNotNull()
+            & (F.col("Total Current Liabilities") != 0),
+            (F.col("Total Current Assets") - F.coalesce(_inv_expr, F.lit(0)))
+            / F.col("Total Current Liabilities")
+        ))
 
     # ── Cash-flow margins ───────────────────────────────────────────────────
     .withColumn("FCF Margin %",          safe_div("Free Cash Flow",      "Revenue") * 100)
@@ -207,6 +226,32 @@ metrics_wide = (
     # is missing (no coalescing — a real gap should read NULL, not 0).
     .withColumn("_accruals_num", F.col("Net Income") - F.col("Operating Cash Flow"))
     .withColumn("Accruals Ratio", safe_div("_accruals_num", "Total Assets"))
+
+    # ── Net-Net (Graham NCAV; base — no market data) ────────────────────────────
+    # NCAV = Total Current Assets − Total Liabilities. Reuses the SAME Total-Liabilities
+    # fallback as Altman Z (coalesce to Total Assets − Total Stockholders Equity) for issuers
+    # like VZ that don't tag us-gaap:Liabilities directly. NOT clamped: NCAV is negative for
+    # most firms — only genuine net-nets are positive, which is the whole signal.
+    .withColumn("_ncav_liab",
+        F.coalesce(
+            _tl_expr,
+            F.when(
+                F.col("Total Assets").isNotNull() & F.col("Total Stockholders Equity").isNotNull(),
+                F.col("Total Assets") - F.col("Total Stockholders Equity"),
+            ),
+        ))
+    .withColumn("NCAV",
+        F.when(
+            F.col("Total Current Assets").isNotNull() & F.col("_ncav_liab").isNotNull(),
+            F.col("Total Current Assets") - F.col("_ncav_liab"),
+        ))
+    .withColumn("NCAV / Share",
+        F.when(
+            F.col("NCAV").isNotNull()
+            & F.col("Shares Diluted").isNotNull()
+            & (F.col("Shares Diluted") != 0),
+            F.col("NCAV") / F.col("Shares Diluted"),
+        ))
 )
 
 # COMMAND ----------
@@ -297,12 +342,14 @@ base_metric_cols = [
     # Financial Health — Solvency / Coverage
     "Interest Coverage", "Net Debt / EBITDA", "Cash Flow to Debt",
     # Liquidity
-    "Current Ratio",
+    "Current Ratio", "Quick Ratio",
     # Capital Returns — payout ratios + net buyback yield (all base / no market data)
     "Dividend Payout Ratio", "Buyback Payout Ratio", "Total Payout Ratio",
     "Payout / FCF", "Dividend Coverage (FCF)", "Net Buyback Yield %",
     # Quality & Risk — base (Altman Z is market-gated → val block / val_metric_cols)
     "Piotroski F-Score", "Accruals Ratio",
+    # Net-Net — base (NCAV Ratio is market-gated → val block / val_metric_cols)
+    "NCAV", "NCAV / Share",
 ]
 
 def unpivot(df, metric_cols):
@@ -421,6 +468,7 @@ if mkt is not None:
         "Op Cash Flow Yield %", "Book Yield %", "EBITDA Yield %",
         "Dividend Yield %", "Buyback Yield %", "Shareholder Yield %",
         "Altman Z-Score",
+        "NCAV Ratio",
     ]
 
     val_metrics = (
@@ -480,6 +528,18 @@ if mkt is not None:
               + 0.6 * (F.col("market_cap")        / F.col("_total_liab"))
               + 1.0 * (F.col("Revenue")           / F.col("Total Assets"))
             ))
+        # ── Net-Net — NCAV Ratio (market-gated; needs market_cap) ───────────────────
+        # Price-over-NCAV, matching the P/E, P/S, P/B convention: lower = cheaper, < 1 = market
+        # cap below net current assets, classic net-net buy ≈ ≤ 0.67. Reuses the Altman
+        # `_total_liab` (same Total-Liabilities fallback). ONLY defined when _ncav > 0 — a
+        # negative-NCAV firm (the vast majority) yields NULL, never a misleading negative ratio.
+        .withColumn("_ncav",
+            F.when(
+                F.col("Total Current Assets").isNotNull(),
+                F.col("Total Current Assets") - F.col("_total_liab"),
+            ))
+        .withColumn("NCAV Ratio",
+            F.when(F.col("_ncav") > 0, F.col("market_cap") / F.col("_ncav")))
     )
 
     # Filter EV/EBITDA outliers (|x| > 500)
