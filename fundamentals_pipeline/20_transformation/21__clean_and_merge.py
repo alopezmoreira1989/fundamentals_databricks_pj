@@ -82,6 +82,12 @@ spark.sql(f"""
 # COMMAND ----------
 
 raw = spark.table(raw_full).filter(F.col("scraped_at") == latest_scrape)
+# `raw` (el slice de la última scrape de financials_raw, ~81M filas) se re-escanea 3×: flow_fy,
+# stock_fy y el _flow_fy_all del orphan-DELETE de §4, cada uno con su propio predicate pushdown
+# sobre el Delta completo. localCheckpoint(eager) lo materializa una vez y los filtros aguas
+# abajo leen del checkpoint en disco local en vez de re-escanear la tabla. .cache()/.persist()
+# NO van en serverless ([NOT_SUPPORTED_WITH_SERVERLESS]); se libera al cerrar la sesión.
+raw = raw.localCheckpoint(eager=True)
 
 # Flow FY rows: 10-K, fp='FY'. NO usamos el filtro estricto period_shape='FY_or_TTM'
 # (descartaría años de transición/stub con duración fuera de 350–380d — p.ej. tras una
