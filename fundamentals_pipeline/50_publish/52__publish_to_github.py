@@ -37,6 +37,7 @@ REPO  = "fundamentals_databricks_pj"
 ARTIFACTS = [
     Path("/tmp/dashboard_data.parquet"),
     Path("/tmp/dashboard_metrics.parquet"),
+    Path("/tmp/dashboard_prices.parquet"),
     Path("/tmp/dashboard_meta.json"),
 ]
 
@@ -153,7 +154,7 @@ def upload_asset(release: dict, file_path: Path) -> None:
             f"{upload_url}?name={file_path.name}",
             headers={**HEADERS, "Content-Type": content_type},
             data=fh.read(),
-            timeout=60,
+            timeout=300,  # dashboard_prices.parquet can be ~60–100MB; harmless for the others
         )
     r.raise_for_status()
     size_kb = file_path.stat().st_size / 1024
@@ -212,6 +213,7 @@ release_body = (
     f"- **Tickers:** {len(meta['tickers'])}\n"
     f"- **Financials rows:** {meta['row_counts']['financials']:,}\n"
     f"- **Metrics rows:** {meta['row_counts']['metrics']:,}\n"
+    f"- **Price rows:** {meta['row_counts'].get('prices', 'n/a')}\n"
     f"- **Schema version:** {meta['schema_version']}\n"
 )
 
