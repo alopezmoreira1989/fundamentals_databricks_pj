@@ -30,14 +30,16 @@ from pathlib import Path
 
 import pandas as pd
 
-SCHEMA_VERSION = 4   # +Capital Returns category (payout ratios + dividend/buyback/shareholder/net-buyback yields)
+SCHEMA_VERSION = 5   # +dashboard_prices.parquet daily price slice
 FY_YEARS       = 10
 QUARTERS       = 12
+PRICE_YEARS    = 10                              # daily-price retention window (calendar years)
 
 OUT_DIR        = Path("/tmp")
 DATA_PARQUET   = OUT_DIR / "dashboard_data.parquet"
 METRIC_PARQUET = OUT_DIR / "dashboard_metrics.parquet"
 META_JSON      = OUT_DIR / "dashboard_meta.json"
+PRICE_PARQUET  = OUT_DIR / "dashboard_prices.parquet"
 
 # COMMAND ----------
 
@@ -203,6 +205,49 @@ print(f"  metrics rows: {len(metrics):,}")
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ## 3b. Daily price slice (market_prices_daily)
+# MAGIC
+# MAGIC Daily adjusted/raw close for the export universe, last `PRICE_YEARS` calendar
+# MAGIC years. Daily grain only — the Streamlit Price tab resamples to weekly/monthly
+# MAGIC client-side, so nothing is pre-aggregated here. `adj_close` drives the chart;
+# MAGIC raw `close` is tooltip-only. `value` precision matters (BRK.A trades >$600k), so
+# MAGIC both columns stay float64 — no downcast.
+
+# COMMAND ----------
+
+# Resilient read: market_prices_daily may not exist yet (12__fetch_market_data not run
+# on full history) or may be empty for this universe. In either case fall back to an
+# empty, correctly-typed frame so 52 still finds the file and the app degrades to
+# "no data" instead of crashing.
+PRICE_COLUMNS = {"ticker": "object", "date": "datetime64[ns]", "close": "float64", "adj_close": "float64"}
+try:
+    prices = spark.sql(f"""
+        SELECT p.ticker, p.date, p.close, p.adj_close
+        FROM {CATALOG}.{SCHEMA}.market_prices_daily p
+        WHERE p.ticker IN (SELECT ticker FROM _export_universe)
+          AND p.date >= ADD_MONTHS(CURRENT_DATE(), -12 * {PRICE_YEARS})
+    """).toPandas()
+    # volume is a one-line add here (and in PRICE_COLUMNS) if a volume subplot is ever wanted.
+    if prices.empty:
+        print("⚠️ market_prices_daily returned 0 rows for this universe — writing empty price slice")
+except Exception as exc:  # noqa: BLE001 — table absent or unreadable: degrade, don't fail the export
+    print(f"⚠️ Could not read market_prices_daily ({type(exc).__name__}: {exc}) — writing empty price slice")
+    prices = pd.DataFrame({c: pd.Series(dtype=t) for c, t in PRICE_COLUMNS.items()})
+
+# Keep close/adj_close as float64 (no downcast — large prices lose cents in float32).
+prices["close"] = prices["close"].astype("float64")
+prices["adj_close"] = prices["adj_close"].astype("float64")
+
+if prices.empty:
+    print("  prices rows: 0 (empty slice)")
+else:
+    print(f"  prices rows: {len(prices):,}")
+    print(f"  distinct tickers: {prices['ticker'].nunique():,}")
+    print(f"  date range: {prices['date'].min()} → {prices['date'].max()}")
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## 4. Write parquet + meta
 
 # COMMAND ----------
@@ -213,8 +258,10 @@ print(f"  metrics rows: {len(metrics):,}")
 # "TypeError: Object of type PlanMetrics is not JSON serializable". Clear attrs first.
 financials.attrs = {}
 metrics.attrs = {}
+prices.attrs = {}
 financials.to_parquet(DATA_PARQUET, index=False)
 metrics.to_parquet(METRIC_PARQUET, index=False)
+prices.to_parquet(PRICE_PARQUET, index=False)
 
 # Per-ticker FY range — used by the Streamlit masthead.
 fy_ranges = (
@@ -234,17 +281,20 @@ meta = {
     "row_counts": {
         "financials":   int(len(financials)),
         "metrics":      int(len(metrics)),
+        "prices":       int(len(prices)),
     },
     "retention": {
         "fy_years":     FY_YEARS,
         "quarters":     QUARTERS,
+        "price_years":  PRICE_YEARS,
     },
 }
 META_JSON.write_text(json.dumps(meta, indent=2, default=str))
 
-print(f"\n✓ Wrote:")
+print("\n✓ Wrote:")
 print(f"  {DATA_PARQUET}   ({DATA_PARQUET.stat().st_size / 1024:.1f} KB)")
 print(f"  {METRIC_PARQUET} ({METRIC_PARQUET.stat().st_size / 1024:.1f} KB)")
+print(f"  {PRICE_PARQUET}  ({PRICE_PARQUET.stat().st_size / 1024:.1f} KB)")
 print(f"  {META_JSON}      (schema_version={SCHEMA_VERSION})")
 
 # COMMAND ----------
@@ -264,7 +314,7 @@ VOLUME_PATH    = "/Volumes/main/financials/_publish"   # must already exist
 
 if COPY_TO_VOLUME:
     dbutils.fs.mkdirs(VOLUME_PATH)
-    for f in [DATA_PARQUET, METRIC_PARQUET, META_JSON]:
+    for f in [DATA_PARQUET, METRIC_PARQUET, PRICE_PARQUET, META_JSON]:
         dest = f"{VOLUME_PATH}/{f.name}"
         dbutils.fs.cp(f"file:{f}", dest, recurse=False)
         print(f"  ✓ {f.name} → {dest}")

@@ -20,6 +20,7 @@ BASE_URL = f"https://github.com/{OWNER}/{REPO}/releases/download/latest"
 DATA_FILE   = "dashboard_data.parquet"
 METRIC_FILE = "dashboard_metrics.parquet"
 META_FILE   = "dashboard_meta.json"
+PRICE_FILE  = "dashboard_prices.parquet"
 
 FIXTURE_DIR = Path(__file__).parent.parent / "fixtures"
 
@@ -92,6 +93,38 @@ def load_latest_data() -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
     data    = _optimize_dtypes(data)
     metrics = _optimize_dtypes(metrics)
     return data, metrics, meta
+
+
+@st.cache_data(ttl=3600, max_entries=1, show_spinner="Loading prices…")
+def load_prices() -> pd.DataFrame:
+    """Daily price slice published by 51/52 (ticker, date, close, adj_close).
+
+    MUST degrade gracefully: missing artifact (404 / not published) or absent
+    fixture → return an EMPTY frame with the right columns. Never st.stop() — the
+    Price tab shows a 'no data' notice and the rest of the page keeps working.
+
+    Kept separate from load_latest_data so the heavy daily frame gets its own cache
+    entry and is materialized lazily (only when the Price tab is first viewed).
+    """
+    empty = pd.DataFrame(columns=["ticker", "date", "close", "adj_close"])
+    use_fixtures = os.environ.get("DASHBOARD_USE_FIXTURES") == "1"
+    if use_fixtures:
+        df = pd.read_parquet(FIXTURE_DIR / PRICE_FILE) if (FIXTURE_DIR / PRICE_FILE).exists() else empty
+    else:
+        try:
+            df = _fetch_parquet(PRICE_FILE)
+        except Exception:
+            # Fall back to a local fixture if present; otherwise degrade to "no data".
+            df = pd.read_parquet(FIXTURE_DIR / PRICE_FILE) if (FIXTURE_DIR / PRICE_FILE).exists() else empty
+
+    if df.empty:
+        return empty
+
+    df["date"] = pd.to_datetime(df["date"])
+    # Do NOT route through _optimize_dtypes: it would downcast nothing harmful here,
+    # but close/adj_close must stay float64 (BRK.A-class prices lose cents in float32).
+    df["ticker"] = df["ticker"].astype("category")
+    return df
 
 
 def _render_load_error(exc: Exception) -> NoReturn:

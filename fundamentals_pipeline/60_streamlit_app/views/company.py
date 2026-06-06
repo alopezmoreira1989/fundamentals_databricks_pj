@@ -1,4 +1,4 @@
-"""Company detail — the per-ticker editorial dashboard (5 tabs).
+"""Company detail — the per-ticker editorial dashboard (6 tabs).
 
 Receives the ticker to show via ``st.session_state["ticker"]`` (the handoff
 convention the screener writes). Keeps its own searchable selectbox so the page
@@ -9,14 +9,14 @@ also works standalone. `set_page_config` / CSS injection live in the router
 from pathlib import Path
 
 import streamlit as st
-
-from lib.data import app_version, load_latest_data, load_notes
+from lib.data import app_version, load_latest_data, load_notes, load_prices
 from lib.kpis import render_kpi_strip
+from lib.prices import price_chart, prices_for, resample_prices
 from lib.quarterly import render_quarterly_combo
 from lib.render import (
+    iv_price_from_metrics,
     render_balance_check,
     render_footnote_bar,
-    iv_price_from_metrics,
     render_masthead,
     render_metrics_grid,
     render_table_html,
@@ -33,6 +33,7 @@ from lib.tables import (
 APP_DIR = Path(__file__).parents[1]
 
 data, metrics, meta = load_latest_data()
+prices = load_prices()   # heavy daily frame; own cache entry, empty if not yet published
 notes = load_notes(APP_DIR / "notes.json")
 
 # Build ticker list with company names for search
@@ -69,6 +70,9 @@ st.markdown(render_kpi_strip(ticker, data, metrics), unsafe_allow_html=True)
 # Unit scale for the statement tables (IS / BS / CF / Quarterly). One control governs
 # all four. Billion = 1e9 (US short scale); a Spanish label would be "Miles de millones",
 # NOT "Billones" (Spanish billón = 1e12). Default "Units" → unchanged full-resolution USD.
+# NOTE: this control is irrelevant to the Price tab (per-share adjusted close, not money
+# amounts) — the Price chart deliberately ignores it. Don't try to hide it on that tab:
+# st.tabs exposes no active-tab signal.
 SCALE_OPTIONS = {
     "Units":     (1,             ""),
     "Thousands": (1_000,         "thousands"),
@@ -82,9 +86,27 @@ scale_label = st.segmented_control(
 )
 divisor, scale_word = SCALE_OPTIONS[scale_label or "Units"]
 
-tab_is, tab_bs, tab_cf, tab_dm, tab_qt = st.tabs(
-    ["Income statement", "Balance sheet", "Cash flow", "Derived metrics", "Quarterly"]
+tab_px, tab_is, tab_bs, tab_cf, tab_dm, tab_qt = st.tabs(
+    ["Price", "Income statement", "Balance sheet", "Cash flow", "Derived metrics", "Quarterly"]
 )
+
+with tab_px:
+    st.markdown(
+        '<div class="panel-header"><h2>Price</h2>'
+        '<div class="meta">Adjusted close · last 10 years · source: market_prices_daily</div></div>',
+        unsafe_allow_html=True,
+    )
+    freq = st.segmented_control(
+        "Frequency", ["Daily", "Weekly", "Monthly"], default="Daily",
+        key="price_freq", label_visibility="collapsed",
+    ) or "Daily"
+    pdf = prices_for(prices, ticker)
+    if pdf.empty:
+        st.info("No price history available for this ticker yet. "
+                "Prices publish with the next pipeline run (51 → 52).")
+    else:
+        chart = price_chart(resample_prices(pdf, freq), ticker)
+        st.altair_chart(chart, use_container_width=True)
 
 with tab_is:
     df_is = income_statement_df(data, ticker)
