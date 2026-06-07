@@ -11,7 +11,7 @@ from pathlib import Path
 import streamlit as st
 from lib.data import app_version, load_latest_data, load_notes, load_prices
 from lib.kpis import render_kpi_strip
-from lib.prices import price_chart, prices_for, render_price_kpi, resample_prices
+from lib.prices import price_chart, prices_for, render_price_kpis, resample_prices
 from lib.quarterly import render_quarterly_combo
 from lib.render import (
     iv_price_from_metrics,
@@ -93,19 +93,19 @@ tab_px, tab_is, tab_bs, tab_cf, tab_dm, tab_qt = st.tabs(
 with tab_px:
     st.markdown(
         '<div class="panel-header"><h2>Price</h2>'
-        '<div class="meta">Adjusted close · last 10 years · source: market_prices_daily</div></div>',
+        '<div class="meta">Adjusted close · SMA 20/50/200 · last 10 years · source: market_prices_daily</div></div>',
         unsafe_allow_html=True,
     )
     freq = st.segmented_control(
         "Frequency", ["Daily", "Weekly", "Monthly"], default="Daily",
         key="price_freq", label_visibility="collapsed",
     ) or "Daily"
-    pdf = prices_for(prices, ticker)          # daily slice — drives the KPI
+    pdf = prices_for(prices, ticker)          # daily slice (+ SMAs) — drives the KPIs
     if pdf.empty:
         st.info("No price history available for this ticker yet. "
                 "Prices publish with the next pipeline run (51 → 52).")
     else:
-        st.markdown(render_price_kpi(pdf), unsafe_allow_html=True)   # latest price, before chart
+        st.markdown(render_price_kpis(pdf), unsafe_allow_html=True)   # 4-card strip
         chart = price_chart(resample_prices(pdf, freq), ticker, freq)
         st.altair_chart(chart, use_container_width=True)
 

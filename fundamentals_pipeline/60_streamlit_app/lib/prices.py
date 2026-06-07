@@ -1,112 +1,194 @@
-"""Price-series helpers for the company Price tab: per-ticker slice, resampling, KPI, Altair chart."""
+"""Price-series helpers for the company Price tab: slice + SMAs, resampling, KPIs, Altair chart."""
 from __future__ import annotations
 
 import altair as alt
 import pandas as pd
 
-from .colors import BLUE, CREAM
-from .format import fmt_delta  # arrow + up/down class, same styling as the masthead KPI strip
+from .colors import BLUE, CORAL, CREAM, GREEN
+from .format import fmt_cagr  # CAGR label + css class (fmt_delta is NOT reused — it bakes in "YoY")
 
 ACCENT = BLUE   # accent blue #185FA5 (reuse the shared token)
 
 # pandas>=2.2: 'ME' = month-end (not deprecated 'M'); 'W' = weekly. None = daily (no resample).
 RESAMPLE = {"Daily": None, "Weekly": "W", "Monthly": "ME"}
 
+# SMA windows in TRADING DAYS (computed on the daily series, then sampled at the chart frequency)
+# — so "SMA 200" always means 200 days, never 200 weeks/months.
+SMA_WINDOWS = {"sma20": 20, "sma50": 50, "sma200": 200}
+
+# Price + SMA palette on cream. Price = strong accent; SMAs fast→slow, warm→earth. GREEN/CORAL
+# reuse the shared colors.py tokens; SMA 20's amber (#C8881F) has no exact token, kept literal.
+_SERIES_COLORS = {"Price": ACCENT, "SMA 20": "#C8881F", "SMA 50": GREEN, "SMA 200": CORAL}
+_SERIES_ORDER = list(_SERIES_COLORS)
+
+
+# ── data shaping ──────────────────────────────────────────────────────────────
 
 def prices_for(prices: pd.DataFrame, ticker: str) -> pd.DataFrame:
-    """Sorted, NaN-dropped daily rows for one ticker (date, close, adj_close)."""
+    """Sorted daily rows for one ticker (date, close, adj_close) + SMA 20/50/200 on adj_close."""
     if prices is None or prices.empty:
-        return prices.iloc[:0] if prices is not None else pd.DataFrame(
-            columns=["date", "close", "adj_close"])
-    out = prices[prices["ticker"].astype(str) == ticker][["date", "close", "adj_close"]]
-    return out.dropna(subset=["adj_close"]).sort_values("date").reset_index(drop=True)
+        cols = ["date", "close", "adj_close", *SMA_WINDOWS]
+        return prices.iloc[:0] if prices is not None else pd.DataFrame(columns=cols)
+    out = (prices[prices["ticker"].astype(str) == ticker][["date", "close", "adj_close"]]
+           .dropna(subset=["adj_close"]).sort_values("date").reset_index(drop=True))
+    for col, win in SMA_WINDOWS.items():
+        out[col] = out["adj_close"].rolling(win).mean()   # NaN until `win` days exist (correct)
+    return out
 
 
 def resample_prices(df: pd.DataFrame, freq_label: str) -> pd.DataFrame:
-    """Daily → period-close at the chosen frequency. 'Daily' is a pass-through."""
+    """Daily → period-close at the chosen frequency. 'Daily' is a pass-through.
+
+    SMAs are carried as the period's last DAILY value, so they stay 'N-day' averages
+    regardless of the weekly/monthly view.
+    """
     freq = RESAMPLE.get(freq_label)
     if not freq or df.empty:
         return df
-    return (df.set_index("date")
-              .resample(freq)
-              .agg({"close": "last", "adj_close": "last"})
-              .dropna(subset=["adj_close"])
-              .reset_index())
+    agg = {"close": "last", "adj_close": "last", **{c: "last" for c in SMA_WINDOWS}}
+    agg = {c: a for c, a in agg.items() if c in df.columns}   # defensive
+    return df.set_index("date").resample(freq).agg(agg).dropna(subset=["adj_close"]).reset_index()
 
 
-def render_price_kpi(pdf: pd.DataFrame) -> str:
-    """Single KPI card: most recent share price + day-over-day change.
+# ── KPI strip ─────────────────────────────────────────────────────────────────
 
-    Reuses the masthead `.kpi` markup. Headline = raw `close` (actual traded price).
-    Always computed from the DAILY series, independent of the freq toggle. Returns '' if empty.
-    """
-    if pdf is None or pdf.empty:
-        return ""
-    last = pdf.iloc[-1]
-    price = last["close"] if pd.notna(last["close"]) else last["adj_close"]
-    if pd.isna(price):
-        return ""
-    as_of = pd.to_datetime(last["date"]).strftime("%b %d, %Y")
+def _price_delta(pct: float | None, suffix: str = "") -> tuple[str, str]:
+    """Arrow + class for a price delta — like fmt_delta but WITHOUT the 'YoY' suffix."""
+    if pct is None or pd.isna(pct):
+        return ("—", "flat")
+    if pct > 0.05:
+        return (f"▲ {pct:.1f}%{suffix}", "up")
+    if pct < -0.05:
+        return (f"▼ {abs(pct):.1f}%{suffix}", "down")
+    return (f"≈ {pct:+.1f}%{suffix}", "flat")
 
-    chg_pct = None
-    if len(pdf) >= 2:
-        prev = pdf.iloc[-2]["close"]
-        if pd.notna(prev) and prev != 0:
-            chg_pct = (price - prev) / abs(prev) * 100
 
-    if chg_pct is None:
-        delta_label, delta_cls, suffix = "—", "flat", ""
-    else:
-        delta_label, delta_cls = fmt_delta(chg_pct)
-        suffix = " (1d)"
+def _signed_pct(pct: float | None) -> tuple[str, str]:
+    """('+28.4%', 'up'|'down'|'flat') for a percent shown as a headline value."""
+    if pct is None or pd.isna(pct):
+        return ("—", "flat")
+    cls = "up" if pct > 0.05 else ("down" if pct < -0.05 else "flat")
+    return (f"{pct:+.1f}%", cls)
 
+
+def _px(v: float) -> str:
+    """Share-price formatting: 2 decimals under $100, whole dollars above (keeps cards short)."""
+    return f"${v:,.2f}" if abs(v) < 100 else f"${v:,.0f}"
+
+
+def _val_color(cls: str) -> str:
+    return {"up": "var(--positive)", "down": "var(--negative)"}.get(cls, "var(--ink)")
+
+
+def _kpi_card(label: str, value: str, delta: str, delta_cls: str, value_cls: str = "") -> str:
+    color = f"color:{_val_color(value_cls)};" if value_cls else ""
     return (
-        '<div class="kpi-strip" style="grid-template-columns:minmax(220px,300px);margin-bottom:20px;">'
         '<div class="kpi">'
-        '<div class="label">LATEST PRICE</div>'
-        f'<div class="value">${price:,.2f}</div>'
-        f'<div class="delta {delta_cls}">{delta_label}{suffix}  ·  {as_of}</div>'
-        '</div></div>'
+        f'<div class="label">{label}</div>'
+        f'<div class="value" style="{color}">{value}</div>'
+        f'<div class="delta {delta_cls}">{delta}</div>'
+        '</div>'
     )
 
 
-def price_chart(df: pd.DataFrame, ticker: str, freq: str = "Daily"):
-    """Interactive Altair line of adjusted close with a hierarchical (month / year) time axis.
+def render_price_kpis(pdf: pd.DataFrame) -> str:
+    """4-card strip: latest price, 1Y return, 52-week range, window CAGR.
 
-    Vega-Lite renders a tick label as two stacked lines when labelExpr returns an array: month
-    (plus day-of-month for Daily/Weekly, so zooming reveals individual weeks) on top, year on a
-    subordinate line below, shown only at the first tick of each year. Returns None if empty.
+    Derived stats use adj_close (consistent with the plotted line, split-safe); the LATEST
+    PRICE headline uses raw close. All computed from the DAILY series, independent of the
+    freq toggle. Returns '' when empty.
+    """
+    if pdf is None or pdf.empty:
+        return ""
+    s = pdf.dropna(subset=["adj_close"]).sort_values("date").reset_index(drop=True)
+    if s.empty:
+        return ""
+
+    dates = pd.to_datetime(s["date"])
+    last_date = dates.iloc[-1]
+    last_adj = float(s.iloc[-1]["adj_close"])
+    price = float(s.iloc[-1]["close"]) if pd.notna(s.iloc[-1]["close"]) else last_adj
+
+    # 1) Latest price + 1d change (raw close)
+    chg_1d = None
+    if len(s) >= 2 and pd.notna(s.iloc[-2]["close"]) and s.iloc[-2]["close"] != 0:
+        chg_1d = (price - float(s.iloc[-2]["close"])) / abs(float(s.iloc[-2]["close"])) * 100
+    d1_label, d1_cls = _price_delta(chg_1d, " (1d)")
+    card1 = _kpi_card("LATEST PRICE", _px(price),
+                      f"{d1_label}  ·  {last_date.strftime('%b %d, %Y')}", d1_cls)
+
+    # 2) 1-year return (adj_close, as-of ~1y ago)
+    prior = s[dates <= last_date - pd.DateOffset(years=1)]
+    if prior.empty:
+        card2 = _kpi_card("1Y RETURN", "—", "· < 1 year of data", "flat")
+    else:
+        base = float(prior.iloc[-1]["adj_close"])
+        ret = (last_adj / base - 1) * 100 if base else None
+        rv, rcls = _signed_pct(ret)
+        base_dt = pd.to_datetime(prior.iloc[-1]["date"]).strftime("%b %Y")
+        card2 = _kpi_card("1Y RETURN", rv, f"from {_px(base)}  ·  {base_dt}", "flat", value_cls=rcls)
+
+    # 3) 52-week range + today's position within it
+    win = s[dates >= last_date - pd.DateOffset(weeks=52)]
+    hi, lo = float(win["adj_close"].max()), float(win["adj_close"].min())
+    pos = (last_adj - lo) / (hi - lo) * 100 if hi > lo else 100.0
+    card3 = _kpi_card("52W RANGE", f"{_px(lo)} – {_px(hi)}", f"today at {pos:.0f}% of range", "flat")
+
+    # 4) Annualized return over the available window (adj_close)
+    first = float(s.iloc[0]["adj_close"])
+    years = max(1, round((last_date - dates.iloc[0]).days / 365.25))
+    cagr_label, cagr_cls = fmt_cagr(first, last_adj, years)
+    card4 = _kpi_card("PRICE CAGR", cagr_label, f"annualized  ·  {years}y", cagr_cls)
+
+    return f'<div class="kpi-strip">{card1}{card2}{card3}{card4}</div>'
+
+
+# ── chart ─────────────────────────────────────────────────────────────────────
+
+def price_chart(df: pd.DataFrame, ticker: str, freq: str = "Daily"):
+    """Interactive Altair chart: adjusted close + SMA 20/50/200, hierarchical month/year axis.
+
+    SMAs are 'N-DAY' averages (computed on the daily series upstream), shown at the chart's
+    frequency. Vega-Lite stacks the tick label into two lines (month/day on top, year below at
+    each January) via labelExpr. Clicking a legend entry toggles a series. Returns None if empty.
     """
     if df is None or df.empty:
         return None
 
+    plot = df.rename(columns={"adj_close": "Price", "sma20": "SMA 20",
+                              "sma50": "SMA 50", "sma200": "SMA 200"})
+    value_cols = [c for c in _SERIES_ORDER if c in plot.columns]
+
     if freq == "Monthly":
-        label_expr = (
-            "[timeFormat(datum.value, '%b'), "
-            "timeFormat(datum.value, '%m') == '01' ? timeFormat(datum.value, '%Y') : '']"
-        )
+        label_expr = ("[timeFormat(datum.value, '%b'), "
+                      "timeFormat(datum.value, '%m') == '01' ? timeFormat(datum.value, '%Y') : '']")
     else:  # Daily / Weekly — include the day so zoomed-in ticks distinguish weeks
-        label_expr = (
-            "[timeFormat(datum.value, '%b %d'), "
-            "(timeFormat(datum.value, '%m') == '01' && toNumber(timeFormat(datum.value, '%d')) <= 7)"
-            " ? timeFormat(datum.value, '%Y') : '']"
-        )
+        label_expr = ("[timeFormat(datum.value, '%b %d'), "
+                      "(timeFormat(datum.value, '%m') == '01' && toNumber(timeFormat(datum.value, '%d')) <= 7)"
+                      " ? timeFormat(datum.value, '%Y') : '']")
+
+    sel = alt.selection_point(fields=["series"], bind="legend")  # click legend to toggle a line
 
     return (
-        alt.Chart(df)
-        .mark_line(color=ACCENT, strokeWidth=1.6)
+        alt.Chart(plot)
+        .transform_fold(value_cols, as_=["series", "value"])
+        .mark_line(strokeWidth=1.4)
         .encode(
             x=alt.X("date:T", title=None,
                     axis=alt.Axis(labelExpr=label_expr, labelAngle=0, labelOverlap=True)),
-            y=alt.Y("adj_close:Q", title="Adjusted close (USD)",
+            y=alt.Y("value:Q", title="Adjusted close (USD)",
                     scale=alt.Scale(zero=False, nice=True)),
-            tooltip=[
-                alt.Tooltip("date:T", title="Date", format="%Y-%m-%d"),
-                alt.Tooltip("adj_close:Q", title="Adj close", format="$,.2f"),
-                alt.Tooltip("close:Q", title="Close", format="$,.2f"),
-            ],
+            color=alt.Color("series:N", title=None, sort=_SERIES_ORDER,
+                            scale=alt.Scale(domain=_SERIES_ORDER,
+                                            range=[_SERIES_COLORS[s] for s in _SERIES_ORDER]),
+                            legend=alt.Legend(orient="top-left", symbolStrokeWidth=2)),
+            opacity=alt.condition(sel, alt.value(1.0), alt.value(0.12)),
+            tooltip=[alt.Tooltip("date:T", title="Date", format="%Y-%m-%d"),
+                     alt.Tooltip("series:N", title="Series"),
+                     alt.Tooltip("value:Q", title="Value", format="$,.2f")],
         )
         .properties(height=360)
+        .add_params(sel)
         .configure_view(fill=CREAM, stroke=None)
         .configure_axis(grid=True, gridColor="#E7E2D8", domainColor="#CBBFA8",
                         labelFont="Inter", titleFont="Inter")
