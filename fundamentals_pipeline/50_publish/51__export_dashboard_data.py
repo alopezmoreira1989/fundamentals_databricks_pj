@@ -30,7 +30,7 @@ from pathlib import Path
 
 import pandas as pd
 
-SCHEMA_VERSION = 5   # +dashboard_prices.parquet daily price slice
+SCHEMA_VERSION = 6   # +sector (GICS) on ticker_meta
 FY_YEARS       = 10
 QUARTERS       = 12
 PRICE_YEARS    = 10                              # daily-price retention window (calendar years)
@@ -52,7 +52,7 @@ PRICE_PARQUET  = OUT_DIR / "dashboard_prices.parquet"
 # screener's universe filter. COALESCE to false so NULLs don't leak through.
 tickers_df = spark.sql(f"""
     SELECT
-      t.ticker, t.company,
+      t.ticker, t.company, t.sector,
       COALESCE(t.is_favorite, false) AS is_favorite,
       COALESCE(t.in_sp500,    false) AS in_sp500,
       COALESCE(t.in_r3000,    false) AS in_r3000
@@ -72,6 +72,7 @@ ticker_meta = [
     {
         "ticker":      r.ticker,
         "company":     r.company,
+        "sector":      r.sector,   # NULL → app maps to "Unknown"
         "is_favorite": bool(r.is_favorite),
         "in_sp500":    bool(r.in_sp500),
         "in_r3000":    bool(r.in_r3000),

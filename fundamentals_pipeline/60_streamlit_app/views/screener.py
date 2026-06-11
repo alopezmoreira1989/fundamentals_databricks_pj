@@ -7,15 +7,16 @@ page, which reads the same key.
 
 import pandas as pd
 import streamlit as st
-
 from lib.screener import (
     DEFAULT_COLUMNS,
     MARKET_CAP,
+    SECTORS,
     UNIVERSE_FLAGS,
     bucket_mask,
     buckets_for,
     build_screener_frame,
     search_mask,
+    sector_mask,
     universe_mask,
 )
 
@@ -39,12 +40,14 @@ st.markdown(
 # Filters (top)
 # ──────────────────────────────────────────────────────────────────────────────
 with st.container(border=True):
-    c1, c2, c3 = st.columns([1.2, 1.8, 3])
+    c1, c2, c3, c4 = st.columns([1.1, 1.4, 1.6, 3])
     with c1:
         universe = st.selectbox("Universe", list(UNIVERSE_FLAGS), index=0)
     with c2:
-        query = st.text_input("Search (ticker or name)", "")
+        sector = st.selectbox("Sector", SECTORS, index=0)
     with c3:
+        query = st.text_input("Search (ticker or name)", "")
+    with c4:
         default_cols = [c for c in DEFAULT_COLUMNS if c in metric_order]
         cols = st.multiselect("Columns (metrics)", metric_order, default=default_cols)
 
@@ -73,7 +76,7 @@ with st.container(border=True):
 # ──────────────────────────────────────────────────────────────────────────────
 # Apply filters
 # ──────────────────────────────────────────────────────────────────────────────
-mask = universe_mask(wide, universe) & search_mask(wide, query)
+mask = universe_mask(wide, universe) & sector_mask(wide, sector) & search_mask(wide, query)
 for metric, sel in selections.items():
     mask &= bucket_mask(wide[metric], sel, bucket_specs[metric])
 fdf = wide[mask].reset_index(drop=True)

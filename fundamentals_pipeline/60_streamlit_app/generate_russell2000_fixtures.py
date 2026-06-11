@@ -8,11 +8,13 @@ writes merged fixtures.
 
 import json
 import random
-import requests
-import numpy as np
-import pandas as pd
+import zlib
 from datetime import datetime, timezone
 from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import requests
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
 DATA_FILE = "dashboard_data.parquet"
@@ -21,12 +23,26 @@ META_FILE = "dashboard_meta.json"
 
 TARGET_NEW_TICKERS = 2000
 
-# Synthetic universe flags (schema v3). The base fixtures are the S&P 500; the
+# Synthetic universe flags (schema v6). The base fixtures are the S&P 500; the
 # added tickers are a Russell 2000 proxy → all are in the (broader) Russell 3000.
 FAVORITES = {"AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "JPM", "V", "JNJ", "WMT"}
 
+# The 11 canonical GICS sectors. Synthetic fixtures have no real sector, so each
+# ticker gets a deterministic (CRC32-of-ticker) placeholder — stable across runs —
+# purely so the screener's sector filter is demonstrable in the preview deployment.
+GICS_SECTORS = [
+    "Communication Services", "Consumer Discretionary", "Consumer Staples",
+    "Energy", "Financials", "Health Care", "Industrials",
+    "Information Technology", "Materials", "Real Estate", "Utilities",
+]
+
 random.seed(42)
 np.random.seed(42)
+
+
+def _assign_sector(ticker: str) -> str:
+    """Deterministic placeholder GICS sector for a synthetic preview ticker."""
+    return GICS_SECTORS[zlib.crc32(ticker.encode("utf-8")) % len(GICS_SECTORS)]
 
 
 def build_market_cap_rows(data: pd.DataFrame, metrics: pd.DataFrame) -> pd.DataFrame:
@@ -146,7 +162,7 @@ def main():
     print("1. Loading existing fixtures...")
     existing_data = pd.read_parquet(FIXTURE_DIR / DATA_FILE)
     existing_metrics = pd.read_parquet(FIXTURE_DIR / METRIC_FILE)
-    with open(FIXTURE_DIR / META_FILE, "r") as f:
+    with open(FIXTURE_DIR / META_FILE) as f:
         existing_meta = json.load(f)
 
     existing_tickers = set(existing_data["ticker"].unique())
@@ -179,12 +195,13 @@ def main():
     merged_metrics = pd.concat([merged_metrics, market_cap], ignore_index=True)
     print(f"   + Market Cap rows: {len(market_cap):,}")
 
-    # 7. Build meta — with universe flags (schema v3).
+    # 7. Build meta — with universe flags + placeholder GICS sector (schema v6).
     def _flags(t: str) -> dict:
         return {
             "is_favorite": t in FAVORITES,
             "in_sp500":    t in existing_tickers,   # base fixtures = S&P 500
             "in_r3000":    True,                     # proxy: all in Russell 3000
+            "sector":      _assign_sector(t),        # deterministic placeholder
         }
 
     base_info = [{"ticker": e["ticker"], "company": e["company"]} for e in existing_meta["tickers"]]
@@ -208,7 +225,7 @@ def main():
             )
 
     meta = {
-        "schema_version": 3,
+        "schema_version": 6,
         "build_timestamp": datetime.now(timezone.utc).isoformat(),
         "tickers": all_tickers_info,
         "fy_ranges": fy_ranges,

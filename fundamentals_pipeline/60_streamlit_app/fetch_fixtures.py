@@ -30,10 +30,10 @@ def main():
     spark = DatabricksSession.builder.getOrCreate()
     print("✓ Connected")
 
-    # 1. Ticker universe (favorites only) — with universe flags (schema v3).
+    # 1. Ticker universe (favorites only) — with universe flags + GICS sector (schema v6).
     tickers_df = spark.sql(f"""
         SELECT
-            ticker, company,
+            ticker, company, sector,
             COALESCE(is_favorite, false) AS is_favorite,
             COALESCE(in_sp500,    false) AS in_sp500,
             COALESCE(in_r3000,    false) AS in_r3000
@@ -51,6 +51,7 @@ def main():
         {
             "ticker":      r.ticker,
             "company":     r.company,
+            "sector":      r.sector,   # NULL → app maps to "Unknown"
             "is_favorite": bool(r.is_favorite),
             "in_sp500":    bool(r.in_sp500),
             "in_r3000":    bool(r.in_r3000),
@@ -142,7 +143,7 @@ def main():
     )
 
     meta = {
-        "schema_version":  3,
+        "schema_version":  6,
         "build_timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "tickers":         ticker_meta,
         "fy_ranges":       fy_ranges,
@@ -160,7 +161,7 @@ def main():
     print(f"\n✓ Fixtures written to {OUT_DIR}/")
     print(f"  {data_path.name}    ({data_path.stat().st_size / 1024:.1f} KB)")
     print(f"  {metric_path.name}  ({metric_path.stat().st_size / 1024:.1f} KB)")
-    print(f"  {meta_path.name}    (schema v3)")
+    print(f"  {meta_path.name}    (schema v6)")
 
 
 def _trim_recent(df, period_types: list[str], n_periods: int):
@@ -170,7 +171,7 @@ def _trim_recent(df, period_types: list[str], n_periods: int):
     mask = df["period_type"].isin(period_types)
     sub = df[mask]
     keep = []
-    for ticker, grp in sub.groupby("ticker"):
+    for _ticker, grp in sub.groupby("ticker"):
         recent_ends = (
             grp[["period_end"]]
             .drop_duplicates()
