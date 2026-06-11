@@ -25,9 +25,11 @@ from .colors import (
     GREEN,
     PER_SHARE_CONCEPTS,
     is_negative_concept,
-    row_class as derive_row_class,
     row_color,
     section_class,
+)
+from .colors import (
+    row_class as derive_row_class,
 )
 from .format import (
     EM_DASH,
@@ -70,13 +72,15 @@ def inject_css(css_path: Path) -> None:
 # ──────────────────────────────────────────────────────────────────────────────
 
 def render_masthead(ticker: str, data: pd.DataFrame, meta: dict[str, Any]) -> str:
-    # Resolve company name from meta (schema v2: list of dicts) or fallback.
+    # Resolve company name + GICS sector from meta (schema v2: list of dicts) or fallback.
     company = ticker
+    sector = "Unknown"   # NULL / missing / legacy (pre-v6) artifacts → "Unknown" bucket
     ticker_info_list = meta.get("tickers", [])
     if ticker_info_list and isinstance(ticker_info_list[0], dict):
         match = next((t for t in ticker_info_list if t["ticker"] == ticker), None)
         if match:
             company = match.get("company", ticker)
+            sector = match.get("sector") or "Unknown"
 
     # FY range for this ticker.
     fy_range = ""
@@ -89,8 +93,6 @@ def render_masthead(ticker: str, data: pd.DataFrame, meta: dict[str, Any]) -> st
     else:
         n_years = 0
 
-    build_ts = meta.get("build_timestamp", "")
-
     return (
         '<div class="masthead">'
         '  <div class="masthead-left">'
@@ -98,6 +100,7 @@ def render_masthead(ticker: str, data: pd.DataFrame, meta: dict[str, Any]) -> st
         f'    <h1>{html.escape(str(company))}</h1>'
         '    <div class="ticker-row">'
         f'      <span class="ticker-chip">{ticker}</span>'
+        f'      <span class="ticker-chip">{html.escape(str(sector))}</span>'
         '    </div>'
         '  </div>'
         '  <div class="masthead-right">'

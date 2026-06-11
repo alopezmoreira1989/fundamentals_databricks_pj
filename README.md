@@ -136,6 +136,7 @@ Los tickers favoritos se gestionan editando `00_config/favorites.json` directame
 |---|---|---|---|
 | `ticker` | string | sí | Símbolo del ticker |
 | `company` | string | sí | Nombre de la empresa |
+| `sector` | string | no | Sector GICS canónico (p.ej. `"Information Technology"`). Fallback de **menor precedencia** — solo se usa cuando ni S&P 500 ni Russell 3000 aportan un sector para el ticker. Las etiquetas desconocidas quedan NULL (la app las muestra como "Unknown") |
 | `note` | string | no | Nota libre (no usada por código) |
 | `cik` | string | no | CIK de 10 dígitos con padding (ej. `"0001602065"`). Fuerza este CIK en la ingesta SEC, ignorando el lookup estándar. Útil tras conversiones MLP→C-corp, spin-offs, o cuando SEC tarda en actualizar su índice |
 | `aliases` | list[str] | no | Tickers históricos que apuntan a la misma empresa. Si el pipeline intenta resolver un alias, usa el CIK del ticker canónico |

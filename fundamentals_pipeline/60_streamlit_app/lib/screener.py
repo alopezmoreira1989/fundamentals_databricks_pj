@@ -5,11 +5,11 @@ detail page uses) — there is **no Databricks connection at runtime**. The wide
 frame is built by pivoting the long-format `dashboard_metrics.parquet` to the
 latest available fiscal year per ticker.
 
-Universe flags (`is_favorite` / `in_sp500` / `in_r3000`) come from
-`meta.tickers` and **Market Cap** comes from a `Market Cap` metric row — both
-added by `50_publish/51__export_dashboard_data.py` (schema v3). Older artifacts
-that predate v3 simply yield all-False flags and an empty Market Cap column; the
-screener degrades gracefully until the next publish.
+Universe flags (`is_favorite` / `in_sp500` / `in_r3000`), the GICS `sector`, and
+**Market Cap** (a `Market Cap` metric row) all come from
+`50_publish/51__export_dashboard_data.py` (schema v6). Older artifacts that predate
+a field simply yield its default — all-False flags, ``"Unknown"`` sector, an empty
+Market Cap column — so the screener degrades gracefully until the next publish.
 """
 
 from __future__ import annotations
@@ -33,6 +33,16 @@ UNIVERSE_FLAGS = {
     "Favorites":    "is_favorite",
 }
 _FLAG_COLS = ("is_favorite", "in_sp500", "in_r3000")
+
+# Bucket for tickers with no/NULL/legacy sector (the app's "Unknown" bucket).
+UNKNOWN_SECTOR = "Unknown"
+# 11 canonical GICS sectors (sorted) + a no-op default. Mirrors the hardcoded
+# UNIVERSE_FLAGS pattern; "All sectors" is the no-op default.
+SECTORS = ["All sectors"] + sorted([
+    "Energy", "Materials", "Industrials", "Consumer Discretionary",
+    "Consumer Staples", "Health Care", "Financials", "Information Technology",
+    "Communication Services", "Utilities", "Real Estate",
+])
 
 
 def _as_bool(s: pd.Series) -> pd.Series:
@@ -88,16 +98,24 @@ def build_screener_frame() -> tuple[pd.DataFrame, dict[str, str], list[str]]:
     fy = m.groupby("ticker", observed=True)["fiscal_year"].max().rename("fiscal_year")
     wide = wide.join(fy).reset_index()
 
-    # company + flags de universo desde meta.
+    # company + flags de universo + sector GICS desde meta.
     info = pd.DataFrame(meta.get("tickers", []))
     if "ticker" in info.columns:
-        keep = ["ticker"] + [c for c in ("company", *_FLAG_COLS) if c in info.columns]
+        keep = ["ticker"] + [c for c in ("company", "sector", *_FLAG_COLS) if c in info.columns]
         wide = wide.merge(info[keep], on="ticker", how="left")
     if "company" not in wide.columns:
         wide["company"] = wide["ticker"]
     wide["company"] = wide["company"].fillna(wide["ticker"])
     for c in _FLAG_COLS:
         wide[c] = _as_bool(wide[c]) if c in wide.columns else False
+
+    # Sector: NULL / missing / legacy fixtures → "Unknown" bucket.
+    if "sector" not in wide.columns:
+        wide["sector"] = UNKNOWN_SECTOR
+    wide["sector"] = (
+        wide["sector"].astype("object").where(wide["sector"].notna(), UNKNOWN_SECTOR)
+        .astype(str).str.strip().replace("", UNKNOWN_SECTOR)
+    )
 
     # Market Cap puede no existir aún (Release anterior a schema v3).
     if MARKET_CAP not in wide.columns:
@@ -112,6 +130,13 @@ def universe_mask(df: pd.DataFrame, universe: str) -> pd.Series:
     if not col or col not in df.columns:
         return pd.Series(True, index=df.index)
     return df[col].astype(bool)
+
+
+def sector_mask(df: pd.DataFrame, sector: str) -> pd.Series:
+    """Boolean mask for one GICS sector. ``"All sectors"`` (the default) is a no-op."""
+    if not sector or sector == SECTORS[0] or "sector" not in df.columns:
+        return pd.Series(True, index=df.index)
+    return df["sector"].astype(str) == sector
 
 
 def search_mask(df: pd.DataFrame, query: str) -> pd.Series:
