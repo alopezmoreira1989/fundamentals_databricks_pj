@@ -761,7 +761,7 @@ with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
         pass
 
 elapsed = time.monotonic() - started_at
-print(f"\n✓ Pase principal completo en {elapsed/60:.1f} min ({total/elapsed:.1f} t/s)")
+print(f"\n✓ Main pass complete in {elapsed/60:.1f} min ({total/elapsed:.1f} t/s)")
 
 # ── Lazy pass: /submissions only for flag_short_history ──────────────────────
 # formerNames only affects action_recommended when flag_short_history fires.
@@ -785,7 +785,7 @@ if flagged_idxs:
                 results[i]["former_names"] = []
                 print(f"    ⚠ {results[i]['ticker']}: {str(e)[:80]}")
             results[i]["action_recommended"] = _build_action_recommended(results[i])
-    print(f"  ✓ Pase lazy completo en {(time.monotonic()-lazy_started):.1f}s")
+    print(f"  ✓ Lazy pass complete in {(time.monotonic()-lazy_started):.1f}s")
 
 # ── FTS pass: search for predecessors by name via EDGAR full-text ────────────
 # Invoked for tickers with flag_short_history that have NO alias configured.

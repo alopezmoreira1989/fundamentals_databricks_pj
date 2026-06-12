@@ -100,7 +100,7 @@ spark.sql(f"""
     AND t.period_end  = s.period_end
     WHEN MATCHED THEN DELETE
 """)
-print(f"✓ DELETE de cross-labels completo → {full_tbl}")
+print(f"✓ Cross-label DELETE complete → {full_tbl}")
 
 # COMMAND ----------
 
@@ -163,9 +163,9 @@ if dup_before["dup_groups"] > 0:
     spark.table(staging).select(*target_cols).createOrReplaceTempView("incoming_dedup")
     spark.sql(f"INSERT OVERWRITE TABLE {full_tbl} SELECT {', '.join(target_cols)} FROM incoming_dedup")
     spark.sql(f"DROP TABLE IF EXISTS {staging}")
-    print(f"✓ INSERT OVERWRITE completo → {full_tbl}")
+    print(f"✓ INSERT OVERWRITE complete → {full_tbl}")
 else:
-    print("✓ 0 duplicados en la clave del MERGE — nada que colapsar.")
+    print("✓ 0 duplicates on the MERGE key — nothing to collapse.")
 
 # COMMAND ----------
 

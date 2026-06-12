@@ -113,7 +113,7 @@ else:
 
 # COMMAND ----------
 
-# MAGIC %md ## INV3 — conceptos de dos estados (info)
+# MAGIC %md ## INV3 — two-statement concepts (info)
 
 # COMMAND ----------
 

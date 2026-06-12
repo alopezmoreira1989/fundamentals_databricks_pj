@@ -326,7 +326,7 @@ spark.sql(f"""
     AND t.period_type = 'FY'
     WHEN MATCHED AND t.is_derived = false THEN DELETE
 """)
-print(f"✓ DELETE de FY huérfanas completo → {full_tbl}")
+print(f"✓ Orphan FY DELETE complete → {full_tbl}")
 
 # COMMAND ----------
 

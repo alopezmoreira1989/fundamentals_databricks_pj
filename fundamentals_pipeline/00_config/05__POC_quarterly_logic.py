@@ -325,9 +325,9 @@ def reconcile(ticker: str, concept: str):
         print(f"  Σ Q1..Q4 =  {total:>20,.0f}")
         print(f"  Diff vs FY: {diff:>+20,.0f}  ({pct:+.4f}%)")
         if abs(pct) < 0.01:
-            print(f"  ✓ CUADRA")
+            print(f"  ✓ RECONCILES")
         else:
-            print(f"  ✗ NO CUADRA — investigar")
+            print(f"  ✗ DOES NOT RECONCILE — investigate")
 
 # COMMAND ----------
 
