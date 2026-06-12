@@ -8,6 +8,13 @@ synthetic data for preview. When the Databricks pipeline publishes real data to
 a GitHub Release (`latest` tag), the app picks it up automatically — **no
 Databricks credentials** needed at runtime.
 
+The landing page is a **screener** (one row per company) filterable by index
+universe and by **GICS sector** (the 11 canonical sectors from `meta.tickers`,
+defaulting to `"Unknown"` for missing/legacy fixtures); clicking a row opens the
+per-ticker detail page, whose masthead shows the company's sector. Sector arrives
+in the published `meta` at `schema_version` ≥ 6 — older artifacts without it still
+load (every consumer defaults `sector`), so the filter degrades to all-`Unknown`.
+
 ---
 
 ## Architecture
