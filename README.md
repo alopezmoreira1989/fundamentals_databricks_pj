@@ -159,7 +159,7 @@ Para modificarlas: edita el JSON, commit + push, y el siguiente run del pipeline
 
 | Table | Description |
 |---|---|
-| `{CATALOG}.config.tickers` | Universo de tickers activos (S&P 500 + Russell 3000 + favoritos) |
+| `{CATALOG}.config.tickers` | Universo de tickers activos (S&P 500 + Russell 3000 + favoritos), con columna `sector` (GICS) por ticker — precedencia Wikipedia GICS (S&P) → IWV normalizado → favoritos → NULL |
 | `{CATALOG}.config.concept_hierarchy` | Jerarquía de conceptos contables |
 | `{CATALOG}.config.metrics_hierarchy` | Jerarquía de derived metrics |
 | `{CATALOG}.{SCHEMA}.financials_raw` | Append-only audit log of all SEC scrapes (10-K + 10-Q) |
@@ -478,6 +478,8 @@ ratios stay NULL when their one component is absent.
 **Live app: https://alm-equity-fundamentals.streamlit.app/**
 
 A read-only dashboard at Streamlit Community Cloud renders the same data without Databricks credentials. Currently serves ~2,500 tickers (S&P 500 + Russell 2000 proxy) with synthetic data for preview; production data is published via GitHub Release. See [`60_streamlit_app/README.md`](fundamentals_pipeline/60_streamlit_app/README.md) for details.
+
+The landing-page **screener** filters the universe by index membership (All / S&P 500 / Russell 3000 / Favorites) and by **GICS sector** — the 11 canonical sectors sourced from `config.tickers.sector`, with a no-op `All sectors` default. Tickers with no sector (NULL/legacy artifacts) fall into an **Unknown** bucket. Each company's sector is also shown as a chip on the detail-page masthead.
 
 ### Valuation football field
 
