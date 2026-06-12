@@ -126,25 +126,100 @@ BALANCE_SHEET = {
 }
 
 CASH_FLOW = {
-    "Net Income":                  ("NetIncomeLoss",                                                                                                     "flow_additive"),
-    "Net Income (to common)":      ("NetIncomeLossAvailableToCommonStockholdersBasic",                                                                   "flow_additive"),
-    "Net Income (incl NCI)":       ("ProfitLoss",                                                                                                        "flow_additive"),
-    "Depreciation & Amortization": ("DepreciationDepletionAndAmortization",                                                                              "flow_additive"),
-    "Stock-based Compensation":    ("ShareBasedCompensation",                                                                                            "flow_additive"),
-    "Changes in Working Capital":  ("IncreaseDecreaseInOperatingCapital",                                                                                "flow_additive"),
-    "Operating Cash Flow":         ("NetCashProvidedByUsedInOperatingActivities",                                                                       "flow_additive"),
-    "Operating Cash Flow (cont ops)": ("NetCashProvidedByUsedInOperatingActivitiesContinuingOperations",                                                "flow_additive"),
-    "CapEx":                       ("PaymentsToAcquirePropertyPlantAndEquipment",                                                                       "flow_additive"),
-    "Acquisitions":                ("PaymentsToAcquireBusinessesNetOfCashAcquired",                                                                     "flow_additive"),
-    "Purchases of Investments":    ("PaymentsToAcquireInvestments",                                                                                     "flow_additive"),
-    "Sales of Investments":        ("ProceedsFromSaleOfInvestments",                                                                                    "flow_additive"),
-    "Investing Cash Flow":         ("NetCashProvidedByUsedInInvestingActivities",                                                                       "flow_additive"),
-    "Debt Issuance":               ("ProceedsFromIssuanceOfLongTermDebt",                                                                               "flow_additive"),
-    "Debt Repayment":              ("RepaymentsOfLongTermDebt",                                                                                         "flow_additive"),
-    "Dividends Paid":              ("PaymentsOfDividends",                                                                                              "flow_additive"),
-    "Share Repurchases":           ("PaymentsForRepurchaseOfCommonStock",                                                                               "flow_additive"),
-    "Financing Cash Flow":         ("NetCashProvidedByUsedInFinancingActivities",                                                                       "flow_additive"),
-    "Net Change in Cash":          ("CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalentsPeriodIncreaseDecreaseIncludingExchangeRateEffect",   "flow_additive"),
+    "Net Income":                  ("NetIncomeLoss",                                                 "flow_additive"),
+    "Net Income (to common)":      ("NetIncomeLossAvailableToCommonStockholdersBasic",               "flow_additive"),
+    "Net Income (incl NCI)":       ("ProfitLoss",                                                    "flow_additive"),
+    "Depreciation & Amortization": ("DepreciationDepletionAndAmortization",                          "flow_additive"),
+    "Stock-based Compensation":    ("ShareBasedCompensation",                                        "flow_additive"),
+    "Changes in Working Capital":  ("IncreaseDecreaseInOperatingCapital",                            "flow_additive"),
+    "Operating Cash Flow":         ("NetCashProvidedByUsedInOperatingActivities",                    "flow_additive"),
+    "Operating Cash Flow (cont ops)": ("NetCashProvidedByUsedInOperatingActivitiesContinuingOperations", "flow_additive"),
+    # ── CapEx — per-period fallback list (extract_series_multi). PP&E is the canonical tag;
+    # many filers (small-cap, oil & gas) tag capex as ProductiveAssets, CapitalImprovements or
+    # OtherPP&E. Recovery measured on the NULL set: ProductiveAssets 9/18 > PP&E 5/18.
+    # PaymentsToAcquireMachineryAndEquipment is EXCLUDED (0 recovery, and it's the candidate most
+    # likely to be a summable component line rather than an aggregate). Per-period coalesce: the
+    # highest-priority tag present that year wins; two tags are NEVER summed — a filer that reports
+    # PP&E + machinery as separate lines could undercount (acceptable approximation, same as the
+    # balance-sheet debt chain).
+    "CapEx":                       (["PaymentsToAcquirePropertyPlantAndEquipment",
+                                     "PaymentsToAcquireProductiveAssets",
+                                     "PaymentsForCapitalImprovements",
+                                     "PaymentsToAcquireOtherPropertyPlantAndEquipment",
+                                     "PaymentsToAcquireOilAndGasPropertyAndEquipment"],
+                                    "flow_additive"),
+    # ── Acquisitions — net-of-cash is the canonical line; some filers report the gross.
+    # Recovery: NetOfCash 10/19, Gross 5/19. (AndInterestInAffiliates 0/19 → excluded.)
+    "Acquisitions":                (["PaymentsToAcquireBusinessesNetOfCashAcquired",
+                                     "PaymentsToAcquireBusinessesGross"],
+                                    "flow_additive"),
+    # ── Purchases of Investments — the aggregate PaymentsToAcquireInvestments is almost never
+    # used (1/17 on the NULL set); filers tag by asset class (marketable, AFS-debt, HTM,
+    # short-term). The aggregate stays at priority 0 (wins when present → no undercount); the
+    # asset-class tags fill in when the aggregate is absent. ⚠ Coalesce-vs-sum risk: a filer that
+    # reports AFS-debt + HTM as SEPARATE lines and WITHOUT the aggregate will undercount (coalesce
+    # picks only one). Acceptable approximation; the per-sum refinement is deferred (see D&A).
+    "Purchases of Investments":    (["PaymentsToAcquireInvestments",
+                                     "PaymentsToAcquireMarketableSecurities",
+                                     "PaymentsToAcquireAvailableForSaleSecuritiesDebt",
+                                     "PaymentsToAcquireAvailableForSaleSecurities",
+                                     "PaymentsToAcquireHeldToMaturitySecurities",
+                                     "PaymentsToAcquireShortTermInvestments"],
+                                    "flow_additive"),
+    # ── Sales of Investments — the current tag (ProceedsFromSaleOfInvestments) is DEAD: 0/18 on
+    # the NULL set and 0 rows in the whole table. Rebuilt from the sale/maturity-by-asset-class
+    # variants. Same ⚠ coalesce-vs-sum risk as Purchases (sale and maturity are often separate
+    # lines that SUM to total proceeds); the broadest aggregate is prioritized.
+    # ProceedsFromSaleOfPropertyPlantAndEquipment is NOT included (that is PP&E disposal, a
+    # different investing line — not a sale of financial investments).
+    "Sales of Investments":        (["ProceedsFromSaleOfInvestments",
+                                     "ProceedsFromSaleOfAvailableForSaleSecuritiesDebt",
+                                     "ProceedsFromSaleOfAvailableForSaleSecurities",
+                                     "ProceedsFromSaleMaturityAndCollectionsOfInvestments",
+                                     "ProceedsFromSaleAndMaturityOfMarketableSecurities",
+                                     "ProceedsFromMaturitiesPrepaymentsAndCallsOfAvailableForSaleSecurities",
+                                     "ProceedsFromSaleOfShortTermInvestments"],
+                                    "flow_additive"),
+    "Investing Cash Flow":         ("NetCashProvidedByUsedInInvestingActivities",                    "flow_additive"),
+    # cont-ops: filers with discontinued operations (RCAT FY2024/FY2025) report the investing
+    # subtotal only as ...ContinuingOperations → the base comes out NULL. Synonym+priority below.
+    "Investing Cash Flow (cont ops)": ("NetCashProvidedByUsedInInvestingActivitiesContinuingOperations", "flow_additive"),
+    # ── Debt Issuance — DEFERRED this pass (revolver-vs-term risk: ProceedsFromLinesOfCredit
+    # mixes revolving-line draws with term-debt issuance). Pending a semantics/sum decision.
+    # Keep the single tag.
+    "Debt Issuance":               ("ProceedsFromIssuanceOfLongTermDebt",                            "flow_additive"),
+    # ── Debt Repayment — fallback with alternative repayment lines (aggregate, notes,
+    # convertibles). Recovery: NotesPayable 5/16, Convertible 4/16, LongTermDebt 4/16. Revolving
+    # credit lines (Repayments...LinesOfCredit) are EXCLUDED for the same revolver-vs-term reason
+    # that deferred Debt Issuance — only term debt / aggregate / notes / convertibles.
+    "Debt Repayment":              (["RepaymentsOfLongTermDebt",
+                                     "RepaymentsOfDebt",
+                                     "RepaymentsOfNotesPayable",
+                                     "RepaymentsOfConvertibleDebt"],
+                                    "flow_additive"),
+    # ── Dividends Paid — DEFERRED this pass. The aggregate PaymentsOfDividends coexists with
+    # components (PaymentsOfDividendsCommonStock / Preferred / MinorityInterest). A coalesce to
+    # common-only would undercount the total when only components are reported → pending SUM logic
+    # (like D&A). Keep the single aggregate tag.
+    "Dividends Paid":              ("PaymentsOfDividends",                                           "flow_additive"),
+    # ── Share Repurchases — common-stock is the canonical line (11/17); the Equity aggregate is
+    # added. Preferred-stock repurchase is EXCLUDED (a separate summable component, not an
+    # equivalent aggregate).
+    "Share Repurchases":           (["PaymentsForRepurchaseOfCommonStock",
+                                     "PaymentsForRepurchaseOfEquity"],
+                                    "flow_additive"),
+    "Financing Cash Flow":         ("NetCashProvidedByUsedInFinancingActivities",                    "flow_additive"),
+    # cont-ops: same pattern as Investing CF (RCAT) → ...ContinuingOperations. Synonym+priority below.
+    "Financing Cash Flow (cont ops)": ("NetCashProvidedByUsedInFinancingActivitiesContinuingOperations", "flow_additive"),
+    # ── Net Change in Cash — variants of the SAME total (NOT summable): Including-FX is the real
+    # period change in cash; Excluding-FX drops the exchange-rate effect; the pre-2018 tag
+    # (CashAndCashEquivalentsPeriodIncreaseDecrease, no restricted) covers the older years.
+    # Recovery on the NULL set: Excluding 15/16, pre-2018 14/16. Coalesce by priority (Including
+    # first) is correct — they are NOT summed, they are versions of the same number.
+    "Net Change in Cash":          (["CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalentsPeriodIncreaseDecreaseIncludingExchangeRateEffect",
+                                     "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalentsPeriodIncreaseDecreaseExcludingExchangeRateEffect",
+                                     "CashAndCashEquivalentsPeriodIncreaseDecrease"],
+                                    "flow_additive"),
 }
 
 STATEMENTS = {
@@ -206,9 +281,13 @@ CONCEPT_SYNONYMS = {
     # We prefer the equity attributable to shareholders (StockholdersEquity) for ROE.
     "Total Equity (incl NCI)":     "Total Stockholders Equity",  # StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest
 
-    # ── Operating Cash Flow ────────────────────────────────────────────────────
-    # Many report the "continuing operations" variant instead of the base.
+    # ── Operating / Investing / Financing Cash Flow (cont ops) ─────────────────
+    # Filers with discontinued operations report the cash-flow subtotals only as
+    # ...ContinuingOperations instead of the base (RCAT: Investing/Financing came out NULL for
+    # FY2024 and FY2025). Same mechanism as OCF: they collapse to the canonical at merge.
     "Operating Cash Flow (cont ops)": "Operating Cash Flow",  # NetCashProvidedByUsedInOperatingActivitiesContinuingOperations
+    "Investing Cash Flow (cont ops)": "Investing Cash Flow",  # NetCashProvidedByUsedInInvestingActivitiesContinuingOperations
+    "Financing Cash Flow (cont ops)": "Financing Cash Flow",  # NetCashProvidedByUsedInFinancingActivitiesContinuingOperations
 
     # ── Interest Expense ───────────────────────────────────────────────────────
     # Filers migrate the interest line in the income statement away from
@@ -245,9 +324,13 @@ CONCEPT_PRIORITY = {
     # Equity: attributable to shareholders > incl-NCI
     "Total Stockholders Equity": 0,
     "Total Equity (incl NCI)":   1,
-    # OCF: base > continuing-operations
+    # OCF / Investing / Financing: base > continuing-operations
     "Operating Cash Flow":            0,
     "Operating Cash Flow (cont ops)": 1,
+    "Investing Cash Flow":            0,
+    "Investing Cash Flow (cont ops)": 1,
+    "Financing Cash Flow":            0,
+    "Financing Cash Flow (cont ops)": 1,
     # Revenue: total revenue line (Revenues) > ASC-606 contract > Sales variants >
     # sector tags. Revenue synonyms COEXIST far more than the old comment assumed
     # (~6.5k fy, ~4.2k differ >2%): without priority, `value desc` was picking the
