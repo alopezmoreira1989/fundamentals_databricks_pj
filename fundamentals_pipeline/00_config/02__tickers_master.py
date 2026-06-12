@@ -36,6 +36,19 @@ import requests
 from pyspark.sql import functions as F
 from pyspark.sql.types import BooleanType, StringType, StructField, StructType
 
+# `fetch_sp500()` parses the Wikipedia table with `pd.read_html(flavor="lxml")`, but
+# lxml is NOT in the Databricks serverless base image (ImportError: lxml not found).
+# Install it defensively with a plain subprocess pip — NOT `%pip`, which is unsupported
+# when this notebook is pulled in via `%run` (e.g. from 91__full_pipeline). No-op on
+# clusters that already ship lxml; idempotent on re-runs.
+try:
+    import lxml  # noqa: F401
+except ImportError:
+    import subprocess
+    import sys
+
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "lxml"])
+
 INGEST_SP500  = True
 INGEST_R3000  = True
 
