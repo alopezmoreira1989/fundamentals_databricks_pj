@@ -1,5 +1,5 @@
 {
-  "_comment": "Jerarquía de conceptos para los 3 estados financieros. Dos tipos de nodos: GRUPOS (con campo 'group' en lugar de 'concept') que solo sirven para agrupar visualmente y NO existen en financials, y CONCEPTOS (con 'concept') que sí existen en financials. Los subtotales como 'Total Assets' son conceptos que aparecen al final del grupo al que pertenecen. El sort_order se deriva del orden en este archivo: hijos primero, luego subtotal del grupo.",
+  "_comment": "Concept hierarchy for the 3 financial statements. Two node types: GROUPS (with a 'group' field instead of 'concept') that only serve to group visually and do NOT exist in financials, and CONCEPTS (with 'concept') that do exist in financials. Subtotals like 'Total Assets' are concepts that appear at the end of the group they belong to. sort_order is derived from the order in this file: children first, then the group's subtotal.",
 
   "Income Statement": [
     {
