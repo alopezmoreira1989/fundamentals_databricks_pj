@@ -66,7 +66,7 @@ def mini_bars_svg(
     width: int = 64,
     height: int = 26,
 ) -> str:
-    """Mini-columnas de los últimos `n` años; la última barra en color, el resto atenuadas."""
+    """Mini bar chart for the last `n` years; last bar in color, the rest muted."""
     vals = [v for v in values if not is_missing(v)][-n:]
     if len(vals) < 2:
         return ""
@@ -77,7 +77,7 @@ def mini_bars_svg(
     for i, v in enumerate(vals):
         h = 4 + (v - vmin) / span * (height - 6)
         x = i * (bw + 3)
-        fill = color if i == len(vals) - 1 else "#CDD9CF"   # último resaltado
+        fill = color if i == len(vals) - 1 else "#CDD9CF"   # last bar highlighted
         bars.append(
             f'<rect x="{x:.1f}" y="{height - h:.1f}" width="{bw:.1f}" '
             f'height="{h:.1f}" rx="1" fill="{fill}"/>'

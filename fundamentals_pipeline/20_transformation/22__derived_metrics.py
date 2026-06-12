@@ -33,12 +33,12 @@ metrics_tbl = f"{CATALOG}.{SCHEMA}.financials_metrics"
 
 # MAGIC %md ## 1. Read FY-only rows and pivot to wide format
 # MAGIC
-# MAGIC Defensa contra company inconsistente por ticker: el MERGE de `21__clean_and_merge.py`
-# MAGIC solo actualiza `company` cuando cambia `value`, así que filas viejas pueden conservar
-# MAGIC un company stale (escapes raros de SEC, restructures LLC→Inc., overrides en
-# MAGIC favorites.json). Aquí normalizamos al primer non-null por ticker antes del pivot —
-# MAGIC si no, el `groupBy(ticker, company, fy)` produce filas duplicadas y el MERGE final
-# MAGIC peta con DELTA_MULTIPLE_SOURCE_ROW_MATCHING.
+# MAGIC Guard against inconsistent company per ticker: the MERGE in `21__clean_and_merge.py`
+# MAGIC only updates `company` when `value` changes, so old rows can retain a stale company
+# MAGIC name (rare SEC escapes, LLC→Inc. restructures, favorites.json overrides).
+# MAGIC We normalize to the first non-null per ticker before the pivot —
+# MAGIC otherwise `groupBy(ticker, company, fy)` produces duplicate rows and the final MERGE
+# MAGIC fails with DELTA_MULTIPLE_SOURCE_ROW_MATCHING.
 
 # COMMAND ----------
 
@@ -67,9 +67,9 @@ if "Revenue" in wide.columns and "Revenue (contract)" in wide.columns:
         F.coalesce(F.col("Revenue"), F.col("Revenue (contract)"))
     ).drop("Revenue (contract)")
 
-# El pivot de `wide` (FY full-scan + pivot sobre todos los conceptos) es caro y se consume
-# 2×: el count() de sanity aquí y todo el bloque `metrics_wide` aguas abajo. localCheckpoint
-# (eager) lo materializa una vez. .cache()/.persist() NO van en serverless; localCheckpoint sí.
+# The `wide` pivot (FY full-scan + pivot over all concepts) is expensive and consumed
+# 2×: the sanity count() here and the entire `metrics_wide` block downstream. localCheckpoint
+# (eager) materializes it once. .cache()/.persist() do NOT work on serverless; localCheckpoint does.
 wide = wide.localCheckpoint(eager=True)
 
 print(f"Wide table: {wide.count():,} rows × {len(wide.columns)} columns")
@@ -364,8 +364,8 @@ def unpivot(df, metric_cols):
     ).filter(F.col("value").isNotNull())
 
 long_base = unpivot(metrics_wide, base_metric_cols)
-# long_base se reusa 4×: count() aquí, el unionByName con long_val, el count() final y el MERGE.
-# Materializar evita re-derivar todo el bloque de métricas (withColumns + stack) cada vez.
+# long_base is reused 4×: count() here, the unionByName with long_val, the final count(), and the MERGE.
+# Materializing avoids re-deriving the entire metrics block (withColumns + stack) each time.
 long_base = long_base.localCheckpoint(eager=True)
 print(f"Base metrics long: {long_base.count():,} rows")
 
@@ -614,9 +614,9 @@ if pe_mcap is not None:
     )
 
     # Need company column for downstream join — pull from financials.
-    # Misma defensa que arriba: si un ticker tiene >1 valor de company en financials
-    # (escapes raros de SEC, restructures, etc.), .distinct() devolvería múltiples
-    # filas y el join duplicaría. Tomamos el primer non-null por ticker.
+    # Same guard as above: if a ticker has >1 company value in financials
+    # (rare SEC escapes, restructures, etc.), .distinct() would return multiple
+    # rows and the join would duplicate. We take the first non-null per ticker.
     company_lookup = (
         spark.table(full_tbl)
         .groupBy("ticker")
@@ -633,8 +633,8 @@ if pe_mcap is not None:
         F.expr(stack_expr)
     ).filter(F.col("value").isNotNull())
 
-    # long_val arrastra su propio FY full-scan + pivot val + withColumns + stack, y se reusa 4×
-    # (count aquí, union, count final, MERGE). Checkpoint para no recomputar el pivot val cada vez.
+    # long_val carries its own FY full-scan + val pivot + withColumns + stack, and is reused 4×
+    # (count here, union, final count, MERGE). Checkpoint to avoid recomputing the val pivot each time.
     long_val = long_val.localCheckpoint(eager=True)
     print(f"Valuation metrics long: {long_val.count():,} rows")
 else:

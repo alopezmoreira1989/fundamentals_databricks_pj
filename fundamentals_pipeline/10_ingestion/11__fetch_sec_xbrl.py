@@ -201,12 +201,12 @@ def get_facts(cik: str) -> dict:
 
 def merge_facts(*facts_dicts: dict) -> dict:
     """
-    Concatena los arrays `facts[ns][concept]["units"][unit]` a través de múltiples
-    JSONs de companyfacts. Útil cuando un ticker tiene CIKs predecesores (p.ej. tras
-    una fusión MLP→C-corp): el histórico vive bajo el CIK viejo y los filings recientes
-    bajo el nuevo. Mergeamos los facts crudos y dejamos que la dedup downstream en
-    21__clean_and_merge.py — Window por (ticker, stmt, concept, fy) con latest filed —
-    resuelva cualquier solape.
+    Concatenates the `facts[ns][concept]["units"][unit]` arrays across multiple
+    companyfacts JSONs. Useful when a ticker has predecessor CIKs (e.g. after an
+    MLP→C-corp conversion): historical data lives under the old CIK and recent
+    filings under the new one. We merge the raw facts and let the downstream dedup in
+    21__clean_and_merge.py — Window by (ticker, stmt, concept, fy) with latest filed —
+    resolve any overlap.
     """
     if not facts_dicts:
         return {}
@@ -214,7 +214,7 @@ def merge_facts(*facts_dicts: dict) -> dict:
         return facts_dicts[0]
 
     merged = {"facts": {}}
-    # Preservar metadatos del primer dict (que será el CIK primario)
+    # Preserve metadata from the first dict (the primary CIK)
     for k, v in facts_dicts[0].items():
         if k != "facts":
             merged[k] = v
@@ -224,7 +224,7 @@ def merge_facts(*facts_dicts: dict) -> dict:
             ns_bucket = merged["facts"].setdefault(ns, {})
             for concept, payload in concepts.items():
                 if concept not in ns_bucket:
-                    # primera vez que vemos este concept: copiamos shallow + clonamos units
+                    # first time we see this concept: shallow copy + clone units
                     ns_bucket[concept] = {
                         "label":       payload.get("label"),
                         "description": payload.get("description"),
@@ -383,8 +383,8 @@ def process_ticker(ticker: str, scraped_at_ts: datetime) -> tuple:
     except Exception as e:
         return [], _classify_error(e, "fetch_facts")
 
-    # Fusionar CIKs predecesores (fusiones, MLP→C-corp, spinoffs). Un alias roto
-    # no debe romper la ingesta del ticker — log y seguir con lo que tengamos.
+    # Merge predecessor CIKs (mergers, MLP→C-corp, spinoffs). A broken alias
+    # must not abort ingestion for the ticker — log and continue with what we have.
     _aliases = _FAV_CIK_ALIASES.get(ticker.upper(), [])
     if _aliases:
         _alias_facts = []
@@ -399,14 +399,14 @@ def process_ticker(ticker: str, scraped_at_ts: datetime) -> tuple:
             facts = merge_facts(facts, *_alias_facts)
 
     try:
-        # Construcción VECTORIZADA de filas. Antes: series.iterrows() por concepto — el ~42% del
-        # CPU por-ticker. El CPU es el cuello de botella REAL de la ingesta: está GIL-serializado,
-        # así que los 8 threads solo solapan la descarga de red (I/O libera el GIL), NO el
-        # parseo/pandas/construcción de filas → throughput ≈ 1 core (~1.5 t/s vs el techo de 8 req/s).
-        # Cada `series` ya es un DataFrame; añadimos las columnas constantes vectorialmente y volcamos
-        # con to_dict en vez de fila-a-fila. Parity validada sobre 12 tickers reales (incl. multi-tag
-        # T/VZ/WMB): mismos conteos y valores. (El extract — el otro ~50% — necesitaría paralelismo
-        # real para mejorar; ver investigación del cuello de botella de ingesta.)
+        # VECTORIZED row construction. Previously: series.iterrows() per concept — ~42% of
+        # per-ticker CPU. CPU is the REAL ingestion bottleneck: it is GIL-serialized, so the
+        # 8 threads only overlap network downloads (I/O releases the GIL), NOT
+        # parsing/pandas/row building → throughput ≈ 1 core (~1.5 t/s vs the 8 req/s ceiling).
+        # Each `series` is already a DataFrame; we add constant columns vectorially and dump
+        # with to_dict instead of row-by-row. Parity validated on 12 real tickers (incl. multi-tag
+        # T/VZ/WMB): same counts and values. (extract — the other ~50% — would need real
+        # parallelism to improve; see ingestion bottleneck investigation.)
         frames = []
         for stmt_name, concept_map in STATEMENTS.items():
             for label, (xbrl_concept, kind) in concept_map.items():
@@ -423,8 +423,8 @@ def process_ticker(ticker: str, scraped_at_ts: datetime) -> tuple:
         allf["ticker"]     = ticker.upper()
         allf["company"]    = company_name
         allf["scraped_at"] = scraped_at_ts
-        # Normaliza tipos para casar EXACTAMENTE con el dict por-fila anterior (lo que luego
-        # consume flush_batch): fy → Int nullable; fechas → date|None; value/fp → valor|None.
+        # Normalize types to match EXACTLY the previous per-row dict output (consumed later
+        # by flush_batch): fy → nullable Int; dates → date|None; value/fp → value|None.
         allf["fy"] = allf["fy"].astype("Int64")
         for _dc in ("period_start", "period_end", "filed"):
             allf[_dc] = allf[_dc].dt.date.where(allf[_dc].notna(), None)

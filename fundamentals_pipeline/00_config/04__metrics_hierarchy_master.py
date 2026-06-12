@@ -2,16 +2,16 @@
 # MAGIC %md
 # MAGIC # 00_config / 04__metrics_hierarchy_master
 # MAGIC
-# MAGIC Lee el árbol de jerarquía desde `00_config/metrics_hierarchy.json`, lo aplana,
-# MAGIC y escribe la tabla `main.config.metrics_hierarchy`.
+# MAGIC Reads the hierarchy tree from `00_config/metrics_hierarchy.json`, flattens it,
+# MAGIC and writes the `main.config.metrics_hierarchy` table.
 # MAGIC
-# MAGIC **Estructura del JSON (2 niveles fijos):**
-# MAGIC - **`category`** — agrupador de alto nivel: Profitability, Cash Flow, Growth, Financial Health, Valuation
-# MAGIC - **`subcategory`** — agrupador fino dentro de cada categoría: Margins, YoY, Leverage, etc.
-# MAGIC - **`metric`** — nombre exacto tal como aparece en `financials_metrics.metric`
+# MAGIC **JSON structure (2 fixed levels):**
+# MAGIC - **`category`** — high-level grouper: Profitability, Cash Flow, Growth, Financial Health, Valuation
+# MAGIC - **`subcategory`** — fine grouper within each category: Margins, YoY, Leverage, etc.
+# MAGIC - **`metric`** — exact name as it appears in `financials_metrics.metric`
 # MAGIC
-# MAGIC Cada métrica también lleva `unit` (`percent` / `usd` / `ratio`) y `requires_market_data`
-# MAGIC (true para las métricas de valuación, que dependen de `market_data`).
+# MAGIC Each metric also carries `unit` (`percent` / `usd` / `ratio`) and `requires_market_data`
+# MAGIC (true for valuation metrics that depend on `market_data`).
 # MAGIC
 # MAGIC **Salida (ejemplo):**
 # MAGIC ```
@@ -26,14 +26,14 @@
 # MAGIC Valuation        | Enterprise Value | EV/EBITDA           | ratio   | true                 | 180
 # MAGIC ```
 # MAGIC
-# MAGIC ### ✏️ Cómo modificar la jerarquía
-# MAGIC 1. Edita `00_config/metrics_hierarchy.json` en el repo
+# MAGIC ### ✏️ How to modify the hierarchy
+# MAGIC 1. Edit `00_config/metrics_hierarchy.json` in the repo
 # MAGIC 2. Commit + push
-# MAGIC 3. Re-ejecuta este notebook (o el pipeline completo)
+# MAGIC 3. Re-run this notebook (or the full pipeline)
 # MAGIC
-# MAGIC > ⚠️ El campo `metric` debe coincidir EXACTAMENTE con el nombre usado en
-# MAGIC > `22__derived_metrics` (incluyendo espacios y símbolos: `Gross Margin %`,
-# MAGIC > `Debt / Equity`, `P/E`, etc.). Si no coincide, el join en el dashboard fallará.
+# MAGIC > ⚠️ The `metric` field must match EXACTLY the name used in
+# MAGIC > `22__derived_metrics` (including spaces and symbols: `Gross Margin %`,
+# MAGIC > `Debt / Equity`, `P/E`, etc.). If it doesn't match, the join in the dashboard will fail.
 
 # COMMAND ----------
 
@@ -53,24 +53,24 @@ print(f"Target : {TARGET_TABLE}")
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 1. Cargar y aplanar el JSON
+# MAGIC ## 1. Load and flatten the JSON
 
 # COMMAND ----------
 
 with open(HIERARCHY_JSON_PATH, "r", encoding="utf-8") as f:
     tree = json.load(f)
 
-# Las claves que empiezan por '_' son metadata/comentarios — descartarlas
+# Keys starting with '_' are metadata/comments — discard them
 tree = {k: v for k, v in tree.items() if not k.startswith("_")}
 
-print(f"Categorías encontradas: {list(tree.keys())}")
+print(f"Categories found: {list(tree.keys())}")
 
 # COMMAND ----------
 
-# Estructura plana de 2 niveles — no necesita recursión.
-# Recorremos: category → subcategory → lista de metrics.
-# El sort_order se asigna globalmente (10, 20, 30, ...) respetando el
-# orden del JSON. Esto da un orden estable en el dashboard.
+# Flat 2-level structure — no recursion needed.
+# We iterate: category → subcategory → list of metrics.
+# sort_order is assigned globally (10, 20, 30, ...) respecting the
+# JSON order. This gives a stable order in the dashboard.
 
 rows = []
 counter = 0
@@ -88,14 +88,14 @@ for category, subcategories in tree.items():
                 "sort_order":           counter,
             })
 
-print(f"Total métricas aplanadas: {len(rows)}")
+print(f"Total flattened metrics: {len(rows)}")
 for r in rows:
     print(f"  {r['sort_order']:>4}  {r['category']:<18} | {r['subcategory']:<18} | {r['metric']}")
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 2. Escribir a Delta (overwrite — la jerarquía es siempre fuente única)
+# MAGIC ## 2. Write to Delta (overwrite — the hierarchy is always the single source)
 
 # COMMAND ----------
 
@@ -120,7 +120,7 @@ spark.sql(f"DROP TABLE IF EXISTS {TARGET_TABLE}")
     .saveAsTable(TARGET_TABLE)
 )
 
-print(f"✓ {sdf.count():,} filas escritas → {TARGET_TABLE}")
+print(f"✓ {sdf.count():,} rows written → {TARGET_TABLE}")
 
 # COMMAND ----------
 
@@ -144,11 +144,11 @@ spark.sql(f"""
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 4. Validación — todas las métricas en `financials_metrics` están mapeadas
+# MAGIC ## 4. Validation — all metrics in `financials_metrics` are mapped
 # MAGIC
-# MAGIC Detecta métricas que existen en `financials_metrics` pero no aparecen en la jerarquía
-# MAGIC (orphan metrics) o al revés (jerarquía con métricas que nunca se computan).
-# MAGIC Si todo está bien mapeado, ambas consultas deben devolver 0 filas.
+# MAGIC Detects metrics that exist in `financials_metrics` but do not appear in the hierarchy
+# MAGIC (orphan metrics) or vice versa (hierarchy with metrics that are never computed).
+# MAGIC If everything is mapped correctly, both queries should return 0 rows.
 
 # COMMAND ----------
 
@@ -163,9 +163,9 @@ try:
     """)
     n_orph = orphans.count()
     if n_orph == 0:
-        print("✓ Todas las métricas en financials_metrics están mapeadas en la jerarquía")
+        print("✓ All metrics in financials_metrics are mapped in the hierarchy")
     else:
-        print(f"⚠ {n_orph} métricas en financials_metrics SIN entrada en la jerarquía:")
+        print(f"⚠ {n_orph} metrics in financials_metrics WITHOUT an entry in the hierarchy:")
         orphans.show(truncate=False)
 
     unused = spark.sql(f"""
@@ -176,10 +176,10 @@ try:
     """)
     n_unused = unused.count()
     if n_unused == 0:
-        print("✓ Todas las métricas de la jerarquía existen en financials_metrics")
+        print("✓ All hierarchy metrics exist in financials_metrics")
     else:
-        print(f"⚠ {n_unused} métricas en la jerarquía SIN datos en financials_metrics:")
+        print(f"⚠ {n_unused} hierarchy metrics WITHOUT data in financials_metrics:")
         unused.show(truncate=False)
 except Exception as e:
-    print(f"⊘ Validación omitida — {metrics_tbl} aún no existe (ejecuta 22__derived_metrics primero)")
+    print(f"⊘ Validation skipped — {metrics_tbl} does not exist yet (run 22__derived_metrics first)")
     print(f"  Detalle: {e}")

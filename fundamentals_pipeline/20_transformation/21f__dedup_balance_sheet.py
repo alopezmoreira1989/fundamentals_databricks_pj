@@ -2,33 +2,34 @@
 # MAGIC %md
 # MAGIC # 20_transformation / 21f__dedup_balance_sheet
 # MAGIC
-# MAGIC **Paso RECURRENTE del pipeline** (a diferencia de `21d`, que es una remediación puntual).
+# MAGIC **RECURRING pipeline step** (unlike `21d`, which is a one-off remediation).
 # MAGIC
-# MAGIC Refuerza la invariante de Balance Sheet de CLAUDE.md: **una sola fila por
-# MAGIC `(ticker, stmt, concept, period_end)`** — un balance a una fecha es UN snapshot. El
-# MAGIC `MERGE` de `21__clean_and_merge` / `21b__derive_quarterly` upserta sobre la clave
-# MAGIC `(ticker, stmt, concept, fiscal_year, period_type)` y **nunca borra**, así que cuando un
-# MAGIC scrape previo etiquetó un snapshot con un `fiscal_year` o `period_type` equivocado, el
-# MAGIC scrape corregido INSERTA una fila nueva (clave distinta) en vez de sobrescribir → la vieja
-# MAGIC queda huérfana para siempre. Dos clases observadas (ver skill `financials-invariants`):
-# MAGIC - **A** mismo `(ticker, concept, period_end, period_type)` con `fiscal_year` distinto
-# MAGIC   (el mismo Q3 etiquetado con dos años fiscales).
-# MAGIC - **B** mismo `period_end` etiquetado como dos `period_type` (un cierre fiscal marcado como
-# MAGIC   trimestre, p.ej. FY y Q2 a la misma fecha).
+# MAGIC Enforces the Balance Sheet invariant from CLAUDE.md: **one row per
+# MAGIC `(ticker, stmt, concept, period_end)`** — a balance at a date is ONE snapshot. The
+# MAGIC `MERGE` in `21__clean_and_merge` / `21b__derive_quarterly` upserts on the key
+# MAGIC `(ticker, stmt, concept, fiscal_year, period_type)` and **never deletes**, so when a
+# MAGIC previous scrape labeled a snapshot with a wrong `fiscal_year` or `period_type`, the
+# MAGIC corrected scrape INSERTS a new row (different key) instead of overwriting → the old one
+# MAGIC becomes a permanent orphan. Two observed classes (see skill `financials-invariants`):
+# MAGIC - **A** same `(ticker, concept, period_end, period_type)` with different `fiscal_year`
+# MAGIC   (same Q3 labeled under two fiscal years).
+# MAGIC - **B** same `period_end` labeled as two `period_type` values (a fiscal close marked as
+# MAGIC   a quarter, e.g. FY and Q2 at the same date).
 # MAGIC
-# MAGIC `21d` (puntual) solo cubría cross-labels FY-vs-Q de OTRO `fiscal_year` y duplicados de clave
-# MAGIC exacta — no estas clases. Este paso las colapsa TODAS por `period_end`.
+# MAGIC `21d` (one-off) only covered FY-vs-Q cross-labels from a DIFFERENT `fiscal_year` and exact
+# MAGIC key duplicates — not these classes. This step collapses ALL of them by `period_end`.
 # MAGIC
-# MAGIC **Regla de superviviente** por `(ticker, stmt, concept, period_end)` en BS:
-# MAGIC 1. `scraped_at` desc — gana el run más reciente. Tras un `force_full_refresh` el run nuevo
-# MAGIC    re-deriva con el `21b` ya parcheado, así que el más reciente es el correcto.
-# MAGIC 2. `period_type = 'FY'` primero — un cierre fiscal es FY; el label trimestral es el mislabel.
-# MAGIC 3. `is_derived` asc — preferimos el valor reportado por SEC sobre el derivado.
-# MAGIC 4. `value` desc — desempate final determinista.
+# MAGIC **Survivor rule** per `(ticker, stmt, concept, period_end)` in BS:
+# MAGIC 1. `scraped_at` desc — most recent run wins. After a `force_full_refresh` the new run
+# MAGIC    re-derives with the already-patched `21b`, so the most recent is correct.
+# MAGIC 2. `period_type = 'FY'` first — a fiscal close is FY; the quarter label is the mislabel.
+# MAGIC 3. `is_derived` asc — prefer SEC-reported value over derived.
+# MAGIC 4. `value` desc — deterministic final tiebreak.
 # MAGIC
-# MAGIC **Solo toca Balance Sheet.** Income Statement / Cash Flow usan `period_type` para
-# MAGIC desambiguar el mismo `period_end` (Q1..Q4/FY) — colapsarlos por `period_end` sería un bug;
-# MAGIC se pasan intactos. **Idempotente:** si no hay duplicados, no reescribe nada.
+# MAGIC **Only touches Balance Sheet.** Income Statement / Cash Flow use `period_type` to
+# MAGIC disambiguate the same `period_end` (Q1..Q4/FY) — collapsing them by `period_end` would
+# MAGIC be a bug; they are passed through unchanged. **Idempotent:** if there are no duplicates,
+# MAGIC nothing is rewritten.
 
 # COMMAND ----------
 
@@ -42,12 +43,12 @@ from pyspark.sql.window import Window
 full_tbl = f"{CATALOG}.{SCHEMA}.{TABLE}"
 staging  = f"{CATALOG}.{SCHEMA}.{TABLE}_bsdedup_staging"
 
-# Clave verdadera del snapshot de BS: un balance a una fecha = una fila.
+# True key of a BS snapshot: one balance at one date = one row.
 BS_KEY = ["ticker", "stmt", "concept", "period_end"]
 
 # COMMAND ----------
 
-# MAGIC %md ## 1. ¿Hay duplicados de BS por (ticker, stmt, concept, period_end)?
+# MAGIC %md ## 1. Are there BS duplicates on (ticker, stmt, concept, period_end)?
 
 # COMMAND ----------
 
@@ -63,26 +64,26 @@ bs_dups = spark.sql(f"""
 """).collect()[0]
 
 total_before = spark.table(full_tbl).count()
-print(f"Filas totales                 : {total_before:,}")
-print(f"Grupos BS duplicados (period) : {bs_dups['dup_groups']:,}")
-print(f"Filas BS sobrantes a borrar   : {bs_dups['extra_rows']:,}")
+print(f"Total rows                    : {total_before:,}")
+print(f"Duplicate BS groups (period)  : {bs_dups['dup_groups']:,}")
+print(f"Extra BS rows to delete       : {bs_dups['extra_rows']:,}")
 
 # COMMAND ----------
 
-# MAGIC %md ## 2. Colapsar — quedarse con un snapshot por fecha (regla de superviviente)
+# MAGIC %md ## 2. Collapse — keep one snapshot per date (survivor rule)
 
 # COMMAND ----------
 
 if bs_dups["dup_groups"] > 0:
     w = Window.partitionBy(*BS_KEY).orderBy(
-        F.col("scraped_at").desc_nulls_last(),         # run más reciente (post-fix) gana
-        (F.col("period_type") == "FY").desc(),         # FY > trimestre en un cierre fiscal
-        F.col("is_derived").asc_nulls_last(),          # reportado > derivado
-        F.col("value").desc_nulls_last(),              # desempate determinista
+        F.col("scraped_at").desc_nulls_last(),         # most recent run (post-fix) wins
+        (F.col("period_type") == "FY").desc(),         # FY > quarter at a fiscal close
+        F.col("is_derived").asc_nulls_last(),          # reported > derived
+        F.col("value").desc_nulls_last(),              # deterministic tiebreak
     )
 
     fin = spark.table(full_tbl)
-    # stmt es NOT NULL → el filtro reparte exhaustivamente entre BS y no-BS.
+    # stmt is NOT NULL → the filter exhaustively partitions into BS and non-BS.
     non_bs = fin.filter(F.col("stmt") != "Balance Sheet")
     bs_deduped = (
         fin.filter(F.col("stmt") == "Balance Sheet")
@@ -92,7 +93,7 @@ if bs_dups["dup_groups"] > 0:
     )
     result = non_bs.unionByName(bs_deduped)
 
-    # Materializar en staging para no leer y sobrescribir la misma tabla a la vez.
+    # Materialize into staging to avoid reading and overwriting the same table simultaneously.
     (
         result.write
         .format("delta")
@@ -102,20 +103,20 @@ if bs_dups["dup_groups"] > 0:
     )
 
     staged_count = spark.table(staging).count()
-    print(f"Filas tras dedup (staging): {staged_count:,}  (se eliminarán {total_before - staged_count:,})")
+    print(f"Rows after dedup (staging): {staged_count:,}  ({total_before - staged_count:,} will be removed)")
 
-    # INSERT OVERWRITE conserva la definición de la tabla (NOT NULL, partición, autoOptimize).
+    # INSERT OVERWRITE preserves the table definition (NOT NULL, partition, autoOptimize).
     target_cols = list(spark.table(full_tbl).columns)
     spark.table(staging).select(*target_cols).createOrReplaceTempView("incoming_bsdedup")
     spark.sql(f"INSERT OVERWRITE TABLE {full_tbl} SELECT {', '.join(target_cols)} FROM incoming_bsdedup")
     spark.sql(f"DROP TABLE IF EXISTS {staging}")
-    print(f"✓ INSERT OVERWRITE completo → {full_tbl}")
+    print(f"✓ INSERT OVERWRITE complete → {full_tbl}")
 else:
-    print("✓ 0 duplicados de BS por period_end — nada que colapsar (idempotente).")
+    print("✓ 0 BS duplicates by period_end — nothing to collapse (idempotent).")
 
 # COMMAND ----------
 
-# MAGIC %md ## 3. Verificación — 0 duplicados de BS por (ticker, stmt, concept, period_end)
+# MAGIC %md ## 3. Verification — 0 BS duplicates per (ticker, stmt, concept, period_end)
 
 # COMMAND ----------
 
@@ -131,7 +132,7 @@ dup_after = spark.sql(f"""
 """).collect()[0]["dup_groups"]
 
 total_after = spark.table(full_tbl).count()
-print(f"Filas totales        : {total_after:,}")
-print(f"Grupos BS duplicados : {dup_after:,}  (esperado 0)")
-assert dup_after == 0, "Aún quedan duplicados de BS por period_end — revisar la ventana de dedup."
-print("✓ Balance Sheet único por (ticker, stmt, concept, period_end)")
+print(f"Total rows           : {total_after:,}")
+print(f"Duplicate BS groups  : {dup_after:,}  (expected 0)")
+assert dup_after == 0, "BS duplicates by period_end still remain — review the dedup window."
+print("✓ Balance Sheet unique by (ticker, stmt, concept, period_end)")

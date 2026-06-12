@@ -29,7 +29,7 @@ _failures_tbl = f"{CATALOG}.{SCHEMA}.ingestion_failures"
 # COMMAND ----------
 
 issues = spark.sql(f"""
-    -- Favoritos que NO llegaron a financials
+    -- Favorites that did NOT make it into financials
     SELECT t.ticker, t.company, 'missing_from_financials' AS issue
     FROM {CATALOG}.config.tickers t
     LEFT JOIN (SELECT DISTINCT ticker FROM {CATALOG}.{SCHEMA}.financials) f
@@ -38,7 +38,7 @@ issues = spark.sql(f"""
 
     UNION ALL
 
-    -- Favoritos en financials pero no en financials_metrics
+    -- Favorites in financials but not in financials_metrics
     SELECT t.ticker, t.company, 'missing_from_metrics' AS issue
     FROM {CATALOG}.config.tickers t
     JOIN (SELECT DISTINCT ticker FROM {CATALOG}.{SCHEMA}.financials) f

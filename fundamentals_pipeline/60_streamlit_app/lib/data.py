@@ -24,7 +24,7 @@ PRICE_FILE  = "dashboard_prices.parquet"
 
 FIXTURE_DIR = Path(__file__).parent.parent / "fixtures"
 
-# Columnas de texto de baja cardinalidad → category (enorme ahorro de RAM).
+# Low-cardinality text columns → category (huge RAM savings).
 _CATEGORICAL_COLS = (
     "ticker", "period_type", "stmt", "section", "group",
     "concept", "display_name", "category", "subcategory", "metric", "unit",
@@ -32,7 +32,7 @@ _CATEGORICAL_COLS = (
 
 
 def _optimize_dtypes(df: pd.DataFrame) -> pd.DataFrame:
-    """Reduce la RAM residente: strings repetidos → category, numéricos → menor precisión."""
+    """Reduce resident RAM: repeated strings → category, numerics → smaller precision."""
     for col in _CATEGORICAL_COLS:
         if col in df.columns and df[col].dtype == object:
             df[col] = df[col].astype("category")
@@ -70,7 +70,7 @@ def load_latest_data() -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
             metrics = _fetch_parquet(METRIC_FILE)
             meta    = _fetch_json(META_FILE)
         except Exception as exc:
-            # Fallback a fixtures locales (dev). Si no hay, error legible (sin traceback).
+            # Fallback to local fixtures (dev). If absent, show readable error (no traceback).
             if (FIXTURE_DIR / DATA_FILE).exists():
                 data    = pd.read_parquet(FIXTURE_DIR / DATA_FILE)
                 metrics = pd.read_parquet(FIXTURE_DIR / METRIC_FILE)
@@ -128,10 +128,10 @@ def load_prices() -> pd.DataFrame:
 
 
 def _render_load_error(exc: Exception) -> NoReturn:
-    """Muestra un st.error legible según el tipo de fallo y corta la ejecución.
+    """Show a readable st.error based on failure type and stop execution.
 
-    Distingue el caso "datos aún no publicados" (Release `latest` ausente → 404)
-    del resto de fallos de red. `st.stop()` evita que suba el traceback crudo.
+    Distinguishes the "data not yet published" case (missing `latest` Release → 404)
+    from other network failures. `st.stop()` prevents the raw traceback from surfacing.
     """
     is_404 = (
         isinstance(exc, requests.HTTPError)

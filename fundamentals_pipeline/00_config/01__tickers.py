@@ -99,23 +99,23 @@ BALANCE_SHEET = {
     "Intangible Assets":          ("FiniteLivedIntangibleAssetsNet",             "stock"),
     "Total Assets":               ("Assets",                                     "stock"),
     "Accounts Payable":           ("AccountsPayableCurrent",                     "stock"),
-    # Debt usa LISTA de tags en orden de prioridad (first-hit-wins en la ingesta,
-    # ver extract_series_multi en 11__fetch_sec_xbrl.py). Muchos filers (p.ej. T/VZ)
-    # NO reportan bajo ShortTermBorrowings/LongTermDebtNoncurrent → la columna salía
-    # NULL → Total Debt=0 → Debt/Equity=0.00. El fallback cubre las variantes us-gaap.
-    "Short-term Debt":            (["DebtCurrent",            # porción corriente de la deuda total (más general)
-                                    "LongTermDebtCurrent",    # porción corriente de la deuda LP
+    # Debt uses a LIST of tags in priority order (first-hit-wins at ingestion,
+    # see extract_series_multi in 11__fetch_sec_xbrl.py). Many filers (e.g. T/VZ)
+    # do NOT report under ShortTermBorrowings/LongTermDebtNoncurrent → column came out
+    # NULL → Total Debt=0 → Debt/Equity=0.00. The fallback covers us-gaap variants.
+    "Short-term Debt":            (["DebtCurrent",            # current portion of total debt (more general)
+                                    "LongTermDebtCurrent",    # current portion of long-term debt
                                     "ShortTermBorrowings"],   # original
                                    "stock"),
     "Total Current Liabilities":  ("LiabilitiesCurrent",                         "stock"),
-    # Orden: preferir el split noncurrent/current primero para NO doble-contar;
-    # caer al agregado LongTermDebt sólo si el split no se reporta.
-    # ⚠ Riesgo doble-conteo: si un filer reporta SÓLO LongTermDebt (que YA incluye la
-    # porción corriente) y además un tag de Short-term Debt, la porción corriente se
-    # cuenta dos veces. Aproximación aceptable para un ratio de apalancamiento.
-    "Long-term Debt":             (["LongTermDebtNoncurrent",                    # original (estándar actual)
-                                    "LongTermDebt",                              # deuda LP total — usada por muchos grandes emisores (estilo AT&T)
-                                    "LongTermDebtAndCapitalLeaseObligations"],   # cuando los leases van incluidos
+    # Order: prefer the noncurrent/current split first to avoid double-counting;
+    # fall back to the LongTermDebt aggregate only if the split is not reported.
+    # ⚠ Double-count risk: if a filer reports ONLY LongTermDebt (which ALREADY includes the
+    # current portion) and also a Short-term Debt tag, the current portion is
+    # counted twice. Acceptable approximation for a leverage ratio.
+    "Long-term Debt":             (["LongTermDebtNoncurrent",                    # original (current standard)
+                                    "LongTermDebt",                              # total long-term debt — used by many large issuers (AT&T style)
+                                    "LongTermDebtAndCapitalLeaseObligations"],   # when leases are included
                                    "stock"),
     "Total Liabilities":          ("Liabilities",                                "stock"),
     "Additional Paid-in Capital": ("AdditionalPaidInCapital",                    "stock"),
@@ -157,83 +157,83 @@ STATEMENTS = {
 
 # MAGIC %md ## XBRL concept synonyms
 # MAGIC
-# MAGIC Algunos emisores cambian de tag XBRL entre años (fusiones, reorganizaciones,
-# MAGIC adopción de un taxonomy nuevo). Para que no perdamos histórico, el merge en
-# MAGIC `21__clean_and_merge.py` colapsa estos alias al concepto canónico **después**
-# MAGIC de la ingesta.
+# MAGIC Some filers change their XBRL tag between years (mergers, reorganizations,
+# MAGIC adoption of a new taxonomy). To avoid losing historical data, the merge in
+# MAGIC `21__clean_and_merge.py` collapses these aliases to the canonical concept **after**
+# MAGIC ingestion.
 # MAGIC
-# MAGIC Formato: `"label_alternativo": "label_canónico"` — ambos deben aparecer como
-# MAGIC keys en alguno de los STATEMENTS de arriba para que ingesten correctamente.
-# MAGIC Al fusionarlos, la dedup por `(ticker, stmt, concept, fy)` se queda con el
-# MAGIC `filed` más reciente.
+# MAGIC Format: `"alternative_label": "canonical_label"` — both must appear as keys
+# MAGIC in one of the STATEMENTS above to be ingested correctly.
+# MAGIC When merging them, the dedup by `(ticker, stmt, concept, fy)` keeps the
+# MAGIC most recent `filed`.
 
 # COMMAND ----------
 
 CONCEPT_SYNONYMS = {
-    # Variantes ASC 606 post-2018
+    # ASC 606 post-2018 variants
     "Revenue (contract)":          "Revenue",   # RevenueFromContractWithCustomerExcludingAssessedTax
     "Revenue (contract incl tax)": "Revenue",   # RevenueFromContractWithCustomerIncludingAssessedTax (FLUT, RGTI, SOUN, DJCO, …)
 
-    # Variantes Sales* pre-ASC 606 (PEP, KR, TPR, ECL, WULF, EPC, DJCO, …)
+    # Sales* pre-ASC 606 variants (PEP, KR, TPR, ECL, WULF, EPC, DJCO, …)
     "Revenue (sales net)":         "Revenue",   # SalesRevenueNet
     "Revenue (sales goods)":       "Revenue",   # SalesRevenueGoodsNet
     "Revenue (sales services)":    "Revenue",   # SalesRevenueServicesNet
 
-    # Bancos (MS, GS, GSBC, BKU, WAFD, RC, ESQ, BMRC, BCAL, NBBK, AGM)
-    # Asunción de dominio: top-line de un banco = InterestAndDividendIncomeOperating.
-    # Riesgo: si un emisor reporta TANTO Revenues como InterestAndDividendIncomeOperating
-    # en el mismo fy, la dedup se queda con el valor mayor — raro en la práctica porque
-    # los bancos no suelen reportar el tag Revenues.
+    # Banks (MS, GS, GSBC, BKU, WAFD, RC, ESQ, BMRC, BCAL, NBBK, AGM)
+    # Domain assumption: a bank's top-line = InterestAndDividendIncomeOperating.
+    # Risk: if a filer reports BOTH Revenues and InterestAndDividendIncomeOperating
+    # in the same fy, the dedup keeps the larger value — rare in practice because
+    # banks don't usually report the Revenues tag.
     "Revenue (bank)":              "Revenue",   # InterestAndDividendIncomeOperating
 
-    # Oil & gas — emisores con concept específico del sector (sin overlap habitual con Revenues)
+    # Oil & gas — filers with a sector-specific concept (no usual overlap with Revenues)
     "Revenue (oil & gas)":         "Revenue",   # OilAndGasRevenue
 
     # ── Net Income ─────────────────────────────────────────────────────────────
-    # Muchas empresas dejan de etiquetar `NetIncomeLoss` en el 10-K y pasan a
-    # `ProfitLoss` (incl. participaciones no controladoras) o a la línea
-    # "available to common" (tras dividendos preferentes). Sin estos sinónimos el
-    # FY Net Income queda ausente o congelado años atrás (→ ROE/Net Margin/P-E
-    # obsoletos). Afecta ~125 tickers: AEE, OXY, LYB, QSR, JEF, MORN, PAYX, VRSN…
-    # ⚠️ A DIFERENCIA de Revenue, aquí los tres tags COEXISTEN en el mismo fy, así
-    # que el desempate no puede ser `value desc` (elegiría el mayor = incl-NCI).
-    # CONCEPT_PRIORITY (abajo) fuerza la preferencia attributable-first.
+    # Many companies stop tagging `NetIncomeLoss` in the 10-K and switch to
+    # `ProfitLoss` (incl. non-controlling interests) or the
+    # "available to common" line (after preferred dividends). Without these synonyms
+    # FY Net Income is absent or frozen years back (→ ROE/Net Margin/P-E
+    # stale). Affects ~125 tickers: AEE, OXY, LYB, QSR, JEF, MORN, PAYX, VRSN…
+    # ⚠️ UNLIKE Revenue, here the three tags COEXIST in the same fy, so
+    # the tiebreak cannot be `value desc` (would pick the largest = incl-NCI).
+    # CONCEPT_PRIORITY (below) enforces attributable-first preference.
     "Net Income (to common)":      "Net Income",   # NetIncomeLossAvailableToCommonStockholdersBasic
     "Net Income (incl NCI)":       "Net Income",   # ProfitLoss
 
     # ── Total Stockholders Equity ──────────────────────────────────────────────
-    # Empresas con NCI material reportan `…IncludingPortionAttributableToNoncontrollingInterest`.
-    # Preferimos el equity atribuible al accionista (StockholdersEquity) para ROE.
+    # Companies with material NCI report `…IncludingPortionAttributableToNoncontrollingInterest`.
+    # We prefer the equity attributable to shareholders (StockholdersEquity) for ROE.
     "Total Equity (incl NCI)":     "Total Stockholders Equity",  # StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest
 
     # ── Operating Cash Flow ────────────────────────────────────────────────────
-    # Muchas reportan la variante "continuing operations" en vez de la base.
+    # Many report the "continuing operations" variant instead of the base.
     "Operating Cash Flow (cont ops)": "Operating Cash Flow",  # NetCashProvidedByUsedInOperatingActivitiesContinuingOperations
 
     # ── Interest Expense ───────────────────────────────────────────────────────
-    # Emisores migran la línea de intereses de la cuenta de resultados fuera de
-    # `InterestExpense`: VZ usa `InterestExpenseNonoperating` desde fy2024 (InterestExpense
-    # ausente → Interest Coverage salía NULL); otros usan el agregado `InterestAndDebtExpense`.
-    # Ambos son gasto BRUTO (magnitud positiva), así que el F.abs(...) de Interest Coverage es
-    # seguro. Tags NETOS (InterestIncomeExpenseNet, …) se EXCLUYEN a propósito: netean ingreso
-    # contra gasto → signo ambiguo → corromperían el ratio (un net-cash daría cobertura basura).
+    # Filers migrate the interest line in the income statement away from
+    # `InterestExpense`: VZ uses `InterestExpenseNonoperating` since fy2024 (InterestExpense
+    # absent → Interest Coverage came out NULL); others use the `InterestAndDebtExpense` aggregate.
+    # Both are GROSS expense (positive magnitude), so the F.abs(...) in Interest Coverage is
+    # safe. NET tags (InterestIncomeExpenseNet, …) are EXCLUDED on purpose: they net income
+    # against expense → ambiguous sign → would corrupt the ratio (a net-cash position gives nonsense coverage).
     "Interest Expense (nonoperating)": "Interest Expense",   # InterestExpenseNonoperating (VZ fy2024+)
     "Interest Expense (incl debt)":    "Interest Expense",   # InterestAndDebtExpense
 }
 
 # COMMAND ----------
 
-# MAGIC %md ## Concept priority (tie-break entre sinónimos que coexisten)
+# MAGIC %md ## Concept priority (tie-break between coexisting synonyms)
 # MAGIC
-# MAGIC Cuando varios tags XBRL colapsan al mismo concepto canónico vía
-# MAGIC `CONCEPT_SYNONYMS` y **coexisten en el mismo `fy`** (típico de Net Income:
-# MAGIC `NetIncomeLoss` + `ProfitLoss` en el mismo 10-K), el desempate por `value desc`
-# MAGIC del merge es INCORRECTO (elegiría el mayor). `CONCEPT_PRIORITY` define el orden
-# MAGIC de preferencia por **label de origen** (menor = preferido). `21` y `21b` lo
-# MAGIC insertan en el `ORDER BY` del Window de dedup, ANTES de `value desc`.
+# MAGIC When multiple XBRL tags collapse to the same canonical concept via
+# MAGIC `CONCEPT_SYNONYMS` and **coexist in the same `fy`** (typical for Net Income:
+# MAGIC `NetIncomeLoss` + `ProfitLoss` in the same 10-K), the `value desc` tiebreak
+# MAGIC in the merge is INCORRECT (would pick the largest). `CONCEPT_PRIORITY` defines the
+# MAGIC preference order by **source label** (lower = preferred). `21` and `21b` inject it
+# MAGIC into the Window dedup `ORDER BY`, BEFORE `value desc`.
 # MAGIC
-# MAGIC Cualquier label no listado → prioridad 0. Revenue YA está priorizado abajo (como
-# MAGIC Net Income): sus sinónimos coexisten mucho (~6.5k fy) y `value desc` elegía el mayor.
+# MAGIC Any label not listed → priority 0. Revenue is ALREADY prioritized below (like
+# MAGIC Net Income): its synonyms coexist frequently (~6.5k fy) and `value desc` was picking the largest.
 
 # COMMAND ----------
 
@@ -242,30 +242,30 @@ CONCEPT_PRIORITY = {
     "Net Income":             0,
     "Net Income (to common)": 1,
     "Net Income (incl NCI)":  2,
-    # Equity: atribuible al accionista > incl-NCI
+    # Equity: attributable to shareholders > incl-NCI
     "Total Stockholders Equity": 0,
     "Total Equity (incl NCI)":   1,
     # OCF: base > continuing-operations
     "Operating Cash Flow":            0,
     "Operating Cash Flow (cont ops)": 1,
-    # Revenue: línea de ingresos totales (Revenues) > contrato ASC-606 > variantes Sales >
-    # tags de sector. Los sinónimos de Revenue COEXISTEN mucho más de lo que asumía el
-    # comentario viejo (~6.5k fy, ~4.2k difieren >2%): sin prioridad, `value desc` elegía el
-    # tag MAYOR (p.ej. WMB fy2024: 12.632 del contrato sobre 10.503 de Revenues, que es el
-    # total de la cuenta de resultados y lo que suman sus trimestres). `Revenues` casa con ΣQ
-    # 1982 vs 1103 del contrato cuando ambos coexisten. Los emisores puro-ASC606 reportan solo
-    # `contract` (sin coexistencia → la prioridad es no-op para ellos, sin regresión).
-    "Revenue":                     0,   # us-gaap:Revenues (total en la cara del estado)
+    # Revenue: total revenue line (Revenues) > ASC-606 contract > Sales variants >
+    # sector tags. Revenue synonyms COEXIST far more than the old comment assumed
+    # (~6.5k fy, ~4.2k differ >2%): without priority, `value desc` was picking the
+    # LARGEST tag (e.g. WMB fy2024: 12.632 from contract over 10.503 from Revenues, which is
+    # the income-statement total and what its quarters sum to). `Revenues` matches ΣQ
+    # 1982 vs 1103 from contract when both coexist. Pure-ASC606 filers report only
+    # `contract` (no coexistence → priority is a no-op for them, no regression).
+    "Revenue":                     0,   # us-gaap:Revenues (total on the face of the statement)
     "Revenue (contract)":          1,   # RevenueFromContractWithCustomerExcludingAssessedTax
-    "Revenue (contract incl tax)": 2,   # …IncludingAssessedTax (incluye sales tax → menos preferido)
+    "Revenue (contract incl tax)": 2,   # …IncludingAssessedTax (includes sales tax → less preferred)
     "Revenue (sales net)":         3,   # SalesRevenueNet (pre-ASC606)
     "Revenue (sales goods)":       4,   # SalesRevenueGoodsNet
     "Revenue (sales services)":    5,   # SalesRevenueServicesNet
     "Revenue (oil & gas)":         6,   # OilAndGasRevenue
     "Revenue (bank)":              7,   # InterestAndDividendIncomeOperating
-    # Interest Expense: línea primaria de la cuenta de resultados > nonoperating > agregado.
-    # Raramente coexisten en un mismo fy (los emisores migran de uno a otro), así que esto
-    # es casi siempre no-op; va por si algún 10-K reporta más de uno.
+    # Interest Expense: primary income statement line > nonoperating > aggregate.
+    # Rarely coexist in the same fy (filers migrate from one to another), so this
+    # is almost always a no-op; included in case a 10-K reports more than one.
     "Interest Expense":                0,   # InterestExpense
     "Interest Expense (nonoperating)": 1,   # InterestExpenseNonoperating
     "Interest Expense (incl debt)":    2,   # InterestAndDebtExpense
@@ -275,19 +275,19 @@ CONCEPT_PRIORITY = {
 
 # MAGIC %md ## Combined-filers (10-K dimensional)
 # MAGIC
-# MAGIC Tickers cuyo 10-K cubre **dos registrantes** (REIT + Operating Partnership, p.ej.
-# MAGIC Tanger Inc. / SKT). Cada línea del estado primario lleva un miembro `dei:LegalEntityAxis`,
-# MAGIC así que la API SEC `companyfacts` (que descarta facts dimensionales) NO devuelve los
-# MAGIC totales anuales → `21` no encuentra FY. `10_ingestion/13__fetch_dimensional_10k`
-# MAGIC procesa SOLO los tickers de este dict: baja la instancia XBRL del 10-K y extrae el
-# MAGIC fact del **miembro de la entidad padre** (`member`), emitiéndolo sin dimensión.
+# MAGIC Tickers whose 10-K covers **two registrants** (REIT + Operating Partnership, e.g.
+# MAGIC Tanger Inc. / SKT). Each primary-statement line carries a `dei:LegalEntityAxis` member,
+# MAGIC so the SEC `companyfacts` API (which drops dimensional facts) does NOT return the
+# MAGIC annual totals → `21` cannot find the FY. `10_ingestion/13__fetch_dimensional_10k`
+# MAGIC processes ONLY the tickers in this dict: downloads the 10-K XBRL instance and extracts the
+# MAGIC fact for the **parent-entity member** (`member`), emitting it without dimension.
 # MAGIC
-# MAGIC Config separada de `favorites.json` **a propósito**: estar aquí NO marca el ticker como
-# MAGIC favorito; solo activa la recuperación dimensional. `cik` es opcional (override si SEC no
-# MAGIC resuelve el ticker). Dict vacío → `13` es no-op.
+# MAGIC Kept separate from `favorites.json` **intentionally**: being here does NOT mark the ticker as
+# MAGIC a favorite; it only activates dimensional retrieval. `cik` is optional (override if SEC cannot
+# MAGIC resolve the ticker). Empty dict → `13` is a no-op.
 # MAGIC
-# MAGIC `member` = local-name del miembro padre (validado contra la instancia del 10-K, no
-# MAGIC adivinado). SKT→`TangerIncMember` verificado FY2024: Revenue 526.06M, Net Income 98.595M.
+# MAGIC `member` = local-name of the parent member (validated against the 10-K instance, not
+# MAGIC guessed). SKT→`TangerIncMember` verified FY2024: Revenue 526.06M, Net Income 98.595M.
 
 # COMMAND ----------
 

@@ -2,17 +2,17 @@
 # MAGIC %md
 # MAGIC # 00_config / 03__concept_hierarchy_master
 # MAGIC
-# MAGIC Lee el árbol de jerarquía desde `00_config/concept_hierarchy.json`, lo aplana,
-# MAGIC y escribe la tabla `main.config.concept_hierarchy`.
+# MAGIC Reads the hierarchy tree from `00_config/concept_hierarchy.json`, flattens it,
+# MAGIC and writes the `main.config.concept_hierarchy` table.
 # MAGIC
-# MAGIC **Dos tipos de nodos en el JSON:**
-# MAGIC - **`group`** — solo agrupa visualmente, NO existe en `financials`. Su nombre aparece como `parent_concept` para sus hijos. Ejemplos: `Assets`, `Current Assets`, `Liabilities`, `Operating Activities`.
-# MAGIC - **`concept`** — existe en `financials` (mapeado en `01__tickers.py`). Emite una fila en la tabla final. Los subtotales como `Total Assets` o `Total Current Assets` son conceptos colocados al final de su grupo.
+# MAGIC **Two node types in the JSON:**
+# MAGIC - **`group`** — visual grouping only, does NOT exist in `financials`. Its name appears as `parent_concept` for its children. Examples: `Assets`, `Current Assets`, `Liabilities`, `Operating Activities`.
+# MAGIC - **`concept`** — exists in `financials` (mapped in `01__tickers.py`). Emits one row in the final table. Subtotals such as `Total Assets` or `Total Current Assets` are concepts placed at the end of their group.
 # MAGIC
-# MAGIC **Resultado:** un subtotal aparece dentro del grupo al que pertenece, en última
-# MAGIC posición — orden contable tradicional.
+# MAGIC **Result:** a subtotal appears within the group it belongs to, in the last
+# MAGIC position — traditional accounting order.
 # MAGIC
-# MAGIC **Salida (ejemplo Balance Sheet):**
+# MAGIC **Output (Balance Sheet example):**
 # MAGIC ```
 # MAGIC stmt          | concept              | parent_concept   | level | sort_order
 # MAGIC Balance Sheet | Cash & Equivalents   | Current Assets   | 1     | 10
@@ -26,10 +26,10 @@
 # MAGIC Balance Sheet | Total Assets         | Assets           | 1     | 90  ← total
 # MAGIC ```
 # MAGIC
-# MAGIC ### ✏️ Cómo modificar la jerarquía
-# MAGIC 1. Edita `00_config/concept_hierarchy.json` en el repo
+# MAGIC ### ✏️ How to modify the hierarchy
+# MAGIC 1. Edit `00_config/concept_hierarchy.json` in the repo
 # MAGIC 2. Commit + push
-# MAGIC 3. Re-ejecuta este notebook (o el pipeline completo)
+# MAGIC 3. Re-run this notebook (or the full pipeline)
 
 # COMMAND ----------
 
@@ -49,14 +49,14 @@ print(f"Target : {TARGET_TABLE}")
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 1. Cargar y aplanar el JSON
+# MAGIC ## 1. Load and flatten the JSON
 
 # COMMAND ----------
 
 with open(HIERARCHY_JSON_PATH, "r", encoding="utf-8") as f:
     tree = json.load(f)
 
-# Las claves que empiezan por '_' son metadata/comentarios — descartarlas
+# Keys starting with '_' are metadata/comments — discard them
 tree = {k: v for k, v in tree.items() if not k.startswith("_")}
 
 print(f"Statements encontrados: {list(tree.keys())}")
@@ -65,31 +65,31 @@ print(f"Statements encontrados: {list(tree.keys())}")
 
 def flatten(node, stmt, parent, group_stack, level, rows, counter):
     """
-    Recorre el árbol y emite una fila por cada nodo de tipo 'concept'.
-    Los nodos de tipo 'group' NO emiten fila — solo sirven como contenedor
-    visual y como `parent_concept` para sus hijos.
+    Traverses the tree and emits one row per 'concept' node.
+    'group' nodes do NOT emit a row — they serve only as visual containers
+    and as `parent_concept` for their children.
 
-    `group_stack` es una lista que rastrea los grupos atravesados hasta llegar
-    al concept actual. De ese stack derivamos las columnas:
+    `group_stack` is a list tracking the groups traversed to reach the
+    current concept. From that stack we derive the columns:
       - `section` = group_stack[0]  (Assets, Liabilities & Equity, Operating Activities, ...)
-      - `group`   = group_stack[-1] (el grupo más cercano al concept; Current Assets,
+      - `group`   = group_stack[-1] (the group closest to the concept; Current Assets,
                                      Current Liabilities, Stockholders Equity, ...)
-                    o NULL si solo hay 1 grupo en el stack (el concept está directo
-                    bajo la section, ej. 'Total Assets')
+                    or NULL if there is only 1 group in the stack (the concept sits
+                    directly under the section, e.g. 'Total Assets')
 
-    - node        : dict (un nodo) o list (hermanos)
-    - parent      : nombre del padre directo (grupo o concept), None si es raíz
-    - group_stack : lista de nombres de grupos atravesados, en orden
-    - level       : profundidad (1 = nivel superior)
-    - counter     : contador mutable [int] para asignar sort_order globalmente
-                    dentro de cada statement (10, 20, 30, ...)
+    - node        : dict (one node) or list (siblings)
+    - parent      : name of the direct parent (group or concept), None if root
+    - group_stack : list of group names traversed, in order
+    - level       : depth (1 = top level)
+    - counter     : mutable counter [int] for assigning sort_order globally
+                    within each statement (10, 20, 30, ...)
     """
     if isinstance(node, list):
         for child in node:
             flatten(child, stmt, parent, group_stack, level, rows, counter)
         return
 
-    # ── Nodo 'group': no emite fila, empuja su nombre al stack y recursa ─
+    # ── 'group' node: does not emit a row, pushes its name onto the stack and recurses ─
     if "group" in node:
         group_name = node["group"]
         new_stack = group_stack + [group_name]
@@ -97,22 +97,22 @@ def flatten(node, stmt, parent, group_stack, level, rows, counter):
             flatten(child, stmt, group_name, new_stack, level, rows, counter)
         return
 
-    # ── Nodo 'concept': emite fila ────────────────────────────────────────
+    # ── 'concept' node: emits row ────────────────────────────────────────
     concept  = node["concept"]
     display  = node.get("display_name", concept)
     children = node.get("children") or []
 
-    # Si tiene hijos (caso del Income Statement, post-orden), recursamos primero
+    # If it has children (Income Statement case, post-order), recurse first
     if children:
         for child in children:
             flatten(child, stmt, concept, group_stack, level + 1, rows, counter)
 
-    # Derivar section y group del stack
+    # Derive section and group from the stack
     section = group_stack[0]  if len(group_stack) >= 1 else None
-    # group = el grupo más cercano al concept (último del stack), pero solo si
-    # es distinto de la section (si solo hay 1 grupo, group queda NULL)
+    # group = the group closest to the concept (last in stack), but only if
+    # different from section (if only 1 group, group remains NULL)
     group   = group_stack[-1] if len(group_stack) >= 2 else None
-    if group == concept:  # defensa: subtotal con mismo nombre que el grupo
+    if group == concept:  # guard: subtotal with same name as the group
         group = None
 
     counter[0] += 10
@@ -130,10 +130,10 @@ def flatten(node, stmt, parent, group_stack, level, rows, counter):
 
 rows = []
 for stmt, root in tree.items():
-    counter = [0]  # sort_order reinicia en cada statement
+    counter = [0]  # sort_order resets for each statement
     flatten(root, stmt, None, [], 1, rows, counter)
 
-print(f"Total filas: {len(rows)}")
+print(f"Total rows: {len(rows)}")
 for stmt in tree.keys():
     n = sum(1 for r in rows if r["stmt"] == stmt)
     print(f"  {stmt}: {n}")
@@ -141,7 +141,7 @@ for stmt in tree.keys():
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 2. Validación — concepts del JSON deben existir en `01__tickers.py`
+# MAGIC ## 2. Validation — concepts in the JSON must exist in `01__tickers.py`
 
 # COMMAND ----------
 
@@ -153,30 +153,30 @@ warnings = []
 for r in rows:
     stmt = r["stmt"]
     if stmt not in valid_by_stmt:
-        errors.append(f"  Statement desconocido en JSON: '{stmt}'")
+        errors.append(f"  Unknown statement in JSON: '{stmt}'")
         continue
     if r["concept"] not in valid_by_stmt[stmt]:
-        errors.append(f"  [{stmt}] concept '{r['concept']}' no existe en 01__tickers.py")
+        errors.append(f"  [{stmt}] concept '{r['concept']}' does not exist in 01__tickers.py")
 
 for stmt, valid in valid_by_stmt.items():
     in_hierarchy = {r["concept"] for r in rows if r["stmt"] == stmt}
-    # 'Revenue (contract)' se coalesce a 'Revenue' en 22__derived_metrics —
-    # se permite que esté ausente de la jerarquía.
+    # 'Revenue (contract)' is coalesced to 'Revenue' in 22__derived_metrics —
+    # allowed to be absent from the hierarchy.
     missing = (valid - in_hierarchy) - {"Revenue (contract)"}
     if missing:
-        warnings.append(f"  [{stmt}] presente en 01__tickers.py pero NO en JSON: {sorted(missing)}")
+        warnings.append(f"  [{stmt}] present in 01__tickers.py but NOT in JSON: {sorted(missing)}")
 
 if errors:
     for e in errors: print("✗", e)
-    raise ValueError("Validación fallida — corrige concept_hierarchy.json")
+    raise ValueError("Validation failed — fix concept_hierarchy.json")
 
 for w in warnings: print("⚠", w)
-print("\n✅ Validación OK — todos los concepts del JSON existen en 01__tickers.py")
+print("\n✅ Validation OK — all JSON concepts exist in 01__tickers.py")
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 3. Escribir a Delta (overwrite — la jerarquía es siempre fuente única)
+# MAGIC ## 3. Write to Delta (overwrite — the hierarchy is always the single source)
 
 # COMMAND ----------
 
@@ -203,7 +203,7 @@ spark.sql(f"DROP TABLE IF EXISTS {TARGET_TABLE}")
     .saveAsTable(TARGET_TABLE)
 )
 
-print(f"✓ {sdf.count():,} filas escritas → {TARGET_TABLE}")
+print(f"✓ {sdf.count():,} rows written → {TARGET_TABLE}")
 
 # COMMAND ----------
 

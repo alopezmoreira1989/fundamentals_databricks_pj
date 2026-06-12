@@ -2,30 +2,30 @@
 # MAGIC %md
 # MAGIC # 20_transformation / 21e__derive_fy_from_quarterly
 # MAGIC
-# MAGIC **Fallback de último recurso:** sintetiza una fila `FY` para conceptos
-# MAGIC `flow_additive` (Income Statement / Cash Flow) **solo cuando NO existe ya** una FY
-# MAGIC real, sumando los cuatro trimestres `Q1+Q2+Q3+Q4` que `21b__derive_quarterly` haya
-# MAGIC dejado en `financials`. La fila se marca `is_derived=True`.
+# MAGIC **Last-resort fallback:** synthesizes an `FY` row for `flow_additive` concepts
+# MAGIC (Income Statement / Cash Flow) **only when a real FY does not already exist**, by
+# MAGIC summing the four quarters `Q1+Q2+Q3+Q4` that `21b__derive_quarterly` left in
+# MAGIC `financials`. The row is flagged `is_derived=True`.
 # MAGIC
-# MAGIC **Por qué existe:** algunos emisores no exponen el total anual sin dimensión en su
-# MAGIC 10-K (companyfacts de SEC descarta facts dimensionales), así que `21` no encuentra FY.
-# MAGIC Si los cuatro trimestres sí están, `ΣQ` reconstruye el año.
+# MAGIC **Why it exists:** some filers do not expose the undimensioned annual total in their
+# MAGIC 10-K (SEC companyfacts drops dimensional facts), so `21` finds no FY. If all four
+# MAGIC quarters are present, `ΣQ` reconstructs the year.
 # MAGIC
-# MAGIC **Rendimiento real hoy: bajo.** El conjunto afectado suele carecer de **Q4** (Q4 a su
-# MAGIC vez se deriva de `FY − YTD_Q3`, que necesita el anual — circular), así que esta etapa
-# MAGIC dispara para muy pocos tickers. Se ejecuta de todas formas por robustez y para cubrir
-# MAGIC casos futuros. El `print` final reporta cuántas filas FY se sintetizaron.
+# MAGIC **Actual coverage today: low.** The affected set typically lacks **Q4** (Q4 is itself
+# MAGIC derived from `FY − YTD_Q3`, which needs the annual — circular), so this stage fires
+# MAGIC for very few tickers. It runs anyway for robustness and to cover future cases. The
+# MAGIC final `print` reports how many FY rows were synthesized.
 # MAGIC
-# MAGIC **Guards (no romper la lógica existente):**
-# MAGIC - **Nunca** sobrescribe una FY real → `MERGE … WHEN NOT MATCHED` (insert) y un
-# MAGIC   `WHEN MATCHED AND target.is_derived = true` que solo refresca filas ya derivadas.
-# MAGIC - Solo `flow_additive`. **No** `flow_nonadditive` (EPS, shares — no son aditivos) ni
-# MAGIC   `stock` (el balance no es aditivo; además la tabla limpia no guarda snapshot de
-# MAGIC   cierre de año para los casos-gap — `21b` solo emite snapshots Q1–Q3).
-# MAGIC - **No** recalcula Q4 (eso es responsabilidad de `21b`); solo crea la fila FY ausente
-# MAGIC   a partir de trimestres ya presentes → sin doble conteo.
+# MAGIC **Guards (do not break existing logic):**
+# MAGIC - **Never** overwrites a real FY → `MERGE … WHEN NOT MATCHED` (insert) and a
+# MAGIC   `WHEN MATCHED AND target.is_derived = true` that only refreshes already-derived rows.
+# MAGIC - Only `flow_additive`. **Not** `flow_nonadditive` (EPS, shares — not additive) nor
+# MAGIC   `stock` (balance sheet is not additive; also the clean table does not store a
+# MAGIC   year-end snapshot for gap cases — `21b` only emits Q1–Q3 snapshots).
+# MAGIC - **Does not** recalculate Q4 (that is `21b`'s responsibility); only creates the
+# MAGIC   missing FY row from already-present quarters → no double-counting.
 # MAGIC
-# MAGIC Idempotente: re-ejecutar es seguro.
+# MAGIC Idempotent: re-running is safe.
 
 # COMMAND ----------
 
@@ -40,11 +40,11 @@ fin = spark.table(full_tbl)
 
 # COMMAND ----------
 
-# MAGIC %md ## 1. Conceptos flow_additive (desde STATEMENTS)
+# MAGIC %md ## 1. flow_additive concepts (from STATEMENTS)
 # MAGIC
-# MAGIC Solo estos son sumables Q1..Q4 = FY. La tabla limpia usa el label canónico, que
-# MAGIC coincide con las keys de STATEMENTS; los labels-sinónimo no aparecen en `financials`
-# MAGIC (ya colapsados por `21`/`21b`), así que el join simplemente no los matchea.
+# MAGIC Only these are summable Q1..Q4 = FY. The clean table uses the canonical label, which
+# MAGIC matches the STATEMENTS keys; synonym labels do not appear in `financials`
+# MAGIC (already collapsed by `21`/`21b`), so the join simply does not match them.
 
 # COMMAND ----------
 
@@ -58,7 +58,7 @@ flow_concepts = spark.createDataFrame(_flow_pairs, ["stmt", "concept"]).distinct
 
 # COMMAND ----------
 
-# MAGIC %md ## 2. Σ Q1..Q4 por (ticker, stmt, concept, fiscal_year) — exige los 4 trimestres
+# MAGIC %md ## 2. Σ Q1..Q4 per (ticker, stmt, concept, fiscal_year) — requires all 4 quarters
 
 # COMMAND ----------
 
@@ -67,19 +67,19 @@ q = (
        .join(flow_concepts, on=["stmt", "concept"], how="inner")
 )
 
-def _qval(qn):  # valor del trimestre (NULL si no está)
+def _qval(qn):  # quarter value (NULL if absent)
     return F.max(F.when(F.col("period_type") == qn, F.col("value"))).alias(f"v_{qn}")
 
 agg = (
     q.groupBy("ticker", "company", "stmt", "concept", "fiscal_year")
      .agg(
         _qval("Q1"), _qval("Q2"), _qval("Q3"), _qval("Q4"),
-        # period_end de la FY sintética = cierre del Q4 (fin del año fiscal)
+        # period_end of the synthetic FY = Q4 close (end of fiscal year)
         F.max(F.when(F.col("period_type") == "Q4", F.col("period_end"))).alias("q4_end"),
      )
 )
 
-# Solo años con los CUATRO trimestres presentes (y un period_end de Q4 válido)
+# Only years with ALL FOUR quarters present (and a valid Q4 period_end)
 synth = (
     agg.filter(
         F.col("v_Q1").isNotNull() & F.col("v_Q2").isNotNull()
@@ -91,13 +91,13 @@ synth = (
 
 # COMMAND ----------
 
-# MAGIC %md ## 3. Quédate solo con (ticker, stmt, concept, fy) que NO tienen ya una FY real
+# MAGIC %md ## 3. Keep only (ticker, stmt, concept, fy) that do NOT already have a real FY
 
 # COMMAND ----------
 
 existing_fy = (
     fin.filter(F.col("period_type") == "FY")
-       .filter(~F.coalesce(F.col("is_derived"), F.lit(False)))   # FY real (no derivada)
+       .filter(~F.coalesce(F.col("is_derived"), F.lit(False)))   # real FY (not derived)
        .select("ticker", "stmt", "concept", "fiscal_year")
        .distinct()
 )
@@ -119,14 +119,14 @@ clean_fy = (
 )
 
 n_synth = clean_fy.count()
-print(f"FY sintetizadas desde Σ Q1..Q4 (conceptos sin FY real): {n_synth:,}")
+print(f"FY synthesized from Σ Q1..Q4 (concepts without a real FY): {n_synth:,}")
 if n_synth:
     print("Muestra:")
     clean_fy.select("ticker", "stmt", "concept", "fiscal_year", "value").orderBy("ticker", "concept").show(30, truncate=False)
 
 # COMMAND ----------
 
-# MAGIC %md ## 4. MERGE — insertar FY sintéticas (nunca tocar una FY real)
+# MAGIC %md ## 4. MERGE — insert synthetic FY rows (never touch a real FY)
 
 # COMMAND ----------
 
@@ -141,7 +141,7 @@ spark.sql(f"""
     AND target.fiscal_year = source.fiscal_year
     AND target.period_type = source.period_type
 
-    -- Solo refresca filas YA derivadas por esta etapa (nunca una FY real reportada).
+    -- Only refreshes rows ALREADY derived by this stage (never a real reported FY).
     WHEN MATCHED AND target.is_derived = true
                  AND (target.value != source.value OR target.period_end != source.period_end) THEN
         UPDATE SET
@@ -158,4 +158,4 @@ spark.sql(f"""
                 source.value, source.is_derived, source.scraped_at)
 """)
 
-print(f"✓ MERGE complete → {full_tbl} (FY sintéticas desde trimestres)")
+print(f"✓ MERGE complete → {full_tbl} (synthetic FY from quarters)")

@@ -2,27 +2,28 @@
 # MAGIC %md
 # MAGIC # 10_ingestion / 13__fetch_dimensional_10k  ⚠️ EXPERIMENTAL
 # MAGIC
-# MAGIC Recupera los conceptos primarios anuales de **combined-filers** (un 10-K que cubre
-# MAGIC dos registrantes, p.ej. una REIT + su Operating Partnership: Tanger Inc. / SKT).
+# MAGIC Fetches the primary annual concepts for **combined-filers** (a 10-K that covers
+# MAGIC two registrants, e.g. a REIT + its Operating Partnership: Tanger Inc. / SKT).
 # MAGIC
-# MAGIC **Por qué hace falta:** en un 10-K combinado, cada línea de estado lleva un miembro
-# MAGIC `dei:LegalEntityAxis`. La API `companyfacts` de SEC **descarta los facts dimensionales**,
-# MAGIC así que `11__fetch_sec_xbrl` no ve ningún total anual de ingresos / net income / equity
-# MAGIC para esos tickers → `21` no encuentra FY → ROE/Net Margin/P-E nulos. Esta etapa baja la
-# MAGIC **instancia XBRL del 10-K** (`…_htm.xml`), resuelve dimensiones, y extrae el fact del
-# MAGIC **miembro de la entidad padre** (el que corresponde al ticker), emitiéndolo SIN dimensión
-# MAGIC a `financials_raw` para que el resto del pipeline (21/21b/22/23) funcione sin cambios.
+# MAGIC **Why this is needed:** in a combined 10-K, each statement line carries a
+# MAGIC `dei:LegalEntityAxis` member. The SEC `companyfacts` API **drops dimensional facts**,
+# MAGIC so `11__fetch_sec_xbrl` sees no annual totals for revenue / net income / equity
+# MAGIC for those tickers → `21` finds no FY → ROE/Net Margin/P-E are null. This stage
+# MAGIC downloads the **XBRL instance of the 10-K** (`…_htm.xml`), resolves dimensions,
+# MAGIC and extracts the fact for the **parent-entity member** (the one matching the ticker),
+# MAGIC emitting it WITHOUT a dimension to `financials_raw` so the rest of the pipeline
+# MAGIC (21/21b/22/23) works unchanged.
 # MAGIC
-# MAGIC **Gate (no penaliza el run normal):** solo procesa los tickers del dict `COMBINED_FILERS`
-# MAGIC en `00_config/01__tickers.py` (`ticker → {"member": <local-name del miembro padre>, "cik": opt}`),
-# MAGIC p.ej. `"SKT": {"member": "TangerIncMember"}`. Config separada de `favorites.json` a
-# MAGIC propósito (estar ahí NO marca el ticker como favorito). Dict vacío → **no-op**.
+# MAGIC **Gate (no penalty on normal runs):** only processes tickers in the `COMBINED_FILERS`
+# MAGIC dict in `00_config/01__tickers.py` (`ticker → {"member": <local-name of parent member>, "cik": opt}`),
+# MAGIC e.g. `"SKT": {"member": "TangerIncMember"}`. Config kept separate from `favorites.json`
+# MAGIC intentionally (being there does NOT mark the ticker as a favourite). Empty dict → **no-op**.
 # MAGIC
-# MAGIC **Estado:** validado localmente contra el 10-K FY2024 de SKT (Revenue 526.06M, Net
-# MAGIC Income attribuible 98.595M). Heurística de selección documentada abajo. Tratar como
-# MAGIC experimental: revisar la salida antes de confiar en nuevos tickers.
+# MAGIC **Status:** validated locally against SKT's FY2024 10-K (Revenue 526.06M, Net
+# MAGIC Income attributable 98.595M). Selection heuristic documented below. Treat as
+# MAGIC experimental: review output before trusting new tickers.
 # MAGIC
-# MAGIC Databricks-only: usa `spark`, `%run`, escribe a `financials_raw`.
+# MAGIC Databricks-only: uses `spark`, `%run`, writes to `financials_raw`.
 
 # COMMAND ----------
 
@@ -43,27 +44,27 @@ from pyspark.sql.types import (
 
 HEADERS  = {"User-Agent": SEC_USER_AGENT}
 raw_full = f"{CATALOG}.{SCHEMA}.{RAW_TABLE}"
-N_FILINGS_BACK = 3   # cuántos 10-K recientes parsear (cada uno trae ~3 años comparativos)
+N_FILINGS_BACK = 3   # how many recent 10-Ks to parse (each carries ~3 comparative years)
 
 # COMMAND ----------
 
-# MAGIC %md ## 1. Allowlist desde `COMBINED_FILERS` (00_config/01__tickers.py)
+# MAGIC %md ## 1. Allowlist from `COMBINED_FILERS` (00_config/01__tickers.py)
 
 # COMMAND ----------
 
-# `COMBINED_FILERS` llega vía %run de 01__tickers: ticker → {"member": ..., "cik": opt}.
-# Config separada de favorites.json a propósito (estar aquí NO marca al ticker favorito).
+# `COMBINED_FILERS` arrives via %run from 01__tickers: ticker → {"member": ..., "cik": opt}.
+# Config kept separate from favorites.json intentionally (being here does NOT mark the ticker as a favourite).
 _allowlist = {
     t.upper(): {"member": cfg["member"], "cik": (cfg.get("cik") or None)}
     for t, cfg in (COMBINED_FILERS or {}).items()
 }
 print(f"Combined-filers en allowlist: {list(_allowlist) or '(ninguno — no-op)'}")
 
-# Mapa xbrl_concept → (stmt, label, kind) para los conceptos que nos interesan.
-# El slot de tag puede ser un str o una LISTA de tags-fallback en orden de prioridad
-# (ver extract_series_multi en 11__fetch_sec_xbrl.py). Expandimos cada tag a la misma
-# (stmt, label, kind); con setdefault, el PRIMER label que reclama un tag gana —
-# coherente con el first-hit-wins de la ingesta.
+# Map xbrl_concept → (stmt, label, kind) for the concepts we care about.
+# The tag slot may be a str or a LIST of fallback tags in priority order
+# (see extract_series_multi in 11__fetch_sec_xbrl.py). We expand each tag to the same
+# (stmt, label, kind); with setdefault, the FIRST label that claims a tag wins —
+# consistent with the first-hit-wins logic in ingestion.
 CONCEPT_LOOKUP: dict[str, tuple] = {}
 for stmt, cmap in STATEMENTS.items():
     for label, (xbrl, kind) in cmap.items():
@@ -72,7 +73,7 @@ for stmt, cmap in STATEMENTS.items():
 
 # COMMAND ----------
 
-# MAGIC %md ## 2. Helpers SEC: resolver CIK, último N 10-K, instancia XBRL
+# MAGIC %md ## 2. SEC helpers: resolve CIK, latest N 10-Ks, XBRL instance
 
 # COMMAND ----------
 
@@ -90,7 +91,7 @@ def _get_cik(ticker: str, override: str | None) -> str | None:
 
 
 def _recent_10k_instances(cik: str, n: int) -> list[str]:
-    """Devuelve URLs de las instancias `…_htm.xml` de los últimos n 10-K."""
+    """Returns URLs for the `…_htm.xml` instances of the last n 10-Ks."""
     cik_int = int(cik)
     subs = requests.get(f"https://data.sec.gov/submissions/CIK{cik}.json", headers=HEADERS, timeout=60).json()
     rec = subs["filings"]["recent"]
@@ -107,13 +108,13 @@ def _recent_10k_instances(cik: str, n: int) -> list[str]:
 
 # COMMAND ----------
 
-# MAGIC %md ## 3. Parser de la instancia XBRL
+# MAGIC %md ## 3. XBRL instance parser
 # MAGIC
-# MAGIC **Selección del fact padre:** entre los facts anuales (~365d) o snapshot del concepto,
-# MAGIC nos quedamos con los que tienen **exactamente una** dimensión `LegalEntityAxis` cuyo
-# MAGIC miembro (local-name) == el `member` configurado en `COMBINED_FILERS`. Descartamos facts
-# MAGIC con cualquier OTRA dimensión (segmentos, equity components, partner type…) para no coger
-# MAGIC desgloses.
+# MAGIC **Parent-fact selection:** among the annual (~365d) or snapshot facts for a concept,
+# MAGIC we keep those with **exactly one** `LegalEntityAxis` dimension whose member
+# MAGIC (local-name) matches the `member` configured in `COMBINED_FILERS`. We discard facts
+# MAGIC with any OTHER dimension (segments, equity components, partner type…) to avoid
+# MAGIC picking up breakdowns.
 
 # COMMAND ----------
 
@@ -147,12 +148,12 @@ def _parse_contexts(root) -> dict:
 
 
 def _parent_fact(c: dict, member: str) -> bool:
-    """True si el contexto tiene EXACTAMENTE LegalEntityAxis=member y nada más."""
+    """True if the context has EXACTLY LegalEntityAxis=member and nothing else."""
     return len(c["dims"]) == 1 and c["dims"][0] == (_LEGAL_ENTITY_AXIS, member)
 
 
 def _extract(instance_url: str, member: str) -> list[dict]:
-    """Devuelve filas (estilo financials_raw, sin dimensión) para los conceptos objetivo."""
+    """Returns rows (financials_raw style, without dimension) for the target concepts."""
     resp = requests.get(instance_url, headers=HEADERS, timeout=60)
     if resp.status_code != 200 or b"<xbrl" not in resp.content[:5000].lower():
         return []
@@ -179,7 +180,7 @@ def _extract(instance_url: str, member: str) -> list[dict]:
         shape = classify_period_shape(
             pd.to_datetime(start) if start else pd.NaT, pd.to_datetime(end)
         )
-        # stock → solo snapshot al cierre; flow → solo anual (~365d)
+        # stock → snapshot at close only; flow → annual only (~365d)
         if kind == "stock":
             if shape != "snapshot":
                 continue
@@ -208,14 +209,14 @@ def _extract(instance_url: str, member: str) -> list[dict]:
 
 # COMMAND ----------
 
-# MAGIC %md ## 4. Recolectar para todos los tickers de la allowlist
+# MAGIC %md ## 4. Collect for all tickers in the allowlist
 
 # COMMAND ----------
 
 records = []
 if _allowlist:
-    # Sincroniza scraped_at con el último scrape de 11 para que 21/21b incluyan estas filas
-    # (21 filtra por MAX(scraped_at)). Si financials_raw está vacío, usa now.
+    # Sync scraped_at with the last scrape from 11 so that 21/21b include these rows
+    # (21 filters by MAX(scraped_at)). If financials_raw is empty, use now.
     latest_scrape = spark.sql(f"SELECT MAX(scraped_at) AS ts FROM {raw_full}").collect()[0]["ts"]
     if latest_scrape is None:
         from datetime import datetime, timezone
@@ -242,23 +243,23 @@ if _allowlist:
                     r.update({"ticker": ticker.upper(), "company": ticker.upper(), "scraped_at": latest_scrape})
                     records.append(r)
             except Exception as exc:
-                print(f"    ⚠ {ticker}: parse falló en {url.split('/')[-1]} ({exc})")
+                print(f"    ⚠ {ticker}: parse failed on {url.split('/')[-1]} ({exc})")
         got = len(records) - n_before
-        print(f"  ✓ {ticker} [{cfg['member']}]: {got} filas (concepto×año, miembro padre)")
+        print(f"  ✓ {ticker} [{cfg['member']}]: {got} rows (concept×year, parent member)")
 else:
-    print("⊘ Allowlist vacía — no-op.")
+    print("⊘ Empty allowlist — no-op.")
 
-print(f"\nTotal filas dimensionales extraídas: {len(records):,}")
+print(f"\nTotal dimensional rows extracted: {len(records):,}")
 
 # COMMAND ----------
 
-# MAGIC %md ## 5. Append a financials_raw (mismo schema que 11)
+# MAGIC %md ## 5. Append to financials_raw (same schema as 11)
 
 # COMMAND ----------
 
 if records:
-    # Dedup por (ticker, stmt, concept, fy, period_end): varios 10-K reportan los mismos
-    # años comparativos → quédate con uno (los valores coinciden; 21 re-deduplica igualmente).
+    # Dedup by (ticker, stmt, concept, fy, period_end): multiple 10-Ks report the same
+    # comparative years → keep one (values match; 21 deduplicates again anyway).
     df = pd.DataFrame(records).drop_duplicates(
         subset=["ticker", "stmt", "concept", "fy", "period_end"], keep="first"
     )
@@ -283,14 +284,14 @@ if records:
     df["filed"] = None
     df = df[[f.name for f in SCHEMA_DEF.fields]]
 
-    # Stage experimental: un fallo al escribir NO debe tumbar el pipeline (91 lo corre vía %run).
+    # Experimental stage: a write failure must NOT bring down the pipeline (91 runs it via %run).
     try:
         sdf = spark.createDataFrame(df, schema=SCHEMA_DEF)
         sdf.write.mode("append").option("mergeSchema", "true").saveAsTable(raw_full)
-        print(f"✓ {len(df):,} filas dimensionales → {raw_full}")
-        print("Muestra:")
+        print(f"✓ {len(df):,} dimensional rows → {raw_full}")
+        print("Sample:")
         sdf.select("ticker", "stmt", "concept", "fy", "value").orderBy("ticker", "concept", "fy").show(40, truncate=False)
     except Exception as exc:
-        print(f"⚠ Append dimensional falló (no fatal): {exc}")
+        print(f"⚠ Dimensional append failed (non-fatal): {exc}")
 else:
-    print("⊘ Nada que escribir.")
+    print("⊘ Nothing to write.")

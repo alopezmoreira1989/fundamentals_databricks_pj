@@ -6,37 +6,36 @@
 # MAGIC %md
 # MAGIC # 20_transformation / 21d__dedup_clean_table
 # MAGIC
-# MAGIC **Remediación puntual** — NO forma parte del pipeline recurrente.
+# MAGIC **One-off remediation** — NOT part of the recurring pipeline.
 # MAGIC
-# MAGIC > **Superseded para el caso BS:** `21f__dedup_balance_sheet` es el paso RECURRENTE que
-# MAGIC > refuerza "un snapshot de BS por `(ticker, stmt, concept, period_end)`" en cada run y cubre
-# MAGIC > las clases que el predicado de §1/§2 de aquí NO veía (mismo `period_end` con `fiscal_year`
-# MAGIC > distinto, y cierres fiscales mal etiquetados como trimestre del MISMO `fiscal_year`). Este
-# MAGIC > notebook se mantiene solo como remediación histórica de cross-labels.
+# MAGIC > **Superseded for the BS case:** `21f__dedup_balance_sheet` is the RECURRING step that
+# MAGIC > enforces "one BS snapshot per `(ticker, stmt, concept, period_end)`" on every run and covers
+# MAGIC > the classes that the §1/§2 predicate here did NOT catch (same `period_end` with different
+# MAGIC > `fiscal_year`, and fiscal closes mislabeled as a quarter within the SAME `fiscal_year`). This
+# MAGIC > notebook is kept only as a historical remediation for cross-labels.
 # MAGIC
-# MAGIC El `MERGE` de `21__clean_and_merge` / `21b__derive_quarterly` hace upsert pero
-# MAGIC **nunca borra**. Cuando una versión previa de `21b` escribió una clave de MERGE con
-# MAGIC un `period_end` equivocado y la versión parcheada ya no re-emite esa clave, la fila
-# MAGIC queda huérfana en `financials` y el MERGE no la limpia.
+# MAGIC The `MERGE` in `21__clean_and_merge` / `21b__derive_quarterly` upserts but
+# MAGIC **never deletes**. When a prior version of `21b` wrote a MERGE key with a wrong `period_end`
+# MAGIC and the patched version no longer emits that key, the row becomes an orphan in `financials`
+# MAGIC and the MERGE never cleans it up.
 # MAGIC
-# MAGIC **Caso principal (cross-label de Balance Sheet):** el bug del desfase de `fiscal_year`
-# MAGIC en `21b` etiquetaba el snapshot del CIERRE FISCAL de un año como un trimestre (Q3 casi
-# MAGIC siempre) del año siguiente — un period_end que en realidad pertenece a una fila `FY`.
-# MAGIC Tras parchear `21b`, re-correr el pipeline corrige (UPDATE) la mayoría de esas claves
-# MAGIC in situ; este notebook borra las que el re-run ya no re-emite.
+# MAGIC **Main case (Balance Sheet cross-label):** the `fiscal_year` offset bug in `21b` labeled
+# MAGIC the FISCAL-CLOSE snapshot of one year as a quarter (almost always Q3) of the following year —
+# MAGIC a period_end that actually belongs to an `FY` row. After patching `21b`, re-running the
+# MAGIC pipeline corrects (UPDATE) most of those keys in place; this notebook deletes the ones the
+# MAGIC re-run no longer emits.
 # MAGIC
-# MAGIC **Invariante usado:** una fila de BS con `period_type ∈ {Q1..Q4}` cuyo `period_end`
-# MAGIC coincide con el `period_end` de una fila `FY` del mismo `(ticker, stmt, concept)` pero
-# MAGIC de OTRO `fiscal_year` es, por definición, un cierre fiscal mal etiquetado como
-# MAGIC trimestre (un trimestre nunca cae en el límite del año fiscal). Esas filas se borran.
+# MAGIC **Invariant used:** a BS row with `period_type ∈ {Q1..Q4}` whose `period_end` matches the
+# MAGIC `period_end` of an `FY` row for the same `(ticker, stmt, concept)` but a DIFFERENT
+# MAGIC `fiscal_year` is, by definition, a fiscal close mislabeled as a quarter (a quarter never
+# MAGIC falls on a fiscal year boundary). Those rows are deleted.
 # MAGIC
-# MAGIC **Orden de ejecución recomendado:** corre primero el pipeline ya parcheado (21 → 21b)
-# MAGIC para que el MERGE haga UPDATE de las claves que sí re-emite; LUEGO este notebook para
-# MAGIC borrar las huérfanas restantes.
+# MAGIC **Recommended execution order:** run the already-patched pipeline (21 → 21b) first so the
+# MAGIC MERGE UPDATEs the keys it does re-emit; THEN run this notebook to delete the remaining orphans.
 # MAGIC
-# MAGIC También colapsa, como red de seguridad, cualquier duplicado en la clave del MERGE
-# MAGIC `(ticker, stmt, concept, fiscal_year, period_type)` (hoy 0; el fix de `21b` evita que
-# MAGIC se generen nuevos). Idempotente: re-ejecutar sobre una tabla ya limpia no cambia nada.
+# MAGIC Also collapses, as a safety net, any duplicate on the MERGE key
+# MAGIC `(ticker, stmt, concept, fiscal_year, period_type)` (currently 0; the `21b` fix prevents new
+# MAGIC ones from being generated). Idempotent: re-running on an already-clean table changes nothing.
 
 # COMMAND ----------
 
@@ -54,13 +53,13 @@ KEY = ["ticker", "stmt", "concept", "fiscal_year", "period_type"]
 
 # COMMAND ----------
 
-# MAGIC %md ## 1. Borrar cross-labels de Balance Sheet (cierre fiscal mal etiquetado como Q)
+# MAGIC %md ## 1. Delete Balance Sheet cross-labels (fiscal close mislabeled as Q)
 
 # COMMAND ----------
 
 fin = spark.table(full_tbl)
 
-# period_end de cada FY real/derivada por (ticker, stmt, concept)
+# period_end of each real/derived FY per (ticker, stmt, concept)
 fy_ends = (
     fin.filter(F.col("period_type") == "FY")
        .select("ticker", "stmt", "concept",
@@ -68,7 +67,7 @@ fy_ends = (
        .distinct()
 )
 
-# Filas de BS trimestrales cuyo period_end es un cierre fiscal de OTRO fiscal_year.
+# Quarterly BS rows whose period_end is a fiscal close from a DIFFERENT fiscal_year.
 bad = (
     fin.filter((F.col("stmt") == "Balance Sheet")
                & F.col("period_type").isin("Q1", "Q2", "Q3", "Q4"))
@@ -82,14 +81,14 @@ bad = (
 )
 
 n_bad = bad.count()
-print(f"Cross-labels de BS a borrar (cierre fiscal etiquetado como trimestre): {n_bad:,}")
+print(f"BS cross-labels to delete (fiscal close labeled as a quarter): {n_bad:,}")
 if n_bad:
     bad.groupBy("period_type").count().orderBy("period_type").show()
 
 bad.createOrReplaceTempView("bad_xlabel")
 
-# DELETE puntual vía MERGE (la clave + period_end identifica la fila de forma única;
-# 0 duplicados en la clave del MERGE — verificado en el paso 2).
+# Targeted DELETE via MERGE (key + period_end uniquely identifies the row;
+# 0 duplicates on the MERGE key — verified in step 2).
 spark.sql(f"""
     MERGE INTO {full_tbl} AS t
     USING bad_xlabel AS s
@@ -105,14 +104,14 @@ print(f"✓ DELETE de cross-labels completo → {full_tbl}")
 
 # COMMAND ----------
 
-# MAGIC %md ## 2. Red de seguridad — colapsar duplicados en la clave del MERGE
+# MAGIC %md ## 2. Safety net — collapse duplicates on the MERGE key
 # MAGIC
-# MAGIC Una fila por `(ticker, stmt, concept, fiscal_year, period_type)`. Hoy debería haber 0
-# MAGIC duplicados (el fix de `21b` los evita), así que esto es idempotente. Desempate:
-# MAGIC 1. `scraped_at` desc — gana el run más reciente.
-# MAGIC 2. `period_end` desc — gana el fact del año en curso (no el comparativo desfasado).
-# MAGIC 3. `is_derived` asc — preferimos el valor reportado por SEC sobre el derivado.
-# MAGIC 4. `value` desc — desempate final determinista.
+# MAGIC One row per `(ticker, stmt, concept, fiscal_year, period_type)`. There should be 0
+# MAGIC duplicates today (the `21b` fix prevents them), so this is idempotent. Tiebreak order:
+# MAGIC 1. `scraped_at` desc — most recent run wins.
+# MAGIC 2. `period_end` desc — current-year fact wins (not the stale comparative).
+# MAGIC 3. `is_derived` asc — prefer SEC-reported value over derived.
+# MAGIC 4. `value` desc — deterministic final tiebreak.
 
 # COMMAND ----------
 
@@ -126,9 +125,9 @@ dup_before = spark.sql(f"""
     )
 """).collect()[0]
 total_before = spark.table(full_tbl).count()
-print(f"Filas totales            : {total_before:,}")
-print(f"Grupos duplicados (clave): {dup_before['dup_groups']:,}")
-print(f"Filas sobrantes a borrar : {dup_before['extra_rows']:,}")
+print(f"Total rows               : {total_before:,}")
+print(f"Duplicate groups (key)   : {dup_before['dup_groups']:,}")
+print(f"Extra rows to delete     : {dup_before['extra_rows']:,}")
 
 # COMMAND ----------
 
@@ -147,7 +146,7 @@ if dup_before["dup_groups"] > 0:
         .drop("rn")
     )
 
-    # Materializamos en staging para no leer y sobrescribir la misma tabla a la vez.
+    # Materialize into staging to avoid reading and overwriting the same table simultaneously.
     (
         deduped.write
         .format("delta")
@@ -157,9 +156,9 @@ if dup_before["dup_groups"] > 0:
     )
 
     staged_count = spark.table(staging).count()
-    print(f"Filas tras dedup (staging): {staged_count:,}  (se eliminarán {total_before - staged_count:,})")
+    print(f"Rows after dedup (staging): {staged_count:,}  ({total_before - staged_count:,} will be removed)")
 
-    # INSERT OVERWRITE conserva la definición de la tabla (NOT NULL, partición, autoOptimize).
+    # INSERT OVERWRITE preserves the table definition (NOT NULL, partition, autoOptimize).
     target_cols = [c for c in spark.table(full_tbl).columns]
     spark.table(staging).select(*target_cols).createOrReplaceTempView("incoming_dedup")
     spark.sql(f"INSERT OVERWRITE TABLE {full_tbl} SELECT {', '.join(target_cols)} FROM incoming_dedup")
@@ -170,7 +169,7 @@ else:
 
 # COMMAND ----------
 
-# MAGIC %md ## 3. Verificación — 0 cross-labels y 0 duplicados de clave
+# MAGIC %md ## 3. Verification — 0 cross-labels and 0 key duplicates
 
 # COMMAND ----------
 
@@ -199,9 +198,9 @@ xlabel_after = spark.sql(f"""
 """).collect()[0]["n"]
 
 total_after = spark.table(full_tbl).count()
-print(f"Filas totales        : {total_after:,}")
-print(f"Grupos duplicados    : {dup_after:,}  (esperado 0)")
-print(f"Cross-labels BS      : {xlabel_after:,}  (esperado 0)")
-assert dup_after == 0,    "Aún quedan duplicados en la clave del MERGE."
-assert xlabel_after == 0, "Aún quedan cross-labels de BS — revisar el predicado."
-print("✓ tabla limpia")
+print(f"Total rows           : {total_after:,}")
+print(f"Duplicate groups     : {dup_after:,}  (expected 0)")
+print(f"Cross-labels BS      : {xlabel_after:,}  (expected 0)")
+assert dup_after == 0,    "Duplicates still remain on the MERGE key."
+assert xlabel_after == 0, "BS cross-labels still remain — review the predicate."
+print("✓ clean table")

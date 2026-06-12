@@ -36,10 +36,10 @@ def _record_step(name, t0):
 # MAGIC Runs the full ingestion → transformation → analysis pipeline in sequence.
 # MAGIC
 # MAGIC ```
-# MAGIC favorites.json              editar favoritos (00_config/favorites.json en el repo)
-# MAGIC concept_hierarchy.json      editar jerarquía de conceptos (00_config/ en el repo)
-# MAGIC metrics_hierarchy.json      editar jerarquía de derived metrics (00_config/ en el repo)
-# MAGIC valuation_assumptions.json  editar supuestos de valoración (00_config/ en el repo)
+# MAGIC favorites.json              edit favorites (00_config/favorites.json in the repo)
+# MAGIC concept_hierarchy.json      edit concept hierarchy (00_config/ in the repo)
+# MAGIC metrics_hierarchy.json      edit derived metrics hierarchy (00_config/ in the repo)
+# MAGIC valuation_assumptions.json  edit valuation assumptions (00_config/ in the repo)
 # MAGIC       ↓
 # MAGIC 02__tickers_master              build main.config.tickers
 # MAGIC       ↓
@@ -66,10 +66,10 @@ def _record_step(name, t0):
 # MAGIC 52__publish_to_github           upload artifacts as GitHub Release assets (latest tag)
 # MAGIC ```
 # MAGIC
-# MAGIC > **Nota:** `02__tickers_master`, `03__concept_hierarchy_master` y `04__metrics_hierarchy_master` viven en `00_config/`.
-# MAGIC > En este pipeline asumimos que `main.config.tickers` ya existe — se construye
-# MAGIC > manualmente con `02__tickers_master`. Las jerarquías (`concept_hierarchy` y `metrics_hierarchy`)
-# MAGIC > se reconstruyen automáticamente en cada run desde sus respectivos JSONs.
+# MAGIC > **Note:** `02__tickers_master`, `03__concept_hierarchy_master` and `04__metrics_hierarchy_master` live in `00_config/`.
+# MAGIC > This pipeline assumes `main.config.tickers` already exists — it is built
+# MAGIC > manually with `02__tickers_master`. The hierarchies (`concept_hierarchy` and `metrics_hierarchy`)
+# MAGIC > are rebuilt automatically on every run from their respective JSONs.
 
 # COMMAND ----------
 
@@ -79,16 +79,16 @@ def _record_step(name, t0):
 # MAGIC Override at runtime via Databricks Job parameters:
 # MAGIC `{"tickers_override": "AAPL,TSLA", "run_optimization": "false"}`
 # MAGIC
-# MAGIC - `tickers_override`: lista de tickers separados por coma (omite `main.config.tickers`)
-# MAGIC - `run_optimization`: `true` para correr OPTIMIZE + VACUUM al final
-# MAGIC - `force_full_refresh`: `true` para re-ingestar TODOS los tickers ignorando el
-# MAGIC   guard de frescura de 3 días en `11__fetch_sec_xbrl` (úsalo para un backfill
-# MAGIC   tras un cambio de lógica de ingest/merge)
+# MAGIC - `tickers_override`: comma-separated ticker list (overrides `main.config.tickers`)
+# MAGIC - `run_optimization`: `true` to run OPTIMIZE + VACUUM at the end
+# MAGIC - `force_full_refresh`: `true` to re-ingest ALL tickers ignoring the
+# MAGIC   3-day freshness guard in `11__fetch_sec_xbrl` (use this for a backfill
+# MAGIC   after a logic change in ingest/merge)
 # MAGIC
-# MAGIC > El universo de tickers (`main.config.tickers`) se mantiene manualmente con
-# MAGIC > `02__tickers_master`. Las jerarquías de conceptos y métricas
-# MAGIC > (`main.config.concept_hierarchy` y `main.config.metrics_hierarchy`)
-# MAGIC > sí se reconstruyen automáticamente en cada run desde sus respectivos JSONs.
+# MAGIC > The ticker universe (`main.config.tickers`) is maintained manually with
+# MAGIC > `02__tickers_master`. The concept and metrics hierarchies
+# MAGIC > (`main.config.concept_hierarchy` and `main.config.metrics_hierarchy`)
+# MAGIC > are rebuilt automatically on every run from their respective JSONs.
 
 # COMMAND ----------
 
@@ -140,37 +140,37 @@ print(f"Pipeline started at {pipeline_start.isoformat()} UTC")
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 2. Status de config tables
+# MAGIC ## 2. Config table status
 # MAGIC
-# MAGIC `main.config.tickers` debe existir antes de ejecutar este pipeline — se construye
-# MAGIC manualmente con `02__tickers_master` (cuando edites `favorites.json`).
-# MAGIC `main.config.concept_hierarchy` y `main.config.metrics_hierarchy` se reconstruyen
-# MAGIC automáticamente en los pasos 3 y 4.
+# MAGIC `main.config.tickers` must exist before running this pipeline — it is built
+# MAGIC manually with `02__tickers_master` (when you edit `favorites.json`).
+# MAGIC `main.config.concept_hierarchy` and `main.config.metrics_hierarchy` are rebuilt
+# MAGIC automatically in steps 3 and 4.
 
 # COMMAND ----------
 
-# El rebuild de main.config.tickers no se ejecuta automáticamente porque hace
-# llamadas a Wikipedia (S&P 500) y iShares (Russell 3000) que rara vez cambian.
+# The main.config.tickers rebuild does not run automatically because it makes
+# calls to Wikipedia (S&P 500) and iShares (Russell 3000) that rarely change.
 #
-# Para refrescar el universo de tickers, ejecuta 02__tickers_master manualmente
-# (por ejemplo, después de editar favorites.json en el repo).
+# To refresh the ticker universe, run 02__tickers_master manually
+# (e.g. after editing favorites.json in the repo).
 #
-# Las jerarquías (siguientes pasos) sí se reconstruyen siempre — son baratas.
+# The hierarchies (next steps) are always rebuilt — they are cheap.
 
 if rebuild_config.lower() == "true":
-    print("⚠ rebuild_config=true detectado, pero el rebuild de tickers se hace")
-    print("  manualmente — ejecuta 02__tickers_master por separado.")
+    print("⚠ rebuild_config=true detected, but the ticker rebuild is done")
+    print("  manually — run 02__tickers_master separately.")
 else:
-    print("⊘ Skipping ticker rebuild — usa main.config.tickers tal como está")
+    print("⊘ Skipping ticker rebuild — using main.config.tickers as-is")
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ## 3. Concept hierarchy
-# MAGIC `main.config.concept_hierarchy` — jerarquía de conceptos para agrupación y orden en el dashboard.
+# MAGIC `main.config.concept_hierarchy` — concept hierarchy for grouping and ordering in the dashboard.
 # MAGIC
-# MAGIC Siempre se reconstruye (es barato — ~48 filas, <5s) para asegurar que la tabla
-# MAGIC refleja el estado actual de `concept_hierarchy.json` en el repo.
+# MAGIC Always rebuilt (cheap — ~48 rows, <5s) to ensure the table
+# MAGIC reflects the current state of `concept_hierarchy.json` in the repo.
 
 # COMMAND ----------
 
@@ -191,11 +191,11 @@ _record_step("Concept Hierarchy", _t0)
 
 # MAGIC %md
 # MAGIC ## 4. Metrics hierarchy
-# MAGIC `main.config.metrics_hierarchy` — jerarquía de derived metrics (category → subcategory)
-# MAGIC para agrupación y orden en el dashboard.
+# MAGIC `main.config.metrics_hierarchy` — derived metrics hierarchy (category → subcategory)
+# MAGIC for grouping and ordering in the dashboard.
 # MAGIC
-# MAGIC Siempre se reconstruye (es barato — ~40 filas, <2s) para asegurar que la tabla
-# MAGIC refleja el estado actual de `metrics_hierarchy.json` en el repo.
+# MAGIC Always rebuilt (cheap — ~40 rows, <2s) to ensure the table
+# MAGIC reflects the current state of `metrics_hierarchy.json` in the repo.
 
 # COMMAND ----------
 
@@ -237,11 +237,11 @@ _record_step("SEC Ingestion", _t0)
 
 # MAGIC %md
 # MAGIC ## 5b. Ingestion — dimensional 10-K facts (combined-filers) ⚠️ experimental
-# MAGIC `financials_raw` — recupera los totales primarios anuales de combined-filers
-# MAGIC (REIT + Operating Partnership, p.ej. SKT) que SEC `companyfacts` omite por ser
-# MAGIC facts dimensionales. **No-op** si ningún ticker en `favorites.json` tiene el campo
-# MAGIC `combined_filer_member`. Debe correr DESPUÉS de `11` (sincroniza `scraped_at`) y
-# MAGIC ANTES de `21`.
+# MAGIC `financials_raw` — retrieves annual primary totals for combined-filers
+# MAGIC (REIT + Operating Partnership, e.g. SKT) that SEC `companyfacts` omits because they are
+# MAGIC dimensional facts. **No-op** if no ticker in `favorites.json` has the
+# MAGIC `combined_filer_member` field. Must run AFTER `11` (syncs `scraped_at`) and
+# MAGIC BEFORE `21`.
 
 # COMMAND ----------
 
@@ -304,14 +304,14 @@ _record_step("Clean & Merge", _t0)
 
 # MAGIC %md
 # MAGIC ## 7b. Derive quarterly rows
-# MAGIC `financials` — añade filas Q1–Q4 standalone por concepto.
+# MAGIC `financials` — adds Q1–Q4 standalone rows per concept.
 # MAGIC
-# MAGIC Por `kind`:
-# MAGIC - `flow_additive`: Q1–Q3 standalone (~90d) o `YTD_n − YTD_(n-1)`. Q4 standalone si existe en el 10-K, si no `FY − YTD_Q3`.
-# MAGIC - `flow_nonadditive`: solo standalone (~90d); NULL si no.
-# MAGIC - `stock`: snapshot al `period_end` (dedup latest `filed`).
+# MAGIC By `kind`:
+# MAGIC - `flow_additive`: Q1–Q3 standalone (~90d) or `YTD_n − YTD_(n-1)`. Q4 standalone if present in the 10-K, otherwise `FY − YTD_Q3`.
+# MAGIC - `flow_nonadditive`: standalone only (~90d); NULL if absent.
+# MAGIC - `stock`: snapshot at `period_end` (dedup latest `filed`).
 # MAGIC
-# MAGIC Requiere que `21__clean_and_merge` haya escrito las filas FY antes.
+# MAGIC Requires `21__clean_and_merge` to have written the FY rows first.
 
 # COMMAND ----------
 
@@ -332,12 +332,12 @@ _record_step("Derive Quarterly", _t0)
 
 # MAGIC %md
 # MAGIC ## 7c. FY-from-quarterly fallback
-# MAGIC `financials` — sintetiza filas FY (Σ Q1..Q4) **solo** para conceptos `flow_additive`
-# MAGIC que no tienen FY real (emisores cuyo total anual no se expone sin dimensión en el
-# MAGIC 10-K). Nunca sobrescribe una FY reportada; `is_derived=True`. Rendimiento bajo hoy
-# MAGIC (el conjunto afectado suele carecer de Q4), pero cubre casos futuros.
+# MAGIC `financials` — synthesises FY rows (Σ Q1..Q4) **only** for `flow_additive` concepts
+# MAGIC that have no real FY (issuers whose annual total is not exposed without a dimension in the
+# MAGIC 10-K). Never overwrites a reported FY; `is_derived=True`. Low yield today
+# MAGIC (the affected set often lacks Q4), but covers future cases.
 # MAGIC
-# MAGIC Requiere que `21b__derive_quarterly` haya escrito los trimestres antes.
+# MAGIC Requires `21b__derive_quarterly` to have written the quarters first.
 
 # COMMAND ----------
 
@@ -358,10 +358,10 @@ _record_step("FY from Quarterly", _t0)
 
 # MAGIC %md
 # MAGIC ## 7d. Dedup Balance Sheet
-# MAGIC `financials` — refuerza la invariante "un snapshot de BS por `(ticker, stmt, concept,
-# MAGIC period_end)`", colapsando huérfanas mal etiquetadas (fiscal_year/period_type) que el MERGE
-# MAGIC nunca borra. Recurrente e idempotente: si no hay duplicados, no reescribe nada. Debe correr
-# MAGIC después de todos los escritores de filas BS (21, 21b) y antes de las métricas.
+# MAGIC `financials` — enforces the "one BS snapshot per `(ticker, stmt, concept,
+# MAGIC period_end)`" invariant, collapsing mislabelled orphans (fiscal_year/period_type) that MERGE
+# MAGIC never deletes. Recurring and idempotent: if no duplicates exist, nothing is rewritten. Must run
+# MAGIC after all BS row writers (21, 21b) and before metrics.
 
 # COMMAND ----------
 
@@ -403,14 +403,14 @@ _record_step("Derived Metrics", _t0)
 
 # MAGIC %md
 # MAGIC ## 9. Intrinsic Value
-# MAGIC `financials_intrinsic_value` — Graham Number, Graham Revised, DCF y Owner Earnings
-# MAGIC para cada fiscal year histórico y TTM (rolling 4 quarters). También expone las
-# MAGIC métricas resultantes con sufijos `(FY)` y `(TTM)` en `financials_metrics` para que
-# MAGIC el dashboard pueda filtrarlas como cualquier otra métrica.
+# MAGIC `financials_intrinsic_value` — Graham Number, Graham Revised, DCF and Owner Earnings
+# MAGIC for each historical fiscal year and TTM (rolling 4 quarters). Also exposes the
+# MAGIC resulting metrics with `(FY)` and `(TTM)` suffixes in `financials_metrics` so the
+# MAGIC dashboard can filter them like any other metric.
 # MAGIC
-# MAGIC Los supuestos (WACC, growth, etc.) viven en `00_config/valuation_assumptions.json`
-# MAGIC con overrides por ticker. Requiere que `22__derived_metrics` y `12__fetch_market_data`
-# MAGIC se hayan ejecutado antes.
+# MAGIC Assumptions (WACC, growth, etc.) live in `00_config/valuation_assumptions.json`
+# MAGIC with per-ticker overrides. Requires `22__derived_metrics` and `12__fetch_market_data`
+# MAGIC to have run first.
 
 # COMMAND ----------
 

@@ -1,25 +1,25 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # POC — Lógica de ingestión 10-Q
+# MAGIC # POC — 10-Q ingestion logic
 # MAGIC
-# MAGIC **Objetivo:** validar la matemática del Q4 derivado y mapear cuán heterogéneo
-# MAGIC es el panorama de filings entre empresas, ANTES de tocar el pipeline.
+# MAGIC **Objective:** validate the derived-Q4 math and map how heterogeneous
+# MAGIC the filing landscape is across companies, BEFORE touching the pipeline.
 # MAGIC
-# MAGIC **No escribe en ninguna tabla.** Solo imprime resultados para inspección visual.
+# MAGIC **Writes to no table.** Only prints results for visual inspection.
 # MAGIC
-# MAGIC **Lo que valida:**
-# MAGIC 1. ¿Las empresas reportan `Revenues` como standalone (~90d), YTD acumulado, o ambos?
-# MAGIC 2. ¿Cuadra Q1 + Q2 + Q3 + Q4_derivado = FY?
-# MAGIC 3. ¿`Assets` (Balance Sheet) viene como snapshot puntual?
-# MAGIC 4. ¿Los campos `fp` y `fy` de SEC son fiables incluso para fiscal years no-calendario?
+# MAGIC **What it validates:**
+# MAGIC 1. Do companies report `Revenues` as standalone (~90d), cumulative YTD, or both?
+# MAGIC 2. Does Q1 + Q2 + Q3 + Q4_derived = FY?
+# MAGIC 3. Does `Assets` (Balance Sheet) come as a point-in-time snapshot?
+# MAGIC 4. Are SEC's `fp` and `fy` fields reliable even for non-calendar fiscal years?
 # MAGIC
-# MAGIC **Muestra de tickers** elegida para cubrir perfiles distintos:
-# MAGIC - `AAPL` — fiscal year acaba en septiembre (caso "duro")
-# MAGIC - `MSFT` — fiscal year acaba en junio
-# MAGIC - `WMT`  — fiscal year acaba en enero
-# MAGIC - `JPM`  — financial (puede tener concepts distintos)
-# MAGIC - `O`    — REIT (estructura distinta)
-# MAGIC - `KO`   — calendar year FY, gran cap clásica
+# MAGIC **Ticker sample** chosen to cover distinct profiles:
+# MAGIC - `AAPL` — fiscal year ends in September (the "hard" case)
+# MAGIC - `MSFT` — fiscal year ends in June
+# MAGIC - `WMT`  — fiscal year ends in January
+# MAGIC - `JPM`  — financial (may have different concepts)
+# MAGIC - `O`    — REIT (different structure)
+# MAGIC - `KO`   — calendar-year FY, classic large cap
 
 # COMMAND ----------
 
@@ -28,11 +28,11 @@ import pandas as pd
 import time
 from collections import defaultdict
 
-HEADERS = {"User-Agent": "POC quarterly research"}  # ← cámbialo por tu User-Agent real
+HEADERS = {"User-Agent": "POC quarterly research"}  # ← change this to your real User-Agent
 
 SAMPLE_TICKERS = ["AAPL", "MSFT", "WMT", "JPM", "O", "KO"]
 
-# Concepts representativos: 1 flow del IS, 1 flow del CF, 1 stock del BS
+# Representative concepts: 1 IS flow, 1 CF flow, 1 BS stock
 PROBE_CONCEPTS = {
     "Revenues":                                    ("Income Statement", "flow"),
     "RevenueFromContractWithCustomerExcludingAssessedTax": ("Income Statement", "flow"),
@@ -42,7 +42,7 @@ PROBE_CONCEPTS = {
 
 # COMMAND ----------
 
-# MAGIC %md ## 1. Helpers — fetch SEC + clasificar duración
+# MAGIC %md ## 1. Helpers — fetch SEC + classify duration
 
 # COMMAND ----------
 
@@ -64,7 +64,7 @@ def get_facts(cik: str) -> dict:
 
 
 def classify_duration(start, end):
-    """Devuelve la 'forma' del periodo según end-start. None si es stock."""
+    """Returns the period 'shape' based on end-start. None if it is a stock concept."""
     if pd.isna(start):
         return "snapshot"   # stock concept — no tiene start
     days = (pd.to_datetime(end) - pd.to_datetime(start)).days
@@ -77,8 +77,8 @@ def classify_duration(start, end):
 
 def extract_concept_raw(facts: dict, concept: str, namespace: str = "us-gaap") -> pd.DataFrame:
     """
-    Devuelve TODOS los rows raw del concept, sin filtrar nada.
-    Añade columnas derivadas: 'duration_days', 'period_shape'.
+    Returns ALL raw rows for the concept, without any filtering.
+    Adds derived columns: 'duration_days', 'period_shape'.
     """
     try:
         units    = facts["facts"][namespace][concept]["units"]
@@ -103,17 +103,17 @@ def extract_concept_raw(facts: dict, concept: str, namespace: str = "us-gaap") -
         lambda r: classify_duration(r["start"], r["end"]), axis=1
     )
 
-    # Solo quedarnos con 10-K/10-Q/10-K/A/10-Q/A
+    # Keep only 10-K/10-Q/10-K/A/10-Q/A
     df = df[df["form"].isin(["10-K", "10-Q", "10-K/A", "10-Q/A"])].copy()
 
     return df
 
 # COMMAND ----------
 
-# MAGIC %md ## 2. Inventario de "formas" por ticker × concept
+# MAGIC %md ## 2. Shape inventory by ticker × concept
 # MAGIC
-# MAGIC Para cada (ticker, concept) cuenta cuántas filas hay de cada `period_shape`.
-# MAGIC Esto contesta la pregunta clave: ¿cada empresa reporta el standalone Q, el YTD, o ambos?
+# MAGIC For each (ticker, concept) counts how many rows there are for each `period_shape`.
+# MAGIC This answers the key question: does each company report the standalone Q, the YTD, or both?
 
 # COMMAND ----------
 
@@ -136,8 +136,8 @@ for ticker in SAMPLE_TICKERS:
             fp_set       = sorted(df["fp"].unique().tolist())
             form_set     = sorted(df["form"].unique().tolist())
 
-            # Q4 standalone: ~90d que aparecen dentro de 10-K (fp="FY").
-            # Indicador de si la empresa publica el Q4 como standalone en su 10-K.
+            # Q4 standalone: ~90d rows that appear inside a 10-K (fp="FY").
+            # Indicator of whether the company publishes Q4 as standalone in its 10-K.
             q4_std_rows = df[
                 (df["fp"] == "FY")
                 & (df["form"].isin(["10-K", "10-K/A"]))
@@ -167,18 +167,18 @@ print(inv_df.to_string())
 
 # COMMAND ----------
 
-# MAGIC %md ## 3. Test específico: cuadre Q1+Q2+Q3+Q4 = FY (para AAPL, último FY completo)
+# MAGIC %md ## 3. Specific test: Q1+Q2+Q3+Q4 = FY reconciliation (for AAPL, latest complete FY)
 # MAGIC
-# MAGIC Coge el FY más reciente con datos completos y aplica las dos estrategias en paralelo:
-# MAGIC - **Estrategia A:** standalone directo si existe, si no derivado de YTD
-# MAGIC - **Estrategia B:** todo derivado de YTD (ignorar standalones)
+# MAGIC Takes the most recent FY with complete data and applies both strategies in parallel:
+# MAGIC - **Strategy A:** direct standalone if available, otherwise derived from YTD
+# MAGIC - **Strategy B:** everything derived from YTD (ignore standalones)
 # MAGIC
-# MAGIC Validamos cuál cuadra mejor con el FY del 10-K.
+# MAGIC We validate which one reconciles better with the 10-K FY.
 
 # COMMAND ----------
 
 def latest_fy_from_10k(df_concept: pd.DataFrame):
-    """Devuelve el (fy, value, end) más reciente reportado en un 10-K."""
+    """Returns the most recent (fy, value, end) reported in a 10-K."""
     fy_rows = df_concept[
         (df_concept["form"].isin(["10-K", "10-K/A"]))
         & (df_concept["fp"] == "FY")
@@ -186,7 +186,7 @@ def latest_fy_from_10k(df_concept: pd.DataFrame):
     ].copy()
     if fy_rows.empty:
         return None
-    # quedarnos con el último filed por fy (restatements)
+    # keep the latest filed per fy (restatements)
     fy_rows = fy_rows.sort_values("filed").drop_duplicates(subset=["fy"], keep="last")
     fy_rows = fy_rows.sort_values("fy", ascending=False)
     top = fy_rows.iloc[0]
@@ -195,20 +195,20 @@ def latest_fy_from_10k(df_concept: pd.DataFrame):
 
 def quarter_values_for_fy(df_concept: pd.DataFrame, fy: int):
     """
-    Para un fiscal year concreto, devuelve dict con todas las opciones disponibles:
+    For a given fiscal year, returns a dict with all available options:
     - q1_standalone, q2_standalone, q3_standalone, q4_standalone
-        ~90d en Q1/Q2/Q3 (de 10-Q) y ~90d en FY (de 10-K, si la empresa lo reporta)
-    - ytd_q1, ytd_q2, ytd_q3   (~90/180/270d en Q1/Q2/Q3)
-    Quedándonos siempre con el último 'filed' para cada combinación.
+        ~90d in Q1/Q2/Q3 (from 10-Q) and ~90d in FY (from 10-K, if the company reports it)
+    - ytd_q1, ytd_q2, ytd_q3   (~90/180/270d in Q1/Q2/Q3)
+    Always keeping the latest 'filed' for each combination.
 
-    Nota sobre Q4 standalone:
-    En XBRL no existe un fp="Q4" oficial. Cuando una empresa publica el Q4 standalone
-    en su 10-K, aparece como una duration de ~90d con fp="FY" y end == fy_end.
-    Lo detectamos por forma (Q_standalone) dentro de filings 10-K, no por fp.
+    Note on Q4 standalone:
+    There is no official fp="Q4" in XBRL. When a company publishes Q4 standalone
+    in its 10-K, it appears as a ~90d duration with fp="FY" and end == fy_end.
+    We detect it by shape (Q_standalone) within 10-K filings, not by fp.
     """
     out = {}
 
-    # ── Standalones + YTD para Q1/Q2/Q3 (vienen de 10-Q con fp="Qn") ──
+    # ── Standalones + YTD for Q1/Q2/Q3 (come from 10-Q with fp="Qn") ──
     for fp, key_std, key_ytd in [
         ("Q1", "q1_standalone", "ytd_q1"),
         ("Q2", "q2_standalone", "ytd_q2"),
@@ -223,14 +223,14 @@ def quarter_values_for_fy(df_concept: pd.DataFrame, fy: int):
         if not std.empty:
             out[key_std] = float(std.iloc[-1]["val"])
 
-        # YTD (depende del fp)
+        # YTD (depends on fp)
         ytd_shape = {"Q1": "Q_standalone", "Q2": "YTD_6M", "Q3": "YTD_9M"}[fp]
         ytd = chunk[chunk["period_shape"] == ytd_shape].sort_values("filed")
         if not ytd.empty:
             out[key_ytd] = float(ytd.iloc[-1]["val"])
 
-    # ── Q4 standalone: ~90d dentro del 10-K (fp="FY") ──
-    # Buscamos rows con period_shape="Q_standalone" en filings 10-K del FY actual.
+    # ── Q4 standalone: ~90d inside the 10-K (fp="FY") ──
+    # Look for rows with period_shape="Q_standalone" in 10-K filings for the current FY.
     q4_chunk = df_concept[
         (df_concept["fy"] == fy)
         & (df_concept["fp"] == "FY")
@@ -259,7 +259,7 @@ def reconcile(ticker: str, concept: str):
     fy, fy_val, fy_end = fy_info
     qvals = quarter_values_for_fy(df, fy)
 
-    # ── Q1/Q2/Q3: standalone si existe, derivado si no ──
+    # ── Q1/Q2/Q3: standalone if available, derived otherwise ──
     def derive_qstandalone(q, qvals):
         std_key = f"q{q}_standalone"
         if std_key in qvals:
@@ -274,14 +274,14 @@ def reconcile(ticker: str, concept: str):
     q2_a, src_q2 = derive_qstandalone(2, qvals)
     q3_a, src_q3 = derive_qstandalone(3, qvals)
 
-    # ── Q4 por DOS vías para poder cruzarlas ──
+    # ── Q4 via TWO paths so they can be cross-checked ──
     ytd_q3 = qvals.get("ytd_q3")
     q4_via_fy_minus_ytd = (fy_val - ytd_q3) if ytd_q3 is not None else None
-    q4_standalone       = qvals.get("q4_standalone")  # None si la empresa no lo reporta
+    q4_standalone       = qvals.get("q4_standalone")  # None if the company does not report it
 
-    # Elegimos el "oficial" siguiendo la estrategia de ingestión:
-    # FY − YTD_Q3 es el método primario (siempre disponible si hay YTD_Q3);
-    # standalone es el cross-check cuando existe.
+    # We choose the "official" one following the ingestion strategy:
+    # FY − YTD_Q3 is the primary method (always available when YTD_Q3 exists);
+    # standalone is the cross-check when available.
     if q4_via_fy_minus_ytd is not None:
         q4_a, src_q4 = q4_via_fy_minus_ytd, "FY − YTD_Q3"
     elif q4_standalone is not None:
@@ -299,7 +299,7 @@ def reconcile(ticker: str, concept: str):
         else:
             print(f"  Q{q}  =  {val:>20,.0f}   ({src})")
 
-    # ── Cruce de las dos vías de Q4 (si disponemos de ambas) ──
+    # ── Cross-check of the two Q4 paths (if both are available) ──
     if q4_via_fy_minus_ytd is not None and q4_standalone is not None:
         diff_q4 = q4_standalone - q4_via_fy_minus_ytd
         base    = q4_via_fy_minus_ytd if q4_via_fy_minus_ytd else 1
@@ -310,13 +310,13 @@ def reconcile(ticker: str, concept: str):
         print(f"    via Q4 standalone    =  {q4_standalone:>20,.0f}")
         print(f"    Diff:                   {diff_q4:>+20,.0f}  ({pct_q4:+.4f}%)")
         if abs(pct_q4) < 0.01:
-            print(f"    ✓ Ambas vías coinciden")
+            print(f"    ✓ Both paths agree")
         else:
-            print(f"    ✗ Discrepancia entre vías — investigar")
+            print(f"    ✗ Discrepancy between paths — investigate")
     elif q4_standalone is None and q4_via_fy_minus_ytd is not None:
-        print(f"  (Q4 standalone no reportado — solo disponible vía FY−YTD_Q3)")
+        print(f"  (Q4 standalone not reported — only available via FY−YTD_Q3)")
 
-    # ── Cuadre Σ Q1..Q4 == FY ──
+    # ── Σ Q1..Q4 == FY reconciliation ──
     if None not in (q1_a, q2_a, q3_a, q4_a):
         total = q1_a + q2_a + q3_a + q4_a
         diff  = total - fy_val
@@ -331,10 +331,10 @@ def reconcile(ticker: str, concept: str):
 
 # COMMAND ----------
 
-# MAGIC %md ## 4. Run reconcile sobre la muestra
+# MAGIC %md ## 4. Run reconcile over the sample
 # MAGIC
-# MAGIC Para cada ticker, probamos el concept de Revenue más probable.
-# MAGIC Algunas empresas usan `Revenues`, otras `RevenueFromContractWithCustomerExcludingAssessedTax`.
+# MAGIC For each ticker, we try the most likely Revenue concept.
+# MAGIC Some companies use `Revenues`, others use `RevenueFromContractWithCustomerExcludingAssessedTax`.
 
 # COMMAND ----------
 
@@ -347,7 +347,7 @@ for ticker in SAMPLE_TICKERS:
 
 # COMMAND ----------
 
-# MAGIC %md ## 5. Reconcile sobre Operating Cash Flow (sanity check con un concept distinto)
+# MAGIC %md ## 5. Reconcile over Operating Cash Flow (sanity check with a different concept)
 
 # COMMAND ----------
 
@@ -359,12 +359,12 @@ for ticker in SAMPLE_TICKERS:
 
 # COMMAND ----------
 
-# MAGIC %md ## 6. Balance Sheet — confirmar que es snapshot puro
+# MAGIC %md ## 6. Balance Sheet — confirm it is a pure snapshot
 # MAGIC
-# MAGIC Para `Assets` esperamos:
-# MAGIC - `start` siempre NaT (sin start, solo end)
+# MAGIC For `Assets` we expect:
+# MAGIC - `start` always NaT (no start, only end)
 # MAGIC - `period_shape` = "snapshot"
-# MAGIC - Múltiples valores por año (uno por cada filing donde aparezca)
+# MAGIC - Multiple values per year (one per filing where it appears)
 
 # COMMAND ----------
 
@@ -376,31 +376,31 @@ for ticker in SAMPLE_TICKERS:
         if df.empty:
             print(f"{ticker} / Assets: not reported"); continue
         df = df.sort_values("end", ascending=False).head(5)
-        print(f"\n── {ticker} / Assets — últimos 5 reportes ──")
+        print(f"\n── {ticker} / Assets — last 5 reports ──")
         print(df[["end", "fy", "fp", "form", "period_shape", "val", "filed"]].to_string(index=False))
     except Exception as e:
         print(f"{ticker} / Assets: ERROR {e}")
 
 # COMMAND ----------
 
-# MAGIC %md ## 7. Conclusiones a verificar a mano
+# MAGIC %md ## 7. Conclusions to verify manually
 # MAGIC
-# MAGIC Después de correr esto, responder:
+# MAGIC After running this, answer:
 # MAGIC
-# MAGIC 1. **¿Todas las empresas reportan YTD?** (esperado: sí, es la regla SEC)
-# MAGIC 2. **¿Algunas reportan TAMBIÉN standalone Q?** (esperado: la mayoría sí, en duración ~90d)
-# MAGIC 3. **¿Hay empresas que reportan SOLO standalone sin YTD?** (esperado: raro, pero comprobar)
-# MAGIC 4. **¿La estrategia "standalone si existe, derivar si no" cuadra al céntimo con FY?**
-# MAGIC 5. **¿Algún ticker tiene `period_shape = other_Xd` significativo?** (sería un caso raro a investigar)
-# MAGIC 6. **¿`fp` y `fy` son consistentes incluso para AAPL/MSFT/WMT (FY no-calendario)?**
-# MAGIC 7. **¿Qué empresas publican Q4 standalone en su 10-K?** (mirar `n_q4_standalone` en el inventario
-# MAGIC    y la sección "Q4 cross-check" del reconcile)
-# MAGIC 8. **Cuando existen las dos vías de Q4 (FY−YTD_Q3 vs Q4 standalone), ¿coinciden?**
-# MAGIC    Si no coinciden → la empresa restated YTD_Q3 al publicar el 10-K, o usa un concept distinto en Q4.
+# MAGIC 1. **Do all companies report YTD?** (expected: yes, SEC rule)
+# MAGIC 2. **Do some ALSO report standalone Q?** (expected: most do, at ~90d duration)
+# MAGIC 3. **Are there companies that report ONLY standalone without YTD?** (expected: rare, but check)
+# MAGIC 4. **Does the "standalone if available, derive otherwise" strategy reconcile to the cent with FY?**
+# MAGIC 5. **Does any ticker have a significant `period_shape = other_Xd`?** (would be a rare case to investigate)
+# MAGIC 6. **Are `fp` and `fy` consistent even for AAPL/MSFT/WMT (non-calendar FY)?**
+# MAGIC 7. **Which companies publish Q4 standalone in their 10-K?** (check `n_q4_standalone` in the inventory
+# MAGIC    and the "Q4 cross-check" section of reconcile)
+# MAGIC 8. **When both Q4 paths exist (FY−YTD_Q3 vs Q4 standalone), do they match?**
+# MAGIC    If not → the company restated YTD_Q3 when filing the 10-K, or uses a different concept in Q4.
 # MAGIC
-# MAGIC Si todo cuadra, la estrategia de ingestión es:
+# MAGIC If everything reconciles, the ingestion strategy is:
 # MAGIC ```
-# MAGIC Q1, Q2, Q3:  preferir standalone (~90d); fallback a YTD_n − YTD_(n-1)
-# MAGIC Q4:          siempre derivado = FY_10K − YTD_Q3
-# MAGIC BS concepts: snapshot directo del 'end' de cada filing
+# MAGIC Q1, Q2, Q3:  prefer standalone (~90d); fallback to YTD_n − YTD_(n-1)
+# MAGIC Q4:          always derived = FY_10K − YTD_Q3
+# MAGIC BS concepts: direct snapshot from the 'end' of each filing
 # MAGIC ```

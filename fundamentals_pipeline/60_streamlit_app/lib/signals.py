@@ -1,13 +1,13 @@
-"""Semáforo de salud para las derived metrics (umbrales tipo Graham defensivo)."""
+"""Health traffic-light for derived metrics (conservative Graham-style thresholds)."""
 from __future__ import annotations
 
 from statistics import mean
 
 from .format import is_missing
 
-# (verde_máx, rojo_mín) para "lower is better"; o (verde_mín, rojo_máx) para "higher is better".
-# good = mejor que verde, bad = peor que rojo, warn = en medio.
-_LOWER_IS_BETTER = {          # caro/arriesgado cuanto más alto
+# (green_max, red_min) for "lower is better"; or (green_min, red_max) for "higher is better".
+# good = better than green, bad = worse than red, warn = in between.
+_LOWER_IS_BETTER = {          # more expensive/risky the higher the value
     "P/E": (15, 25), "P/S": (2, 5), "P/FCF": (15, 25), "P/B": (1.5, 3),
     "EV/EBITDA": (15, 25),
     "Debt / Equity": (0.5, 1.0), "Debt / Assets": (0.3, 0.5),
@@ -23,7 +23,7 @@ _LOWER_IS_BETTER = {          # caro/arriesgado cuanto más alto
     "Total Payout Ratio":    (0.8, 1.2),   # green ≤ 80% of NI, red ≥ 120% (over-distributing)
     "Payout / FCF":          (0.8, 1.2),   # green ≤ 80% of FCF, red ≥ 120%
 }
-_HIGHER_IS_BETTER = {         # mejor cuanto más alto
+_HIGHER_IS_BETTER = {         # better the higher the value
     "Current Ratio": (2.0, 1.5),
     # Financial Health — Coverage (more coverage = safer).
     "Interest Coverage": (6.0, 2.0),   # green ≥ 6× EBIT covers interest, red ≤ 2× (distress)
@@ -53,35 +53,35 @@ _HIGHER_IS_BETTER = {         # mejor cuanto más alto
 def signal_absolute(metric: str, value) -> str | None:
     if is_missing(value):
         return None
-    base = metric.split(" (")[0].strip()      # tolera sufijos (FY)/(TTM)
+    base = metric.split(" (")[0].strip()      # tolerates (FY)/(TTM) suffixes
     if base in _LOWER_IS_BETTER:
         g, b = _LOWER_IS_BETTER[base]
         return "good" if value <= g else ("bad" if value >= b else "warn")
     if base in _HIGHER_IS_BETTER:
         g, b = _HIGHER_IS_BETTER[base]
         return "good" if value >= g else ("bad" if value <= b else "warn")
-    if base.startswith("MoS %"):              # margen de seguridad intrínseco
+    if base.startswith("MoS %"):              # intrinsic margin of safety
         return "good" if value > 30 else ("bad" if value < 0 else "warn")
     return None
 
 
 def threshold_text(metric: str) -> str:
-    """Texto del umbral Graham para el tooltip de la fila."""
+    """Graham threshold text for the row tooltip."""
     base = metric.split(" (")[0].strip()
     if base in _LOWER_IS_BETTER:
         g, b = _LOWER_IS_BETTER[base]
-        return f"{base}: verde ≤ {g:g}, rojo ≥ {b:g} (menor es mejor)"
+        return f"{base}: green ≤ {g:g}, red ≥ {b:g} (lower is better)"
     if base in _HIGHER_IS_BETTER:
         g, b = _HIGHER_IS_BETTER[base]
-        return f"{base}: verde ≥ {g:g}, rojo ≤ {b:g} (mayor es mejor)"
+        return f"{base}: green ≥ {g:g}, red ≤ {b:g} (higher is better)"
     if base.startswith("MoS %"):
-        return "MoS %: verde > 30, ámbar 0–30, rojo < 0"
+        return "MoS %: green > 30, amber 0–30, red < 0"
     return ""
 
 
 def signal_vs_history(value, history, tol: float = 0.20) -> str | None:
-    """Para múltiplos de Valuation: hoy vs media de la serie (≈10 años)."""
-    hist = [h for h in history[:-1] if not is_missing(h)]  # excluye el año actual
+    """For Valuation multiples: today vs the series average (≈10 years)."""
+    hist = [h for h in history[:-1] if not is_missing(h)]  # excludes the current year
     if is_missing(value) or len(hist) < 3:
         return None
     avg = mean(hist)

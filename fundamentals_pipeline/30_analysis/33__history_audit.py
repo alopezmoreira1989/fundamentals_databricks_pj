@@ -2,28 +2,28 @@
 # MAGIC %md
 # MAGIC # 30_analysis / 33__history_audit
 # MAGIC
-# MAGIC Audita la cobertura histórica de cada ticker activo contra la SEC companyfacts API
-# MAGIC y flagea los que probablemente tienen histórico cortado por una de estas tres causas:
+# MAGIC Audits the historical coverage of each active ticker against the SEC companyfacts API
+# MAGIC and flags those that likely have truncated history due to one of three causes:
 # MAGIC
-# MAGIC 1. **CIK predecesor faltante** (`flag_short_history`) — tras una fusión o
-# MAGIC    conversión MLP→C-corp, el ticker apunta a un CIK nuevo cuyo `companyfacts`
-# MAGIC    solo contiene filings recientes; el histórico vive bajo el CIK antiguo.
-# MAGIC 2. **Concept renaming** (`flag_concept_gap`) — el tag XBRL canónico que
-# MAGIC    ingestamos (p.ej. `Revenues`) tiene menos años que un sinónimo (p.ej.
-# MAGIC    `RevenueFromContractWithCustomerExcludingAssessedTax`); falta añadir el
-# MAGIC    sinónimo a `CONCEPT_SYNONYMS` en `01__tickers.py`.
-# MAGIC 3. **Año stub/transición** (`flag_stub_years`) — hay rows con `fp='FY'` en
-# MAGIC    10-K con duración fuera de 350–380d (p.ej. cambio de fiscal year-end);
-# MAGIC    el filtro estricto antiguo los descartaba.
+# MAGIC 1. **Missing predecessor CIK** (`flag_short_history`) — after a merger or
+# MAGIC    MLP→C-corp conversion, the ticker points to a new CIK whose `companyfacts`
+# MAGIC    only contains recent filings; the historical data lives under the old CIK.
+# MAGIC 2. **Concept renaming** (`flag_concept_gap`) — the canonical XBRL tag we
+# MAGIC    ingest (e.g. `Revenues`) has fewer years than a synonym (e.g.
+# MAGIC    `RevenueFromContractWithCustomerExcludingAssessedTax`); the synonym needs to be
+# MAGIC    added to `CONCEPT_SYNONYMS` in `01__tickers.py`.
+# MAGIC 3. **Stub/transition year** (`flag_stub_years`) — rows with `fp='FY'` in
+# MAGIC    10-K filings with a duration outside 350–380d (e.g. fiscal year-end change);
+# MAGIC    the old strict filter discarded them.
 # MAGIC
-# MAGIC **Escribe a**: `main.financials.history_audit` (Delta, overwrite cada run —
-# MAGIC es un snapshot del estado SEC en el momento de la corrida).
+# MAGIC **Writes to**: `main.financials.history_audit` (Delta, overwrite each run —
+# MAGIC snapshot of SEC state at the time of the run).
 # MAGIC
-# MAGIC **NO escribe** a `financials_raw`, `financials`, ni a otras tablas del pipeline.
+# MAGIC **Does NOT write** to `financials_raw`, `financials`, or any other pipeline table.
 # MAGIC
-# MAGIC **Cómo correr**:
-# MAGIC - Por defecto: audita todos los `ACTIVE_TICKERS` (~3000 tickers, ~20–25 min con 8 workers).
-# MAGIC - Override ad-hoc: setear `TICKERS_OVERRIDE = ["VNOM", "AAPL"]` antes de ejecutar.
+# MAGIC **How to run**:
+# MAGIC - Default: audits all `ACTIVE_TICKERS` (~3000 tickers, ~20–25 min with 8 workers).
+# MAGIC - Ad-hoc override: set `TICKERS_OVERRIDE = ["VNOM", "AAPL"]` before executing.
 
 # COMMAND ----------
 
@@ -35,14 +35,14 @@
 
 # COMMAND ----------
 
-# ── Override manual: lista de tickers; None = todos los activos ──────────────
+# ── Manual override: list of tickers; None = all active ──────────────────────
 TICKERS_OVERRIDE: "list[str] | None" = None
 
-# ── Heurísticas ──────────────────────────────────────────────────────────────
-MIN_EXPECTED_YEARS = 5     # menos años que esto → flag_short_history
-MIN_REVENUE_GAP    = 2     # años de diferencia entre sinónimos → flag_concept_gap
+# ── Heuristics ───────────────────────────────────────────────────────────────
+MIN_EXPECTED_YEARS = 5     # fewer years than this → flag_short_history
+MIN_REVENUE_GAP    = 2     # years difference between synonyms → flag_concept_gap
 
-# ── Parallelism & rate limit (mismo patrón que 11__fetch_sec_xbrl.py) ────────
+# ── Parallelism & rate limit (same pattern as 11__fetch_sec_xbrl.py) ─────────
 MAX_WORKERS     = 8
 MIN_REQUEST_GAP = 0.12
 REQUEST_TIMEOUT = 30
@@ -64,8 +64,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from requests.adapters import HTTPAdapter
 from threading import Lock
 
-# Windows console (cp1252) revienta con → ✓ ✗ ⚠ — fuerza UTF-8 si el stream lo soporta.
-# No-op en Databricks.
+# Windows console (cp1252) chokes on → ✓ ✗ ⚠ — force UTF-8 if the stream supports it.
+# No-op in Databricks.
 try:
     sys.stdout.reconfigure(encoding="utf-8")
 except Exception:
@@ -73,22 +73,21 @@ except Exception:
 
 HEADERS = {"User-Agent": SEC_USER_AGENT}
 
-# ── HTTP session compartida ──────────────────────────────────────────────────
-# Reusar la misma Session a través de todos los workers ahorra el handshake
-# TCP+TLS (~50–150ms por request) en cada llamada después de la primera. El
-# pool tiene que ser ≥ MAX_WORKERS para que no se convierta en un punto de
-# serialización oculto.
+# ── Shared HTTP session ───────────────────────────────────────────────────────
+# Reusing the same Session across all workers saves the TCP+TLS handshake
+# (~50–150ms per request) on every call after the first. The pool must be
+# ≥ MAX_WORKERS to avoid becoming a hidden serialisation bottleneck.
 SESSION = requests.Session()
 SESSION.headers.update(HEADERS)
 SESSION.mount("https://", HTTPAdapter(pool_connections=MAX_WORKERS, pool_maxsize=MAX_WORKERS * 2))
 
-# Buffer de latencias para el resumen p50/p95/p99 al final. Capped para que
-# no crezca sin límite en runs largos.
+# Latency buffer for the p50/p95/p99 summary at the end. Capped so it
+# doesn't grow unbounded on long runs.
 _LATENCIES: "deque[float]" = deque(maxlen=20000)
 
-# Cache de "este CIK tiene XBRL ingestible?" usado por el pase 3 (FTS).
-# Compartido entre workers; los dict ops de una sola clave son atómicos en
-# CPython bajo el GIL — no hace falta lock.
+# Cache of "does this CIK have ingestible XBRL?" used by pass 3 (FTS).
+# Shared across workers; single-key dict ops are atomic in CPython under
+# the GIL — no lock needed.
 _XBRL_PROBE_CACHE: "dict[str, bool]" = {}
 
 # COMMAND ----------
@@ -99,18 +98,18 @@ _XBRL_PROBE_CACHE: "dict[str, bool]" = {}
 
 if TICKERS_OVERRIDE:
     AUDIT_TICKERS = [t.upper().strip() for t in TICKERS_OVERRIDE]
-    print(f"✓ Override manual — auditando {len(AUDIT_TICKERS)} ticker(s): {AUDIT_TICKERS[:20]}{'…' if len(AUDIT_TICKERS) > 20 else ''}")
+    print(f"✓ Manual override — auditing {len(AUDIT_TICKERS)} ticker(s): {AUDIT_TICKERS[:20]}{'…' if len(AUDIT_TICKERS) > 20 else ''}")
 else:
     tickers_df = spark.table(f"{CATALOG}.config.tickers").select("ticker").collect()
     AUDIT_TICKERS = [row.ticker.upper() for row in tickers_df]
-    print(f"✓ Universo completo — auditando {len(AUDIT_TICKERS):,} tickers desde {CATALOG}.config.tickers")
+    print(f"✓ Full universe — auditing {len(AUDIT_TICKERS):,} tickers from {CATALOG}.config.tickers")
 
 # COMMAND ----------
 
-# MAGIC %md ## 2. Conceptos a sondear
+# MAGIC %md ## 2. Concepts to probe
 # MAGIC
-# MAGIC Familias amplias para detectar renaming. Si el canónico tiene menos cobertura
-# MAGIC que cualquier alternativo del mismo grupo, lo flageamos.
+# MAGIC Broad families to detect renaming. If the canonical tag has less coverage
+# MAGIC than any alternative in the same group, we flag it.
 
 # COMMAND ----------
 
@@ -138,11 +137,11 @@ ASSETS_FAMILY = [
 
 ALL_PROBES = REVENUE_FAMILY + NET_INCOME_FAMILY + ASSETS_FAMILY
 
-# ── Tags XBRL que el pipeline YA ingesta y colapsa a "Revenue" ───────────────
-# Derivado de INCOME_STATEMENT + CONCEPT_SYNONYMS (heredados del %run de 01__tickers).
-# Si un tag de REVENUE_FAMILY no está aquí, significa que el pipeline lo desconoce
-# y dispararemos flag_concept_gap. Mantener este set en sync con el pipeline es
-# automático — al añadir un sinónimo a 01__tickers.py, este set se actualiza solo.
+# ── XBRL tags the pipeline ALREADY ingests and collapses to "Revenue" ─────────
+# Derived from INCOME_STATEMENT + CONCEPT_SYNONYMS (inherited from the %run of 01__tickers).
+# If a tag from REVENUE_FAMILY is not here, the pipeline doesn't know it and we
+# will fire flag_concept_gap. Keeping this set in sync with the pipeline is
+# automatic — adding a synonym to 01__tickers.py updates this set automatically.
 INGESTED_REVENUE_TAGS = {
     tag
     for label, (tag, _kind) in INCOME_STATEMENT.items()
@@ -182,11 +181,11 @@ TICKER_MAP = {
 }
 print(f"✓ Ticker index loaded — {len(TICKER_MAP):,} tickers known to SEC")
 
-# ── CIK aliases desde favorites.json ─────────────────────────────────────────
-# Permite que la auditoría vea el histórico combinado de CIKs predecesores
-# (fusiones MLP→C-corp, spinoffs). Sin esto, un ticker con cik_aliases
-# configurado en el pipeline aparecería falsamente con flag_short_history porque
-# el CIK actual de SEC solo tiene filings recientes (caso VNOM).
+# ── CIK aliases from favorites.json ──────────────────────────────────────────
+# Allows the audit to see the combined history of predecessor CIKs
+# (MLP→C-corp mergers, spinoffs). Without this, a ticker with cik_aliases
+# configured in the pipeline would falsely appear with flag_short_history because
+# the current SEC CIK only has recent filings (e.g. VNOM).
 _FAV_CIK_ALIASES = {}
 try:
     with open(FAVORITES_JSON_PATH, "r", encoding="utf-8") as f:
@@ -200,11 +199,11 @@ try:
 except Exception as _e:
     print(f"  ⚠ Could not load cik_aliases from favorites.json: {_e}")
 if _FAV_CIK_ALIASES:
-    print(f"  ✓ CIK aliases activos para auditoría: {_FAV_CIK_ALIASES}")
+    print(f"  ✓ Active CIK aliases for audit: {_FAV_CIK_ALIASES}")
 
 # COMMAND ----------
 
-# MAGIC %md ## 4. Helpers — SEC fetch + análisis de un ticker
+# MAGIC %md ## 4. Helpers — SEC fetch + ticker analysis
 
 # COMMAND ----------
 
@@ -221,8 +220,8 @@ def classify_duration(start, end):
 
 def concept_fy_coverage(facts: dict, concept: str) -> "tuple[set[int], int]":
     """
-    Devuelve (set de fy distintos con fp='FY' en 10-K family, n rows con period_shape='other_*').
-    Para conceptos de balance (snapshot), devuelve los años a partir de period_end.
+    Returns (set of distinct fy with fp='FY' in the 10-K family, n rows with period_shape='other_*').
+    For balance-sheet concepts (snapshot), returns years derived from period_end.
     """
     try:
         units    = facts["facts"]["us-gaap"][concept]["units"]
@@ -247,7 +246,7 @@ def concept_fy_coverage(facts: dict, concept: str) -> "tuple[set[int], int]":
 
     df["period_shape"] = df.apply(lambda r: classify_duration(r["start"], r["end"]), axis=1)
 
-    # Stocks: snapshots, año = end.year. Flows: fp='FY' y period_shape!='snapshot'
+    # Stocks: snapshots, year = end.year. Flows: fp='FY' and period_shape!='snapshot'
     is_stock = df["period_shape"].eq("snapshot").all()
     if is_stock:
         years = set(df["end"].dt.year.dropna().astype(int).tolist())
@@ -264,10 +263,10 @@ def concept_fy_coverage(facts: dict, concept: str) -> "tuple[set[int], int]":
 
 def merge_facts(*facts_dicts: dict) -> dict:
     """
-    Concatena los arrays `facts[ns][concept]["units"][unit]` a través de múltiples
-    JSONs de companyfacts. Misma lógica que 11__fetch_sec_xbrl.merge_facts —
-    duplicada aquí para evitar acoplar este script (que es read-only) con el
-    notebook de ingesta (que tiene side effects al ejecutarse vía %run).
+    Concatenates `facts[ns][concept]["units"][unit]` arrays across multiple
+    companyfacts JSONs. Same logic as 11__fetch_sec_xbrl.merge_facts —
+    duplicated here to avoid coupling this script (read-only) with the
+    ingestion notebook (which has side effects when run via %run).
     """
     if not facts_dicts:
         return {}
@@ -298,14 +297,14 @@ def merge_facts(*facts_dicts: dict) -> dict:
 
 def derive_10k_stats(facts: dict) -> "tuple[int|None, int|None, int]":
     """
-    Deriva (first_10k_year, last_10k_year, n_10k) de los rows de companyfacts
-    sin llamar /submissions. Recorre todos los conceptos sondeados y junta los
-    distintos (fy, accn) en form='10-K'/'10-K/A'.
+    Derives (first_10k_year, last_10k_year, n_10k) from companyfacts rows
+    without calling /submissions. Iterates all probed concepts and unions
+    distinct (fy, accn) for form='10-K'/'10-K/A'.
 
-    Tradeoff respecto al método antiguo (contar filings desde /submissions):
-    si un 10-K no reporta NINGUNO de los conceptos en ALL_PROBES, no se cuenta.
-    Para emisores normales eso no pasa (todos reportan Revenue/NetIncome/Assets).
-    n_10k es ahora "cantidad de accessions 10-K observadas en conceptos sondeados".
+    Trade-off vs. the old method (counting filings from /submissions):
+    if a 10-K reports NONE of the concepts in ALL_PROBES, it is not counted.
+    For normal issuers this doesn't happen (all report Revenue/NetIncome/Assets).
+    n_10k is now "number of 10-K accessions observed in probed concepts".
     """
     fys: "set[int]" = set()
     accns: "set[str]" = set()
@@ -333,42 +332,42 @@ def _build_action_recommended(rec: dict) -> "str | None":
         if suggested:
             csv = ", ".join(suggested)
             actions.append(
-                f"Predecesor probable (EDGAR FTS): CIK(s) {csv} — verificar y anadir a cik_aliases en favorites.json"
+                f"Likely predecessor (EDGAR FTS): CIK(s) {csv} — verify and add to cik_aliases in favorites.json"
             )
         elif had_raw:
             actions.append(
-                "Posible predecesor sin XBRL: hits en EDGAR FTS pero ningun CIK con companyfacts utilizable "
-                "(probable pre-mandato XBRL 2009-2011). Revisar manualmente."
+                "Possible predecessor without XBRL: hits in EDGAR FTS but no CIK with usable companyfacts "
+                "(likely pre-XBRL mandate 2009-2011). Review manually."
             )
         elif rec["former_names"]:
             actions.append(
-                "CIK predecesor probable — buscar en EDGAR full-text por formerNames "
-                f"({rec['former_names']}) y anadir a cik_aliases en favorites.json"
+                "Likely predecessor CIK — search EDGAR full-text by formerNames "
+                f"({rec['former_names']}) and add to cik_aliases in favorites.json"
             )
         else:
             actions.append(
-                "CIK predecesor probable — sin formerNames; mirar Previous CIKs en EDGAR full-text "
-                "y anadir a cik_aliases en favorites.json"
+                "Likely predecessor CIK — no formerNames; check Previous CIKs in EDGAR full-text "
+                "and add to cik_aliases in favorites.json"
             )
     if rec["flag_concept_gap"]:
         best_tag = rec["concept_max_coverage"]
         actions.append(
-            f"Sinonimo a anadir: el tag {best_tag} cubre mas anos que el canonico — "
-            "anadirlo a INCOME_STATEMENT en 01__tickers.py y al dict CONCEPT_SYNONYMS apuntando a Revenue"
+            f"Synonym to add: tag {best_tag} covers more years than the canonical one — "
+            "add it to INCOME_STATEMENT in 01__tickers.py and to the CONCEPT_SYNONYMS dict pointing to Revenue"
         )
     if rec["flag_stub_years"]:
         actions.append(
-            "Hay anos con period_shape=other_* (stubs/transiciones). La capa c de 21__clean_and_merge.py "
-            "(max-duration window) ya los captura — verificar que ese ticker tiene FY tras re-ingestar."
+            "There are years with period_shape=other_* (stubs/transitions). Layer c of 21__clean_and_merge.py "
+            "(max-duration window) already captures them — verify that ticker has FY after re-ingestion."
         )
     return " | ".join(actions) if actions else None
 
 
 def fetch_former_names(current_cik: str, aliased_ciks: "list[str]") -> "list[str]":
     """
-    Llamada lazy a /submissions para popular formerNames. Se invoca SOLO para
-    tickers con flag_short_history en el segundo pase (post-paralelo). Errores
-    en alias son silenciosos; un error en el CIK primario devuelve [].
+    Lazy call to /submissions to populate formerNames. Invoked ONLY for
+    tickers with flag_short_history in the second pass (post-parallel). Errors
+    on aliases are silent; an error on the primary CIK returns [].
     """
     names: "set[str]" = set()
     for c in [current_cik] + list(aliased_ciks or []):
@@ -385,12 +384,12 @@ def fetch_former_names(current_cik: str, aliased_ciks: "list[str]") -> "list[str
     return sorted(names)
 
 
-# ── Pase 3: búsqueda fuzzy de predecesores por nombre (EDGAR FTS) ────────────
-# Cubre el caso en que el predecesor es OTRO CIK (cambio LLC→Inc., emisor de
-# deuda→emisor de equity), no un rename dentro del mismo CIK. SEC's formerNames
-# solo capta lo segundo. Caso canónico: ALH (Alliance Laundry Holdings) cuyo
-# predecesor "Alliance Laundry Systems LLC" CIK 0001063699 no aparece en
-# formerNames porque es un CIK distinto.
+# ── Pass 3: fuzzy predecessor search by name (EDGAR FTS) ─────────────────────
+# Covers the case where the predecessor is a DIFFERENT CIK (LLC→Inc. change,
+# debt issuer→equity issuer), not a rename within the same CIK. SEC's formerNames
+# only captures the latter. Canonical example: ALH (Alliance Laundry Holdings)
+# whose predecessor "Alliance Laundry Systems LLC" CIK 0001063699 does not appear
+# in formerNames because it is a distinct CIK.
 
 _ENTITY_SUFFIXES = {
     "INC", "INC.", "CORP", "CORP.", "CORPORATION", "COMPANY", "CO", "CO.",
@@ -400,14 +399,14 @@ _ENTITY_SUFFIXES = {
 }
 
 _NAME_STOPWORDS = {
-    # conectores / artículos
+    # connectors / articles
     "AND", "OF", "FOR", "NEW", "THE",
-    # geográficos / genéricos altamente recurrentes en nombres de empresa
+    # geographic / highly recurrent generic terms in company names
     "AMERICAN", "UNITED", "GLOBAL", "INTERNATIONAL", "NATIONAL", "FIRST",
-    # ruido de industria: aparecen en miles de nombres y matchean cualquier cosa.
-    # Si el nombre del emisor SOLO tiene estos tokens, el filtro de overlap
-    # reducirá los candidatos a [], y eso es lo correcto — para esos casos no
-    # podemos buscar predecesor por nombre porque el nombre no distingue.
+    # industry noise: appear in thousands of names and match anything.
+    # If the issuer name ONLY contains these tokens, the overlap filter
+    # will reduce candidates to [], which is correct — for those cases we
+    # cannot search for a predecessor by name because the name is non-distinctive.
     "TECHNOLOGIES", "TECHNOLOGY", "HEALTHCARE", "SYSTEMS", "SOLUTIONS",
     "INDUSTRIES", "ENTERPRISES", "RESOURCES", "SERVICES", "ENERGY",
     "ENTERTAINMENT", "FINANCIAL", "FINANCE", "PHARMACEUTICALS",
@@ -418,26 +417,26 @@ _NAME_STOPWORDS = {
 
 def _normalize_company_name(title: str) -> str:
     """
-    Strip trademark glyphs, parens, y sufijos de entidad recurrentes para
-    obtener el "núcleo" del nombre que sirve para EDGAR FTS.
+    Strips trademark glyphs, parens, and recurrent entity suffixes to
+    obtain the "core" of the name for use with EDGAR FTS.
     "ALLIANCE LAUNDRY HOLDINGS INC." → "ALLIANCE LAUNDRY".
     """
     if not title:
         return ""
     s = title.upper()
-    # quitar marcas y parens
+    # strip trademarks and parens
     for ch in ("™", "®", "©"):
         s = s.replace(ch, "")
-    # cortar cualquier paren (typically (TICKER) o (CIK ...))
+    # cut any paren (typically (TICKER) or (CIK ...))
     if "(" in s:
         s = s.split("(", 1)[0]
-    # quitar comas y collapsing whitespace
+    # remove commas and collapse whitespace
     s = s.replace(",", " ")
     tokens = [t for t in s.split() if t]
-    # quitar "THE" inicial — habitual en nombres tipo "The Walt Disney Company"
+    # remove leading "THE" — common in names like "The Walt Disney Company"
     if tokens and tokens[0] == "THE":
         tokens.pop(0)
-    # quitar sufijos de entidad de derecha a izquierda iterativamente
+    # remove entity suffixes right-to-left iteratively
     while tokens and tokens[-1] in _ENTITY_SUFFIXES:
         tokens.pop()
     return " ".join(tokens).strip()
@@ -445,8 +444,8 @@ def _normalize_company_name(title: str) -> str:
 
 def _substantive_tokens(name: str) -> "set[str]":
     """
-    Tokens >=3 chars, alphanumericos, sin stopwords genericas. Usado para
-    filtrar hits de EDGAR FTS por overlap con el nombre del emisor.
+    Tokens >=3 chars, alphanumeric, excluding generic stopwords. Used to
+    filter EDGAR FTS hits by overlap with the issuer name.
     """
     out: "set[str]" = set()
     for tok in (name or "").upper().split():
@@ -458,10 +457,10 @@ def _substantive_tokens(name: str) -> "set[str]":
 
 def _cik_has_xbrl(cik: str, cache: "dict[str, bool]") -> bool:
     """
-    Memoized check: ¿companyfacts/CIK{cik}.json devuelve datos us-gaap
-    no vacíos? True solo si status 200 + json + facts.us-gaap no vacío.
-    404 → False (y se cachea). 5xx u otros → False pero NO se cachea
-    (para no envenenar el run con un fallo transitorio).
+    Memoized check: does companyfacts/CIK{cik}.json return non-empty us-gaap
+    data? True only if status 200 + json + facts.us-gaap non-empty.
+    404 → False (and cached). 5xx or others → False but NOT cached
+    (to avoid poisoning the run with a transient failure).
     """
     cik = str(cik).zfill(10)
     cached = cache.get(cik)
@@ -488,9 +487,9 @@ def _cik_has_xbrl(cik: str, cache: "dict[str, bool]") -> bool:
 
 def _edgar_fts_search(normalized_name: str) -> "list[dict]":
     """
-    GET a EDGAR full-text search por frase entrecomillada, restringido a 10-K.
-    Devuelve la lista de hits (cada hit tiene _source con ciks, display_names,
-    file_date). En cualquier error → [].
+    GET to EDGAR full-text search for a quoted phrase, restricted to 10-K.
+    Returns the list of hits (each hit has _source with ciks, display_names,
+    file_date). On any error → [].
     """
     if not normalized_name:
         return []
@@ -511,13 +510,13 @@ def _rank_predecessor_candidates(
     issuer_tokens: "set[str]",
 ) -> "list[tuple[str, int, str]]":
     """
-    Agrega los hits por CIK (todos los CIKs por hit — algunos filings son
-    multi-emisor), filtra el CIK actual y los aliases ya configurados, exige
-    overlap >=1 token sustantivo con el nombre del emisor para reducir falsos
-    positivos por nombres genéricos. Ordena por (filings desc, latest_date desc).
+    Aggregates hits by CIK (all CIKs per hit — some filings are multi-issuer),
+    filters out the current CIK and already-configured aliases, requires
+    >=1 substantive token overlap with the issuer name to reduce false positives
+    from generic names. Sorts by (filings desc, latest_date desc).
 
-    Deliberado: NO fetcheamos el SIC del candidato. Sería un GET extra por
-    candidato y el filtro de tokens ya mata la mayoría del ruido cross-industry.
+    Deliberate: we do NOT fetch the candidate's SIC. That would be an extra GET
+    per candidate and the token filter already eliminates most cross-industry noise.
     """
     agg: "dict[str, dict]" = {}
     for h in hits:
@@ -555,10 +554,10 @@ def find_predecessor_candidates(
     max_results: int = 3,
 ) -> "tuple[list[str], bool]":
     """
-    Orquestador del pase 3. Devuelve (suggested_ciks, had_raw_candidates).
-    had_raw_candidates distingue "FTS no devolvió nada" de "FTS devolvió hits
-    pero ninguno tiene XBRL". El segundo caso es la firma del problema ALH
-    (predecesor existe pero predata el mandato XBRL).
+    Orchestrator for pass 3. Returns (suggested_ciks, had_raw_candidates).
+    had_raw_candidates distinguishes "FTS returned nothing" from "FTS returned
+    hits but none have XBRL". The latter is the signature of the ALH problem
+    (predecessor exists but predates the XBRL mandate).
     """
     normalized = _normalize_company_name(issuer_title)
     if not normalized:
@@ -581,13 +580,13 @@ def find_predecessor_candidates(
 
 def audit_ticker(ticker: str) -> dict:
     """
-    Audita un ticker. Devuelve dict con todos los campos requeridos por el schema
-    de la tabla destino. En caso de error, devuelve un dict con `error` poblado y
-    los campos numéricos a NULL.
+    Audits a ticker. Returns a dict with all fields required by the destination
+    table schema. On error, returns a dict with `error` populated and numeric
+    fields set to NULL.
 
-    NOTA: este pase NO llama a /submissions. former_names queda vacío y se rellena
-    en un segundo pase lazy solo para tickers con flag_short_history (es el único
-    flag cuya action_recommended depende de formerNames).
+    NOTE: this pass does NOT call /submissions. former_names is left empty and
+    populated in a second lazy pass only for tickers with flag_short_history
+    (the only flag whose action_recommended depends on formerNames).
     """
     base = {
         "ticker":                    ticker,
@@ -610,23 +609,23 @@ def audit_ticker(ticker: str) -> dict:
         "error":                     None,
     }
 
-    # Resolver CIK primario
+    # Resolve primary CIK
     cik_info = TICKER_MAP.get(ticker.upper())
     if cik_info is None:
         base["error"] = "ticker_not_in_sec_index"
-        base["action_recommended"] = "Ticker no resuelve en SEC ticker index — añadir override 'cik' en favorites.json"
+        base["action_recommended"] = "Ticker does not resolve in SEC ticker index — add a 'cik' override in favorites.json"
         return base
     cik, _ = cik_info
     base["current_cik"] = cik
 
-    # CIKs a auditar: primario + aliases configurados en favorites.json.
-    # El primario es obligatorio; los aliases son best-effort (un alias roto no
-    # tumba la auditoría del ticker — solo se pierde su contribución).
+    # CIKs to audit: primary + aliases configured in favorites.json.
+    # The primary is mandatory; aliases are best-effort (a broken alias does not
+    # abort the ticker audit — only its contribution is lost).
     aliases = _FAV_CIK_ALIASES.get(ticker.upper(), [])
     base["aliased_ciks"] = aliases
     cik_list = [cik] + [a for a in aliases if a != cik]
 
-    # ── Companyfacts: fetch en cada CIK y merge ────────────────────────────
+    # ── Companyfacts: fetch per CIK and merge ─────────────────────────────
     facts_list = []
     for c in cik_list:
         try:
@@ -643,11 +642,11 @@ def audit_ticker(ticker: str) -> dict:
             if c == cik:
                 if code == 404:
                     base["error"] = "no_companyfacts"
-                    base["action_recommended"] = "Emisor sin companyfacts (puede ser muy pequeño o nuevo)"
+                    base["action_recommended"] = "Issuer has no companyfacts (may be very small or newly listed)"
                 else:
                     base["error"] = f"facts_http_{code}"
                 return base
-            # alias roto — silencioso, seguimos
+            # broken alias — silent, continue
         except Exception as e:
             if c == cik:
                 base["error"] = f"facts_fetch_failed: {str(e)[:100]}"
@@ -658,13 +657,13 @@ def audit_ticker(ticker: str) -> dict:
         base["error"] = "no_facts_after_merge"
         return base
 
-    # ── 10-K stats derivados de companyfacts (evita el fetch a /submissions) ─
+    # ── 10-K stats derived from companyfacts (avoids a /submissions fetch) ──
     first_y, last_y, n_10k = derive_10k_stats(facts)
     base["first_10k_year"] = first_y
     base["last_10k_year"]  = last_y
     base["n_10k"]          = n_10k
 
-    # Coverage por familia: nos quedamos con el sinónimo de mejor cobertura por familia
+    # Coverage per family: keep the best-coverage synonym per family
     family_results = {}  # family_name → {best_concept, best_years, all_concept_years}
     family_stubs = 0
 
@@ -697,7 +696,7 @@ def audit_ticker(ticker: str) -> dict:
     base["years_assets"]     = sorted(family_results["assets"]["best_years"])
     base["concept_max_coverage"] = family_results["revenue"]["best_concept"]
 
-    # ── Flag 1: histórico corto ─────────────────────────────────────────────
+    # ── Flag 1: short history ──────────────────────────────────────────────
     all_years = (
         family_results["revenue"]["best_years"]
         | family_results["net_income"]["best_years"]
@@ -706,11 +705,11 @@ def audit_ticker(ticker: str) -> dict:
     if all_years and (max(all_years) - min(all_years) + 1) < MIN_EXPECTED_YEARS:
         base["flag_short_history"] = True
 
-    # ── Flag 2: concept gap (lo que el pipeline ingesta vs el mejor sinónimo) ─
-    # Si el mejor sinónimo de la familia Revenue cubre MIN_REVENUE_GAP años más que
-    # los tags que el pipeline reconoce (INGESTED_REVENUE_TAGS, derivado de
-    # CONCEPT_SYNONYMS) → flag. Tras añadir un sinónimo a 01__tickers.py el flag
-    # desaparece automáticamente.
+    # ── Flag 2: concept gap (what the pipeline ingests vs the best synonym) ──
+    # If the best synonym in the Revenue family covers MIN_REVENUE_GAP more years
+    # than the tags the pipeline recognises (INGESTED_REVENUE_TAGS, derived from
+    # CONCEPT_SYNONYMS) → flag. After adding a synonym to 01__tickers.py the flag
+    # disappears automatically.
     revenue_per_concept = family_results["revenue"]["per_concept"]
     if revenue_per_concept:
         canonical_years = set()
@@ -721,14 +720,14 @@ def audit_ticker(ticker: str) -> dict:
         if gap >= MIN_REVENUE_GAP:
             base["flag_concept_gap"] = True
 
-    # ── Flag 3: stub years ─────────────────────────────────────────────────
+    # ── Flag 3: stub years ────────────────────────────────────────────────
     if family_stubs > 0:
         base["flag_stub_years"] = True
 
     base["n_flags"] = int(base["flag_short_history"]) + int(base["flag_concept_gap"]) + int(base["flag_stub_years"])
 
-    # action_recommended se calcula aquí; si flag_short_history dispara, el pase
-    # lazy de /submissions lo va a regenerar después con formerNames poblado.
+    # action_recommended is computed here; if flag_short_history fires, the
+    # lazy /submissions pass will regenerate it later with formerNames populated.
     base["action_recommended"] = _build_action_recommended(base)
     return base
 
@@ -764,11 +763,11 @@ with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
 elapsed = time.monotonic() - started_at
 print(f"\n✓ Pase principal completo en {elapsed/60:.1f} min ({total/elapsed:.1f} t/s)")
 
-# ── Pase lazy: /submissions solo para flag_short_history ────────────────────
-# formerNames únicamente influye en action_recommended cuando flag_short_history
-# dispara. Saltarlo en el pase principal nos ahorra ~3000 requests (uno por
-# ticker). Aquí los recuperamos solo para los tickers flageados (típicamente
-# <100) y regeneramos action_recommended para esos.
+# ── Lazy pass: /submissions only for flag_short_history ──────────────────────
+# formerNames only affects action_recommended when flag_short_history fires.
+# Skipping it in the main pass saves ~3000 requests (one per ticker). Here we
+# fetch it only for flagged tickers (typically <100) and regenerate
+# action_recommended for those.
 flagged_idxs = [i for i, r in enumerate(results) if r.get("flag_short_history")]
 if flagged_idxs:
     print(f"\n  Pase lazy /submissions para {len(flagged_idxs)} ticker(s) flageados…")
@@ -788,19 +787,19 @@ if flagged_idxs:
             results[i]["action_recommended"] = _build_action_recommended(results[i])
     print(f"  ✓ Pase lazy completo en {(time.monotonic()-lazy_started):.1f}s")
 
-# ── Pase FTS: buscar predecesores por nombre vía EDGAR full-text ─────────────
-# Se invoca para tickers con flag_short_history que NO tienen alias configurado.
-# OJO: formerNames NO es buen filtro — SEC lo registra para renames dentro del
-# mismo CIK (p.ej. JNTL Inc.→Kenvue Inc., mismo CIK), no para predecesores en
-# OTRO CIK (caso ALH: LLC→Inc., CIK distinto). Las dos columnas (former_names
-# vs suggested_predecessor_ciks) son complementarias, no excluyentes.
+# ── FTS pass: search for predecessors by name via EDGAR full-text ────────────
+# Invoked for tickers with flag_short_history that have NO alias configured.
+# NOTE: formerNames is NOT a good filter — SEC records it for renames within the
+# same CIK (e.g. JNTL Inc.→Kenvue Inc., same CIK), not for predecessors in a
+# DIFFERENT CIK (ALH case: LLC→Inc., distinct CIK). The two columns (former_names
+# vs suggested_predecessor_ciks) are complementary, not mutually exclusive.
 fts_candidates_idxs = [
     i for i in flagged_idxs
     if results[i]["ticker"] not in _FAV_CIK_ALIASES
     and results[i].get("current_cik")
 ]
 if fts_candidates_idxs:
-    print(f"\n  Pase FTS para {len(fts_candidates_idxs)} candidato(s) sin cik_alias configurado…")
+    print(f"\n  FTS pass for {len(fts_candidates_idxs)} candidate(s) without a configured cik_alias…")
     fts_started = time.monotonic()
     n_with_suggestions = 0
 
@@ -832,17 +831,17 @@ if fts_candidates_idxs:
                 n_with_suggestions += 1
             results[idx]["action_recommended"] = _build_action_recommended(results[idx])
 
-    # Limpiar el campo transitorio antes del DataFrame (no está en el schema)
+    # Clean up the transient field before building the DataFrame (not in the schema)
     for r in results:
         r.pop("_had_raw_predecessor_candidates", None)
 
     print(
-        f"  ✓ Pase FTS completo en {(time.monotonic()-fts_started):.1f}s — "
-        f"sugerencias con XBRL para {n_with_suggestions}/{len(fts_candidates_idxs)} candidatos "
+        f"  ✓ FTS pass complete in {(time.monotonic()-fts_started):.1f}s — "
+        f"XBRL suggestions for {n_with_suggestions}/{len(fts_candidates_idxs)} candidates "
         f"(XBRL probe cache: {len(_XBRL_PROBE_CACHE)} CIKs)"
     )
 
-# Resumen de latencias HTTP (cap: últimas 20k requests del run)
+# HTTP latency summary (cap: last 20k requests of the run)
 if _LATENCIES:
     lats_ms = sorted(l * 1000 for l in _LATENCIES)
     n_lat   = len(lats_ms)
@@ -856,18 +855,18 @@ print(f"✓ Auditoría completa en {total_elapsed/60:.1f} min (total)")
 
 # COMMAND ----------
 
-# MAGIC %md ## 6. Build pandas DF + escribir Delta
+# MAGIC %md ## 6. Build pandas DF + write to Delta
 
 # COMMAND ----------
 
 audit_df = pd.DataFrame(results)
 audit_df["audited_at"] = datetime.utcnow()
 
-# Coerce nullable int columns para que createDataFrame no se queje
+# Coerce nullable int columns so createDataFrame doesn't complain
 for col in ("first_10k_year", "last_10k_year", "n_10k", "n_flags"):
     audit_df[col] = audit_df[col].astype("Int64")
 
-# Schema explícito (orden y nullability para que coincida exactamente con la tabla)
+# Explicit schema (order and nullability to match the table exactly)
 from pyspark.sql.types import (
     StructType, StructField,
     StringType, IntegerType, BooleanType, TimestampType, ArrayType,
@@ -895,22 +894,22 @@ schema = StructType([
     StructField("audited_at",           TimestampType(),            False),
 ])
 
-# Reordenar columnas al orden del schema
+# Reorder columns to match schema order
 audit_df = audit_df[[f.name for f in schema.fields]]
 
 sdf = spark.createDataFrame(audit_df, schema=schema)
 
-# Guard: cuando TICKERS_OVERRIDE está activo (modo test), NO sobreescribir la
-# tabla — preservamos el snapshot del último run completo y solo imprimimos.
+# Guard: when TICKERS_OVERRIDE is active (test mode), do NOT overwrite the
+# table — preserve the last full-run snapshot and only print.
 if TICKERS_OVERRIDE:
-    print(f"⚠ TICKERS_OVERRIDE activo — saltando write a {AUDIT_TABLE} para no clobberar el snapshot completo.")
-    print(f"\n── Resultado del run ({len(audit_df)} ticker(s)) ──")
+    print(f"⚠ TICKERS_OVERRIDE active — skipping write to {AUDIT_TABLE} to avoid clobbering the full snapshot.")
+    print(f"\n── Run result ({len(audit_df)} ticker(s)) ──")
     show_cols = ["ticker", "current_cik", "aliased_ciks", "suggested_predecessor_ciks",
                  "n_flags", "flag_short_history", "flag_concept_gap", "flag_stub_years",
                  "n_10k", "first_10k_year", "last_10k_year",
                  "concept_max_coverage", "error"]
     print(audit_df[show_cols].to_string(index=False))
-    print("\n── action_recommended por ticker ──")
+    print("\n── action_recommended by ticker ──")
     for _, row in audit_df.iterrows():
         if row.get("action_recommended"):
             print(f"  {row['ticker']}: {row['action_recommended']}")
@@ -922,16 +921,16 @@ else:
         .option("overwriteSchema", "true")
         .saveAsTable(AUDIT_TABLE)
     )
-    print(f"✓ {sdf.count():,} filas escritas → {AUDIT_TABLE}")
+    print(f"✓ {sdf.count():,} rows written → {AUDIT_TABLE}")
 
 # COMMAND ----------
 
-# MAGIC %md ## 7. Resumen — top sospechosos
+# MAGIC %md ## 7. Summary — top suspects
 
 # COMMAND ----------
 
 print("\n" + "="*78)
-print(f"  RESUMEN AUDITORÍA  —  {AUDIT_TABLE}")
+print(f"  AUDIT SUMMARY  —  {AUDIT_TABLE}")
 print("="*78)
 
 n_total      = len(audit_df)
@@ -944,13 +943,13 @@ n_short      = audit_df["flag_short_history"].sum()
 n_gap        = audit_df["flag_concept_gap"].sum()
 n_stub       = audit_df["flag_stub_years"].sum()
 
-print(f"  Tickers auditados        : {n_total:,}")
-print(f"  Con errores fetch        : {n_errors:,}")
-print(f"  Con al menos 1 flag      : {n_flagged:,}")
-print(f"    - 3 flags (críticos)   : {n_3flags:,}")
+print(f"  Tickers audited          : {n_total:,}")
+print(f"  With fetch errors        : {n_errors:,}")
+print(f"  With at least 1 flag     : {n_flagged:,}")
+print(f"    - 3 flags (critical)   : {n_3flags:,}")
 print(f"    - 2 flags              : {n_2flags:,}")
 print(f"    - 1 flag               : {n_1flag:,}")
-print(f"  Breakdown por flag:")
+print(f"  Breakdown by flag:")
 print(f"    flag_short_history     : {n_short:,}")
 print(f"    flag_concept_gap       : {n_gap:,}")
 print(f"    flag_stub_years        : {n_stub:,}")
@@ -964,14 +963,14 @@ top_suspects = (
 )
 
 if not top_suspects.empty:
-    print("\n── TOP-20 TICKERS MÁS SOSPECHOSOS ──")
+    print("\n── TOP-20 MOST SUSPICIOUS TICKERS ──")
     show_cols = ["ticker", "current_cik", "n_flags", "flag_short_history",
                  "flag_concept_gap", "flag_stub_years", "n_10k",
                  "first_10k_year", "last_10k_year", "concept_max_coverage",
                  "suggested_predecessor_ciks"]
     print(top_suspects[show_cols].to_string(index=False))
 
-    print("\n── ACCIÓN RECOMENDADA (top 10) ──")
+    print("\n── RECOMMENDED ACTION (top 10) ──")
     for _, row in top_suspects.head(10).iterrows():
         print(f"\n  {row['ticker']}  (CIK {row['current_cik']}, flags={row['n_flags']})")
         if row.get("suggested_predecessor_ciks"):
@@ -980,29 +979,29 @@ if not top_suspects.empty:
             print(f"    formerNames: {row['former_names']}")
         print(f"    → {row['action_recommended']}")
 else:
-    print("\n✓ Ningún ticker flageado — todo el histórico parece completo")
+    print("\n✓ No ticker flagged — the full history looks complete")
 
 # COMMAND ----------
 
-# MAGIC %md ## 8. Quick SQL para uso posterior
+# MAGIC %md ## 8. Quick SQL for later use
 # MAGIC
 # MAGIC ```sql
-# MAGIC -- Tickers críticos (3 flags)
+# MAGIC -- Critical tickers (3 flags)
 # MAGIC SELECT * FROM main.financials.history_audit
 # MAGIC WHERE n_flags = 3 ORDER BY n_10k ASC;
 # MAGIC
-# MAGIC -- Candidatos a añadir un sinónimo (flag_concept_gap)
+# MAGIC -- Candidates to add a synonym (flag_concept_gap)
 # MAGIC SELECT ticker, current_cik, concept_max_coverage, years_revenue
 # MAGIC FROM main.financials.history_audit
 # MAGIC WHERE flag_concept_gap = TRUE;
 # MAGIC
-# MAGIC -- Candidatos a tener CIK predecesor (flag_short_history)
+# MAGIC -- Candidates likely to have a predecessor CIK (flag_short_history)
 # MAGIC SELECT ticker, current_cik, former_names, first_10k_year, last_10k_year
 # MAGIC FROM main.financials.history_audit
 # MAGIC WHERE flag_short_history = TRUE ORDER BY n_10k ASC;
 # MAGIC
-# MAGIC -- Work-queue: tickers con predecesor sugerido por EDGAR FTS (Pase 3).
-# MAGIC -- Estos son los candidatos accionables para añadir a cik_aliases en favorites.json.
+# MAGIC -- Work-queue: tickers with a predecessor suggested by EDGAR FTS (Pass 3).
+# MAGIC -- These are the actionable candidates to add to cik_aliases in favorites.json.
 # MAGIC SELECT ticker, current_cik, suggested_predecessor_ciks, n_10k, last_10k_year, action_recommended
 # MAGIC FROM main.financials.history_audit
 # MAGIC WHERE flag_short_history = TRUE

@@ -68,8 +68,7 @@ st.markdown(render_masthead(ticker, data, meta), unsafe_allow_html=True)
 st.markdown(render_kpi_strip(ticker, data, metrics), unsafe_allow_html=True)
 
 # Unit scale for the statement tables (IS / BS / CF / Quarterly). One control governs
-# all four. Billion = 1e9 (US short scale); a Spanish label would be "Miles de millones",
-# NOT "Billones" (Spanish billón = 1e12). Default "Units" → unchanged full-resolution USD.
+# all four. Billion = 1e9 (US short scale). Default "Units" → unchanged full-resolution USD.
 # NOTE: this control is irrelevant to the Price tab (per-share adjusted close, not money
 # amounts) — the Price chart deliberately ignores it. Don't try to hide it on that tab:
 # st.tabs exposes no active-tab signal.

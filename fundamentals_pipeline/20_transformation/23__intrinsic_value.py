@@ -2,37 +2,37 @@
 # MAGIC %md
 # MAGIC # 20_transformation / 23__intrinsic_value
 # MAGIC
-# MAGIC Calcula el **valor intrínseco** de cada empresa bajo cuatro prismas distintos,
-# MAGIC para **cada fiscal year histórico** y para **TTM** (rolling 4 quarters).
+# MAGIC Computes the **intrinsic value** of each company under four different lenses,
+# MAGIC for **each historical fiscal year** and for **TTM** (rolling 4 quarters).
 # MAGIC
 # MAGIC | Method | Idea | Output |
 # MAGIC |---|---|---|
-# MAGIC | `graham_number` | √(22.5 × EPS × BVPS) — la regla de servilleta de Graham | $/acción |
-# MAGIC | `graham_revised` | EPS × (8.5 + 2g) × 4.4 / Y_AAA — fórmula con growth | $/acción |
-# MAGIC | `dcf` | DCF 2-stage sobre FCF (u Owner Earnings) | $/acción |
-# MAGIC | `owner_earnings` | Owner Earnings × multiple (Buffett) o / discount_rate | $/acción |
+# MAGIC | `graham_number` | √(22.5 × EPS × BVPS) — Graham's napkin rule | $/share |
+# MAGIC | `graham_revised` | EPS × (8.5 + 2g) × 4.4 / Y_AAA — formula with growth | $/share |
+# MAGIC | `dcf` | 2-stage DCF on FCF (or Owner Earnings) | $/share |
+# MAGIC | `owner_earnings` | Owner Earnings × multiple (Buffett) or / discount_rate | $/share |
 # MAGIC
-# MAGIC **Output principal:** `{catalog}.{schema}.financials_intrinsic_value` (nueva)
-# MAGIC con columnas `period_type ∈ {'FY','TTM'}`, `fiscal_year`, `period_end`.
+# MAGIC **Primary output:** `{catalog}.{schema}.financials_intrinsic_value` (new)
+# MAGIC with columns `period_type ∈ {'FY','TTM'}`, `fiscal_year`, `period_end`.
 # MAGIC
-# MAGIC Adicionalmente, expone las métricas clave (IV per share y MoS por método y por
-# MAGIC período) en `financials_metrics` con sufijos `(FY)` y `(TTM)` para que el
-# MAGIC dashboard pueda filtrarlas como cualquier otra métrica.
+# MAGIC Additionally, exposes the key metrics (IV per share and MoS by method and period)
+# MAGIC in `financials_metrics` with suffixes `(FY)` and `(TTM)` so the dashboard can filter
+# MAGIC them like any other metric.
 # MAGIC
-# MAGIC **Lee de:**
-# MAGIC - `financials` (long-format con `period_type`, `period_end`, `fiscal_year`)
-# MAGIC - `market_data` (price_close, market_cap por ticker × fiscal_year)
-# MAGIC - `00_config/valuation_assumptions.json` (defaults + overrides por ticker)
+# MAGIC **Reads from:**
+# MAGIC - `financials` (long-format with `period_type`, `period_end`, `fiscal_year`)
+# MAGIC - `market_data` (price_close, market_cap per ticker × fiscal_year)
+# MAGIC - `00_config/valuation_assumptions.json` (defaults + per-ticker overrides)
 # MAGIC
-# MAGIC > **Advertencia importante:** las valoraciones son tan buenas como sus supuestos.
-# MAGIC > Especialmente el DCF es **muy sensible** a `WACC` y `growth_stage1`. Cambia estos
-# MAGIC > parámetros en `valuation_assumptions.json` antes de tomar decisiones reales.
+# MAGIC > **Important warning:** valuations are only as good as their assumptions.
+# MAGIC > The DCF in particular is **very sensitive** to `WACC` and `growth_stage1`. Change
+# MAGIC > these parameters in `valuation_assumptions.json` before making real decisions.
 
 # COMMAND ----------
 
 # MAGIC %md ### ⚠️ Path note
-# MAGIC `%run` paths son **relativos a la ubicación de este notebook** en el workspace.
-# MAGIC Si falla con `NameError`, ajusta la ruta para que apunte a `00_config/01__tickers`.
+# MAGIC `%run` paths are **relative to this notebook's location** in the workspace.
+# MAGIC If it fails with `NameError`, adjust the path to point to `00_config/01__tickers`.
 
 # COMMAND ----------
 
@@ -65,12 +65,12 @@ print(f"Metrics table : {metrics_tbl}")
 
 # COMMAND ----------
 
-# MAGIC %md ## 1. Cargar supuestos desde JSON
+# MAGIC %md ## 1. Load assumptions from JSON
 
 # COMMAND ----------
 
 def _load_assumptions(path: str) -> dict:
-    """JSON con tolerancia a líneas-comentario // y claves _xxx descartables."""
+    """JSON loader tolerant of // comment lines and discardable _xxx keys."""
     raw   = Path(path).read_text(encoding="utf-8")
     lines = [l for l in raw.splitlines() if not l.strip().startswith("//")]
     data  = json.loads("\n".join(lines))
@@ -111,15 +111,15 @@ def assumptions_for(ticker: str) -> dict:
 
 # COMMAND ----------
 
-# MAGIC %md ## 2. Definir los conceptos que necesitamos
+# MAGIC %md ## 2. Define the concepts we need
 # MAGIC
-# MAGIC IMPORTANTE: incluimos `stmt` en el join — `Net Income` aparece tanto en
-# MAGIC `Income Statement` como en `Cash Flow` (reconciliación), y sin filtrar
-# MAGIC duplicaríamos filas al pivotar.
+# MAGIC IMPORTANT: we include `stmt` in the join — `Net Income` appears in both
+# MAGIC `Income Statement` and `Cash Flow` (reconciliation), and without filtering
+# MAGIC we would duplicate rows when pivoting.
 
 # COMMAND ----------
 
-# (stmt, concept, alias) — orden controlado, sin colisiones de nombre al pivotar
+# (stmt, concept, alias) — controlled order, no name collisions when pivoting
 NEEDED = [
     ("Income Statement", "Net Income",                  "net_income"),
     ("Income Statement", "Revenue",                     "revenue"),
@@ -142,28 +142,28 @@ NEEDED = [
     ("Cash Flow",        "Changes in Working Capital",  "delta_wc"),
 ]
 
-# Conceptos de tipo "flow" (sumables a TTM). Los Balance Sheet son "stock" (snapshot).
+# "flow" concepts (summable to TTM). Balance Sheet concepts are "stock" (snapshot).
 STOCK_ALIASES = {"equity", "assets", "lt_debt", "st_debt", "cash", "st_inv", "retained_earnings"}
-# Shares también es "stock" en sentido TTM: usamos las del quarter más reciente,
-# no las sumamos (el alias 'shares' es weighted-average diluted del periodo).
+# Shares is also "stock" in the TTM sense: we use the most recent quarter's value,
+# not the sum (the 'shares' alias is the period's weighted-average diluted count).
 STOCK_ALIASES.add("shares")
 
 ALIAS_OF = {(s, c): a for s, c, a in NEEDED}
 ALL_ALIASES = [a for _, _, a in NEEDED]
 
-# Construir el filtro como OR de (stmt, concept) específicos
+# Build the filter as OR of specific (stmt, concept) pairs
 filter_cond = F.lit(False)
 for stmt, concept, _ in NEEDED:
     filter_cond = filter_cond | ((F.col("stmt") == stmt) & (F.col("concept") == concept))
 
-# Subset relevante con alias en columna nueva
+# Relevant subset with alias in a new column
 fin_subset = (
     spark.table(full_table)
     .filter(filter_cond)
     .filter(F.col("value").isNotNull())
 )
 
-# Aplicar mapping stmt+concept → alias usando CASE WHEN
+# Apply stmt+concept → alias mapping using CASE WHEN
 alias_col = F.lit(None).cast("string")
 for stmt, concept, alias in NEEDED:
     alias_col = F.when(
@@ -172,31 +172,31 @@ for stmt, concept, alias in NEEDED:
     ).otherwise(alias_col)
 fin_subset = fin_subset.withColumn("alias", alias_col).filter(F.col("alias").isNotNull())
 
-# Deduplicar por si una scrape introdujo duplicados exactos
+# Deduplicate in case a scrape introduced exact duplicates
 fin_subset = fin_subset.dropDuplicates(
     ["ticker", "stmt", "concept", "fiscal_year", "period_type", "period_end"]
 )
 
-# Defensa contra company inconsistente por ticker — misma razón que en 22__derived_metrics:
-# el MERGE de 21__clean_and_merge solo actualiza company cuando cambia value, así que
-# algunas filas viejas conservan un company stale (entityNames SEC con escapes, restructures,
-# overrides en favorites.json). Sin esto, el groupBy(ticker, company, fiscal_year) de abajo
-# produce filas duplicadas y el MERGE final peta con DELTA_MULTIPLE_SOURCE_ROW_MATCHING.
+# Guard against inconsistent company per ticker — same reason as in 22__derived_metrics:
+# the MERGE in 21__clean_and_merge only updates company when value changes, so some old
+# rows retain a stale company (SEC entityNames with escapes, restructures, favorites.json
+# overrides). Without this, groupBy(ticker, company, fiscal_year) below produces duplicate
+# rows and the final MERGE fails with DELTA_MULTIPLE_SOURCE_ROW_MATCHING.
 _company_w = Window.partitionBy("ticker")
 fin_subset = fin_subset.withColumn(
     "company", F.first("company", ignorenulls=True).over(_company_w)
 )
 
-# Materializa fin_subset (el scan de financials filtrado a ~16 conceptos): lo consumen fy_wide,
-# quarters y varios count() → sin esto se re-escanea ~7×. localCheckpoint(eager) lo materializa
-# una vez y trunca el linaje. .cache()/.persist() NO van en serverless ([NOT_SUPPORTED_WITH_SERVERLESS]).
+# Materialize fin_subset (financials scan filtered to ~16 concepts): consumed by fy_wide,
+# quarters, and several count() calls → without this it would be re-scanned ~7×. localCheckpoint(eager)
+# materializes it once and truncates the lineage. .cache()/.persist() do NOT work on serverless ([NOT_SUPPORTED_WITH_SERVERLESS]).
 fin_subset = fin_subset.localCheckpoint(eager=True)
 
 print(f"✓ Concept subset prepared — {fin_subset.count():,} rows")
 
 # COMMAND ----------
 
-# MAGIC %md ## 3. Pivot FY — una fila por (ticker, fiscal_year)
+# MAGIC %md ## 3. Pivot FY — one row per (ticker, fiscal_year)
 
 # COMMAND ----------
 
@@ -213,12 +213,12 @@ print(f"✓ FY wide: {fy_wide.count():,} (ticker, year) rows")
 
 # COMMAND ----------
 
-# MAGIC %md ## 4. Pivot TTM — una fila por ticker (rolling 4 quarters)
+# MAGIC %md ## 4. Pivot TTM — one row per ticker (rolling 4 quarters)
 # MAGIC
-# MAGIC Para cada (ticker, alias) ordenamos los quarters por `period_end DESC` y
-# MAGIC nos quedamos con los 4 más recientes. Luego:
-# MAGIC - **Flow** (IS, CF) → SUMA de los 4 valores
-# MAGIC - **Stock** (BS, Shares) → primer valor (el más reciente)
+# MAGIC For each (ticker, alias) we sort quarters by `period_end DESC` and
+# MAGIC keep the 4 most recent. Then:
+# MAGIC - **Flow** (IS, CF) → SUM of the 4 values
+# MAGIC - **Stock** (BS, Shares) → first value (the most recent)
 
 # COMMAND ----------
 
@@ -231,11 +231,11 @@ w_recent = Window.partitionBy("ticker", "alias").orderBy(F.col("period_end").des
 quarters_ranked = quarters.withColumn("rn", F.row_number().over(w_recent)) \
                           .filter(F.col("rn") <= 4)
 
-# Materializa quarters_ranked (window de los 4 quarters más recientes): alimenta ttm_flow Y
-# ttm_stock → dos lecturas del mismo window. localCheckpoint una vez (cache no va en serverless).
+# Materialize quarters_ranked (window of the 4 most recent quarters): feeds ttm_flow AND
+# ttm_stock → two reads of the same window. localCheckpoint once (cache does not work on serverless).
 quarters_ranked = quarters_ranked.localCheckpoint(eager=True)
 
-# Aggregate: SUM si flow, FIRST (rn=1) si stock
+# Aggregate: SUM if flow, FIRST (rn=1) if stock
 ttm_flow = (
     quarters_ranked
     .filter(~F.col("alias").isin(list(STOCK_ALIASES)))
@@ -245,9 +245,9 @@ ttm_flow = (
         F.sum("value").alias("value"),
         F.max("period_end").alias("period_end"),
         F.first("company", ignorenulls=True).alias("company"),
-        F.first("fiscal_year").alias("fiscal_year"),  # del más reciente
+        F.first("fiscal_year").alias("fiscal_year"),  # from the most recent
     )
-    # Sólo conservar TTM si tenemos 4 quarters completos
+    # Only keep TTM if we have 4 complete quarters
     .filter(F.col("_n_quarters") == 4)
     .drop("_n_quarters")
 )
@@ -266,8 +266,8 @@ ttm_stock = (
 
 ttm_long = ttm_flow.unionByName(ttm_stock)
 
-# Pivot a wide. Para period_end y fiscal_year usamos el MAX entre todos los
-# aliases del mismo ticker (el más reciente disponible).
+# Pivot to wide. For period_end and fiscal_year we use the MAX across all
+# aliases for the same ticker (the most recent available).
 ttm_meta = ttm_long.groupBy("ticker").agg(
     F.max("period_end").alias("period_end"),
     F.first("company", ignorenulls=True).alias("company"),
@@ -287,10 +287,10 @@ print(f"✓ TTM wide: {ttm_wide.count():,} ticker rows")
 
 # COMMAND ----------
 
-# MAGIC %md ## 5. Join con market_data y bajar a Pandas
+# MAGIC %md ## 5. Join with market_data and collect to Pandas
 # MAGIC
-# MAGIC Para **FY**: precio del mismo `fiscal_year`.
-# MAGIC Para **TTM**: precio del `fiscal_year` más reciente disponible en market_data.
+# MAGIC For **FY**: price from the same `fiscal_year`.
+# MAGIC For **TTM**: price from the most recent `fiscal_year` available in market_data.
 
 # COMMAND ----------
 
@@ -310,7 +310,7 @@ except Exception:
     mkt = None
     has_market_data = False
 
-# FY: join directo por (ticker, year)
+# FY: direct join on (ticker, year)
 if has_market_data:
     fy_with_price = fy_wide.join(mkt, on=["ticker", "year"], how="left")
 else:
@@ -320,8 +320,8 @@ else:
         .withColumn("market_cap",  F.lit(None).cast("double"))
     )
 
-# TTM: usar el price_close del año más reciente disponible en market_data para
-# cada ticker (puede ser el año actual sin shares todavía, o el del año pasado).
+# TTM: use the most recent price_close available in market_data per ticker
+# (may be the current year without shares yet, or the previous year).
 if has_market_data:
     w_latest_price = Window.partitionBy("ticker").orderBy(F.col("year").desc())
     latest_price = (
@@ -332,7 +332,7 @@ if has_market_data:
         .select("ticker", F.col("price_close"), F.col("year").alias("price_year"))
     )
     ttm_with_price = ttm_wide.join(latest_price, on="ticker", how="left")
-    # market_cap actual (para futuras métricas — no estrictamente necesario aquí)
+    # current market_cap (for future metrics — not strictly needed here)
     ttm_with_price = ttm_with_price.withColumn("market_cap", F.lit(None).cast("double"))
 else:
     ttm_with_price = (
@@ -347,29 +347,29 @@ print(f"✓ TTM rows: {ttm_with_price.count():,}")
 
 # COMMAND ----------
 
-# Bajar a pandas — volumen razonable (~30k FY + ~3k TTM)
+# Collect to pandas — reasonable volume (~30k FY + ~3k TTM)
 fy_pdf  = fy_with_price.toPandas()
 ttm_pdf = ttm_with_price.toPandas()
 
-# (Sin unpersist: tampoco soportado en serverless. Los localCheckpoint se liberan al cerrar
-# la sesión; a partir de aquí todo es pandas/numpy en el driver + escrituras Delta.)
+# (No unpersist: also unsupported on serverless. localCheckpoints are released when the
+# session closes; from here on everything is pandas/numpy on the driver + Delta writes.)
 
-# Asegurar columnas auxiliares
+# Ensure auxiliary columns exist
 if "period_end" not in fy_pdf.columns:
     fy_pdf["period_end"] = pd.NaT
 fy_pdf["period_type"] = "FY"
 
 ttm_pdf["period_type"] = "TTM"
-# Renombrar para que ambos pdf compartan schema
-# (fy ya tiene 'year'; ttm también)
+# Rename so both pdfs share the same schema
+# (fy already has 'year'; ttm does too)
 
-# Derivados comunes
+# Common derived fields
 for pdf in (fy_pdf, ttm_pdf):
     pdf["fcf"]  = pdf["ocf"].astype(float) - pdf["capex"].fillna(0).astype(float)
     pdf["bvps"] = pdf["equity"] / pdf["shares"]
-    # Owner Earnings $ (Buffett 1986: NI + D&A + SBC − CapEx − ΔWC). Vectorizado con
-    # fillna(0) = el _safe(.., 0) de la versión por-fila. Lo consumen compute_all (vía DCF
-    # use_owner_earnings + método owner_earnings) y el paso 9 de exposición de OE absoluto.
+    # Owner Earnings $ (Buffett 1986: NI + D&A + SBC − CapEx − ΔWC). Vectorized with
+    # fillna(0) = the per-row _safe(.., 0). Consumed by compute_all (via DCF
+    # use_owner_earnings + owner_earnings method) and step 9 for absolute OE exposure.
     pdf["oe_dollars"] = (
         pdf["net_income"].fillna(0) + pdf["dna"].fillna(0) + pdf["sbc"].fillna(0)
         - pdf["capex"].fillna(0) - pdf["delta_wc"].fillna(0)
@@ -389,22 +389,22 @@ print(f"✓ TTM pandas: {len(ttm_pdf):,} rows")
 
 # COMMAND ----------
 
-# MAGIC %md ## 6. Las cuatro fórmulas
+# MAGIC %md ## 6. The four formulas
 
 # COMMAND ----------
 
-# Las cuatro fórmulas, VECTORIZADAS sobre todo el dataframe con numpy. La versión anterior
-# iteraba fila-a-fila (pdf.iterrows × 4 métodos × un merge de dicts por fila) — el sink de
-# wall-clock del paso una vez eliminados los re-scans. Esta versión es equivalente fila-a-fila
-# a la anterior (validado a diff < 1e-9 sobre datos sintéticos cubriendo todas las skip-conditions
-# y overrides). Cada skip-condition se vuelve una máscara NaN; una fila se incluye sólo si su iv
-# no es NaN y > 0, idéntico al `continue` original. El DCF mantiene el LOOP por año (vectorizado
-# entre filas, NO closed-form) para reproducir bit-a-bit la suma flotante del loop original.
+# The four formulas, VECTORIZED over the entire dataframe with numpy. The previous version
+# iterated row-by-row (pdf.iterrows × 4 methods × one dict merge per row) — the wall-clock
+# bottleneck once re-scans were eliminated. This version is row-for-row equivalent to the
+# previous one (validated to diff < 1e-9 on synthetic data covering all skip-conditions and
+# overrides). Each skip-condition becomes a NaN mask; a row is included only if its iv is
+# not NaN and > 0, identical to the original `continue`. The DCF keeps the per-year LOOP
+# (vectorized across rows, NOT closed-form) to reproduce the original loop's floating-point sum bit-for-bit.
 
 
 def _params_for(ticker: str) -> dict:
-    """Aplana assumptions_for(ticker) a columnas escalares. Se llama UNA vez por ticker
-    ÚNICO (no por fila), reutilizando la misma lógica de merge defaults+overrides."""
+    """Flattens assumptions_for(ticker) into scalar columns. Called ONCE per UNIQUE ticker
+    (not per row), reusing the same defaults+overrides merge logic."""
     a = assumptions_for(ticker)
     g, gr, d, oe = a["graham"], a["graham_revised"], a["dcf"], a["owner_earnings"]
     return {
@@ -429,16 +429,16 @@ def _params_for(ticker: str) -> dict:
 
 # COMMAND ----------
 
-# MAGIC %md ## 7. Computar — para cada fila (FY o TTM) × cada método (vectorizado)
+# MAGIC %md ## 7. Compute — for each row (FY or TTM) × each method (vectorized)
 
 # COMMAND ----------
 
 def compute_all(pdf, period_type, computed_at):
-    """Calcula los 4 métodos para TODO el dataframe (numpy, sin iterrows) y arma las filas."""
+    """Computes all 4 methods for the ENTIRE dataframe (numpy, no iterrows) and builds the rows."""
     if len(pdf) == 0:
         return []
 
-    # Parámetros por ticker único → columnas; merge en vez de un dict-merge por fila.
+    # Parameters per unique ticker → columns; merge instead of a per-row dict-merge.
     params = pd.DataFrame([_params_for(t) for t in pdf["ticker"].unique()])
     m = pdf.merge(params, on="ticker", how="left")
 
@@ -472,14 +472,14 @@ def compute_all(pdf, period_type, computed_at):
     oe_dollars = z(ni) + z(dna) + z(sbc) - z(capex) - z(dwc)
 
     with np.errstate(invalid="ignore", divide="ignore"):
-        # ── graham_number ──  sqrt(magic·EPS·BVPS); skip si EPS/BVPS no-positivos o book
-        # distorsionado (retained < 0, o P/B > 10). bvps>0 garantizado en la rama válida.
+        # ── graham_number ──  sqrt(magic·EPS·BVPS); skip if EPS/BVPS non-positive or book
+        # distorted (retained < 0, or P/B > 10). bvps>0 guaranteed in the valid branch.
         gn_valid = ~np.isnan(eps) & ~np.isnan(bvps) & (eps > 0) & (bvps > 0)
         pb = np.where(bvps != 0, price / bvps, np.inf)
         distort = (~np.isnan(retained) & (retained < 0)) | (~np.isnan(price) & (pb > 10))
         gn = np.where(gn_valid & ~distort, np.sqrt(magic * eps * bvps), nan)
 
-        # ── graham_revised ──  g = min(dcf.growth_stage1, growth_cap) (decisión documentada).
+        # ── graham_revised ──  g = min(dcf.growth_stage1, growth_cap) (documented decision).
         g_eff = np.minimum(dcf_g1, gr_growth_cap)
         grv_valid = ~np.isnan(eps) & (eps > 0)
         grv = np.where(
@@ -488,7 +488,7 @@ def compute_all(pdf, period_type, computed_at):
             nan,
         )
 
-        # ── dcf ──  loop por año (vectorizado entre filas) = bit-identical al loop original.
+        # ── dcf ──  per-year loop (vectorized across rows) = bit-identical to the original loop.
         starting_cf = np.where(dcf_use_oe, oe_dollars, fcf)
         dcf_valid = (
             ~dcf_skip & ~np.isnan(shares) & (shares > 0)
@@ -497,8 +497,8 @@ def compute_all(pdf, period_type, computed_at):
         cf  = np.where(np.isnan(starting_cf), 0.0, starting_cf).astype("float64")
         pv1 = np.zeros_like(cf)
         for t in range(1, int(dcf_horizon.max()) + 1):
-            active = t <= dcf_horizon                       # filas cuyo horizonte aún cubre t
-            cf  = np.where(active, cf * (1 + dcf_g1), cf)    # deja de crecer pasado el horizonte
+            active = t <= dcf_horizon                       # rows whose horizon still covers t
+            cf  = np.where(active, cf * (1 + dcf_g1), cf)    # stops growing past the horizon
             pv1 = np.where(active, pv1 + cf / ((1 + dcf_wacc) ** t), pv1)
         cf_term = cf * (1 + dcf_gt)
         tv      = cf_term / (dcf_wacc - dcf_gt)
@@ -508,7 +508,7 @@ def compute_all(pdf, period_type, computed_at):
         dcf_ips = (pv1 + pv_term - debt + cash_t) / shares
         dcf = np.where(dcf_valid, dcf_ips, nan)
 
-        # ── owner_earnings ──  OE × múltiplo  ó  OE / discount_rate (perpetuidad Gordon).
+        # ── owner_earnings ──  OE × multiple  or  OE / discount_rate (Gordon perpetuity).
         oe_valid = ~oe_skip & (oe_dollars > 0) & ~np.isnan(shares) & (shares > 0)
         total = np.where(
             oe_method == "multiple", oe_dollars * oe_multiple,
@@ -522,8 +522,8 @@ def compute_all(pdf, period_type, computed_at):
     pend_ts    = pd.to_datetime(m["period_end"], errors="coerce")
     pend       = [p.date() if pd.notna(p) else None for p in pend_ts]
 
-    # Meta diagnóstica (columna `assumptions`) — NO la consume el dashboard ni el export;
-    # se conserva por inspección ad-hoc de la tabla. Construida sólo sobre filas supervivientes.
+    # Diagnostic metadata (`assumptions` column) — NOT consumed by the dashboard or export;
+    # kept for ad-hoc table inspection. Built only for surviving rows.
     def _meta_gn(i):
         return {"magic": float(magic[i]), "eps": float(eps[i]), "bvps": float(bvps[i])}
 
@@ -592,7 +592,7 @@ if len(iv_pdf):
 
 # COMMAND ----------
 
-# MAGIC %md ## 8. Escribir a Delta (MERGE — idempotente)
+# MAGIC %md ## 8. Write to Delta (MERGE — idempotent)
 
 # COMMAND ----------
 
@@ -638,10 +638,10 @@ if len(iv_pdf):
     iv_sdf = spark.createDataFrame(iv_pdf, schema=schema)
     iv_sdf.createOrReplaceTempView("incoming_iv")
 
-    # MERGE: la clave única es (ticker, period_type, fiscal_year, method).
-    # Para TTM, fiscal_year es el del quarter más reciente, así que cada run
-    # de TTM upserts la misma fila (si el quarter no ha cambiado) o inserta
-    # una nueva (si hay quarter más reciente).
+    # MERGE: unique key is (ticker, period_type, fiscal_year, method).
+    # For TTM, fiscal_year is that of the most recent quarter, so each TTM run
+    # upserts the same row (if the quarter hasn't changed) or inserts a new one
+    # (if there is a more recent quarter).
     spark.sql(f"""
         MERGE INTO {iv_tbl} AS target
         USING incoming_iv AS source
@@ -703,15 +703,15 @@ else:
 
 # COMMAND ----------
 
-# MAGIC %md ## 9. Exponer las métricas en `financials_metrics`
+# MAGIC %md ## 9. Expose metrics in `financials_metrics`
 # MAGIC
-# MAGIC Dos variantes por método: `(FY)` y `(TTM)`. Las filas FY se asocian a su
-# MAGIC `fiscal_year` correspondiente; las TTM se escriben con el `fiscal_year` del
-# MAGIC quarter más reciente del ticker.
+# MAGIC Two variants per method: `(FY)` and `(TTM)`. FY rows are associated with their
+# MAGIC corresponding `fiscal_year`; TTM rows are written with the `fiscal_year` of the
+# MAGIC ticker's most recent quarter.
 
 # COMMAND ----------
 
-# Mapeo: (method, output_field, period_type) → metric_name
+# Mapping: (method, output_field, period_type) → metric_name
 EXPOSED = [
     # ── FY ──
     ("graham_number",  "FY",  "intrinsic_value_per_share", "Graham Number (FY)"),
@@ -733,7 +733,7 @@ EXPOSED = [
     ("owner_earnings", "TTM", "margin_of_safety_pct",      "MoS % (Owner Earnings, TTM)"),
 ]
 
-# Detectar el schema real de financials_metrics (puede tener fiscal_year o year)
+# Detect the actual financials_metrics schema (may have fiscal_year or year)
 try:
     metrics_cols = {f.name for f in spark.table(metrics_tbl).schema.fields}
 except Exception:
@@ -754,9 +754,9 @@ if len(iv_pdf):
         subset = subset[["ticker", "company", year_col, "metric", "value"]]
         exposed_frames.append(subset)
 
-# Owner Earnings absoluto (FY y TTM) — métrica útil aparte. `oe_dollars` ya está como columna
-# (vectorizado, = _owner_earnings_dollars con _safe→0), nunca NaN → toda fila produce su métrica,
-# igual que la versión por-fila anterior. El dropna(value) de abajo es no-op aquí (nunca NaN).
+# Absolute Owner Earnings (FY and TTM) — useful standalone metric. `oe_dollars` is already
+# a column (vectorized, = _owner_earnings_dollars with _safe→0), never NaN → every row
+# produces its metric, same as the previous per-row version. The dropna(value) below is a no-op here (never NaN).
 oe_frames = []
 for _pdf, ptype in ((fy_pdf, "FY"), (ttm_pdf, "TTM")):
     if not len(_pdf):

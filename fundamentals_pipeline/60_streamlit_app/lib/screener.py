@@ -21,11 +21,11 @@ from .data import load_latest_data
 
 MARKET_CAP = "Market Cap"
 
-# Columnas por defecto del screener (orden de aparición).
+# Screener default columns (display order).
 DEFAULT_COLUMNS = [
     "Market Cap", "P/E", "P/S", "Net Margin %", "ROE %", "Revenue YoY %", "EV/EBITDA",
 ]
-# Universo → columna de flag en el frame ("" = sin filtro).
+# Universe → flag column in the frame ("" = no filter).
 UNIVERSE_FLAGS = {
     "All":          "",
     "S&P 500":      "in_sp500",
@@ -67,17 +67,17 @@ def build_screener_frame() -> tuple[pd.DataFrame, dict[str, str], list[str]]:
     # pivot doesn't materialise ghost columns for unused categories.
     m["metric"] = m["metric"].astype(str)
 
-    # Para cada (ticker, métrica) quédate con SU último fiscal_year disponible —
-    # NO un único año por ticker. Filas como las métricas TTM de Intrinsic Value
-    # (estampadas en un fiscal_year futuro, p.ej. 2026) o el Market Cap (año
-    # CALENDARIO) van por delante del último FY de las métricas core; un MAX por
-    # ticker congelaría toda la fila a ese año y dejaría Net Margin/ROE/P-E… en
-    # None aunque sí existan en el año anterior (bug VNOM). Esta es además la
-    # misma semántica que usa la página de detalle (último valor por métrica).
+    # For each (ticker, metric) keep ITS latest available fiscal_year —
+    # NOT a single year per ticker. Rows such as TTM Intrinsic Value metrics
+    # (stamped on a future fiscal_year, e.g. 2026) or Market Cap (CALENDAR
+    # year) appear ahead of the latest FY of core metrics; a per-ticker MAX
+    # would freeze the whole row to that year and leave Net Margin/ROE/P-E…
+    # as None even when they exist in the prior year (VNOM bug). This also
+    # matches the semantics used by the detail page (latest value per metric).
     latest = m.groupby(["ticker", "metric"], observed=True)["fiscal_year"].transform("max")
     m = m[m["fiscal_year"] == latest]
 
-    # unit por métrica (para formateo) y orden por metrics_hierarchy.
+    # unit per metric (for formatting) and order from metrics_hierarchy.
     unit_map = (
         m.dropna(subset=["unit"]).drop_duplicates("metric")
         .assign(unit=lambda d: d["unit"].astype(str))
@@ -92,13 +92,13 @@ def build_screener_frame() -> tuple[pd.DataFrame, dict[str, str], list[str]]:
     )
     metric_order = [MARKET_CAP] + [x for x in order if x != MARKET_CAP]
 
-    # long → wide (en pandas; el SQL se mantiene simple).
+    # long → wide (in pandas; keeps the SQL simple).
     wide = m.pivot_table(index="ticker", columns="metric", values="value", aggfunc="first")
     wide.columns.name = None
     fy = m.groupby("ticker", observed=True)["fiscal_year"].max().rename("fiscal_year")
     wide = wide.join(fy).reset_index()
 
-    # company + flags de universo + sector GICS desde meta.
+    # company + universe flags + GICS sector from meta.
     info = pd.DataFrame(meta.get("tickers", []))
     if "ticker" in info.columns:
         keep = ["ticker"] + [c for c in ("company", "sector", *_FLAG_COLS) if c in info.columns]
@@ -117,7 +117,7 @@ def build_screener_frame() -> tuple[pd.DataFrame, dict[str, str], list[str]]:
         .astype(str).str.strip().replace("", UNKNOWN_SECTOR)
     )
 
-    # Market Cap puede no existir aún (Release anterior a schema v3).
+    # Market Cap may not exist yet (Release predating schema v3).
     if MARKET_CAP not in wide.columns:
         wide[MARKET_CAP] = pd.NA
 

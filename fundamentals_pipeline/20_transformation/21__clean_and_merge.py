@@ -82,26 +82,26 @@ spark.sql(f"""
 # COMMAND ----------
 
 raw = spark.table(raw_full).filter(F.col("scraped_at") == latest_scrape)
-# `raw` (el slice de la última scrape de financials_raw, ~81M filas) se re-escanea 3×: flow_fy,
-# stock_fy y el _flow_fy_all del orphan-DELETE de §4, cada uno con su propio predicate pushdown
-# sobre el Delta completo. localCheckpoint(eager) lo materializa una vez y los filtros aguas
-# abajo leen del checkpoint en disco local en vez de re-escanear la tabla. .cache()/.persist()
-# NO van en serverless ([NOT_SUPPORTED_WITH_SERVERLESS]); se libera al cerrar la sesión.
+# `raw` (the slice of the latest financials_raw scrape, ~81M rows) is re-scanned 3×: flow_fy,
+# stock_fy, and the _flow_fy_all for the orphan-DELETE in §4, each with its own predicate pushdown
+# over the full Delta table. localCheckpoint(eager) materializes it once and downstream filters
+# read from the on-disk local checkpoint instead of re-scanning the table. .cache()/.persist()
+# do NOT work on serverless ([NOT_SUPPORTED_WITH_SERVERLESS]); released when the session closes.
 raw = raw.localCheckpoint(eager=True)
 
-# Flow FY rows: 10-K, fp='FY'. NO usamos el filtro estricto period_shape='FY_or_TTM'
-# (descartaría años de transición/stub con duración fuera de 350–380d — p.ej. tras una
-# conversión MLP→C-corp o un cambio de fiscal year-end —, que el clasificador etiqueta
-# como `other_Nd`). Pero SÍ excluimos las formas SUB-ANUALES que un 10-K re-reporta con
-# fp='FY': el desglose trimestral del año (Q1..Q4 standalone, ~90d) y los YTD de 6M/9M.
-# El Q4 standalone (`Q_standalone`, ~91d, period_end == fy_end) es indistinguible de la fila
-# FY por (fp, period_end, filed) → empataba en el Window de dedup hasta `value desc`, que
-# elegía el MAYOR valor (a menudo el Q4, no el anual) y corrompía la FY (~9k filas, p.ej.
-# ALNY fy2019: −276.19 del Q4 en vez de −886.12 del año). Excluyéndolas, solo compiten las
-# formas anuales (`FY_or_TTM` 365d + `other_Nd` stubs). Snapshot se excluye por defensa.
-# Edge case: un fy cuyo ÚNICO fact fp='FY' es sub-anual ya no produce fila FY aquí (se borra
-# como huérfana más abajo); `21e__derive_fy_from_quarterly` reconstruye el anual desde ΣQ
-# para los flow_additive con los 4 trimestres.
+# Flow FY rows: 10-K, fp='FY'. We do NOT use the strict period_shape='FY_or_TTM' filter
+# (it would drop transition/stub years with duration outside 350–380d — e.g. after an
+# MLP→C-corp conversion or a fiscal year-end change — which the classifier labels
+# `other_Nd`). We DO exclude the SUB-ANNUAL shapes that a 10-K re-reports with
+# fp='FY': the quarterly breakdown of the year (Q1..Q4 standalone, ~90d) and the 6M/9M YTDs.
+# The Q4 standalone (`Q_standalone`, ~91d, period_end == fy_end) is indistinguishable from the
+# FY row by (fp, period_end, filed) → it tied in the dedup Window until `value desc`, which
+# picked the LARGEST value (often the Q4, not the annual) and corrupted the FY (~9k rows, e.g.
+# ALNY fy2019: −276.19 from Q4 instead of −886.12 for the year). Excluding them, only annual
+# shapes compete (`FY_or_TTM` 365d + `other_Nd` stubs). Snapshot excluded as a safeguard.
+# Edge case: a fy whose ONLY fact fp='FY' is sub-annual no longer produces an FY row here (it
+# is deleted as an orphan below); `21e__derive_fy_from_quarterly` reconstructs the annual from ΣQ
+# for flow_additive concepts that have all 4 quarters.
 flow_fy = (
     raw
     .filter(F.col("kind").isin("flow_additive", "flow_nonadditive"))
@@ -113,9 +113,9 @@ flow_fy = (
 )
 
 # Stock FY rows: snapshot from 10-K
-# Añadimos duration_days = NULL para que el unionByName con flow_fy cuadre el schema.
-# Para stocks no hay criterio de duración (todos son snapshots), así que el window
-# de dedup cae al siguiente criterio (filed desc) — comportamiento idéntico al previo.
+# We add duration_days = NULL so that the unionByName with flow_fy aligns the schema.
+# For stocks there is no duration criterion (all are snapshots), so the dedup window
+# falls through to the next criterion (filed desc) — identical behaviour to before.
 stock_fy = (
     raw
     .filter(F.col("kind") == "stock")
@@ -138,55 +138,55 @@ print(f"FY rows incoming: {incoming.count():,}")
 
 # COMMAND ----------
 
-# Prioridad de sinónimo (menor = preferido) calculada ANTES del rename, desde el label
-# de ORIGEN. Net Income coexiste como NetIncomeLoss + ProfitLoss + (to common) en el
-# mismo fy, así que el desempate no puede ser `value desc`. CONCEPT_PRIORITY fuerza
-# attributable-first; labels no listados → 0 (comportamiento previo de Revenue intacto).
+# Synonym priority (lower = preferred) computed BEFORE the rename, from the SOURCE label.
+# Net Income coexists as NetIncomeLoss + ProfitLoss + (to common) in the same fy,
+# so the tiebreak cannot be `value desc`. CONCEPT_PRIORITY forces attributable-first;
+# unlisted labels → 0 (previous Revenue behaviour preserved).
 _prio = F.lit(0)
 for _label, _rank in CONCEPT_PRIORITY.items():
     _prio = F.when(F.col("concept") == _label, F.lit(_rank)).otherwise(_prio)
 incoming = incoming.withColumn("prio", _prio)
 
-# Normalise: colapsa sinónimos XBRL al concepto canónico via CONCEPT_SYNONYMS
-# (heredado del %run de 01__tickers). Si ambos reportan el mismo (ticker, stmt, fy),
-# la dedup posterior se queda con uno solo — prio asc, latest filed, mayor value.
+# Normalise: collapse XBRL synonyms to the canonical concept via CONCEPT_SYNONYMS
+# (inherited from the %run of 01__tickers). If both report the same (ticker, stmt, fy),
+# the downstream dedup keeps one — prio asc, latest filed, largest value.
 for _alt, _canon in CONCEPT_SYNONYMS.items():
     incoming = incoming.withColumn(
         "concept",
         F.when(F.col("concept") == _alt, _canon).otherwise(F.col("concept"))
     )
 
-# Drop comparativos mal etiquetados: un fact del año en curso SIEMPRE termina en un
-# año calendario >= su fiscal_year (cierre en dic = año fy; Jan-enders cierran en fy+1).
-# Un period_end cuyo año < fy es un comparativo de un filing posterior etiquetado con el
-# fy de ese filing — nunca un dato genuino del año en curso (ningún emisor del universo
-# etiqueta su fiscal year por ADELANTE; verificado vía modal offset por ticker). Sin esto,
-# un fy cuyo único fact disponible es un comparativo produce una fila desalineada que el
-# MERGE no borra y se acumula.
+# Drop mislabelled comparatives: a current-year fact ALWAYS ends in a calendar year
+# >= its fiscal_year (Dec-closers = fy year; Jan-closers close in fy+1).
+# A period_end whose year < fy is a comparative from a later filing labelled with
+# that filing's fy — never a genuine current-year figure (no issuer in the universe
+# labels its fiscal year AHEAD; verified via modal offset per ticker). Without this,
+# a fy whose only available fact is a comparative produces a misaligned row that the
+# MERGE never deletes and that accumulates.
 incoming = incoming.filter(F.year(F.col("period_end")) >= F.col("fy"))
 
-# Dedup: nos quedamos con el fact del AÑO EN CURSO por (ticker, stmt, concept, fy).
-# Un 10-K etiqueta los comparativos de años previos con el `fy` DEL FILING, así que una
-# partición fy contiene varios facts FY; el año en curso es el de `period_end` MÁS RECIENTE
-# (los comparativos terminan antes). Ordenar por duración era INCORRECTO — un comparativo
-# de 53 semanas (370d) o de año bisiesto (366d) ganaba al año en curso de 52 semanas/365d,
-# arrastrando el valor equivocado y un period_end cuyo año ≠ fiscal_year. Misma regla
-# MAX(period_end) que usa 21b. `filed` desc resuelve restatements; `value` desc es desempate
-# final. Para stocks (BS) period_end desc también elige el snapshot del año en curso (antes
-# caía a `value` desc y podía elegir el snapshot comparativo mayor).
-# `prio asc` va DESPUÉS de period_end (elegir año en curso vs comparativo) pero ANTES
-# de value: entre tags que coexisten en el mismo fy/period_end gana el preferido.
-# La forma ANUAL gana ANTES de cualquier desempate por valor: si tras filtrar las formas
-# sub-anuales aún coexisten un `FY_or_TTM` y un stub `other_Nd` en el mismo period_end,
-# preferimos el anual de 365d y, en su defecto, el de mayor duración — para que `value desc`
-# (último recurso determinista) NUNCA vuelva a elegir una forma más corta por ser mayor.
+# Dedup: keep the CURRENT-YEAR fact per (ticker, stmt, concept, fy).
+# A 10-K labels prior-year comparatives with the FILING's `fy`, so a fy partition
+# contains multiple FY facts; the current year has the MOST RECENT `period_end`
+# (comparatives end earlier). Ordering by duration was INCORRECT — a 53-week (370d)
+# or leap-year (366d) comparative beat the current 52-week/365d year, pulling in the
+# wrong value and a period_end whose year ≠ fiscal_year. Same MAX(period_end) rule
+# as 21b. `filed` desc resolves restatements; `value` desc is the final tiebreak.
+# For stocks (BS) period_end desc also picks the current-year snapshot (previously
+# fell through to `value` desc and could pick the larger comparative snapshot).
+# `prio asc` goes AFTER period_end (pick current year vs comparative) but BEFORE
+# value: among tags that coexist in the same fy/period_end the preferred one wins.
+# The ANNUAL shape wins BEFORE any value tiebreak: if after filtering sub-annual shapes
+# a `FY_or_TTM` and an `other_Nd` stub coexist at the same period_end, we prefer the
+# 365d annual and, failing that, the longest duration — so `value desc`
+# (last deterministic resort) NEVER again picks a shorter shape just because it is larger.
 w = Window.partitionBy("ticker", "stmt", "concept", "fy").orderBy(
     F.col("period_end").desc_nulls_last(),
-    (F.col("period_shape") == "FY_or_TTM").desc(),   # prefiere la forma anual real
+    (F.col("period_shape") == "FY_or_TTM").desc(),   # prefer the true annual shape
     F.col("prio").asc_nulls_last(),
     F.col("filed").desc_nulls_last(),
-    F.col("duration_days").desc_nulls_last(),         # luego el período más largo (anual > stub)
-    F.col("value").desc_nulls_last()                  # desempate final determinista
+    F.col("duration_days").desc_nulls_last(),         # then the longest period (annual > stub)
+    F.col("value").desc_nulls_last()                  # final deterministic tiebreak
 )
 incoming = (
     incoming
@@ -196,12 +196,12 @@ incoming = (
     .withColumn("company", F.initcap(F.col("company")))
 )
 
-# Guard: un period_end pertenece a EXACTAMENTE un fiscal year. Tras la dedup por fy,
-# el mismo period_end puede seguir apareciendo bajo varios fy (un 10-K reciente trae el
-# año en curso como current y los previos como comparativos, cada uno con su propio fy
-# en su filing original). Nos quedamos con el fy más pequeño (el filing del año en curso)
-# y descartamos el resto, para que un comparativo no se haga pasar por un año posterior.
-# El MERGE no borra, así que sin esto los duplicados cross-fy se acumulan en `financials`.
+# Guard: a period_end belongs to EXACTLY one fiscal year. After dedup by fy,
+# the same period_end can still appear under multiple fy values (a recent 10-K brings
+# the current year as current and prior years as comparatives, each with its own fy
+# from its original filing). We keep the smallest fy (the current-year filing)
+# and discard the rest, so a comparative cannot masquerade as a later year.
+# The MERGE never deletes, so without this cross-fy duplicates accumulate in `financials`.
 w2 = Window.partitionBy("ticker", "stmt", "concept", "period_end").orderBy(F.col("fy").asc())
 incoming = (
     incoming
@@ -224,11 +224,12 @@ clean_fy = incoming.select(
     F.col("scraped_at"),
 )
 
-# clean_fy se consume 3× aguas abajo: count() aquí, el MERGE de §3 y `_kept_keys` del
-# orphan-DELETE de §4. Su linaje es caro (scan de `raw` + union + synonym-loops + dos
-# window functions de dedup) — sin materializar se recomputa entero cada vez. localCheckpoint
-# (eager) lo calcula UNA vez y trunca el linaje. OJO serverless: .cache()/.persist() NO van
-# ([NOT_SUPPORTED_WITH_SERVERLESS]); localCheckpoint sí. Se libera al cerrar la sesión.
+# clean_fy is consumed 3× downstream: count() here, the MERGE in §3, and `_kept_keys` for
+# the orphan-DELETE in §4. Its lineage is expensive (scan of `raw` + union + synonym-loops
+# + two dedup window functions) — without materializing it is fully recomputed each time.
+# localCheckpoint(eager) computes it ONCE and truncates the lineage. NOTE serverless:
+# .cache()/.persist() do NOT work ([NOT_SUPPORTED_WITH_SERVERLESS]); localCheckpoint does.
+# Released when the session closes.
 clean_fy = clean_fy.localCheckpoint(eager=True)
 
 print(f"After dedupe & normalize: {clean_fy.count():,} FY rows ready for MERGE")
@@ -269,23 +270,23 @@ print(f"✓ MERGE complete → {full_tbl} (FY rows)")
 
 # COMMAND ----------
 
-# MAGIC %md ## 4. Borrar FY de FLOW huérfanas (anual fabricado a partir de una forma sub-anual)
+# MAGIC %md ## 4. Delete orphan FLOW FY rows (annual fabricated from a sub-annual shape)
 # MAGIC
-# MAGIC El MERGE de arriba hace UPDATE/INSERT pero **nunca borra**. Antes, una forma sub-anual con
-# MAGIC `fp='FY'` (Q4 standalone ~90d, o YTD 6M/9M) ganaba el desempate `value desc` y se escribía
-# MAGIC como la fila `FY` (`is_derived=False`) de ese `(ticker, stmt, concept, fy)`. Con el filtro
-# MAGIC nuevo de `flow_fy`, los años cuyo ÚNICO fact `fp='FY'` es sub-anual (o un comparativo mal
-# MAGIC etiquetado que cae por el guard `year(period_end) >= fy`) YA NO producen fila FY, así que la
-# MAGIC vieja queda huérfana y stale. La borramos aquí (~2.5k filas). `21e__derive_fy_from_quarterly`
-# MAGIC (más adelante en el pipeline) reconstruye el anual desde `ΣQ1..Q4` para los `flow_additive`
-# MAGIC con los 4 trimestres presentes. **Idempotente:** solo toca `is_derived=False`; las FY
-# MAGIC reconstruidas (`is_derived=True`) y las FY reales nunca se borran. Acotado al universo de
-# MAGIC claves del scrape en curso → nunca toca histórico de tickers/conceptos ausentes del scrape.
+# MAGIC The MERGE above does UPDATE/INSERT but **never deletes**. Previously, a sub-annual shape with
+# MAGIC `fp='FY'` (Q4 standalone ~90d, or YTD 6M/9M) won the `value desc` tiebreak and was written
+# MAGIC as the `FY` row (`is_derived=False`) for that `(ticker, stmt, concept, fy)`. With the new
+# MAGIC `flow_fy` filter, years whose ONLY fact `fp='FY'` is sub-annual (or a mislabelled comparative
+# MAGIC that is dropped by the `year(period_end) >= fy` guard) NO LONGER produce an FY row, so the
+# MAGIC old one becomes stale and orphaned. We delete it here (~2.5k rows). `21e__derive_fy_from_quarterly`
+# MAGIC (later in the pipeline) reconstructs the annual from `ΣQ1..Q4` for `flow_additive` concepts
+# MAGIC that have all 4 quarters present. **Idempotent:** only touches `is_derived=False`; reconstructed
+# MAGIC FY rows (`is_derived=True`) and genuine FY rows are never deleted. Scoped to the key universe
+# MAGIC of the current scrape → never touches historical tickers/concepts absent from the scrape.
 
 # COMMAND ----------
 
-# Universo de claves FLOW con ALGÚN fact fp='FY' en este scrape, colapsado al concepto canónico
-# (para casar con `financials`). Incluye las formas sub-anuales que `flow_fy` ahora excluye.
+# Universe of FLOW keys with ANY fact fp='FY' in this scrape, collapsed to the canonical concept
+# (to match against `financials`). Includes the sub-annual shapes that `flow_fy` now excludes.
 _flow_fy_all = (
     raw
     .filter(F.col("kind").isin("flow_additive", "flow_nonadditive"))
@@ -302,8 +303,8 @@ _all_keys = _flow_fy_all.select(
     "ticker", "stmt", "concept", F.col("fy").alias("fiscal_year")
 ).distinct()
 
-# Claves que el 21 parcheado SÍ (re)emite = tienen un anual genuino (FY_or_TTM / other_Nd del
-# año en curso). Las demás del universo flow → su FY publicada es un fabricado a borrar.
+# Keys that the patched 21 DOES (re)emit = they have a genuine annual (FY_or_TTM / other_Nd for
+# the current year). The rest of the flow universe → their published FY is a fabrication to delete.
 _kept_keys = clean_fy.select("ticker", "stmt", "concept", "fiscal_year").distinct()
 
 orphan_keys = _all_keys.join(
@@ -312,9 +313,9 @@ orphan_keys = _all_keys.join(
 orphan_keys.createOrReplaceTempView("orphan_fy_keys")
 
 n_orphan = orphan_keys.count()
-print(f"FY de flow huérfanas a borrar (anual fabricado / sin anual genuino): {n_orphan:,}")
+print(f"Orphan flow FY rows to delete (fabricated annual / no genuine annual): {n_orphan:,}")
 
-# DELETE puntual vía MERGE; solo filas FY reportadas (is_derived=False), nunca derivadas/reales-OK.
+# Targeted DELETE via MERGE; only reported FY rows (is_derived=False), never derived/genuine ones.
 spark.sql(f"""
     MERGE INTO {full_tbl} AS t
     USING orphan_fy_keys AS s

@@ -35,7 +35,7 @@ def _pivot_financials(
         columns="fiscal_year",
         values="value",
         aggfunc="first",
-        observed=True,  # las claves del index son category → solo combinaciones presentes
+        observed=True,  # index keys are category dtype → only present combinations
     ).reset_index()
 
     pivot = pivot.sort_values("sort_order", na_position="last").reset_index(drop=True)
@@ -129,7 +129,7 @@ def quarterly_df(data: pd.DataFrame, ticker: str) -> pd.DataFrame:
         columns="q_label",
         values="value",
         aggfunc="first",
-        observed=True,  # las claves del index son category → solo combinaciones presentes
+        observed=True,  # index keys are category dtype → only present combinations
     ).reset_index()
 
     # Reorder columns to match chronological quarter order.

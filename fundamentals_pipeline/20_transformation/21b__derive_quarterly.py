@@ -56,30 +56,30 @@ print(f"Latest scrape: {latest_scrape}")
 
 raw = spark.table(raw_full).filter(F.col("scraped_at") == latest_scrape)
 
-# Prioridad de sinónimo (menor = preferido), calculada ANTES del rename desde el label
-# de ORIGEN, igual que en 21__clean_and_merge. Necesario porque Net Income / Equity / OCF
-# tienen tags que COEXISTEN en el mismo fy y el desempate no puede ser `value desc`.
+# Synonym priority (lower = preferred), computed BEFORE the rename from the SOURCE label,
+# same as in 21__clean_and_merge. Required because Net Income / Equity / OCF
+# have tags that COEXIST in the same fy and the tiebreak cannot be `value desc`.
 _prio = F.lit(0)
 for _label, _rank in CONCEPT_PRIORITY.items():
     _prio = F.when(F.col("concept") == _label, F.lit(_rank)).otherwise(_prio)
 raw = raw.withColumn("prio", _prio)
 
-# Normalise: colapsa TODOS los sinónimos XBRL al concepto canónico via CONCEPT_SYNONYMS
-# (heredado del %run de 01__tickers) — antes aquí solo se colapsaba "Revenue (contract)".
-# Afecta a flow (Net Income, OCF) y stock (Total Equity), igual que 21.
+# Normalise: collapse ALL XBRL synonyms to the canonical concept via CONCEPT_SYNONYMS
+# (inherited from the %run of 01__tickers) — previously only "Revenue (contract)" was collapsed here.
+# Affects flow (Net Income, OCF) and stock (Total Equity), same as 21.
 for _alt, _canon in CONCEPT_SYNONYMS.items():
     raw = raw.withColumn(
         "concept",
         F.when(F.col("concept") == _alt, _canon).otherwise(F.col("concept"))
     )
 
-# Descarta `fy` basura de companyfacts: a veces el tag llega malformado — un serial de
-# fecha de Excel (43101 = 2018-01-01, 43830 = 2019-12-31) o un typo (2107 ← 2017). El
-# `period_end` siempre es correcto, pero un fy enorme se cuela como "último año" en las
-# métricas derivadas (22/23) y rompe la fila más reciente del screener (WTBA, ACIC…).
-# Aquí NO podemos usar `year(period_end) >= fy` como 21 (las filas FY): un Q1/Q2 de un
-# emisor con cierre fiscal a mitad de año termina en el año calendario ANTERIOR a su fy,
-# así que ese test borraría trimestres legítimos. Usamos un rango plausible (preserva NULL).
+# Drop garbage `fy` values from companyfacts: sometimes the tag arrives malformed —
+# an Excel date serial (43101 = 2018-01-01, 43830 = 2019-12-31) or a typo (2107 ← 2017).
+# `period_end` is always correct, but a huge fy sneaks in as the "latest year" in
+# derived metrics (22/23) and corrupts the most-recent row of the screener (WTBA, ACIC…).
+# We CANNOT use `year(period_end) >= fy` as 21 does for FY rows: a Q1/Q2 from an
+# issuer with a mid-year fiscal close ends in the calendar year BEFORE its fy,
+# so that test would drop legitimate quarters. We use a plausible range (preserves NULL).
 raw = raw.filter(F.col("fy").isNull() | F.col("fy").between(1990, 2030))
 
 # COMMAND ----------
@@ -107,17 +107,17 @@ flow = (
 # FY total (fp="FY" + period_shape="FY_or_TTM") thanks to period_shape,
 # so this dedup window correctly preserves both as separate rows.
 #
-# `period_end` desc PRIMERO: SEC companyfacts etiqueta el comparativo del año
-# anterior con el `fy/fp` DEL FILING (un 10-Q de fy=2022/Q1 trae también el Q1 de
-# fy=2021 como comparativo, ambos con fy=2022/fp=Q1/Q_standalone y el MISMO `filed`).
-# Ordenar solo por `filed` dejaba ganar a un comparativo arbitrario → el trimestre
-# salía con period_end del año anterior (fy desfasado +1). MAX(period_end) elige el
-# fact del año en curso. Misma regla que 21__clean_and_merge para las filas FY.
+# `period_end` desc FIRST: SEC companyfacts labels the prior-year comparative with
+# the FILING's `fy/fp` (a 10-Q with fy=2022/Q1 also brings the Q1 of fy=2021 as a
+# comparative, both with fy=2022/fp=Q1/Q_standalone and the SAME `filed`).
+# Ordering by `filed` alone allowed an arbitrary comparative to win → the quarter
+# came out with a prior-year period_end (fy shifted +1). MAX(period_end) picks the
+# current-year fact. Same rule as 21__clean_and_merge for FY rows.
 w = Window.partitionBy(
     "ticker", "stmt", "concept", "fy", "fp", "period_shape"
 ).orderBy(
     F.col("period_end").desc_nulls_last(),
-    F.col("prio").asc_nulls_last(),   # tag preferido cuando varios sinónimos coexisten
+    F.col("prio").asc_nulls_last(),   # preferred tag when multiple synonyms coexist
     F.col("filed").desc_nulls_last(),
 )
 
@@ -128,17 +128,17 @@ flow_dedup = (
     .drop("rn")
 )
 
-# Tag-pin: por (ticker, stmt, concept, fy) quédate SOLO con las filas del MISMO tag XBRL que
-# alimenta el valor FY, para que FY, los standalones y los YTD (que alimentan Q4 = FY − YTD_Q3)
-# salgan todos del mismo tag. CONCEPT_SYNONYMS colapsa NetIncomeLoss / (to common) / (incl NCI)
-# en un solo "Net Income"; el tag preferido (prio 0 = NetIncomeLoss, el que usa 21 para FY) a
-# menudo NO tiene fila YTD (bancos/emisores con preferentes: el YTD solo está bajo los sinónimos),
-# así que `pick("Q3","YTD_9M")` caía a otro tag que `pick("FY")` → Q4 mezclaba medidas y
-# Q1+Q2+Q3+Q4 ≠ FY. `_fy_prio` = prio de la fila FY_or_TTM (10-K) que YA elige `fy_val` (tras la
-# dedup hay una sola; `min` = su prio = la elección prio-asc de 21), así que FY NO cambia.
-# Filtramos al tag FY; si ese tag no tiene YTD, Q4 = FY − YTD_Q3 queda NULL y `unpivot_quarter`
-# lo descarta (no fabricamos un Q4 con tags mezclados). `prio` = 0 para conceptos no sinónimos →
-# no-op fuera de CONCEPT_PRIORITY. Grupos sin fila FY (`_fy_prio` NULL) se preservan tal cual.
+# Tag-pin: per (ticker, stmt, concept, fy) keep ONLY rows from the SAME XBRL tag that
+# feeds the FY value, so that FY, standalones, and YTDs (which feed Q4 = FY − YTD_Q3)
+# all come from the same tag. CONCEPT_SYNONYMS collapses NetIncomeLoss / (to common) / (incl NCI)
+# into a single "Net Income"; the preferred tag (prio 0 = NetIncomeLoss, the one 21 uses for FY)
+# often has NO YTD row (banks/issuers with preferreds: the YTD exists only under the synonyms),
+# so `pick("Q3","YTD_9M")` fell to a different tag than `pick("FY")` → Q4 mixed measures and
+# Q1+Q2+Q3+Q4 ≠ FY. `_fy_prio` = prio of the FY_or_TTM row (10-K) that ALREADY picks `fy_val`
+# (after dedup there is exactly one; `min` = its prio = the prio-asc choice of 21), so FY does NOT change.
+# We filter to the FY tag; if that tag has no YTD, Q4 = FY − YTD_Q3 is NULL and `unpivot_quarter`
+# discards it (we do not fabricate a Q4 from mixed tags). `prio` = 0 for non-synonym concepts →
+# no-op outside CONCEPT_PRIORITY. Groups without an FY row (`_fy_prio` NULL) are preserved as-is.
 _w_fyprio = Window.partitionBy("ticker", "stmt", "concept", "fy")
 flow_dedup = (
     flow_dedup
@@ -157,11 +157,11 @@ flow_dedup = (
     .drop("_fy_prio")
 )
 
-# Materializa flow_dedup (resultado de los windows pesados dedup + tag-pin sobre el scan del
-# raw). Lo consumen agg_base, q4_std_rows y q4_xcheck → sin esto esos 3 branches re-ejecutan el
-# scan de 81M filas + windows cada vez. localCheckpoint(eager) lo materializa UNA vez y trunca el
-# linaje. OJO serverless: .cache()/.persist()/.unpersist() NO están soportados en serverless
-# compute ([NOT_SUPPORTED_WITH_SERVERLESS]); localCheckpoint sí. Se libera al cerrar la sesión.
+# Materialize flow_dedup (output of the heavy dedup + tag-pin windows over the raw scan).
+# Consumed by agg_base, q4_std_rows, and q4_xcheck → without this those 3 branches re-execute
+# the 81M-row scan + windows each time. localCheckpoint(eager) materializes it ONCE and truncates
+# the lineage. NOTE serverless: .cache()/.persist()/.unpersist() are NOT supported on serverless
+# compute ([NOT_SUPPORTED_WITH_SERVERLESS]); localCheckpoint is. Released when the session closes.
 flow_dedup = flow_dedup.localCheckpoint(eager=True)
 
 # COMMAND ----------
@@ -353,7 +353,7 @@ derived = agg.select(
 
 # MAGIC %md ### 1b-bis. Cross-check Q4: standalone vs FY−YTD_Q3
 # MAGIC
-# MAGIC When both vías are available, compare and log discrepancies. We KEEP the standalone
+# MAGIC When both paths are available, compare and log discrepancies. We KEEP the standalone
 # MAGIC (decision: trust what the issuer actually reported), but flag mismatches >0.1% so
 # MAGIC we can investigate restatements or concept-tagging inconsistencies between 10-K and 10-Q.
 
@@ -383,7 +383,7 @@ q4_xcheck = (
 
 n_xcheck   = q4_xcheck.count()
 n_mismatch = q4_xcheck.filter(F.abs(F.col("diff_pct")) > 0.1).count()
-print(f"Q4 cross-check: {n_xcheck:,} (ticker, concept, fy) tuples have both vías")
+print(f"Q4 cross-check: {n_xcheck:,} (ticker, concept, fy) tuples have both paths")
 print(f"  → {n_mismatch:,} with |diff| > 0.1%  (preferring standalone in all cases)")
 
 if n_mismatch > 0:
@@ -418,8 +418,8 @@ flow_quarterly = (
 
 flow_quarterly = flow_quarterly.withColumn("scraped_at", F.lit(latest_scrape).cast("timestamp"))
 
-# Materializa flow_quarterly: se lee 3× (count aquí + union en all_quarterly → count + MERGE).
-# localCheckpoint en vez de cache (no soportado en serverless).
+# Materialize flow_quarterly: read 3× (count here + union into all_quarterly → count + MERGE).
+# localCheckpoint instead of cache (not supported on serverless).
 flow_quarterly = flow_quarterly.localCheckpoint(eager=True)
 
 print(f"Flow quarterly rows derived: {flow_quarterly.count():,}")
@@ -444,28 +444,28 @@ stock = (
     .filter(F.col("form").isin("10-Q", "10-Q/A"))   # Q snapshots only; FY snapshots come from 10-K via 21
     .filter(F.col("fp").isin("Q1", "Q2", "Q3"))
     .filter(F.col("value").isNotNull())
-    # Proximity guard: el balance "as of" de un 10-Q es la fecha de cierre del trimestre,
-    # presentada como mucho ~1 trimestre antes del `filed` (plazo SEC 40-45d + holgura). Un
-    # period_end MUY anterior al `filed` es un comparativo profundo o un fact arrastrado de un
-    # concepto que el emisor dejó de reportar en curso. Descartarlo evita que un snapshot viejo
-    # gane el MAX(period_end) por filing cuando el del trimestre en curso no aparece en ese
-    # filing (origen de los ~990 cross-labels residuales tras el fix del window de abajo).
+    # Proximity guard: the "as of" balance in a 10-Q is the quarter-close date,
+    # filed at most ~1 quarter before `filed` (SEC deadline 40-45d + buffer). A
+    # period_end MUCH earlier than `filed` is a deep comparative or a fact carried forward
+    # from a concept the issuer stopped reporting mid-stream. Dropping it prevents a stale
+    # snapshot from winning MAX(period_end) per filing when the current-quarter one is absent
+    # from that filing (source of the ~990 residual cross-labels after the window fix below).
     .filter(F.datediff(F.col("filed"), F.col("period_end")) <= 100)
 )
 
-# El snapshot del AÑO EN CURSO de un filing es el de period_end MÁS RECIENTE; los period_end
-# anteriores del MISMO filing son comparativos. `filed` identifica el filing (accession), así
-# que MAX(period_end) por filing fija el (fy, fp) que de verdad "posee" ese period_end.
+# The CURRENT-YEAR snapshot in a filing is the one with the MOST RECENT period_end; earlier
+# period_ends within the SAME filing are comparatives. `filed` identifies the filing (accession),
+# so MAX(period_end) per filing fixes the (fy, fp) that genuinely "owns" that period_end.
 #
-# La dedup previa por (ticker, concept, period_end) → MAX(filed) era INCORRECTA para stocks:
-# reasignaba cada snapshot al (fy, fp) de su ÚLTIMO filing, pero un 10-Q posterior trae ese
-# mismo period_end como comparativo del año anterior (p.ej. el Total Assets de Q3-2011 aparece
-# en el 10-Q de Q3-2012). Eso empujaba el tag ~1 año hacia adelante y expulsaba el snapshot del
-# año en curso de su propia partición fy → el trimestre salía con el period_end del CIERRE
-# FISCAL previo (~19k filas mal etiquetadas; el window period_end-desc posterior corría
-# demasiado tarde para deshacerlo). Misma intención que 21__clean_and_merge para las filas FY.
-# `prio` rompe el empate cuando el MISMO filing trae dos tags del concepto (p.ej. equity
-# StockholdersEquity vs incl-NCI) con el mismo period_end.
+# The previous dedup by (ticker, concept, period_end) → MAX(filed) was INCORRECT for stocks:
+# it reassigned each snapshot to the (fy, fp) of its LATEST filing, but a later 10-Q brings
+# that same period_end as a prior-year comparative (e.g. Total Assets for Q3-2011 appears in
+# the Q3-2012 10-Q). This pushed the tag ~1 year forward and expelled the current-year snapshot
+# from its own fy partition → the quarter came out with the prior FISCAL CLOSE period_end
+# (~19k mislabelled rows; the subsequent period_end-desc window ran too late to undo it).
+# Same intent as 21__clean_and_merge for FY rows.
+# `prio` breaks ties when the SAME filing brings two tags for the concept (e.g. equity
+# StockholdersEquity vs incl-NCI) with the same period_end.
 w_filing = Window.partitionBy("ticker", "stmt", "concept", "filed").orderBy(
     F.col("period_end").desc_nulls_last(),
     F.col("prio").asc_nulls_last(),
@@ -478,8 +478,8 @@ stock_dedup = (
     .drop("rn")
 )
 
-# Restatements: el mismo (fy, fp) en curso puede venir en 10-Q y 10-Q/A → latest `filed`
-# (period_end desc como desempate determinista final).
+# Restatements: the same current (fy, fp) may arrive via 10-Q and 10-Q/A → latest `filed`
+# (period_end desc as the final deterministic tiebreak).
 w_restate = Window.partitionBy("ticker", "stmt", "concept", "fy", "fp").orderBy(
     F.col("filed").desc_nulls_last(),
     F.col("prio").asc_nulls_last(),
@@ -506,8 +506,8 @@ stock_quarterly = stock_dedup.select(
     F.lit(latest_scrape).cast("timestamp").alias("scraped_at"),
 )
 
-# Materializa stock_quarterly: se lee 3× (count aquí + union en all_quarterly → count + MERGE).
-# localCheckpoint materializa el scan/dedup del path stock una sola vez (cache no va en serverless).
+# Materialize stock_quarterly: read 3× (count here + union into all_quarterly → count + MERGE).
+# localCheckpoint materializes the scan/dedup of the stock path once (cache not supported on serverless).
 stock_quarterly = stock_quarterly.localCheckpoint(eager=True)
 
 print(f"Stock quarterly rows: {stock_quarterly.count():,}")
@@ -562,8 +562,8 @@ spark.sql(f"""
 
 print(f"✓ MERGE complete → {full_tbl} (quarterly rows)")
 
-# (Sin unpersist explícito: .unpersist() tampoco está soportado en serverless. Los
-# localCheckpoint de arriba viven en disco local del cluster y se liberan al cerrar la sesión.)
+# (No explicit unpersist: .unpersist() is also not supported on serverless. The
+# localCheckpoints above live on the cluster's local disk and are released when the session closes.)
 
 # COMMAND ----------
 

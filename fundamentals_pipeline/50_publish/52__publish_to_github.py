@@ -271,7 +271,7 @@ else:
     raise RuntimeError(f"`{LATEST_TAG}` stuck as a draft after 6 re-publish attempts — aborting.")
 
 # Fail the job if `latest` didn't actually become publicly fetchable — otherwise the app
-# silently 404s and shows "datos aún no publicados" despite a "successful" run. Verify ALL
+# silently 404s and shows "data not yet published" despite a "successful" run. Verify ALL
 # THREE assets the app needs (not just the smallest): the 12.8MB parquet can lag the others on
 # GitHub's CDN right after publishing, so a single-asset check could pass while the app 404s.
 for art in ARTIFACTS:

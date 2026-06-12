@@ -2,21 +2,21 @@
 # MAGIC %md
 # MAGIC # 30_analysis / 33__fy_staleness_check
 # MAGIC
-# MAGIC Detecta **conceptos core con FY ausente u obsoleto** en `main.financials.financials`
-# MAGIC — el síntoma de un gap de sinónimo XBRL (un emisor que cambió, p.ej., `NetIncomeLoss`
-# MAGIC por `ProfitLoss`, o `NetCashProvidedByUsedInOperatingActivities` por su variante
-# MAGIC `…ContinuingOperations`). Esos huecos producen ROE / Net Margin / P-E **obsoletos o
-# MAGIC nulos** en el screener y la página de detalle.
+# MAGIC Detects **core concepts with missing or stale FY** in `main.financials.financials`
+# MAGIC — the symptom of an XBRL synonym gap (an issuer that switched, e.g., `NetIncomeLoss`
+# MAGIC to `ProfitLoss`, or `NetCashProvidedByUsedInOperatingActivities` to its
+# MAGIC `…ContinuingOperations` variant). These gaps produce **stale or null** ROE / Net Margin / P/E
+# MAGIC in the screener and detail page.
 # MAGIC
-# MAGIC **Método:** para cada ticker, el último fiscal year con `Revenue` FY es la referencia
-# MAGIC de "empresa viva". Un concepto cuyo último FY va por detrás de esa referencia (o falta
-# MAGIC del todo) se marca como *stale*/*missing*. Es **informativo** (no hace fail) — sirve
-# MAGIC para validar el efecto de añadir sinónimos en `00_config/01__tickers.py` y para vigilar
-# MAGIC regresiones futuras.
+# MAGIC **Method:** for each ticker, the latest fiscal year with a `Revenue` FY row is the
+# MAGIC "active company" reference. A concept whose latest FY lags that reference (or is absent
+# MAGIC altogether) is flagged as *stale*/*missing*. This is **informational** (does not fail)
+# MAGIC — it validates the effect of adding synonyms in `00_config/01__tickers.py` and monitors
+# MAGIC for future regressions.
 # MAGIC
-# MAGIC **Nota:** algunos "missing" son legítimos (bancos/REITs sin Gross Profit / Operating
-# MAGIC Income). El objetivo es ver la TENDENCIA del recuento tras cada cambio de sinónimos,
-# MAGIC no perseguir el cero absoluto.
+# MAGIC **Note:** some "missing" entries are legitimate (banks/REITs without Gross Profit /
+# MAGIC Operating Income). The goal is to track the TREND in the count after each synonym change,
+# MAGIC not to chase absolute zero.
 
 # COMMAND ----------
 
@@ -28,8 +28,8 @@ from pyspark.sql import functions as F
 
 full_tbl = f"{CATALOG}.{SCHEMA}.{TABLE}"
 
-# Conceptos core a vigilar (label canónico tal como queda en `financials`).
-# La referencia de "empresa viva" es el último FY con Revenue.
+# Core concepts to monitor (canonical label as stored in `financials`).
+# The "active company" reference is the latest FY with Revenue.
 CORE_CONCEPTS = [
     ("Income Statement", "Net Income"),
     ("Income Statement", "Operating Income"),
@@ -41,7 +41,7 @@ CORE_CONCEPTS = [
 
 # COMMAND ----------
 
-# MAGIC %md ## 1. Referencia por ticker: último FY con Revenue
+# MAGIC %md ## 1. Reference per ticker: latest FY with Revenue
 
 # COMMAND ----------
 
@@ -55,7 +55,7 @@ ref = (
 
 # COMMAND ----------
 
-# MAGIC %md ## 2. Por concepto: último FY vs referencia → missing / stale
+# MAGIC %md ## 2. Per concept: latest FY vs reference → missing / stale
 
 # COMMAND ----------
 
@@ -97,8 +97,8 @@ summary = spark.createDataFrame(
     summary_rows, ["stmt", "concept", "missing", "stale", "total_affected"]
 ).orderBy(F.col("total_affected").desc())
 
-print("FY staleness por concepto core (vs último FY con Revenue):")
+print("FY staleness by core concept (vs latest FY with Revenue):")
 summary.display()
 
-print("\nDetalle — peores casos (más años por detrás):")
+print("\nDetail — worst cases (most years behind):")
 detail.orderBy(F.col("years_behind").desc()).display()

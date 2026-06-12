@@ -19,9 +19,9 @@
 # MAGIC when a ticker appears in multiple sources: **Wikipedia GICS (S&P) → IWV normalized
 # MAGIC → favorites.json → NULL**.
 # MAGIC
-# MAGIC ### ✏️ Cómo añadir/quitar favoritos
-# MAGIC Edita `00_config/favorites.json` en el repositorio Git y vuelve a ejecutar este notebook.
-# MAGIC No es necesario tocar ningún notebook de Databricks.
+# MAGIC ### ✏️ How to add/remove favorites
+# MAGIC Edit `00_config/favorites.json` in the Git repository and re-run this notebook.
+# MAGIC No Databricks notebook needs to be touched.
 
 # COMMAND ----------
 
@@ -52,7 +52,7 @@ except ImportError:
 INGEST_SP500  = True
 INGEST_R3000  = True
 
-# FAVORITES_JSON_PATH heredado de 01__tickers vía %run
+# FAVORITES_JSON_PATH inherited from 01__tickers via %run
 
 TARGET_TABLE = f"{CATALOG}.config.tickers"
 
@@ -270,25 +270,25 @@ def fetch_russell3000() -> pd.DataFrame:
 
 def fetch_favorites() -> pd.DataFrame:
     """
-    Lee los favoritos desde 00_config/favorites.json en el repositorio.
-    El JSON es un array de objetos: [{"ticker": "TSM", "company": "...", "note": "..."}]
-    Los comentarios con // son ignorados (se limpian antes de parsear).
+    Read favorites from 00_config/favorites.json in the repository.
+    The JSON is an array of objects: [{"ticker": "TSM", "company": "...", "note": "..."}]
+    Comments with // are ignored (stripped before parsing).
 
-    El campo `sector` es **opcional**: cuando está presente se usa como fallback de
-    menor precedencia (por debajo de S&P y Russell 3000). Se devuelve NULL si falta.
+    The `sector` field is **optional**: when present it is used as the lowest-precedence
+    fallback (below S&P and Russell 3000). Returns NULL when absent.
     """
     empty = pd.DataFrame(columns=["ticker", "company", "sector"])
     try:
         with open(FAVORITES_JSON_PATH, encoding="utf-8") as f:
             raw = f.read()
 
-        # Eliminar líneas de comentario (// ...) para permitir JSON con anotaciones
+        # Strip comment lines (// ...) to allow annotated JSON
         lines   = [ln for ln in raw.splitlines() if not ln.strip().startswith("/")]
         cleaned = "\n".join(lines)
         data    = json.loads(cleaned)
 
         if not data:
-            print("  ℹ favorites.json está vacío — sin favoritos")
+            print("  ℹ favorites.json is empty — no favorites")
             return empty
 
         full = pd.DataFrame(data)
@@ -296,14 +296,14 @@ def fetch_favorites() -> pd.DataFrame:
         df["ticker"] = df["ticker"].str.upper().str.strip()
         # Optional sector field — normalize to canonical GICS (NULL when absent/unknown).
         df["sector"] = full["sector"].map(_normalize_sector) if "sector" in full.columns else None
-        print(f"  ✓ {len(df)} favorito(s) cargados desde favorites.json")
+        print(f"  ✓ {len(df)} favorite(s) loaded from favorites.json")
         return df
 
     except FileNotFoundError:
-        print(f"  ⚠ No se encontró {FAVORITES_JSON_PATH} — sin favoritos")
+        print(f"  ⚠ {FAVORITES_JSON_PATH} not found — no favorites")
         return empty
     except json.JSONDecodeError as e:
-        print(f"  ✗ Error al parsear favorites.json: {e}")
+        print(f"  ✗ Error parsing favorites.json: {e}")
         return empty
 
 # COMMAND ----------
@@ -324,7 +324,7 @@ if INGEST_R3000:
         print(f"  ✗ Russell 3000 fetch failed: {_r3k_err}")
         print("  ⚠ Continuing with S&P 500 + favorites only — R3000 will be missing")
 
-print("Cargando favoritos desde favorites.json...")
+print("Loading favorites from favorites.json...")
 favorites_df = fetch_favorites()
 
 # COMMAND ----------
@@ -381,7 +381,7 @@ master = (
     .sort_values("ticker")
 )
 
-print(f"\nUniverso unificado: {len(master):,} tickers únicos")
+print(f"\nUnified universe: {len(master):,} unique tickers")
 print(master[bool_cols].sum().to_string())
 
 # COMMAND ----------
@@ -412,7 +412,7 @@ spark.sql(f"DROP TABLE IF EXISTS {TARGET_TABLE}")
     .saveAsTable(TARGET_TABLE)
 )
 
-print(f"✓ {sdf.count():,} tickers escritos → {TARGET_TABLE}")
+print(f"✓ {sdf.count():,} tickers written → {TARGET_TABLE}")
 
 # COMMAND ----------
 
@@ -459,4 +459,4 @@ if fav_count > 0:
         FROM {TARGET_TABLE} WHERE is_favorite ORDER BY ticker
     """).show()
 else:
-    print("\nℹ Sin favoritos — edita 00_config/favorites.json para añadir")
+    print("\nℹ No favorites — edit 00_config/favorites.json to add some")
