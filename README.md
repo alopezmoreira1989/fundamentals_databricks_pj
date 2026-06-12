@@ -41,14 +41,14 @@ valuation_assumptions.json                                         ← edit here
 fundamentals_databricks_pj/
 │
 ├── 00_config/
-│   ├── 01__tickers.py                       ← constantes, nombres de tabla y mapas XBRL (con kind por concept)
-│   ├── 02__tickers_master.py                ← construye main.config.tickers (S&P 500 + Russell 3000 + favoritos)
-│   ├── 03__concept_hierarchy_master.py      ← construye main.config.concept_hierarchy desde JSON
-│   ├── 04__metrics_hierarchy_master.py      ← construye main.config.metrics_hierarchy desde JSON
-│   ├── favorites.json                       ← lista de tickers favoritos (con overrides opcionales: cik, aliases)
-│   ├── concept_hierarchy.json               ← jerarquía de conceptos contables
-│   ├── metrics_hierarchy.json               ← jerarquía de derived metrics
-│   └── valuation_assumptions.json           ← supuestos de valoración (WACC, growth, overrides por ticker)
+│   ├── 01__tickers.py                       ← constants, table names, and XBRL maps (with kind per concept)
+│   ├── 02__tickers_master.py                ← builds main.config.tickers (S&P 500 + Russell 3000 + favorites)
+│   ├── 03__concept_hierarchy_master.py      ← builds main.config.concept_hierarchy from JSON
+│   ├── 04__metrics_hierarchy_master.py      ← builds main.config.metrics_hierarchy from JSON
+│   ├── favorites.json                       ← favorite tickers list (with optional overrides: cik, aliases)
+│   ├── concept_hierarchy.json               ← accounting concept hierarchy
+│   ├── metrics_hierarchy.json               ← derived metrics hierarchy
+│   └── valuation_assumptions.json           ← valuation assumptions (WACC, growth, per-ticker overrides)
 │
 ├── 10_ingestion/
 │   ├── 11__fetch_sec_xbrl.py         ← SEC EDGAR XBRL API → financials_raw (parallel + Arrow + batched)
@@ -76,7 +76,7 @@ fundamentals_databricks_pj/
 ├── 60_streamlit_app/                 ← public Streamlit Cloud dashboard (see its own README)
 │
 └── 90_pipelines/
-    └── 91__full_pipeline.py          ← entry point del Job — ejecuta los 11 steps en secuencia
+    └── 91__full_pipeline.py          ← Job entry point — runs the 11 steps in sequence
 ```
 
 ---
@@ -84,16 +84,16 @@ fundamentals_databricks_pj/
 ## Pipeline flow
 
 ```
-favorites.json                editar tickers favoritos (sin tocar Databricks)
-concept_hierarchy.json        editar jerarquía de conceptos contables
-metrics_hierarchy.json        editar jerarquía de derived metrics
-valuation_assumptions.json    editar supuestos de valoración (WACC, growth, etc.)
+favorites.json                edit favorite tickers (without touching Databricks)
+concept_hierarchy.json        edit accounting concept hierarchy
+metrics_hierarchy.json        edit derived metrics hierarchy
+valuation_assumptions.json    edit valuation assumptions (WACC, growth, etc.)
       ↓
-02__tickers_master              construye main.config.tickers              (manual)
+02__tickers_master              builds main.config.tickers              (manual)
       ↓
-03__concept_hierarchy_master    construye main.config.concept_hierarchy    (auto)
+03__concept_hierarchy_master    builds main.config.concept_hierarchy    (auto)
       ↓
-04__metrics_hierarchy_master    construye main.config.metrics_hierarchy    (auto)
+04__metrics_hierarchy_master    builds main.config.metrics_hierarchy    (auto)
       ↓
 11__fetch_sec_xbrl              SEC API → financials_raw                   (10-K + 10-Q)
       ↓
@@ -103,26 +103,26 @@ valuation_assumptions.json    editar supuestos de valoración (WACC, growth, etc
 21b__derive_quarterly           Q1..Q4    → MERGE into financials
 21c__prune_quarterly            keep last QUARTERLY_WINDOW Qs per ticker
       ↓
-22__derived_metrics             márgenes, FCF, YoY, leverage, ratios de valoración (FY only)
+22__derived_metrics             margins, FCF, YoY, leverage, valuation ratios (FY only)
       ↓
 23__intrinsic_value             Graham, Graham Revised, DCF, Owner Earnings (FY + TTM)
       ↓
-31__company_analysis            queries de validación
+31__company_analysis            validation queries
       ↓
-32__coverage_check              verificar que favoritos llegaron a financials + metrics
+32__coverage_check              verify favorites reached financials + metrics
       ↓
 51__export_dashboard_data       slice + write parquet artifacts to /tmp/
       ↓
 52__publish_to_github           upload to GitHub Release (latest tag)
 ```
 
-`main.config.tickers` se reconstruye manualmente con `02__tickers_master` cuando edites `favorites.json`. Las jerarquías se reconstruyen automáticamente en cada run desde sus JSONs.
+`main.config.tickers` is rebuilt manually with `02__tickers_master` whenever you edit `favorites.json`. The hierarchies are rebuilt automatically on every run from their JSON files.
 
 ---
 
-## Favoritos (`favorites.json`)
+## Favorites (`favorites.json`)
 
-Los tickers favoritos se gestionan editando `00_config/favorites.json` directamente en el repositorio Git. Se incluyen siempre en la ingesta y en la exportación al dashboard público.
+Favorite tickers are managed by editing `00_config/favorites.json` directly in the Git repository. They are always included in ingestion and in the export to the public dashboard.
 
 ```json
 [
@@ -132,26 +132,26 @@ Los tickers favoritos se gestionan editando `00_config/favorites.json` directame
 ]
 ```
 
-| Campo | Tipo | Requerido | Descripción |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `ticker` | string | sí | Símbolo del ticker |
-| `company` | string | sí | Nombre de la empresa |
-| `sector` | string | no | Sector GICS canónico (p.ej. `"Information Technology"`). Fallback de **menor precedencia** — solo se usa cuando ni S&P 500 ni Russell 3000 aportan un sector para el ticker. Las etiquetas desconocidas quedan NULL (la app las muestra como "Unknown") |
-| `note` | string | no | Nota libre (no usada por código) |
-| `cik` | string | no | CIK de 10 dígitos con padding (ej. `"0001602065"`). Fuerza este CIK en la ingesta SEC, ignorando el lookup estándar. Útil tras conversiones MLP→C-corp, spin-offs, o cuando SEC tarda en actualizar su índice |
-| `aliases` | list[str] | no | Tickers históricos que apuntan a la misma empresa. Si el pipeline intenta resolver un alias, usa el CIK del ticker canónico |
+| `ticker` | string | yes | Ticker symbol |
+| `company` | string | yes | Company name |
+| `sector` | string | no | Canonical GICS sector (e.g. `"Information Technology"`). Lowest-precedence fallback — used only when neither S&P 500 nor Russell 3000 supplies a sector for the ticker. Unknown labels are left NULL (the app shows them as "Unknown") |
+| `note` | string | no | Free-form note (not used by code) |
+| `cik` | string | no | Zero-padded 10-digit CIK (e.g. `"0001602065"`). Forces this CIK in SEC ingestion, bypassing the standard lookup. Useful after MLP→C-corp conversions, spin-offs, or when SEC is slow to update its index |
+| `aliases` | list[str] | no | Historical tickers that point to the same company. If the pipeline tries to resolve an alias, it uses the canonical ticker's CIK |
 
 ---
 
-## Jerarquías (`concept_hierarchy.json` y `metrics_hierarchy.json`)
+## Hierarchies (`concept_hierarchy.json` and `metrics_hierarchy.json`)
 
-Ambas jerarquías son archivos JSON en `00_config/` editables desde el repo. El pipeline las aplana a tablas Delta en cada ejecución.
+Both hierarchies are JSON files in `00_config/` editable from the repo. The pipeline flattens them into Delta tables on every run.
 
-**`concept_hierarchy.json`** — árbol contable (Income Statement, Balance Sheet, Cash Flow): qué conceptos van bajo qué grupo y en qué orden aparecen en el dashboard.
+**`concept_hierarchy.json`** — accounting tree (Income Statement, Balance Sheet, Cash Flow): which concepts go under which group and in what order they appear in the dashboard.
 
-**`metrics_hierarchy.json`** — organización de las derived metrics en 2 niveles: `category → subcategory → metric`. Siete categorías: Profitability, Cash Flow, Growth, Financial Health, Valuation, Capital Returns, Intrinsic Value.
+**`metrics_hierarchy.json`** — organizes the derived metrics into 2 levels: `category → subcategory → metric`. Seven categories: Profitability, Cash Flow, Growth, Financial Health, Valuation, Capital Returns, Intrinsic Value.
 
-Para modificarlas: edita el JSON, commit + push, y el siguiente run del pipeline reconstruye la tabla automáticamente.
+To modify them: edit the JSON, commit + push, and the next pipeline run rebuilds the table automatically.
 
 ---
 
@@ -159,9 +159,9 @@ Para modificarlas: edita el JSON, commit + push, y el siguiente run del pipeline
 
 | Table | Description |
 |---|---|
-| `{CATALOG}.config.tickers` | Universo de tickers activos (S&P 500 + Russell 3000 + favoritos), con columna `sector` (GICS) por ticker — precedencia Wikipedia GICS (S&P) → IWV normalizado → favoritos → NULL |
-| `{CATALOG}.config.concept_hierarchy` | Jerarquía de conceptos contables |
-| `{CATALOG}.config.metrics_hierarchy` | Jerarquía de derived metrics |
+| `{CATALOG}.config.tickers` | Active ticker universe (S&P 500 + Russell 3000 + favorites), with a per-ticker `sector` column (GICS) — precedence Wikipedia GICS (S&P) → normalized IWV → favorites → NULL |
+| `{CATALOG}.config.concept_hierarchy` | Accounting concept hierarchy |
+| `{CATALOG}.config.metrics_hierarchy` | Derived metrics hierarchy |
 | `{CATALOG}.{SCHEMA}.financials_raw` | Append-only audit log of all SEC scrapes (10-K + 10-Q) |
 | `{CATALOG}.{SCHEMA}.financials` | Long-format fact table — one row per ticker / fiscal_year / period_type / concept |
 | `{CATALOG}.{SCHEMA}.market_data` | Year-end closing prices and market cap per ticker / fiscal_year |
@@ -307,10 +307,10 @@ Lookup table organising derived metrics into categories. Rebuilt every run from 
 |---|---|---|
 | `category` | STRING | Profitability, Cash Flow, Growth, Financial Health, Valuation, Capital Returns, Intrinsic Value |
 | `subcategory` | STRING | Margins, YoY, Leverage, Liquidity, Price Multiples, Enterprise Value, Absolute, Payout, Yield |
-| `metric` | STRING | Nombre exacto tal como aparece en `financials_metrics.metric` |
+| `metric` | STRING | Exact name as it appears in `financials_metrics.metric` |
 | `unit` | STRING | `percent` / `usd` / `ratio` |
-| `requires_market_data` | BOOLEAN | `true` para las métricas que dependen de `market_data` |
-| `sort_order` | INT | Orden global (10, 20, 30, ...) |
+| `requires_market_data` | BOOLEAN | `true` for metrics that depend on `market_data` |
+| `sort_order` | INT | Global ordering (10, 20, 30, ...) |
 
 ---
 
@@ -326,8 +326,8 @@ AAPL   | Apple   | 2023        | Free Cash Flow  | 99584000000
 AAPL   | Apple   | 2023        | P/E             |     28.74
 ```
 
-Las métricas están organizadas en 6 categorías. La jerarquía completa vive en
-`00_config/metrics_hierarchy.json` y se materializa en `main.config.metrics_hierarchy`.
+The metrics are organized into 6 categories. The full hierarchy lives in
+`00_config/metrics_hierarchy.json` and is materialized into `main.config.metrics_hierarchy`.
 
 ### Profitability — Margins
 
@@ -469,7 +469,7 @@ ratios stay NULL when their one component is absent.
 | `Owner Earnings Value/Share (FY/TTM)` | Capitalized Owner Earnings at required return |
 | `MoS %` | Margin of Safety: `(Intrinsic Value − Price) / Intrinsic Value × 100` |
 
-> Las métricas de valoración solo se rellenan para combinaciones `ticker / fiscal_year` donde `market_data` tiene un `market_cap` válido. Los supuestos de valoración (WACC, growth rate, etc.) se configuran en `00_config/valuation_assumptions.json`.
+> Valuation metrics are only populated for `ticker / fiscal_year` combinations where `market_data` has a valid `market_cap`. Valuation assumptions (WACC, growth rate, etc.) are configured in `00_config/valuation_assumptions.json`.
 
 ---
 
