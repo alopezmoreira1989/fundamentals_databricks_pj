@@ -66,7 +66,7 @@ def get_facts(cik: str) -> dict:
 def classify_duration(start, end):
     """Returns the period 'shape' based on end-start. None if it is a stock concept."""
     if pd.isna(start):
-        return "snapshot"   # stock concept — no tiene start
+        return "snapshot"   # stock concept — has no start
     days = (pd.to_datetime(end) - pd.to_datetime(start)).days
     if   70  <= days <=  100: return "Q_standalone"   # ~90d
     elif 160 <= days <=  200: return "YTD_6M"         # ~180d

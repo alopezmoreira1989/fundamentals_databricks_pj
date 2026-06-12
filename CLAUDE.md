@@ -40,23 +40,23 @@ Databricks analytical pipeline that ingests SEC EDGAR XBRL filings (10-K/10-Q) f
 
 ## Sync GitHub → Databricks Repo
 
-GitHub `main` es la única fuente de verdad. El Databricks Repo (sincronizado por
-`.github/workflows/sync-databricks.yml`) es un **espejo de solo lectura**, ubicado en
-`/Workspace/Shared/fundamentals_databricks_pj` (variable de Actions
+GitHub `main` is the single source of truth. The Databricks Repo (synced by
+`.github/workflows/sync-databricks.yml`) is a **read-only mirror**, located at
+`/Workspace/Shared/fundamentals_databricks_pj` (Actions variable
 `DATABRICKS_REPO_PATH`).
 
-- **El Repo vive bajo `/Workspace/Shared/`, no bajo `/Repos/<tu-email>`.** El sync lo
-  hace el service principal `gh-actions-repo-sync`, que no puede recrear un Repo en el
-  namespace `/Repos/<email>` de un humano (es gestionado por su dueño). Por eso el
-  auto-repair (delete+recreate) exige una carpeta que el SP sí controle, como
-  `/Workspace/Shared`. El `REPO_ID` se resuelve por la URL del git, no por un id fijo.
-- **No edites ni ejecutes los notebooks directamente desde el Repo sincronizado.**
-  Abrir un notebook `.py` en el editor del workspace lo reescribe (metadatos de
-  celdas/reformateo) y crea cambios locales que rompen el pull con `GIT_CONFLICT`.
-- Para iterar de forma interactiva, clona el repo en un Databricks Repo aparte bajo
-  tu carpeta de usuario y trabaja allí; envía los cambios vía GitHub.
-- Si necesitas correr un notebook del Repo sincronizado, lánzalo como **Job** sobre
-  su ruta (no lo abras en el editor): ejecutar no reescribe el fuente, editar sí.
-- El workflow es auto-reparable: ante `GIT_CONFLICT` borra y recrea el Repo desde
-  `main`, descartando el estado local. Si tenías trabajo sin guardar en el Repo
-  sincronizado, se perderá — por eso no se debe trabajar ahí.
+- **The Repo lives under `/Workspace/Shared/`, not under `/Repos/<your-email>`.** The sync
+  is done by the service principal `gh-actions-repo-sync`, which cannot recreate a Repo in a
+  human's `/Repos/<email>` namespace (that is owner-managed). That's why the
+  auto-repair (delete+recreate) requires a folder the SP actually controls, such as
+  `/Workspace/Shared`. The `REPO_ID` is resolved from the git URL, not from a fixed id.
+- **Don't edit or run the notebooks directly from the synced Repo.**
+  Opening a `.py` notebook in the workspace editor rewrites it (cell metadata/reformatting)
+  and creates local changes that break the pull with `GIT_CONFLICT`.
+- To iterate interactively, clone the repo into a separate Databricks Repo under
+  your user folder and work there; push the changes via GitHub.
+- If you need to run a notebook from the synced Repo, launch it as a **Job** against
+  its path (don't open it in the editor): running does not rewrite the source, editing does.
+- The workflow is self-repairing: on `GIT_CONFLICT` it deletes and recreates the Repo from
+  `main`, discarding the local state. If you had unsaved work in the synced
+  Repo, it will be lost — that's why you must not work there.
