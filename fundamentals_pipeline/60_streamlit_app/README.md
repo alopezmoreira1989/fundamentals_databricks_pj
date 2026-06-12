@@ -88,6 +88,20 @@ to the repo.
 
 ---
 
+## Environments
+
+| Env     | Branch    | URL                                            | Notes                        |
+|---------|-----------|------------------------------------------------|------------------------------|
+| prod    | `main`    | https://alm-equity-fundamentals.streamlit.app/ | stable, public-facing        |
+| staging | `dev_alm` | https://alm-fundamentals-dev.streamlit.app/    | internal QA, may be unstable |
+
+`staging` is an internal twin of prod for visual QA before merging `dev_alm` → `main`.
+It is **not** for sharing; it may be broken at any time. Same `app.py`, same data
+sources — for schema-bumping work, point it at regenerated fixtures via
+`DASHBOARD_USE_FIXTURES=1` so new code is tested against the new schema.
+
+---
+
 ## Refresh story
 
 - Databricks pipeline runs nightly (or on-demand via Job).
