@@ -21,7 +21,9 @@
 # MAGIC   vs **non-mappable** (`custom`); `ORACLE_VALUE_MISMATCH` (app has a value, but it
 # MAGIC   disagrees with the **highest-priority presented** us-gaap tag — the wrong-tag /
 # MAGIC   value-mangle case that Tier B/C cannot see, because there the app matches its own
-# MAGIC   chosen raw fact); and `ORACLE_PARSE_FAIL` (counts against the validator).
+# MAGIC   chosen raw fact; Net Income on the Cash Flow line is excluded — its value is reconciled
+# MAGIC   on the Income Statement, and the CF line legitimately uses total `ProfitLoss` incl. NCI);
+# MAGIC   and `ORACLE_PARSE_FAIL` (counts against the validator).
 # MAGIC
 # MAGIC **Writes only `main.config.reconciliation_findings`** (append-only audit, partitioned by
 # MAGIC `run_id`) + the view `main.config.reconciliation_open` + a clustered parquet export.
@@ -348,6 +350,9 @@ if _have_oracle:
     #   • value mangled at merge for the right tag.
     # Quiet by construction when the app matches the winner. Sign flips that the linkbase explains
     # (`negated`) are excluded; oracle_value = 0 is skipped (rel_diff NULL) to avoid div-by-zero noise.
+    # Net Income on the Cash Flow line is also carved out (see the WHERE clause): it is the
+    # indirect-method reconciliation start (ProfitLoss, total incl. NCI) vs the app's attributable
+    # NetIncomeLoss — an immaterial NCI difference already covered by the Income Statement check.
     df_vm = spark.sql(f"""
         WITH oa AS (
             SELECT o.cik, o.ticker, o.accession, o.form, o.fiscal_year, o.period_end, o.stmt,
@@ -383,6 +388,12 @@ if _have_oracle:
         WHERE app_value <> oracle_value
           AND ABS((app_value - oracle_value) / NULLIF(oracle_value, 0)) > {VALUE_TOL}
           AND NOT (negated AND ABS((app_value + oracle_value) / NULLIF(oracle_value, 0)) <= {VALUE_TOL})
+          -- Net Income on the Cash Flow statement is the indirect-method reconciliation start line:
+          -- filers present it as ProfitLoss (total, incl. NCI) while the app publishes the
+          -- attributable NetIncomeLoss (the CONCEPT_PRIORITY winner). The NCI-only difference is
+          -- immaterial (OCF is a direct concept; ROE uses attributable NI) and Net Income's value
+          -- is already reconciled on the Income Statement line. Drop it to keep the high bucket clean.
+          AND NOT (concept = 'Net Income' AND stmt = 'Cash Flow')
     """)
     print(f"  Tier A ORACLE_VALUE_MISMATCH findings: {df_vm.count():,}")
 
