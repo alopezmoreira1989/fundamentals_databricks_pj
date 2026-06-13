@@ -56,7 +56,7 @@ metadata:
 | `COVERAGE_GAP` (us-gaap, mapped tag) | oracle has the line; app NULL/absent | `synonym+priority` — mapped tag not landing → [[xbrl-concept-mapping]] |
 | `COVERAGE_GAP` (us-gaap, untracked) | us-gaap line not in the concept map | `mechanism-1 tag-list` — add the tag → [[xbrl-concept-mapping]] |
 | `COVERAGE_GAP` (`custom`) | filer custom-namespace line | `custom — not mappable` (no us-gaap fix exists) |
-| `ORACLE_VALUE_MISMATCH` | app has a value, but it disagrees with the **highest-priority presented** us-gaap tag (wrong synonym picked, or value mangled) — invisible to Tier B/C, which matches the app's own chosen raw fact | `synonym+priority` — `CONCEPT_PRIORITY` / inspect `21__clean_and_merge` → [[xbrl-concept-mapping]] |
+| `ORACLE_VALUE_MISMATCH` | app has a value, but it disagrees with the **highest-priority presented** us-gaap tag (wrong synonym picked, or value mangled) — invisible to Tier B/C, which matches the app's own chosen raw fact. (Net Income on the Cash Flow line is excluded — the IS covers its value; the CF line legitimately uses total `ProfitLoss` incl. NCI.) | `synonym+priority` — `CONCEPT_PRIORITY` / inspect `21__clean_and_merge` → [[xbrl-concept-mapping]] |
 | `VALUE_MISMATCH` | both present, beyond 0.5% | inspect `21__clean_and_merge` / float precision |
 | `SCALE_SIGN` | app ≈ raw × 10ⁿ, or a clean sign flip not explained by `negated` | scale fix in `21__clean_and_merge` |
 | `PERIOD_MISALIGN` | app value matches the raw fact at a **different** `period_end` | period anchor in `21__`/`22__` (fiscal/calendar) |
