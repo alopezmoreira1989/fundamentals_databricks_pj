@@ -11,7 +11,7 @@ and TTM bases.
 "defaults": {
   "graham":          { "magic_number": 22.5 },
   "graham_revised":  { "base_pe": 8.5, "growth_multiplier": 2.0, "aaa_yield_norm": 4.4,
-                       "graham_aaa_yield": 0.045, "growth_cap": 0.15 },
+                       "graham_aaa_yield": 0.055, "growth_cap": 0.15 },
   "dcf":             { "wacc": 0.09, "growth_stage1": 0.08, "growth_terminal": 0.025,
                        "horizon_years": 10, "use_owner_earnings": false },
   "owner_earnings":  { "multiple": 15.0, "discount_rate": 0.09, "method": "multiple" },
@@ -36,12 +36,19 @@ excluded from the dashboard's valuation "football field" — it is often a wild 
 ## Graham Revised
 
 ```
-g_eff = min(dcf.growth_stage1, graham_revised.growth_cap)        growth_cap = 0.15
-GRV   = EPS × (base_pe + growth_multiplier × g_eff × 100)
-            × aaa_yield_norm / (graham_aaa_yield × 100)
+g_company = company's trailing 5y EPS CAGR (point-in-time)   ; NaN → dcf.growth_stage1
+g_eff     = clip(min(g_company, graham_revised.growth_cap), 0, None)   growth_cap = 0.15
+GRV       = EPS × (base_pe + growth_multiplier × g_eff × 100)
+                × aaa_yield_norm / (graham_aaa_yield × 100)
 ```
-NULL unless `EPS > 0`. Note it intentionally feeds off `dcf.growth_stage1` (capped), not a separate
-growth input — documented at the formula in 23.
+NULL unless `EPS > 0`. The growth `g` is each company's own **trailing 5-year EPS CAGR**, derived
+point-in-time in 23 (ending at each row's `fiscal_year`, no lookahead; longest span available in
+[3,5]y; both endpoints' EPS must be > 0). It is **floored at 0** (Graham's `8.5` base is the
+no-growth P/E) and capped at `growth_cap`. When the CAGR is undefined (< 3y of positive EPS history)
+it falls back to the `dcf.growth_stage1` assumption — so the per-ticker `dcf` overrides remain the
+backstop. DCF itself still uses `dcf.growth_stage1` directly; only Graham Revised uses `g_eff`.
+`graham_aaa_yield` is the current AAA corporate yield (set to 0.055 / 5.5% as of 2026-06) and must be
+refreshed periodically — IV scales as `1/Y`, so a stale-low yield inflates every GRV.
 
 ## DCF (2-stage)
 
