@@ -237,13 +237,33 @@ def merge_facts(*facts_dicts: dict) -> dict:
     return merged
 
 
+def _pick_unit(units: dict) -> str:
+    """Choose the unit bucket that carries a concept's real series.
+
+    A fact may expose several unit buckets. Monetary concepts use ``USD``; per-share
+    concepts (EPS) use ``USD/shares``; share counts use ``shares``. We must NOT blindly
+    take ``list(units.keys())[0]``: many filers (KO/PEP/WMT/DHR…) mistagged a handful of
+    early (≈2009) per-share facts under the dimensionless ``pure`` unit, and that bogus
+    bucket can sort FIRST in dict order. The old first-key fallback then grabbed those 2–4
+    junk rows and dropped the entire real ``USD/shares`` series (every year) — nulling EPS
+    Diluted/Basic, and with it Graham Number, Graham Revised and P/E, for ~870 tickers.
+
+    Prefer the correct measure for the concept, then fall back to the largest bucket (the
+    erroneous one is always tiny). ``units.get(pref)`` is truthy only when the bucket is
+    present AND non-empty, so an empty preferred bucket doesn't shadow a populated one.
+    """
+    for pref in ("USD", "USD/shares", "shares"):
+        if units.get(pref):
+            return pref
+    return max(units, key=lambda u: len(units[u]))
+
+
 def extract_series(facts: dict, concept: str, kind: str, namespace: str = "us-gaap") -> pd.DataFrame:
     """Extract all rows of one XBRL concept across 10-K/10-Q filings, classified by period shape."""
     try:
         units    = facts["facts"][namespace][concept]["units"]
-        unit_key = "USD" if "USD" in units else list(units.keys())[0]
-        rows     = units[unit_key]
-    except KeyError:
+        rows     = units[_pick_unit(units)]
+    except (KeyError, ValueError):
         return pd.DataFrame()
 
     df = pd.DataFrame(rows)
