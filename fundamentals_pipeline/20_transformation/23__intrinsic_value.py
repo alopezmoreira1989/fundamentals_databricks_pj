@@ -89,11 +89,28 @@ ASSUMPTIONS = _load_assumptions(ASSUMPTIONS_JSON_PATH)
 DEFAULTS    = ASSUMPTIONS["defaults"]
 OVERRIDES   = ASSUMPTIONS.get("overrides", {})
 
+# Sector-aware flow-model skip policy. `_load_assumptions` already stripped the `_doc` key,
+# so only `flow_model_skip_sectors` (sector → bool) survives. Energy/Financials/Real Estate
+# skip DCF + Owner Earnings by default; a per-ticker override still wins (see _resolve_skip).
+SECTOR_POLICY           = ASSUMPTIONS.get("sector_policy", {})
+FLOW_MODEL_SKIP_SECTORS = SECTOR_POLICY.get("flow_model_skip_sectors", {})
+
 print(f"✓ Loaded assumptions — {len(OVERRIDES)} ticker override(s)")
 print(f"  DCF defaults  : WACC={DEFAULTS['dcf']['wacc']}, "
       f"g1={DEFAULTS['dcf']['growth_stage1']}, "
       f"g_terminal={DEFAULTS['dcf']['growth_terminal']}, "
       f"horizon={DEFAULTS['dcf']['horizon_years']}y")
+print(f"  Flow-model skip sectors: "
+      f"{sorted(s for s, v in FLOW_MODEL_SKIP_SECTORS.items() if v) or '(none)'}")
+
+# ticker → GICS sector, used by the sector-aware skip below. Left-join semantics: tickers
+# absent from config.tickers (or with NULL sector) resolve to None ⇒ no sector skip. Built
+# once here (small table, ~3k rows) and looked up per unique ticker in _resolve_skip.
+SECTOR_MAP = {
+    r["ticker"]: r["sector"]
+    for r in spark.table(TICKERS_TABLE).select("ticker", "sector").collect()
+}
+print(f"✓ Sector map built — {len(SECTOR_MAP):,} tickers")
 
 
 def _merge_dicts(base: dict, over: dict) -> dict:
@@ -402,6 +419,19 @@ print(f"✓ TTM pandas: {len(ttm_pdf):,} rows")
 # (vectorized across rows, NOT closed-form) to reproduce the original loop's floating-point sum bit-for-bit.
 
 
+def _resolve_skip(ticker: str, method_assumptions: dict) -> bool:
+    """Precedence for the flow-model skip flag (dcf / owner_earnings):
+      1. Explicit per-ticker override wins — if the merged assumptions carry a `skip` key
+         (present, True OR False), use it verbatim. DEFAULTS never set `skip`, so the key is
+         present here only when an `overrides[ticker]` entry set it (preserves BRK.B / JPM).
+      2. Else fall through to the sector default — skip if the ticker's GICS sector is flagged
+         in flow_model_skip_sectors with True.
+      3. Else do not skip. Sector NULL / unknown / absent from config.tickers ⇒ no skip."""
+    if "skip" in method_assumptions:
+        return bool(method_assumptions["skip"])
+    return bool(FLOW_MODEL_SKIP_SECTORS.get(SECTOR_MAP.get(ticker), False))
+
+
 def _params_for(ticker: str) -> dict:
     """Flattens assumptions_for(ticker) into scalar columns. Called ONCE per UNIQUE ticker
     (not per row), reusing the same defaults+overrides merge logic."""
@@ -415,13 +445,13 @@ def _params_for(ticker: str) -> dict:
         "gr_aaa_norm":    float(gr["aaa_yield_norm"]),
         "gr_aaa_yield":   float(gr["graham_aaa_yield"]),
         "gr_growth_cap":  float(gr["growth_cap"]),
-        "dcf_skip":       bool(d.get("skip", False)),
+        "dcf_skip":       _resolve_skip(ticker, d),
         "dcf_wacc":       float(d["wacc"]),
         "dcf_g1":         float(d["growth_stage1"]),
         "dcf_gt":         float(d["growth_terminal"]),
         "dcf_horizon":    int(d["horizon_years"]),
         "dcf_use_oe":     bool(d.get("use_owner_earnings", False)),
-        "oe_skip":        bool(oe.get("skip", False)),
+        "oe_skip":        _resolve_skip(ticker, oe),
         "oe_method":      oe.get("method", "multiple"),
         "oe_multiple":    float(oe["multiple"]),
         "oe_dr":          float(oe["discount_rate"]),

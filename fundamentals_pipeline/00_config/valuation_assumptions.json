@@ -70,5 +70,14 @@
       "dcf": { "skip": true },
       "owner_earnings": { "skip": true }
     }
+  },
+
+  "sector_policy": {
+    "_doc": "Skip por defecto de los flow-models (DCF + Owner Earnings) según sector GICS de config.tickers.sector. Energy/Financials/Real Estate saltan por defecto: activos cíclicos de commodity en agotamiento, balances de intermediación financiera, y depreciación contable que distorsiona el NI de los REITs (van por FFO). Un override per-ticker con dcf.skip / owner_earnings.skip = true|false GANA sobre el default de sector (re-activa o fuerza skip para un ticker concreto). Sector NULL/Unknown -> no skip.",
+    "flow_model_skip_sectors": {
+      "Energy": true,
+      "Financials": true,
+      "Real Estate": true
+    }
   }
 }
