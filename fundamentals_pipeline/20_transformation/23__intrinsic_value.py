@@ -228,6 +228,45 @@ fy_wide = (
 
 print(f"✓ FY wide: {fy_wide.count():,} (ticker, year) rows")
 
+# ── Trailing EPS CAGR per (ticker, fiscal_year) → growth input for Graham Revised ──
+# Graham's revised formula uses each company's own expected growth in (8.5 + 2g); the flat
+# dcf.growth_stage1 made GRV collapse to a near-constant ~24× EPS for the whole universe.
+# We derive g from the FY EPS series, POINT-IN-TIME (ending at each row's own fiscal_year,
+# no lookahead): a 5y trailing CAGR, falling back to the longest span available in [3,5]y.
+# Both the start and end EPS must be > 0 for a CAGR to be meaningful; rows with < 3y of
+# positive history get NULL and are coalesced to the dcf.growth_stage1 assumption downstream.
+eps_fy = (
+    fy_wide.select("ticker", "year", F.col("eps").cast("double").alias("eps"))
+    .filter(F.col("eps") > 0)
+)
+_cagr_pairs = (
+    eps_fy.join(
+        eps_fy.select(
+            "ticker",
+            F.col("year").alias("base_year"),
+            F.col("eps").alias("base_eps"),
+        ),
+        on="ticker",
+    )
+    .filter(
+        (F.col("base_year") >= F.col("year") - 5)
+        & (F.col("base_year") <= F.col("year") - 3)
+    )
+)
+# Per (ticker, year), keep the longest available span (smallest base_year ⇒ closest to −5y).
+_span_w = Window.partitionBy("ticker", "year").orderBy(F.col("base_year").asc())
+eps_cagr = (
+    _cagr_pairs.withColumn("_rn", F.row_number().over(_span_w))
+    .filter(F.col("_rn") == 1)
+    .withColumn("_n", (F.col("year") - F.col("base_year")).cast("double"))
+    .withColumn(
+        "eps_cagr",
+        F.pow(F.col("eps") / F.col("base_eps"), F.lit(1.0) / F.col("_n")) - F.lit(1.0),
+    )
+    .select("ticker", "year", "eps_cagr")
+)
+fy_wide = fy_wide.join(eps_cagr, on=["ticker", "year"], how="left")
+
 # COMMAND ----------
 
 # MAGIC %md ## 4. Pivot TTM — one row per ticker (rolling 4 quarters)
@@ -299,6 +338,16 @@ ttm_pivot = (
 )
 
 ttm_wide = ttm_meta.join(ttm_pivot, on="ticker", how="inner")
+
+# TTM growth = the most recent FY EPS CAGR available per ticker (eps_cagr defined in §3).
+_latest_cagr = (
+    eps_cagr
+    .withColumn("_rn", F.row_number().over(
+        Window.partitionBy("ticker").orderBy(F.col("year").desc())))
+    .filter(F.col("_rn") == 1)
+    .select("ticker", "eps_cagr")
+)
+ttm_wide = ttm_wide.join(_latest_cagr, on="ticker", how="left")
 
 print(f"✓ TTM wide: {ttm_wide.count():,} ticker rows")
 
@@ -476,6 +525,7 @@ def compute_all(pdf, period_type, computed_at):
         return m[name].to_numpy(dtype="float64")
 
     eps, bvps, shares = col("eps"), col("bvps"), col("shares")
+    eps_cagr          = col("eps_cagr")   # per-ticker trailing 5y EPS growth (NaN ⇒ use assumption)
     price, retained   = col("price_close"), col("retained_earnings")
     ni, dna, sbc      = col("net_income"), col("dna"), col("sbc")
     capex, dwc        = col("capex"), col("delta_wc")
@@ -509,8 +559,13 @@ def compute_all(pdf, period_type, computed_at):
         distort = (~np.isnan(retained) & (retained < 0)) | (~np.isnan(price) & (pb > 10))
         gn = np.where(gn_valid & ~distort, np.sqrt(magic * eps * bvps), nan)
 
-        # ── graham_revised ──  g = min(dcf.growth_stage1, growth_cap) (documented decision).
-        g_eff = np.minimum(dcf_g1, gr_growth_cap)
+        # ── graham_revised ──  g = the company's own trailing 5y EPS CAGR (point-in-time),
+        # floored at 0 (Graham's 8.5 base IS the no-growth P/E — a shrinking firm should not
+        # push the multiple below it) and capped at growth_cap. Falls back to the
+        # dcf.growth_stage1 assumption when the CAGR is undefined (NaN). DCF still reads
+        # dcf_g1 directly in its loop below — only Graham Revised uses g_eff.
+        g_company = np.where(np.isnan(eps_cagr), dcf_g1, eps_cagr)
+        g_eff = np.clip(np.minimum(g_company, gr_growth_cap), 0.0, None)
         grv_valid = ~np.isnan(eps) & (eps > 0)
         grv = np.where(
             grv_valid,

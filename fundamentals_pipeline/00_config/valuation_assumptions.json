@@ -19,7 +19,7 @@
       "base_pe":           8.5,
       "growth_multiplier": 2.0,
       "aaa_yield_norm":    4.4,
-      "graham_aaa_yield":  0.045,
+      "graham_aaa_yield":  0.055,
       "growth_cap":        0.15,
       "_growth_cap_doc":   "Cap del crecimiento a 15% para evitar valoraciones absurdas en empresas hyper-growth."
     },
