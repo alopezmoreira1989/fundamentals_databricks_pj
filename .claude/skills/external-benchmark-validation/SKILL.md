@@ -80,6 +80,18 @@ non-valuation; `low` otherwise.
    golden-set-only until that rate is acceptably low (the **validate-the-validator gate**); only then
    does Tier A go universe-wide (v2).
 
+## Known findings (reviewed — do not re-investigate)
+
+Clusters already triaged at the per-cluster gate. Two dispositions: **suppressed** (carved out of the
+findings in `35`, won't reappear) vs **visible-accepted** (left in the open view on purpose — the
+delta is a real signal, but the app's value is correct, so a reviewer should skip it).
+
+| Cluster | `issue_class` | Disposition | Why |
+|---|---|---|---|
+| **Total Stockholders Equity** [Balance Sheet] | `ORACLE_VALUE_MISMATCH` (high, ~13 rows / 7 tickers) | **visible-accepted** — NOT suppressed | Oracle winner is `StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest` (total equity **incl. NCI**); the app publishes `StockholdersEquity` (**parent-only**). The app is correct for equity analysis — ROE, book value/share and D/E all use *parent* stockholders' equity. NCI-heavy filers (AMT, NEE, XOM, WMT, LIN, SKT) surface here each run; the gap *is* the minority interest. Kept visible (not carved out) because a future filer with a genuinely wrong equity value would land in the same cluster — suppressing it would blind that. **Exception: BAC** — same tag on both sides, ~0.5% near-tolerance blip, not the NCI split. |
+| **Net Income** [Cash Flow] | `ORACLE_VALUE_MISMATCH` | **suppressed** (carve-out in `35`) | Indirect-method start line: filers present `ProfitLoss` (total incl. NCI); the app publishes attributable `NetIncomeLoss`. Immaterial NCI difference, and NI's value is already reconciled on the Income Statement line. |
+| **Sales of Investments** [Cash Flow] | `ORACLE_VALUE_MISMATCH` | **suppressed** (carve-out in `35`) | Sales-vs-maturities sibling-line ambiguity: securities-heavy filers (AAPL, NVDA, CSCO, CRM, CAT) present *sales* and *maturities/calls* as separate lines; the oracle's magnitude tie-break picks the larger maturities line while the app tracks only sales. Validator noise, not a value mangle. Summing both tags was reviewed and **declined**. |
+
 ## Procedure — manual cross-check (Finviz / other, secondary)
 
 Use when sanity-checking one ticker against a public site (the oracle is preferred when available).
