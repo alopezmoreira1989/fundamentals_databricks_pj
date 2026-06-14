@@ -460,16 +460,32 @@ ratios stay NULL when their one component is absent.
 
 ### Intrinsic Value *(requires `market_data`)*
 
-| Metric | Formula |
-|---|---|
-| `Graham Number (FY/TTM)` | `sqrt(22.5 × EPS × Book Value per Share)` |
-| `Graham Revised Value (FY/TTM)` | `(EPS × (8.5 + 2g) × 4.4) / Y` |
-| `DCF Value per Share (FY/TTM)` | Discounted 10-year FCF projection + terminal value |
-| `Owner Earnings (FY/TTM)` | `Net Income + D&A − CapEx − ΔWC` |
-| `Owner Earnings Value/Share (FY/TTM)` | Capitalized Owner Earnings at required return |
-| `MoS %` | Margin of Safety: `(Intrinsic Value − Price) / Intrinsic Value × 100` |
+Computed by `23__intrinsic_value` for **each fiscal year** and for **TTM** (rolling 4 quarters), under four lenses. Each is emitted both into `financials_intrinsic_value` (one row per `ticker / period_type / fiscal_year / method`, with an `assumptions` JSON column) and exposed as `(FY)` / `(TTM)` metrics here.
 
-> Valuation metrics are only populated for `ticker / fiscal_year` combinations where `market_data` has a valid `market_cap`. Valuation assumptions (WACC, growth rate, etc.) are configured in `00_config/valuation_assumptions.json`.
+| Method | Idea | Formula |
+|---|---|---|
+| `Graham Number (FY/TTM)` | Graham's napkin floor for defensive stocks | `sqrt(22.5 × EPS × Book Value per Share)` |
+| `Graham Revised Value (FY/TTM)` | Graham's growth formula, normalized to the AAA yield | `(EPS × (8.5 + 2g) × 4.4) / Y` |
+| `DCF Value per Share (FY/TTM)` | 2-stage DCF — explicit growth horizon + Gordon terminal | Discounted 10-year FCF (or Owner Earnings) projection + terminal value, net of debt, plus cash, ÷ diluted shares |
+| `Owner Earnings (FY/TTM)` | Buffett's cash earnings (absolute $, ungated) | `Net Income + D&A + SBC − CapEx − ΔWC` |
+| `Owner Earnings Value/Share (FY/TTM)` | Capitalized Owner Earnings | `OE × multiple` (default 15×) **or** `OE / discount_rate` (Gordon perpetuity) ÷ shares |
+| `MoS %` | Margin of Safety vs. market price | `(Intrinsic Value − Price) / Intrinsic Value × 100` |
+
+**Applicability guards (a method returns NaN and emits no row when it doesn't apply):**
+
+- **`Graham Number`** is suppressed for distorted book value — negative Retained Earnings or `P/B > 10` — and requires positive EPS and BVPS.
+- **`Graham Revised`** requires positive EPS; growth `g = min(DCF stage-1 growth, growth_cap)` (capped at 15% to avoid absurd hyper-growth valuations).
+- **`DCF` / `Owner Earnings`** require positive shares and positive starting cash flow, and `WACC > terminal growth`.
+
+**Sector-aware flow-model skip.** The flow-based models — **DCF** and **Owner Earnings Value/Share** — are skipped by default for **Energy, Financials, and Real Estate** (`sector_policy.flow_model_skip_sectors` in `valuation_assumptions.json`, keyed off `config.tickers.sector`). The rationale: depleting commodity assets (a 2-stage perpetual-growth DCF doesn't apply, and depletion baked into OCF inflates FCF), financial-intermediation balance sheets, and REIT book depreciation that distorts Net Income — these belong on FFO, not DCF/OE. Precedence per ticker × method:
+
+1. An explicit per-ticker `dcf.skip` / `owner_earnings.skip` (`true` **or** `false`) in `overrides` **always wins** — it can re-enable a method for a single name or force-skip it.
+2. Else the sector default applies (skip if the ticker's GICS sector is flagged).
+3. Else no skip. Sector NULL / unknown ⇒ no skip.
+
+The Graham methods are **never** sector-gated, and the absolute `Owner Earnings` ($) metric is always emitted regardless of the valuation skip.
+
+> Valuation metrics are only populated for `ticker / fiscal_year` combinations where `market_data` has a valid `market_cap`. Assumptions (WACC, growth, multiples, per-ticker and per-sector skips) are configured in `00_config/valuation_assumptions.json` — editing it requires no code change.
 
 ---
 
@@ -486,7 +502,7 @@ The landing-page **screener** filters the universe by index membership (All / S&
 The company detail page (Derived metrics tab) renders a horizontal "football field" below the metrics grid: one bar per intrinsic-value method spanning its estimate range, with a base-case dot and a single vertical line for the current market price (`render_valuation_football_field` in `lib/render.py`, inline SVG).
 
 - **The bars are a presentational ±15% sensitivity band** (`FF_BAND`) around each method's stored point estimate — **not** a confidence interval. There is no stored low/high triple; the envelope is constructed for readability (a caption says so). The market price is backed out of any method's `MoS %` row (`price = IV × (1 − MoS/100)`), since the app stores no per-share price directly.
-- **`Graham Number` is intentionally excluded** — it's suppressed upstream for distorted-book firms and is often a wild outlier that would crush the shared x-scale. Only Graham Revised, DCF, and Owner Earnings are shown (`FF_METHODS`).
+- **`Graham Number` is intentionally excluded** — it's suppressed upstream for distorted-book firms and is often a wild outlier that would crush the shared x-scale. Only Graham Revised, DCF, and Owner Earnings are shown (`FF_METHODS`). For Energy / Financials / Real Estate names the DCF and Owner Earnings bars are absent (sector-skipped upstream), so the field shows Graham Revised alone — by design.
 - **Over/under-valued color rule:** a method's base **above** the price line → undervalued → green (`--positive`); **below** → overvalued → red (`--negative`); neutral blue when no price is available. So "every bar below the line" reads instantly as overvalued (e.g. AAPL), "every bar above" as undervalued (e.g. VZ).
 - **Graceful degradation:** no methods → the card is hidden (returns `""`); a single method still renders (with a note); no `market_data` price → bars render neutral with no price line and a "no market price" caption; non-finite or ≤0 base values are skipped.
 
