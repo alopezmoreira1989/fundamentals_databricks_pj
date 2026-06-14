@@ -83,8 +83,15 @@ INCOME_STATEMENT = {
     "Net Income":                 ("NetIncomeLoss",                                                                             "flow_additive"),
     "Net Income (to common)":     ("NetIncomeLossAvailableToCommonStockholdersBasic",                                           "flow_additive"),
     "Net Income (incl NCI)":      ("ProfitLoss",                                                                                "flow_additive"),
-    "EPS Basic":                  ("EarningsPerShareBasic",                                                                     "flow_nonadditive"),
-    "EPS Diluted":                ("EarningsPerShareDiluted",                                                                   "flow_nonadditive"),
+    "EPS Basic":                  (["EarningsPerShareBasic",                            # standard basic EPS
+                                    "IncomeLossFromContinuingOperationsPerBasicShare",  # two-class / continuing-ops filers
+                                    "EarningsPerShareBasicAndDiluted"],                 # single combined tag (basic == diluted)
+                                   "flow_nonadditive"),
+    "EPS Diluted":                (["EarningsPerShareDiluted",                          # standard diluted EPS (wins whenever present)
+                                    "IncomeLossFromContinuingOperationsPerDilutedShare",# two-class / continuing-ops filers (ABNB, REG, STAG...)
+                                    "EarningsPerShareBasicAndDiluted",                  # single combined tag (basic == diluted)
+                                    "EarningsPerShareBasic"],                           # last resort: negligible dilution (BRK-B, TR)
+                                   "flow_nonadditive"),
     "Shares Diluted":             ("WeightedAverageNumberOfDilutedSharesOutstanding",                                           "flow_nonadditive"),
 }
 
