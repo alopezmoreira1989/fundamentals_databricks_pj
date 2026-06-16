@@ -25,10 +25,31 @@
 # COMMAND ----------
 
 import json
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
+
+
+# Make the pure-Python schema contract importable (fundamentals_pipeline/_core/schemas.py).
+# Databricks-only note: this is a notebook (no __file__), so we walk up from the working
+# directory to find the repo root. In a Databricks Repo the root is usually already on
+# sys.path (Files-in-Repos); this is a defensive fallback so the assert below also works
+# under a Job, %run, or Databricks Connect.
+def _ensure_core_on_path() -> None:
+    for _cand in (Path.cwd(), *Path.cwd().parents):
+        if (_cand / "fundamentals_pipeline" / "_core" / "schemas.py").exists():
+            if str(_cand) not in sys.path:
+                sys.path.insert(0, str(_cand))
+            return
+
+
+try:
+    from fundamentals_pipeline._core import schemas as _schemas
+except ModuleNotFoundError:
+    _ensure_core_on_path()
+    from fundamentals_pipeline._core import schemas as _schemas
 
 SCHEMA_VERSION = 6   # +sector (GICS) on ticker_meta
 FY_YEARS       = 10
@@ -40,6 +61,7 @@ DATA_PARQUET   = OUT_DIR / "dashboard_data.parquet"
 METRIC_PARQUET = OUT_DIR / "dashboard_metrics.parquet"
 META_JSON      = OUT_DIR / "dashboard_meta.json"
 PRICE_PARQUET  = OUT_DIR / "dashboard_prices.parquet"
+BACKTEST_PARQUET = OUT_DIR / "dashboard_backtest.parquet"
 
 # COMMAND ----------
 
@@ -249,6 +271,40 @@ else:
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ## 3c. Backtest slice (backtest_results)
+# MAGIC
+# MAGIC Equity-curve series per archetype × fiscal_year from `70_backtest/71__run_backtest`.
+# MAGIC Resilient: the table may not exist yet (backtester not run) — fall back to an
+# MAGIC empty, correctly-typed frame so the app degrades to "no data" instead of crashing.
+
+# COMMAND ----------
+
+BACKTEST_COLUMNS = {
+    "archetype": "object", "fiscal_year": "int64",
+    "portfolio_return": "float64", "benchmark_return": "float64",
+    "portfolio_value": "float64", "benchmark_value": "float64", "n_holdings": "int64",
+}
+try:
+    backtest = spark.sql(f"""
+        SELECT archetype, fiscal_year, portfolio_return, benchmark_return,
+               portfolio_value, benchmark_value, n_holdings
+        FROM {CATALOG}.{SCHEMA}.backtest_results
+        ORDER BY archetype, fiscal_year
+    """).toPandas()
+    if backtest.empty:
+        print("⚠️ backtest_results returned 0 rows — writing empty backtest slice")
+except Exception as exc:  # noqa: BLE001 — table absent or unreadable: degrade, don't fail the export
+    print(f"⚠️ Could not read backtest_results ({type(exc).__name__}: {exc}) — writing empty backtest slice")
+    backtest = pd.DataFrame({c: pd.Series(dtype=t) for c, t in BACKTEST_COLUMNS.items()})
+
+if backtest.empty:
+    print("  backtest rows: 0 (empty slice)")
+else:
+    print(f"  backtest rows: {len(backtest):,} ({backtest['archetype'].nunique()} archetype(s))")
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## 4. Write parquet + meta
 
 # COMMAND ----------
@@ -260,9 +316,19 @@ else:
 financials.attrs = {}
 metrics.attrs = {}
 prices.attrs = {}
+backtest.attrs = {}
+
+# Schema contract — fail the run LOUDLY rather than shipping an artifact the public app
+# can't read. assert_artifact raises SchemaError naming the offending artifact/column.
+_schemas.assert_artifact("dashboard_data", financials)
+_schemas.assert_artifact("dashboard_metrics", metrics)
+_schemas.assert_artifact("dashboard_prices", prices)
+_schemas.assert_artifact("dashboard_backtest", backtest)
+
 financials.to_parquet(DATA_PARQUET, index=False)
 metrics.to_parquet(METRIC_PARQUET, index=False)
 prices.to_parquet(PRICE_PARQUET, index=False)
+backtest.to_parquet(BACKTEST_PARQUET, index=False)
 
 # Per-ticker FY range — used by the Streamlit masthead.
 fy_ranges = (
@@ -283,6 +349,7 @@ meta = {
         "financials":   int(len(financials)),
         "metrics":      int(len(metrics)),
         "prices":       int(len(prices)),
+        "backtest":     int(len(backtest)),
     },
     "retention": {
         "fy_years":     FY_YEARS,
@@ -290,12 +357,14 @@ meta = {
         "price_years":  PRICE_YEARS,
     },
 }
+_schemas.assert_meta(meta)
 META_JSON.write_text(json.dumps(meta, indent=2, default=str))
 
 print("\n✓ Wrote:")
 print(f"  {DATA_PARQUET}   ({DATA_PARQUET.stat().st_size / 1024:.1f} KB)")
 print(f"  {METRIC_PARQUET} ({METRIC_PARQUET.stat().st_size / 1024:.1f} KB)")
 print(f"  {PRICE_PARQUET}  ({PRICE_PARQUET.stat().st_size / 1024:.1f} KB)")
+print(f"  {BACKTEST_PARQUET} ({BACKTEST_PARQUET.stat().st_size / 1024:.1f} KB)")
 print(f"  {META_JSON}      (schema_version={SCHEMA_VERSION})")
 
 # COMMAND ----------
@@ -315,7 +384,7 @@ VOLUME_PATH    = "/Volumes/main/financials/_publish"   # must already exist
 
 if COPY_TO_VOLUME:
     dbutils.fs.mkdirs(VOLUME_PATH)
-    for f in [DATA_PARQUET, METRIC_PARQUET, PRICE_PARQUET, META_JSON]:
+    for f in [DATA_PARQUET, METRIC_PARQUET, PRICE_PARQUET, BACKTEST_PARQUET, META_JSON]:
         dest = f"{VOLUME_PATH}/{f.name}"
         dbutils.fs.cp(f"file:{f}", dest, recurse=False)
         print(f"  ✓ {f.name} → {dest}")
