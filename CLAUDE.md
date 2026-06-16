@@ -30,6 +30,23 @@ Databricks analytical pipeline that ingests SEC EDGAR XBRL filings (10-K/10-Q) f
 - **Run from `91__full_pipeline.py`** as a Databricks Job; it accepts `tickers_override`, `run_optimization` (gates `93__delta_maintenance`), `rebuild_config`, and `force_full_refresh`. Local smoke test for Databricks Connect credentials is `test_connection.py` (gitignored).
 - **Branch discipline: `main` is the single source of truth.** GitHub `main` is the production source and feeds the read-only Databricks Repo mirror (see *Sync GitHub → Databricks Repo* below). Do feature work on `dev_alm`, validate, then merge to `main` via the normal PR flow. **Never force-push `main`** — it triggers the sync and is the production source.
 
+## Parallel worktree discipline
+
+- Run parallel Claude Code sessions with `claude -w <name>`, launched from a
+  checkout on `dev_alm` — temp branches (`worktree-*`) fork from `dev_alm`.
+- Temp branch → `dev_alm`: local `--no-ff` merge, no PR. If `dev_alm` moved
+  while the worktree was open, merge `dev_alm` into the temp branch and
+  resolve conflicts there before merging back. `dev_alm` is the single
+  serialized integration point — integrate one temp branch, let it settle,
+  then the next.
+- `dev_alm` → `main`: unchanged — normal reviewed PR flow, never force-push
+  `main` (it is the production source and triggers the Databricks sync).
+- Cleanup: `git worktree remove .claude/worktrees/<name>` then
+  `git branch -d worktree-<name>` (never `-D`) — `-d` refuses unmerged
+  branches, so it cannot drop work that has not landed in `dev_alm`.
+- Never run two sessions against the same working directory; that is the
+  file-level collision worktrees exist to prevent.
+
 ## Layout
 
 - `00_config/` — tickers list, XBRL concept map, metric hierarchies, master-table builders, `valuation_assumptions.json`, `backtest_archetypes.json`
