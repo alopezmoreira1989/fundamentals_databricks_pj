@@ -15,20 +15,27 @@ per-ticker detail page, whose masthead shows the company's sector. Sector arrive
 in the published `meta` at `schema_version` ≥ 6 — older artifacts without it still
 load (every consumer defaults `sector`), so the filter degrades to all-`Unknown`.
 
+A third page, **Backtest**, shows investment-archetype strategies (Graham-defensive,
+Lynch GARP, quality-compounder) as an equity curve vs SPY with CAGR / max-drawdown /
+Sharpe cards and a **survivorship-bias caveat banner**. It reads
+`dashboard_backtest.parquet` and **degrades gracefully** — if the artifact isn't
+published yet, the page shows a "not published" notice and the rest of the app keeps
+working (`load_backtest()` never calls `st.stop()`, same rule as the price tab).
+
 ---
 
 ## Architecture
 
 ```
 Databricks pipeline (nightly)
-    └── 50_publish/51__ → writes 3 artifacts to /tmp/
+    └── 50_publish/51__ → writes 5 artifacts to /tmp/ (data, metrics, prices, backtest, meta)
     └── 50_publish/52__ → uploads to GitHub Release (tag `latest`)
                               │
                               ▼
        Streamlit Community Cloud (this app)
        Reads from: committed fixtures/ (synthetic preview data)
        Falls back to: github.com/alopezmoreira1989/fundamentals_databricks_pj
-                      /releases/download/latest/{dashboard_data,metrics,meta}.*
+                      /releases/download/latest/{dashboard_data,metrics,prices,backtest,meta}.*
                               │
                               ▼
            Anonymous viewer: editorial-newspaper dashboard
@@ -125,9 +132,15 @@ fixtures/                               synthetic data (~2,500 tickers, committe
 └── dashboard_meta.json                 tickers, FY ranges, row counts
 generate_russell2000_fixtures.py        regenerate synthetic fixtures (S&P 500 + Russell 2000 proxy)
 fetch_fixtures.py                       pull real data from Databricks (requires Connect)
+views/                                  multipage routes (st.Page in app.py)
+├── screener.py             landing — filterable one-row-per-company table
+├── company.py              per-ticker statements + metrics + price + football field
+└── backtest.py             archetype equity curve vs SPY + metrics + survivorship banner
 lib/
 ├── __init__.py
-├── data.py                 fetch + cache parquet from fixtures/ (or GitHub Release fallback)
+├── data.py                 fetch + cache parquet (load_latest_data / load_prices / load_backtest);
+│                           validates artifacts against the _core/schemas.py contract (hard for
+│                           data+metrics+meta, soft for prices+backtest — never st.stop())
 ├── format.py               number formatting (accounting negatives, KPI $B, CAGR)
 ├── colors.py               sparkline stroke color + CSS row-class rules
 ├── sparkline.py            inline SVG sparkline generator
@@ -136,6 +149,11 @@ lib/
 ├── quarterly.py            combo SVG chart (bars + YoY line, dynamic axes)
 └── render.py               masthead, table HTML, waterfall, metrics grid, footnotes
 ```
+
+> The Backtest page's return statistics (CAGR / drawdown / vol / Sharpe) are computed by the
+> shared pure module `fundamentals_pipeline/_core/backtest.py` — the same code the pipeline
+> notebook uses, so the app and the pipeline reconcile by construction. `_core` carries no
+> Databricks dependency, so the app stays credential-free.
 
 ---
 
