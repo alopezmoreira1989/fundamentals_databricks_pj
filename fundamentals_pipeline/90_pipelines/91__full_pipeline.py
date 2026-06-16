@@ -666,24 +666,17 @@ if STEP_TIMINGS:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 12. Optional: optimize Delta tables
-# MAGIC Set `run_optimization=true` in Job params to enable. Run at most once a week.
+# MAGIC ## 12. Delta maintenance (OPTIMIZE / VACUUM)
+# MAGIC Runs `93__delta_maintenance` inline via `%run` (shared session — serverless-safe,
+# MAGIC avoids the `dbutils.notebook.run` child-notebook stall). `93` self-gates on
+# MAGIC `run_optimization` (reused from this session via the shared scope), so a default run is
+# MAGIC a **no-op**. Set `run_optimization=true` in Job params to enable; run at most once a
+# MAGIC week. Covers `financials_raw`, `financials`, `financials_metrics`,
+# MAGIC `financials_intrinsic_value`, `market_prices_daily`, and legacy `market_data`.
 
 # COMMAND ----------
 
-if run_optimization.lower() == "true":
-    print("Running OPTIMIZE + VACUUM...")
-    for tbl in ["financials", "market_data", "financials_metrics", "financials_intrinsic_value"]:
-        full = f"{CATALOG}.{SCHEMA}.{tbl}"
-        try:
-            spark.sql(f"OPTIMIZE {full}")
-            spark.sql(f"VACUUM   {full} RETAIN 168 HOURS")
-            print(f"  ✓ {full}")
-        except Exception as e:
-            print(f"  ✗ {full}: {e}")
-    print("Done.")
-else:
-    print("⊘ Skipping OPTIMIZE/VACUUM (set run_optimization=true to enable)")
+# MAGIC %run "./93__delta_maintenance"
 
 # COMMAND ----------
 
