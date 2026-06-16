@@ -1,4 +1,4 @@
-streamlit>=1.40,<2
+streamlit>=1.50,<1.51
 pandas>=2.2,<3
 fastparquet>=2024.5
 requests>=2.31,<3

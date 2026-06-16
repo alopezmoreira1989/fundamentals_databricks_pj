@@ -62,7 +62,7 @@ with sel_col:
     )
 with back_col:
     st.write("")
-    if st.button("← Screener", use_container_width=True):
+    if st.button("← Screener", width="stretch"):
         st.switch_page("views/screener.py")
 
 # Masthead + KPI strip — single markdown block so the spacing matches the spec.

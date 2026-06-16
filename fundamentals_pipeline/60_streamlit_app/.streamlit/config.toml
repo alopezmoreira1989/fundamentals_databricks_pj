@@ -4,7 +4,20 @@ backgroundColor       = "#FAF8F4"
 secondaryBackgroundColor = "#F1EFE8"
 primaryColor          = "#1C1B18"
 textColor             = "#1C1B18"
-font                  = "sans serif"
+# App-wide typography (>=1.45): point each role at the Google Fonts CSS2 URL so the
+# Streamlit chrome AND the canvas st.dataframe match the custom HTML. These URLs cover the
+# exact axes/weights styles.css uses (Fraunces variable opsz 9..144 w400/500/600 for the
+# opsz-144 headings, Inter 400/500/600, JetBrains Mono 400/500) — the single font loader,
+# so lib/render.py no longer injects a Google Fonts <link>.
+# App-wide typography (>=1.45). Declared NAME-ONLY: the fonts themselves are loaded once by
+# the Google Fonts <link> injected in lib/render.py (the variable Fraunces opsz 9..144 the
+# opsz-144 headings need, plus Inter 400/500/600 and JetBrains Mono 400/500). Naming them
+# here makes the Streamlit chrome AND the canvas st.dataframe use the same families as the
+# custom HTML. We do NOT use the "Family:URL" form — Streamlit splits Fraunces' comma-bearing
+# variable-axis URL and the font fails to load (Inter/JBM happen to have comma-free URLs).
+font        = "Inter, sans-serif"
+headingFont = "Fraunces, serif"
+codeFont    = "JetBrains Mono, monospace"
 
 [server]
 headless = true

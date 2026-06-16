@@ -64,6 +64,13 @@ GOOGLE_FONTS_LINK = (
 def inject_css(css_path: Path) -> None:
     """Read the CSS file and inject it + Google Fonts into the page head.
 
+    This <link> is the SINGLE font loader for the whole app — it loads the variable Fraunces
+    (opsz 9..144), Inter and JetBrains Mono that both the custom HTML and the [theme] config
+    reference by name. The [theme] fonts are declared NAME-ONLY (not as URLs): pointing
+    headingFont at the Fraunces CSS2 URL fails because Streamlit splits the comma-bearing
+    variable-axis URL, so the variable font never loads — the link is the reliable loader,
+    and the theme names make the Streamlit chrome and the canvas st.dataframe use it too.
+
     Strip CSS block comments before wrapping: this file is wrapped in a <style> element
     and passed through st.html's sanitizer, which discards the ENTIRE node if it sees a
     nested tag token (e.g. an angle-bracket tag mentioned inside a /* ... */ comment) —
