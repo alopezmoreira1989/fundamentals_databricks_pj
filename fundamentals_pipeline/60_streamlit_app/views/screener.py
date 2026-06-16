@@ -46,6 +46,11 @@ _HAS_DF_SELECTION = tuple(int(p) for p in st.__version__.split(".")[:2]) >= (1, 
 
 wide, unit_map, metric_order = build_screener_frame()
 
+# The active sector — resolved ONCE here and reused by the stat band, the sector strip and
+# Featured. It is the session key both the sector bars (_set_sector callback) and the filter
+# selectbox write; default "All sectors" (sector_mask is a no-op for that default).
+active_sector = st.session_state.get(SECTOR_KEY, SECTORS[0])
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Handoff + filter callbacks (defined early — the fold widgets below use them)
@@ -82,32 +87,36 @@ def _fmt_dash(value: str | None) -> str:
     return value if value else "—"
 
 
-def _median_pct(col: str) -> str | None:
+def _median_pct(src: pd.DataFrame, col: str) -> str | None:
     """Median of a numeric column as a ``%.1f%%`` string; None if the column is absent
     or all-NaN. NaN is ignored — never raises."""
-    if col not in wide.columns:
+    if col not in src.columns:
         return None
-    s = pd.to_numeric(wide[col], errors="coerce").dropna()
+    s = pd.to_numeric(src[col], errors="coerce").dropna()
     return f"{s.median():.1f}%" if not s.empty else None
 
 
-def _stat_band() -> str:
-    """4-card stat band reusing the shared .kpi-strip/.kpi classes (no CSS change). The
-    'Sectors' / '% with sector' cards are dropped — both are capped by definition now that
-    every row carries a sector. Every figure degrades to an em-dash when its source column
-    is missing/empty; medians ignore NaN. Never raises."""
-    companies = f"{len(wide):,}"
+def _stat_band(src: pd.DataFrame, active_sector: str) -> str:
+    """4-card stat band reusing the shared .kpi-strip/.kpi classes (no CSS change), computed
+    over `src` — the active sector's subset, or all of `wide` for "All sectors". Companies
+    counts `src`; the medians (P/E ex-negatives, ROE %, Rev YoY %) are over `src`, ignoring
+    NaN and degrading to an em-dash. The Companies sub-note names the active sector when one
+    is selected. Never raises."""
+    companies = f"{len(src):,}"
 
-    pe = pd.to_numeric(wide["P/E"], errors="coerce") if "P/E" in wide.columns else pd.Series(dtype=float)
+    pe = pd.to_numeric(src["P/E"], errors="coerce") if "P/E" in src.columns else pd.Series(dtype=float)
     pe_pos = pe[pe > 0]
     median_pe = _fmt_dash(f"{pe_pos.median():.1f}x" if not pe_pos.empty else None)
-    median_roe = _fmt_dash(_median_pct("ROE %"))
-    median_yoy = _fmt_dash(_median_pct("Revenue YoY %"))
+    median_roe = _fmt_dash(_median_pct(src, "ROE %"))
+    median_yoy = _fmt_dash(_median_pct(src, "Revenue YoY %"))
+
+    note = ("S&amp;P 500 + Russell 3000" if active_sector == SECTORS[0]
+            else f'<span style="color:var(--accent-ink)">{html.escape(active_sector)}</span>')
 
     return (
         '<div class="kpi-strip">'
         f'<div class="kpi"><div class="label">Companies</div><div class="value">{companies}</div>'
-        '<div class="delta flat">S&amp;P 500 + Russell 3000</div></div>'
+        f'<div class="delta flat">{note}</div></div>'
         f'<div class="kpi"><div class="label">Median P/E</div><div class="value">{median_pe}</div>'
         '<div class="delta flat">latest FY · ex-negatives</div></div>'
         f'<div class="kpi"><div class="label">Median ROE %</div><div class="value">{median_roe}</div>'
@@ -118,7 +127,7 @@ def _stat_band() -> str:
     )
 
 
-st.markdown(_stat_band(), unsafe_allow_html=True)
+st.markdown(_stat_band(wide[sector_mask(wide, active_sector)], active_sector), unsafe_allow_html=True)
 
 dist_col, feat_col = st.columns([1.05, 1])
 
@@ -136,7 +145,6 @@ with dist_col, st.container(key="scr_sectors"):
         counts = pd.Series(dtype=int)
     top = counts.head(5)
     max_count = int(top.max()) if not top.empty else 1
-    active_sector = st.session_state.get(SECTOR_KEY, SECTORS[0])
 
     def _barline(count: int, *, active: bool = False, resto: bool = False) -> str:
         """One flex line — proportional track + right-aligned count — sat tight under a
@@ -157,6 +165,17 @@ with dist_col, st.container(key="scr_sectors"):
             st.button(str(sector), key=f"scr_sec_{slug}", on_click=_set_sector,
                       args=(str(sector),), use_container_width=True)
             st.markdown(_barline(int(cnt), active=(sector == active_sector)), unsafe_allow_html=True)
+
+    # Highlight the active sector's button (the label pill) — one exact-key rule, injected
+    # only when the active sector is among the drawn top-5 (else there's no bar to flag; the
+    # KPIs and Featured still reflect it). Marker-guarded so a rerun can't stack it.
+    if active_sector in top.index:
+        slug = str(active_sector).lower().replace(" ", "_")
+        st.html(
+            f"<style>/* scr-sec-active */ .st-key-scr_sec_{slug} button{{"
+            "background:var(--accent-soft)!important;color:var(--accent-ink)!important;"
+            "font-weight:600!important;border-radius:4px!important;}</style>"
+        )
 
     # "resto" — display-only muted aggregate of the remaining sectors. There is no single
     # sector to filter to, so it is intentionally NOT a button (the bar reads as an
@@ -205,10 +224,8 @@ def _company_key(name: str) -> str:
 
 
 with feat_col, st.container(key="scr_featured"):
-    # Featured follows the active sector — the same session key the bars (via _set_sector)
-    # and the filter selectbox both write. Default "All sectors" → top-12 global, since
-    # sector_mask is a no-op there (no special-casing). The header names the active sector.
-    active_sector = st.session_state.get(SECTOR_KEY, SECTORS[0])
+    # Featured follows the active sector (resolved once at the top of the page). Default
+    # "All sectors" → top-12 global (sector_mask is a no-op there). Header names the sector.
     feat_title = "Featured" if active_sector == SECTORS[0] else f"Featured · {active_sector}"
     st.markdown(
         f'<div class="scr-panel-head"><h3>{html.escape(feat_title)}</h3>'

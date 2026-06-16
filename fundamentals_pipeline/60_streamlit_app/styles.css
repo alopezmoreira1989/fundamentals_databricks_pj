@@ -926,11 +926,13 @@ div[data-baseweb="popover"] div[role="option"]:hover {
 .scr-track { position: relative; flex: 1; height: 7px; background: var(--bg-subtle); border-radius: 4px; }
 .scr-fill { position: absolute; inset: 0 auto 0 0; background: var(--accent); border-radius: 4px; }
 .scr-barline.is-active .scr-fill { background: var(--accent-ink); }
+.scr-barline.is-active .scr-track { background: var(--accent-soft); }
 .scr-barline.resto .scr-fill { background: var(--rule); }
 .scr-count {
   font-family: var(--mono); font-size: 10px; color: var(--ink-3);
   flex: 0 0 34px; text-align: right;
 }
+.scr-barline.is-active .scr-count { color: var(--accent-ink); font-weight: 600; }
 /* "resto" label apes the flat sector button (left-aligned, muted) but isn't clickable. */
 .scr-rest-label {
   font-family: var(--sans); font-size: 12.5px; font-weight: 500; color: var(--ink-3);
