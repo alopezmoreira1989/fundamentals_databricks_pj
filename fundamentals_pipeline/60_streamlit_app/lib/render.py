@@ -71,16 +71,57 @@ def inject_css(css_path: Path) -> None:
 # Masthead
 # ──────────────────────────────────────────────────────────────────────────────
 
+LOGO_DEV_BASE = "https://img.logo.dev/ticker"
+SHOW_LOGO_ATTRIBUTION = True  # free-tier Logo.dev requirement; set False if on a paid plan
+
+
+def _logo_dev_key() -> str | None:
+    """Publishable Logo.dev key from st.secrets; None if unset (e.g. local dev)."""
+    try:
+        return (st.secrets.get("logo_dev", {}) or {}).get("publishable_key") or None
+    except Exception:
+        return None
+
+
+def _render_company_logo(ticker: str, company: str, has_logo: bool | None) -> str:
+    """Logo box for the masthead.
+
+    - No key, or has_logo is False (known miss) -> editorial monogram.
+    - has_logo True (known hit) or None (pre-bump snapshot, unknown) -> hotlink the
+      Logo.dev CDN. For the unknown case we deliberately omit fallback=404 so Logo.dev's
+      own monogram covers any miss (Streamlit strips <img onerror>, so a client-side swap
+      is not reliable). Once the pipeline republishes meta with has_logo, known-misses
+      switch to the editorial monogram.
+
+    The hit branch paints the logo as a CSS background-image, not an <img>: inline style
+    attributes survive Streamlit's markdown sanitizer reliably, whereas an external <img>
+    (and attrs like loading/onerror) is not guaranteed to. We never download/cache the
+    bytes — this is a runtime hotlink to the Logo.dev CDN.
+    """
+    key = _logo_dev_key()
+    if not key or has_logo is False:
+        letter = html.escape((company or ticker).strip()[:1].upper() or "•")
+        return f'<div class="company-logo is-monogram"><span class="logo-monogram">{letter}</span></div>'
+    src = f"{LOGO_DEV_BASE}/{html.escape(ticker)}?token={html.escape(key)}&size=144&format=png"
+    style = (
+        f"background-image:url('{src}');background-size:contain;"
+        "background-repeat:no-repeat;background-position:center;"
+    )
+    return f'<div class="company-logo" style="{style}"></div>'
+
+
 def render_masthead(ticker: str, data: pd.DataFrame, meta: dict[str, Any]) -> str:
     # Resolve company name + GICS sector from meta (schema v2: list of dicts) or fallback.
     company = ticker
     sector = "Unknown"   # NULL / missing / legacy (pre-v6) artifacts → "Unknown" bucket
+    has_logo: bool | None = None   # True / False / None (None = pre-bump snapshot, unknown)
     ticker_info_list = meta.get("tickers", [])
     if ticker_info_list and isinstance(ticker_info_list[0], dict):
         match = next((t for t in ticker_info_list if t["ticker"] == ticker), None)
         if match:
             company = match.get("company", ticker)
             sector = match.get("sector") or "Unknown"
+            has_logo = match.get("has_logo")
 
     # FY range for this ticker.
     fy_range = ""
@@ -93,14 +134,19 @@ def render_masthead(ticker: str, data: pd.DataFrame, meta: dict[str, Any]) -> st
     else:
         n_years = 0
 
+    logo_html = _render_company_logo(ticker, str(company), has_logo)
+
     return (
         '<div class="masthead">'
         '  <div class="masthead-left">'
-        '    <div class="eyebrow">Fundamentals · Annual filings</div>'
-        f'    <h1>{html.escape(str(company))}</h1>'
-        '    <div class="ticker-row">'
-        f'      <span class="ticker-chip">{ticker}</span>'
-        f'      <span class="ticker-chip">{html.escape(str(sector))}</span>'
+        f'    {logo_html}'
+        '    <div class="masthead-identity">'
+        '      <div class="eyebrow">Fundamentals · Annual filings</div>'
+        f'      <h1>{html.escape(str(company))}</h1>'
+        '      <div class="ticker-row">'
+        f'        <span class="ticker-chip">{ticker}</span>'
+        f'        <span class="ticker-chip">{html.escape(str(sector))}</span>'
+        '      </div>'
         '    </div>'
         '  </div>'
         '  <div class="masthead-right">'
@@ -786,6 +832,14 @@ def render_balance_check(df_bs: pd.DataFrame) -> str:
 def render_footnote_bar(meta: dict[str, Any], version: str = "") -> str:
     ts = meta.get("build_timestamp", "")
     ver = f'<span class="pipe">|</span> app {version}' if version else ""
+    # Logo.dev free-tier requires a visible attribution wherever logos are shown. Only
+    # emit it when a key is actually configured (no key → editorial monograms, no logos →
+    # no attribution owed) and the documented flag is on.
+    attribution = (
+        '<span class="pipe">|</span> Logos by '
+        '<a href="https://logo.dev" target="_blank" rel="noopener">Logo.dev</a>'
+        if SHOW_LOGO_ATTRIBUTION and _logo_dev_key() else ""
+    )
     return (
         '<div class="footnote">'
         '<span style="color:var(--ink); font-weight:500;">main.financials.financials</span>'
@@ -795,5 +849,6 @@ def render_footnote_bar(meta: dict[str, Any], version: str = "") -> str:
         '<span class="pipe">|</span> Source · SEC EDGAR XBRL via 11__fetch_sec_xbrl'
         f'<span class="pipe">|</span> Built {ts}'
         f'{ver}'
+        f'{attribution}'
         '</div>'
     )

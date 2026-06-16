@@ -758,3 +758,23 @@ div[data-baseweb="popover"] div[role="option"]:hover {
   color: var(--ink-3);
   letter-spacing: 0.02em;
 }
+
+/* ========= COMPANY LOGO (masthead) ========= */
+/* Streamlit-app-only (below the synced section). The logo box sits left of the
+   eyebrow/name/ticker-row identity block; reuses existing vars only. The hit branch
+   paints a Logo.dev hotlink as a background-image (see render.py); misses render an
+   editorial monogram. */
+.masthead-left { display: flex; align-items: center; gap: 18px; }
+.masthead-identity { min-width: 0; }
+.company-logo {
+  width: 72px; height: 72px; flex: 0 0 72px;
+  display: flex; align-items: center; justify-content: center;
+  background-color: var(--bg-card); border: 1px solid var(--rule);
+  border-radius: 12px; overflow: hidden; padding: 8px;
+  background-origin: content-box;
+}
+.company-logo img { width: 100%; height: 100%; object-fit: contain; }
+.company-logo.is-monogram { background-color: var(--accent-soft); border-color: var(--accent-soft); }
+.company-logo .logo-monogram {
+  font-family: var(--display); font-size: 30px; font-weight: 600; color: var(--accent-ink);
+}
