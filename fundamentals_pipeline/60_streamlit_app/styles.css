@@ -914,9 +914,9 @@ div[data-baseweb="popover"] div[role="option"]:hover {
 .st-key-scr_sec_reset button { color: var(--ink-3) !important; font-size: 11px !important; }
 
 /* Featured tiles — the button IS the logo box. The logo/monogram is painted as a
-   background-image by a per-ticker rule injected from the view (one <style> block);
-   the ticker label is transparent so it doesn't fight the artwork. The white card bg
-   matches the masthead logo box; transparent-PNG logos sit on it cleanly. */
+   background-image by a per-ticker rule injected from the view (one injected style
+   element); the ticker label is transparent so it doesn't fight the artwork. The white
+   card bg matches the masthead logo box; transparent-PNG logos sit on it cleanly. */
 .st-key-scr_featured button {
   height: 62px; min-height: 62px !important; width: 100%;
   background-color: var(--bg-card) !important; background-size: contain;

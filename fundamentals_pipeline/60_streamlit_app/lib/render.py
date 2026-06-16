@@ -62,8 +62,18 @@ GOOGLE_FONTS_LINK = (
 
 
 def inject_css(css_path: Path) -> None:
-    """Read the CSS file and inject it + Google Fonts into the page head."""
+    """Read the CSS file and inject it + Google Fonts into the page head.
+
+    Strip CSS block comments before wrapping: this file is wrapped in a <style> element
+    and passed through st.html's sanitizer, which discards the ENTIRE node if it sees a
+    nested tag token (e.g. an angle-bracket tag mentioned inside a /* ... */ comment) —
+    silently dropping the whole stylesheet. Comments are non-functional, so removing them
+    from the injected copy (not the source) makes that failure impossible. As a belt, also
+    neutralise any stray closing-style token that could prematurely end the wrapper.
+    """
     css = css_path.read_text(encoding="utf-8")
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)   # drop block comments from the injected copy
+    css = re.sub(r"</\s*style", "<\\/style", css, flags=re.I)   # belt: can't close the wrapper early
     st.html(GOOGLE_FONTS_LINK + f"<style>{css}</style>")
 
 
