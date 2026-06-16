@@ -48,7 +48,14 @@ fundamentals_databricks_pj/
 │   ├── favorites.json                       ← favorite tickers list (with optional overrides: cik, aliases)
 │   ├── concept_hierarchy.json               ← accounting concept hierarchy
 │   ├── metrics_hierarchy.json               ← derived metrics hierarchy
-│   └── valuation_assumptions.json           ← valuation assumptions (WACC, growth, per-ticker overrides)
+│   ├── valuation_assumptions.json           ← valuation assumptions (WACC, growth, per-ticker overrides)
+│   └── backtest_archetypes.json             ← investor-archetype screens for the backtester (70_backtest)
+│
+├── _core/                                   ← pure-Python library (no Spark/Streamlit dep), unit-tested
+│   ├── valuation.py                         ← scalar reference impls (Graham, DCF, Owner Earnings, EPS CAGR)
+│   ├── periods.py                           ← Q4 = FY − YTD_Q3 period arithmetic
+│   ├── schemas.py                           ← export↔Streamlit artifact schema contract (single source of truth)
+│   └── backtest.py                          ← as-of (no look-ahead), predicate eval, CAGR/drawdown/vol/Sharpe
 │
 ├── 10_ingestion/
 │   ├── 11__fetch_sec_xbrl.py         ← SEC EDGAR XBRL API → financials_raw (parallel + Arrow + batched)
@@ -63,21 +70,32 @@ fundamentals_databricks_pj/
 │
 ├── 30_analysis/
 │   ├── 31__company_analysis.py       ← ad-hoc validation queries
-│   └── 32__coverage_check.py         ← post-pipeline check: favorites coverage + ingestion failures
+│   ├── 32__coverage_check.py         ← post-pipeline check: favorites coverage + ingestion failures
+│   └── 36__run_log_report.py         ← read-only report over the pipeline_runs run-log (last N runs + trend)
 │
 ├── 40_dashboards/
 │   ├── 41__dashboard_queries.py      ← SQL feeding the Databricks dashboard
 │   └── Main Dashboard.lvdash.json    ← dashboard definition (annual pages + quarterly page)
 │
 ├── 50_publish/
-│   ├── 51__export_dashboard_data.py  ← slice financials + metrics → /tmp/ parquet artifacts
+│   ├── 51__export_dashboard_data.py  ← slice financials + metrics + prices + backtest → /tmp/ parquet artifacts
 │   └── 52__publish_to_github.py      ← upload to GitHub Release (latest tag)
 │
 ├── 60_streamlit_app/                 ← public Streamlit Cloud dashboard (see its own README)
 │
-└── 90_pipelines/
-    └── 91__full_pipeline.py          ← Job entry point — runs the 11 steps in sequence
+├── 70_backtest/
+│   └── 71__run_backtest.py           ← apply archetype screens to history → backtest_results + backtest_summary
+│
+├── 90_pipelines/
+│   ├── 91__full_pipeline.py          ← Job entry point — runs the pipeline in sequence
+│   └── 93__delta_maintenance.py      ← OPTIMIZE / VACUUM (gated on run_optimization)
+│
+└── tests/                            ← pytest suite for the pure _core + Streamlit lib helpers (repo root)
 ```
+
+> Run the tests locally with `pip install -r requirements-dev.txt && pytest -q`. They cover the
+> pure `_core` modules and the Streamlit `lib/` masks/formatters — no Spark or network needed.
+> (`requirements.txt` stays minimal; it is the Streamlit Cloud runtime manifest.)
 
 ---
 
@@ -167,7 +185,11 @@ To modify them: edit the JSON, commit + push, and the next pipeline run rebuilds
 | `{CATALOG}.{SCHEMA}.market_data` | Year-end closing prices and market cap per ticker / fiscal_year |
 | `{CATALOG}.{SCHEMA}.financials_metrics` | Derived metrics — margins, FCF, YoY, leverage, valuation ratios |
 | `{CATALOG}.{SCHEMA}.financials_intrinsic_value` | Intrinsic value models — Graham, DCF, Owner Earnings (FY + TTM) |
+| `{CATALOG}.{SCHEMA}.backtest_results` | Backtest equity-curve series — one row per archetype × fiscal_year (returns + values) |
+| `{CATALOG}.{SCHEMA}.backtest_summary` | Per-archetype backtest metrics — CAGR, max drawdown, vol, Sharpe, vs benchmark |
 | `{CATALOG}.{SCHEMA}.ingestion_failures` | Append-only log of ingestion errors (SEC + yfinance) per run |
+| `{CATALOG}.config.pipeline_runs` | Per-run, per-step telemetry — `run_id`, `step`, `minutes`, `status` (run-log) |
+| `{CATALOG}.config.pipeline_run_coverage` | Per-run coverage/freshness snapshot — tickers ingested, favorites %, `max(filed)`, staleness |
 
 ---
 
@@ -489,6 +511,61 @@ The Graham methods are **never** sector-gated, and the absolute `Owner Earnings`
 
 ---
 
+## Backtester — `70_backtest/71__run_backtest`
+
+Applies named **investor-archetype** screens to historical fundamentals and reports forward
+returns, **with no look-ahead bias**. Archetypes are declared in
+`00_config/backtest_archetypes.json` — each is a list of `[metric, op, threshold]` predicates
+(matching `financials_metrics` labels) plus a holdings cap and a ranking rule. Ships with
+`graham_defensive` (cheap + liquid + profitable), `lynch_garp` (GARP — PEG is not a stored
+metric, so it's approximated via a modest P/E + earnings growth), and `quality_compounder`
+(high returns on capital, modest leverage).
+
+- **No look-ahead.** A fiscal year's metrics are usable only from their **as-of date** — the
+  10-K `filed` date (from `financials_raw`), or `period_end + as_of_lag_days` (default 90) when
+  the filing date is missing. Each name enters at the close on its as-of date and exits at the
+  next year's as-of date; annual cohorts are equal-weighted and chained into an equity curve.
+- **Benchmark** is SPY over each holding's own window — **NULL** if `SPY` is absent from
+  `market_prices_daily` (add it to the price universe to enable benchmark-relative metrics).
+- **⚠️ Survivorship bias.** The universe is tickers alive *today*; delisted names never enter,
+  so returns are biased **upward**. Treat results as a relative comparison between archetypes,
+  not an absolute forecast. The caveat is surfaced in the notebook, the JSON, and the app banner.
+
+Writes `backtest_results` (series) + `backtest_summary` (metrics), then `51` exports
+`dashboard_backtest.parquet` for the public app. The scalar return stats live in
+`_core/backtest.py` and are reused by both the notebook and the Streamlit view, so the numbers
+reconcile by construction.
+
+---
+
+## Run-log / observability — `main.config.pipeline_runs`
+
+`91__full_pipeline` persists per-run telemetry so freshness and coverage are queryable over
+time, not just printed once. At the end of each run it writes:
+
+- **`pipeline_runs`** — one row per step (`run_id`, `run_started_at`, `step`, `minutes`,
+  `status` ∈ `ok`/`failed`/`skipped`, `rows_written`), MERGE-keyed on `(run_id, step)`.
+- **`pipeline_run_coverage`** — one snapshot per run: total tickers ingested, favorites-reached-
+  metrics %, `max(filed)` and staleness in days (reuses the `32__coverage_check` logic).
+
+`run_id` = the run's start stamped `YYYYMMDDThhmmssZ`, tying both tables together. Telemetry is
+wrapped in try/except — a logging failure never aborts an otherwise-successful run. Read it with
+`30_analysis/36__run_log_report` (last N runs, latest-run step breakdown, coverage/freshness trend).
+
+---
+
+## Delta maintenance — `90_pipelines/93__delta_maintenance`
+
+Idempotent `OPTIMIZE` (file compaction) + `VACUUM` (`RETAIN 168 HOURS`, never lowering the
+retention safety check) over `financials_raw`, `financials`, `financials_metrics`,
+`financials_intrinsic_value`, `market_prices_daily`, and legacy `market_data`. Wired into `91`
+as the final step, **gated on `run_optimization`** (a default run is a no-op). `ZORDER` is a
+clearly-commented opt-in (off by default — `market_prices_daily` is liquid-clustered and can't be
+Z-ordered; `ticker` is already the partition key elsewhere). `financials_raw` row-level retention
+is an opt-in block, **disabled** by design (the table is append-only).
+
+---
+
 ## Public Streamlit Dashboard
 
 **Live app: https://alm-equity-fundamentals.streamlit.app/**
@@ -532,9 +609,10 @@ The full pipeline (`91__full_pipeline`) accepts Databricks Job parameters at run
 
 | Parameter | Default | Description |
 |---|---|---|
-| `tickers_override` | *(empty)* | Comma-separated list of tickers — bypasses `main.config.tickers` |
-| `run_optimization` | `false` | Run `OPTIMIZE + VACUUM` on Delta tables at the end of the pipeline |
+| `tickers_override` | *(empty)* | Comma-separated list of tickers — bypasses `main.config.tickers` (ingestion only; the export still publishes the full table) |
+| `run_optimization` | `false` | Run `93__delta_maintenance` (`OPTIMIZE + VACUUM`) at the end of the pipeline |
 | `rebuild_config` | `false` | Reserved — ticker rebuild must still be run manually via `02__tickers_master` |
+| `force_full_refresh` | `false` | Re-ingest ALL tickers, ignoring the 3-day freshness guard in `11__fetch_sec_xbrl` (use for a backfill after an ingest/merge logic change) |
 
 Example:
 ```json
