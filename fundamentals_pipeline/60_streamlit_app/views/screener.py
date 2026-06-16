@@ -4,17 +4,19 @@ Handoff convention (established here): the selected ticker is written to
 ``st.session_state["ticker"]`` and we ``st.switch_page`` to the company detail
 page, which reads the same key.
 
-Above the filters sits an editorial "fold" — a stat band, a clickable
-sector-distribution strip (drives the sector filter), and a featured-companies
-logo row (each tile → detail). All three are pure-frontend reads off the same
-``wide`` frame / published artifacts; no pipeline dependency.
+Above the filters sits an editorial "fold" (Variant 2 — compact): a 4-card stat
+band, a clickable sector-distribution strip (drives the sector filter), and a
+featured-companies logo row (each tile → detail). All three are pure-frontend
+reads off the same ``wide`` frame / published artifacts; no pipeline dependency.
 """
 
 import html
+import re
+from urllib.parse import quote
 
 import pandas as pd
 import streamlit as st
-from lib.render import _logo_dev_key, _render_company_logo
+from lib.render import _logo_dev_key, logo_dev_url
 from lib.screener import (
     DEFAULT_COLUMNS,
     MARKET_CAP,
@@ -35,8 +37,8 @@ SECTOR_KEY = "scr_sector"   # selectbox key the sector strip drives via callback
 # Resolve the Logo.dev key ONCE per run. _logo_dev_key() touches st.secrets; with no
 # secrets.toml that surfaces a "No secrets found" alert, and calling it per featured tile
 # (×8) spams the page AND collapses the app's injected <style>. One call here matches the
-# masthead's single access; when it returns None we render monograms without re-touching
-# st.secrets. On deployed apps the key is present, so tiles hotlink Logo.dev as usual.
+# masthead's single access; when it returns None we paint inline monograms without
+# re-touching st.secrets. On deployed apps the key is present, so tiles hotlink Logo.dev.
 _LOGO_KEY = _logo_dev_key()
 
 # st.dataframe row selection (on_select) needs Streamlit ≥ 1.35.
@@ -76,30 +78,38 @@ def _fmt_dash(value: str | None) -> str:
     return value if value else "—"
 
 
-def _stat_band() -> str:
-    """4-card stat band reusing the shared .kpi-strip/.kpi classes. Every figure degrades
-    to an em-dash when its source column is missing/empty — never raises."""
-    n = len(wide)
-    companies = f"{n:,}"
+def _median_pct(col: str) -> str | None:
+    """Median of a numeric column as a ``%.1f%%`` string; None if the column is absent
+    or all-NaN. NaN is ignored — never raises."""
+    if col not in wide.columns:
+        return None
+    s = pd.to_numeric(wide[col], errors="coerce").dropna()
+    return f"{s.median():.1f}%" if not s.empty else None
 
-    sec = wide["sector"].astype(str) if "sector" in wide.columns else pd.Series(dtype=str)
-    assigned = sec[sec != UNKNOWN_SECTOR]
-    sectors = _fmt_dash(f"{assigned.nunique()} / 11" if not sec.empty else None)
-    pct_assigned = _fmt_dash(f"{100 * len(assigned) / n:.0f}%" if n else None)
+
+def _stat_band() -> str:
+    """4-card stat band reusing the shared .kpi-strip/.kpi classes (no CSS change). The
+    'Sectors' / '% with sector' cards are dropped — both are capped by definition now that
+    every row carries a sector. Every figure degrades to an em-dash when its source column
+    is missing/empty; medians ignore NaN. Never raises."""
+    companies = f"{len(wide):,}"
 
     pe = pd.to_numeric(wide["P/E"], errors="coerce") if "P/E" in wide.columns else pd.Series(dtype=float)
     pe_pos = pe[pe > 0]
     median_pe = _fmt_dash(f"{pe_pos.median():.1f}x" if not pe_pos.empty else None)
+    median_roe = _fmt_dash(_median_pct("ROE %"))
+    median_yoy = _fmt_dash(_median_pct("Revenue YoY %"))
 
     return (
         '<div class="kpi-strip">'
-        f'<div class="kpi"><div class="label">Companies</div><div class="value">{companies}</div></div>'
-        f'<div class="kpi"><div class="label">Sectors</div><div class="value">{sectors}</div>'
-        '<div class="delta flat">GICS</div></div>'
+        f'<div class="kpi"><div class="label">Companies</div><div class="value">{companies}</div>'
+        '<div class="delta flat">S&amp;P 500 + Russell 3000</div></div>'
         f'<div class="kpi"><div class="label">Median P/E</div><div class="value">{median_pe}</div>'
         '<div class="delta flat">latest FY · ex-negatives</div></div>'
-        f'<div class="kpi"><div class="label">% with sector</div><div class="value">{pct_assigned}</div>'
-        '<div class="delta flat">Wikipedia GICS → IWV → favorites</div></div>'
+        f'<div class="kpi"><div class="label">Median ROE %</div><div class="value">{median_roe}</div>'
+        '<div class="delta flat">latest FY</div></div>'
+        f'<div class="kpi"><div class="label">Median Rev YoY %</div><div class="value">{median_yoy}</div>'
+        '<div class="delta flat">latest FY</div></div>'
         '</div>'
     )
 
@@ -124,35 +134,72 @@ with dist_col, st.container(key="scr_sectors"):
     max_count = int(top.max()) if not top.empty else 1
     active_sector = st.session_state.get(SECTOR_KEY, SECTORS[0])
 
-    for sector, cnt in top.items():
-        slug = str(sector).lower().replace(" ", "_")
-        is_active = " is-active" if sector == active_sector else ""
-        st.button(str(sector), key=f"scr_sec_{slug}", on_click=_set_sector, args=(str(sector),),
-                  use_container_width=True)
-        pct = min(100.0, int(cnt) / max_count * 100)
-        st.markdown(
-            f'<div class="scr-bar-wrap{is_active}"><div class="scr-bar">'
-            f'<div class="scr-bar-fill" style="width:{pct:.0f}%"></div></div>'
-            f'<span class="scr-bar-count">{int(cnt):,}</span></div>',
-            unsafe_allow_html=True,
+    def _barline(count: int, *, active: bool = False, resto: bool = False) -> str:
+        """One flex line — proportional track + right-aligned count — sat tight under a
+        sector's label. Width is normalised to the top-5 max count."""
+        cls = " is-active" if active else (" resto" if resto else "")
+        pct = min(100.0, count / max_count * 100)
+        return (
+            f'<div class="scr-barline{cls}"><div class="scr-track">'
+            f'<div class="scr-fill" style="width:{pct:.0f}%"></div></div>'
+            f'<span class="scr-count">{count:,}</span></div>'
         )
 
-    # "resto" — display-only muted aggregate of the remaining sectors.
+    # Top-5: a flat full-width button (the whole-row hit target) with its bar+count
+    # directly beneath, each pair in its own container so the rhythm stays uniform.
+    for sector, cnt in top.items():
+        slug = str(sector).lower().replace(" ", "_")
+        with st.container():
+            st.button(str(sector), key=f"scr_sec_{slug}", on_click=_set_sector,
+                      args=(str(sector),), use_container_width=True)
+            st.markdown(_barline(int(cnt), active=(sector == active_sector)), unsafe_allow_html=True)
+
+    # "resto" — display-only muted aggregate of the remaining sectors. There is no single
+    # sector to filter to, so it is intentionally NOT a button (the bar reads as an
+    # aggregate via the muted --rule fill).
     rest = counts.iloc[5:]
     if not rest.empty:
-        rest_pct = min(100.0, int(rest.sum()) / max_count * 100)
-        st.markdown(
-            f'<div class="scr-bar-wrap resto"><span class="scr-rest-label">+ {rest.size} more</span>'
-            f'<div class="scr-bar"><div class="scr-bar-fill" style="width:{rest_pct:.0f}%"></div></div>'
-            f'<span class="scr-bar-count">{int(rest.sum()):,}</span></div>',
-            unsafe_allow_html=True,
-        )
+        with st.container():
+            st.markdown(f'<div class="scr-rest-label">+ {rest.size} more</div>', unsafe_allow_html=True)
+            st.markdown(_barline(int(rest.sum()), resto=True), unsafe_allow_html=True)
 
     # Reset — always reachable; a no-op when already on "All sectors".
     st.button("↺ All sectors", key="scr_sec_reset", on_click=_set_sector, args=(SECTORS[0],),
               use_container_width=True)
 
+
 # --- Featured companies (right, clickable) ---------------------------------------------
+def _monogram_data_uri(name: str) -> str:
+    """Inline SVG data-URI monogram for the no-key fallback — the tile background when
+    Logo.dev isn't configured (local dev). Mirrors render.py's editorial monogram
+    (accent-soft fill, accent-ink letter); hex literals because var() can't resolve inside
+    a data-URI SVG. The SVG is URL-escaped, so no raw angle-bracket tag tokens enter the
+    injected style element."""
+    letter = html.escape((name or "•").strip()[:1].upper() or "•")
+    svg = (
+        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'>"
+        "<rect width='64' height='64' rx='6' fill='#E6F1FB'/>"
+        "<text x='32' y='34' fill='#0C447C' font-size='30' font-weight='600' "
+        "font-family='Fraunces,Times New Roman,serif' text-anchor='middle' "
+        "dominant-baseline='central'>" + letter + "</text></svg>"
+    )
+    return 'url("data:image/svg+xml;utf8,' + quote(svg) + '")'
+
+
+def _css_token(s: str) -> str:
+    """Escape a ticker for use inside a CSS class selector — a literal dot would split
+    `.st-key-scr_feat_BF.B` into two classes. Top-8 mega-caps are alnum, but be safe."""
+    return s.replace("\\", "\\\\").replace(".", "\\.")
+
+
+def _company_key(name: str) -> str:
+    """Dedup key collapsing dual-class listings to one company: strip a trailing
+    ``(Class A/B/C)`` parenthetical (e.g. 'Alphabet Inc. (Class C)' and '... (Class A)'
+    map to the same key), then casefold. Keeps GOOG/GOOGL, FOX/FOXA, NWS/NWSA from each
+    taking a featured slot."""
+    return re.sub(r"\s*\(class\b[^)]*\)\s*$", "", str(name), flags=re.I).strip().casefold()
+
+
 with feat_col, st.container(key="scr_featured"):
     st.markdown(
         '<div class="scr-panel-head"><h3>Featured</h3><div class="meta">→ detail</div></div>',
@@ -160,30 +207,48 @@ with feat_col, st.container(key="scr_featured"):
     )
     feat = wide.copy()
     feat["_mc"] = pd.to_numeric(feat.get(MARKET_CAP), errors="coerce")
-    feat = feat.sort_values("_mc", ascending=False, na_position="last").head(8)
-
+    # Top-8 by Market Cap, deduplicated by company keeping the highest cap — so dual-class
+    # names (GOOG/GOOGL, FOX/FOXA) take one slot and free the next for a distinct company.
+    feat["_cokey"] = feat["company"].map(_company_key)
+    feat = (
+        feat.sort_values("_mc", ascending=False, na_position="last")
+        .drop_duplicates("_cokey", keep="first")
+        .head(8)
+    )
     feat_rows = feat.to_dict("records")
+
+    # ONE <style> block painting each tile's logo as its button background. Built once from
+    # the top-8 (marker-guarded so it can't stack on rerun). Key present → Logo.dev hotlink
+    # (the CDN's own monogram covers misses, since has_logo isn't carried in `wide`); key
+    # absent → inline data-URI monogram. Tickers are exact per-ticker st-key classes (dots
+    # escaped), so this never reaches the tab buttons or the keyless `Open` fallback.
+    rules: list[str] = []
+    for rec in feat_rows:
+        tkr = str(rec["ticker"])
+        co = str(rec.get("company") or tkr)
+        bg = f"url('{logo_dev_url(tkr, _LOGO_KEY)}')" if _LOGO_KEY else _monogram_data_uri(co)
+        rules.append(
+            f".st-key-scr_feat_{_css_token(tkr)} button{{background-image:{bg};"
+            "background-size:contain;background-position:center;background-repeat:no-repeat;}"
+        )
+    if feat_rows:
+        st.html("<style>/* scr-feat-logos */ " + " ".join(rules) + "</style>")
+
     for r0 in range(0, len(feat_rows), 4):
         for cell, rec in zip(st.columns(4), feat_rows[r0:r0 + 4], strict=False):
             ticker = str(rec["ticker"])
             company = str(rec.get("company") or ticker)
             with cell:
-                # Key present → reuse the Logo.dev render (has_logo not carried in `wide`, so
-                # pass None: the CDN covers misses). Key absent → inline editorial monogram,
-                # WITHOUT re-touching st.secrets (see _LOGO_KEY). Never raises.
-                if _LOGO_KEY:
-                    logo = _render_company_logo(ticker, company, None)
-                else:
-                    letter = html.escape((company or ticker).strip()[:1].upper() or "•")
-                    logo = f'<div class="company-logo is-monogram"><span class="logo-monogram">{letter}</span></div>'
+                # The button IS the logo box (styled via .st-key-scr_feat_*); its label is
+                # transparent so the artwork shows. Company name → tooltip, not a 3rd line.
+                # _go_to runs in the main flow (not on_click) — matches the proven handoff
+                # pattern and keeps st.switch_page out of a callback.
+                if st.button(ticker, key=f"scr_feat_{ticker}", help=company, use_container_width=True):
+                    _go_to(ticker)
                 st.markdown(
-                    f'<div class="scr-tile">{logo}'
-                    f'<div class="scr-tile-tkr">{html.escape(ticker)}</div>'
-                    f'<div class="scr-tile-co">{html.escape(company)}</div></div>',
+                    f'<div class="scr-tile-tkr">{html.escape(ticker)}</div>',
                     unsafe_allow_html=True,
                 )
-                if st.button("→", key=f"scr_feat_{ticker}", use_container_width=True):
-                    _go_to(ticker)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Filters (top)

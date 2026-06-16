@@ -857,14 +857,15 @@ div[data-baseweb="popover"] div[role="option"]:hover {
 
 /* ============================================================
  * SCREENER LANDING — Streamlit-app-only (below the overrides).
- * The stat band reuses the shared .kpi-strip/.kpi classes (no change there).
- * Reuses existing vars only. Button rules are scoped by the EXACT st-key-NAME
- * container class Streamlit emits per st.container(key=NAME), so they never touch
- * the tab buttons or the keyless `Open` fallback. Scope with exact `.st-key-NAME`
- * classes, NOT `[class*=...]` substring selectors. IMPORTANT: keep angle-bracket
- * tag tokens out of these comments — inject_css wraps this file in a style element,
- * so a literal tag token here would prematurely close it and drop all the CSS.
- * Single block; do not duplicate.
+ * Variant 2 "fold superior": stat band (shared .kpi-strip/.kpi — unchanged here),
+ * a clickable sector strip, and a featured-logo row. Reuses existing vars only.
+ * Button rules are scoped to the EXACT st-key container classes Streamlit emits
+ * per st.container(key=NAME) (.st-key-scr_sectors / .st-key-scr_featured), plus
+ * EXACT per-ticker .st-key-scr_feat_TICKER classes for the logo backgrounds — never
+ * `[class*=...]` substrings — so they never touch the tab buttons or the keyless
+ * `Open` fallback. IMPORTANT: keep angle-bracket tag tokens out of these comments —
+ * inject_css wraps this file in a style element, so a literal tag token here would
+ * prematurely close it and drop all the CSS. Single block; do not duplicate.
  * ============================================================ */
 .scr-panel-head {
   display: flex; align-items: baseline; justify-content: space-between;
@@ -879,25 +880,29 @@ div[data-baseweb="popover"] div[role="option"]:hover {
   text-transform: uppercase; color: var(--ink-3);
 }
 
-/* Sector strip — proportional bar sits flush under its full-width button. */
-.scr-bar-wrap { display: flex; align-items: center; gap: 8px; margin: -4px 6px 8px; }
-.scr-bar-wrap .scr-rest-label {
-  font-family: var(--sans); font-size: 12.5px; color: var(--ink-3); flex: 0 0 auto;
-}
-.scr-bar { position: relative; flex: 1; height: 6px; background: var(--bg-subtle); border-radius: 3px; }
-.scr-bar-fill { position: absolute; inset: 0 auto 0 0; background: var(--accent); border-radius: 3px; }
-.scr-bar-wrap.is-active .scr-bar-fill { background: var(--accent-ink); }
-.scr-bar-wrap.resto .scr-bar-fill { background: var(--rule); }
-.scr-bar-count {
+/* Sector strip — proportional track + count on ONE line, sat tight under each row's
+   flat button (recosed: name above, bar+count just below). */
+.scr-barline { display: flex; align-items: center; gap: 8px; margin: 0 6px 2px; }
+.scr-track { position: relative; flex: 1; height: 7px; background: var(--bg-subtle); border-radius: 4px; }
+.scr-fill { position: absolute; inset: 0 auto 0 0; background: var(--accent); border-radius: 4px; }
+.scr-barline.is-active .scr-fill { background: var(--accent-ink); }
+.scr-barline.resto .scr-fill { background: var(--rule); }
+.scr-count {
   font-family: var(--mono); font-size: 10px; color: var(--ink-3);
-  min-width: 36px; text-align: right;
+  flex: 0 0 34px; text-align: right;
+}
+/* "resto" label apes the flat sector button (left-aligned, muted) but isn't clickable. */
+.scr-rest-label {
+  font-family: var(--sans); font-size: 12.5px; font-weight: 500; color: var(--ink-3);
+  padding: 3px 6px; margin: 0 6px;
 }
 
-/* Tighten the vertical rhythm inside the two fold panels (exact st-key container class). */
+/* Tight vertical rhythm inside the two fold panels (exact st-key container classes). */
 .st-key-scr_sectors [data-testid="stVerticalBlock"],
 .st-key-scr_featured [data-testid="stVerticalBlock"] { gap: 0.2rem; }
 
-/* Flat editorial buttons for the sector rows + reset (scoped to the sector container). */
+/* Flat, left-aligned editorial buttons for the sector rows + reset (scoped to the
+   sector container so the tab bar and the keyless `Open` fallback stay untouched). */
 .st-key-scr_sectors button {
   background: transparent !important; border: none !important; border-radius: 2px !important;
   padding: 3px 6px !important; min-height: 0 !important;
@@ -908,30 +913,25 @@ div[data-baseweb="popover"] div[role="option"]:hover {
 .st-key-scr_sectors button:hover { color: var(--ink) !important; background: var(--bg-hover) !important; }
 .st-key-scr_sec_reset button { color: var(--ink-3) !important; font-size: 11px !important; }
 
-/* Featured logo tiles (scaled-down .company-logo) + compact go-to button. */
-.scr-tile { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 6px; padding: 6px 2px 4px; }
-.scr-tile .company-logo {
-  width: 58px; height: 58px; flex: 0 0 58px; border-radius: 10px; padding: 6px;
-}
-.scr-tile .company-logo .logo-monogram { font-size: 24px; }
-.scr-tile-tkr {
-  font-family: var(--mono); font-size: 11px; font-weight: 500;
-  color: var(--ink); letter-spacing: 0.04em;
-}
-.scr-tile-co {
-  font-size: 9.5px; color: var(--ink-3); line-height: 1.2;
-  max-width: 92px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
+/* Featured tiles — the button IS the logo box. The logo/monogram is painted as a
+   background-image by a per-ticker rule injected from the view (one <style> block);
+   the ticker label is transparent so it doesn't fight the artwork. The white card bg
+   matches the masthead logo box; transparent-PNG logos sit on it cleanly. */
 .st-key-scr_featured button {
-  background: transparent !important; border: 1px solid var(--rule) !important; border-radius: 3px !important;
-  padding: 1px 0 !important; min-height: 0 !important;
-  font-family: var(--mono) !important; font-size: 11px !important; color: var(--ink-2) !important;
+  height: 62px; min-height: 62px !important; width: 100%;
+  background-color: var(--bg-card) !important; background-size: contain;
+  background-position: center; background-repeat: no-repeat;
+  border: 0.5px solid var(--rule) !important; border-radius: 6px !important;
+  padding: 8px !important; color: transparent !important;
 }
-.st-key-scr_featured button:hover {
-  background: var(--ink) !important; color: var(--bg) !important; border-color: var(--ink) !important;
+.st-key-scr_featured button:hover { background-color: var(--bg-hover) !important; border-color: var(--rule) !important; }
+.st-key-scr_featured button p { color: transparent !important; }
+.scr-tile-tkr {
+  font-family: var(--mono); font-size: 11px; font-weight: 500; text-align: center;
+  color: var(--ink); letter-spacing: 0.04em; margin: 3px 0 2px;
 }
 
 /* Mobile: fold panels stack (Streamlit handles the column reflow). */
 @media (max-width: 880px) {
-  .scr-bar-count { min-width: 28px; }
+  .scr-count { flex-basis: 28px; }
 }

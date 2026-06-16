@@ -83,6 +83,15 @@ def _logo_dev_key() -> str | None:
         return None
 
 
+def logo_dev_url(ticker: str, key: str, size: int = 144) -> str:
+    """Logo.dev CDN hotlink (PNG) for a ticker. Caller must hold a publishable `key`.
+
+    Shared by the masthead logo box and the screener's featured tiles so the URL shape
+    lives in one place; `ticker`/`key` are URL-escaped. We deliberately omit fallback=404
+    so Logo.dev's own monogram covers misses (Streamlit strips img onerror)."""
+    return f"{LOGO_DEV_BASE}/{html.escape(ticker)}?token={html.escape(key)}&size={size}&format=png"
+
+
 def _render_company_logo(ticker: str, company: str, has_logo: bool | None) -> str:
     """Logo box for the masthead.
 
@@ -102,7 +111,7 @@ def _render_company_logo(ticker: str, company: str, has_logo: bool | None) -> st
     if not key or has_logo is False:
         letter = html.escape((company or ticker).strip()[:1].upper() or "•")
         return f'<div class="company-logo is-monogram"><span class="logo-monogram">{letter}</span></div>'
-    src = f"{LOGO_DEV_BASE}/{html.escape(ticker)}?token={html.escape(key)}&size=144&format=png"
+    src = logo_dev_url(ticker, key)
     style = (
         f"background-image:url('{src}');background-size:contain;"
         "background-repeat:no-repeat;background-position:center;"
