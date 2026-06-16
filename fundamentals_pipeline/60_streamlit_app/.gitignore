@@ -4,3 +4,6 @@ fixtures/*.json
 __pycache__/
 *.pyc
 .env
+
+# Streamlit Cloud secrets — local-only; never commit (Logo.dev publishable_key etc.)
+.streamlit/secrets.toml
