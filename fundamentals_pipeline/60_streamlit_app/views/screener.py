@@ -207,13 +207,15 @@ with feat_col, st.container(key="scr_featured"):
     )
     feat = wide.copy()
     feat["_mc"] = pd.to_numeric(feat.get(MARKET_CAP), errors="coerce")
-    # Top-8 by Market Cap, deduplicated by company keeping the highest cap — so dual-class
-    # names (GOOG/GOOGL, FOX/FOXA) take one slot and free the next for a distinct company.
+    # Top-12 by Market Cap (3 rows of 4), deduplicated by company keeping the highest cap —
+    # so dual-class names (GOOG/GOOGL, FOX/FOXA) take one slot and free the next for a
+    # distinct company. Row 3 reaches mid-caps where Logo.dev hits less, so expect more of
+    # the CDN's own monograms there — expected, not a break.
     feat["_cokey"] = feat["company"].map(_company_key)
     feat = (
         feat.sort_values("_mc", ascending=False, na_position="last")
         .drop_duplicates("_cokey", keep="first")
-        .head(8)
+        .head(12)
     )
     feat_rows = feat.to_dict("records")
 
