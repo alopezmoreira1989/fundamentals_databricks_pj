@@ -6,12 +6,25 @@ import io
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, NoReturn
 
 import pandas as pd
 import requests
 import streamlit as st
+
+# Import the shared export↔app schema contract. Streamlit Cloud clones the whole repo, so
+# parents[3] of this file is the repo root (.../60_streamlit_app/lib/data.py → repo root).
+# _core is pure Python (no Spark/Databricks dep), so this keeps the app Databricks-free.
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+from fundamentals_pipeline._core.schemas import (  # noqa: E402
+    SchemaError,
+    validate_artifact,
+    validate_meta,
+)
 
 OWNER = "alopezmoreira1989"
 REPO  = "fundamentals_databricks_pj"
@@ -78,6 +91,18 @@ def load_latest_data() -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
             else:
                 _render_load_error(exc)   # st.error + st.stop(), no retorna
 
+    # Schema contract — validate the RAW loaded frames (the contract tolerates the
+    # object/date dtypes parquet yields pre-normalization). A violation means the
+    # published artifacts drifted from what this app version expects → hard-stop with a
+    # readable error rather than rendering a broken page (data + metrics are the core).
+    violations = (
+        validate_artifact("dashboard_data", data)
+        + validate_artifact("dashboard_metrics", metrics)
+        + validate_meta(meta)
+    )
+    if violations:
+        _render_load_error(SchemaError("\n  - ".join(["Published data is incompatible with this app version:", *violations])))
+
     # Normalize types: parquet preserves None (not NaN) for missing strings,
     # which breaks pandas groupby/pivot. Convert to proper NaN.
     for col in ("section", "group", "display_name"):
@@ -120,6 +145,14 @@ def load_prices() -> pd.DataFrame:
     if df.empty:
         return empty
 
+    # SOFT schema check: the Price tab must never block the rest of the app, so on a
+    # contract violation we log + degrade to "no data" instead of st.stop(). Validated on
+    # the raw frame (date as object/date, ticker as object) — the contract accepts both.
+    violations = validate_artifact("dashboard_prices", df)
+    if violations:
+        print("⚠️ dashboard_prices failed schema validation — degrading to no-data:\n  - " + "\n  - ".join(violations))
+        return empty
+
     df["date"] = pd.to_datetime(df["date"])
     # Do NOT route through _optimize_dtypes: it would downcast nothing harmful here,
     # but close/adj_close must stay float64 (BRK.A-class prices lose cents in float32).
@@ -130,9 +163,19 @@ def load_prices() -> pd.DataFrame:
 def _render_load_error(exc: Exception) -> NoReturn:
     """Show a readable st.error based on failure type and stop execution.
 
-    Distinguishes the "data not yet published" case (missing `latest` Release → 404)
-    from other network failures. `st.stop()` prevents the raw traceback from surfacing.
+    Distinguishes the "data not yet published" case (missing `latest` Release → 404),
+    an incompatible-format case (SchemaError), and other network failures. `st.stop()`
+    prevents the raw traceback from surfacing.
     """
+    if isinstance(exc, SchemaError):
+        st.error(
+            "**The published data is incompatible with this version of the app.**\n\n"
+            "The data format no longer matches what the app expects — the app code and the "
+            "published artifacts are out of sync. Redeploy the app from the matching commit, "
+            "or re-run the publish step (`50_publish/51` → `52`).\n\n"
+            f"```\n{exc}\n```"
+        )
+        st.stop()
     is_404 = (
         isinstance(exc, requests.HTTPError)
         and getattr(exc.response, "status_code", None) == 404

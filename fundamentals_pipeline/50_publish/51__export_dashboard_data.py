@@ -25,10 +25,31 @@
 # COMMAND ----------
 
 import json
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
+
+
+# Make the pure-Python schema contract importable (fundamentals_pipeline/_core/schemas.py).
+# Databricks-only note: this is a notebook (no __file__), so we walk up from the working
+# directory to find the repo root. In a Databricks Repo the root is usually already on
+# sys.path (Files-in-Repos); this is a defensive fallback so the assert below also works
+# under a Job, %run, or Databricks Connect.
+def _ensure_core_on_path() -> None:
+    for _cand in (Path.cwd(), *Path.cwd().parents):
+        if (_cand / "fundamentals_pipeline" / "_core" / "schemas.py").exists():
+            if str(_cand) not in sys.path:
+                sys.path.insert(0, str(_cand))
+            return
+
+
+try:
+    from fundamentals_pipeline._core import schemas as _schemas
+except ModuleNotFoundError:
+    _ensure_core_on_path()
+    from fundamentals_pipeline._core import schemas as _schemas
 
 SCHEMA_VERSION = 6   # +sector (GICS) on ticker_meta
 FY_YEARS       = 10
@@ -260,6 +281,13 @@ else:
 financials.attrs = {}
 metrics.attrs = {}
 prices.attrs = {}
+
+# Schema contract — fail the run LOUDLY rather than shipping an artifact the public app
+# can't read. assert_artifact raises SchemaError naming the offending artifact/column.
+_schemas.assert_artifact("dashboard_data", financials)
+_schemas.assert_artifact("dashboard_metrics", metrics)
+_schemas.assert_artifact("dashboard_prices", prices)
+
 financials.to_parquet(DATA_PARQUET, index=False)
 metrics.to_parquet(METRIC_PARQUET, index=False)
 prices.to_parquet(PRICE_PARQUET, index=False)
@@ -290,6 +318,7 @@ meta = {
         "price_years":  PRICE_YEARS,
     },
 }
+_schemas.assert_meta(meta)
 META_JSON.write_text(json.dumps(meta, indent=2, default=str))
 
 print("\n✓ Wrote:")
