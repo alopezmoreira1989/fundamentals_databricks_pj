@@ -205,11 +205,17 @@ def _company_key(name: str) -> str:
 
 
 with feat_col, st.container(key="scr_featured"):
+    # Featured follows the active sector — the same session key the bars (via _set_sector)
+    # and the filter selectbox both write. Default "All sectors" → top-12 global, since
+    # sector_mask is a no-op there (no special-casing). The header names the active sector.
+    active_sector = st.session_state.get(SECTOR_KEY, SECTORS[0])
+    feat_title = "Featured" if active_sector == SECTORS[0] else f"Featured · {active_sector}"
     st.markdown(
-        '<div class="scr-panel-head"><h3>Featured</h3><div class="meta">→ detail</div></div>',
+        f'<div class="scr-panel-head"><h3>{html.escape(feat_title)}</h3>'
+        '<div class="meta">→ detail</div></div>',
         unsafe_allow_html=True,
     )
-    feat = wide.copy()
+    feat = wide[sector_mask(wide, active_sector)].copy()
     feat["_mc"] = pd.to_numeric(feat.get(MARKET_CAP), errors="coerce")
     # Top-12 by Market Cap (3 rows of 4), deduplicated by company keeping the highest cap —
     # so dual-class names (GOOG/GOOGL, FOX/FOXA) take one slot and free the next for a
