@@ -3,15 +3,24 @@
 Handoff convention (established here): the selected ticker is written to
 ``st.session_state["ticker"]`` and we ``st.switch_page`` to the company detail
 page, which reads the same key.
+
+Above the filters sits an editorial "fold" — a stat band, a clickable
+sector-distribution strip (drives the sector filter), and a featured-companies
+logo row (each tile → detail). All three are pure-frontend reads off the same
+``wide`` frame / published artifacts; no pipeline dependency.
 """
+
+import html
 
 import pandas as pd
 import streamlit as st
+from lib.render import _logo_dev_key, _render_company_logo
 from lib.screener import (
     DEFAULT_COLUMNS,
     MARKET_CAP,
     SECTORS,
     UNIVERSE_FLAGS,
+    UNKNOWN_SECTOR,
     bucket_mask,
     buckets_for,
     build_screener_frame,
@@ -21,11 +30,34 @@ from lib.screener import (
 )
 
 COMPANY_PAGE = "views/company.py"
+SECTOR_KEY = "scr_sector"   # selectbox key the sector strip drives via callback
+
+# Resolve the Logo.dev key ONCE per run. _logo_dev_key() touches st.secrets; with no
+# secrets.toml that surfaces a "No secrets found" alert, and calling it per featured tile
+# (×8) spams the page AND collapses the app's injected <style>. One call here matches the
+# masthead's single access; when it returns None we render monograms without re-touching
+# st.secrets. On deployed apps the key is present, so tiles hotlink Logo.dev as usual.
+_LOGO_KEY = _logo_dev_key()
 
 # st.dataframe row selection (on_select) needs Streamlit ≥ 1.35.
 _HAS_DF_SELECTION = tuple(int(p) for p in st.__version__.split(".")[:2]) >= (1, 35)
 
 wide, unit_map, metric_order = build_screener_frame()
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Handoff + filter callbacks (defined early — the fold widgets below use them)
+# ──────────────────────────────────────────────────────────────────────────────
+def _go_to(ticker: str) -> None:
+    st.session_state["ticker"] = ticker
+    st.switch_page(COMPANY_PAGE)
+
+
+def _set_sector(sector: str) -> None:
+    """on_click callback — runs before the sector selectbox is instantiated, so writing
+    its session-state key here is the valid way to drive it from the bars."""
+    st.session_state[SECTOR_KEY] = sector
+
 
 st.markdown(
     f'<div class="masthead"><div class="masthead-left">'
@@ -36,6 +68,123 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Fold "superior" — stat band + sector distribution + featured (above the filters)
+# ──────────────────────────────────────────────────────────────────────────────
+def _fmt_dash(value: str | None) -> str:
+    return value if value else "—"
+
+
+def _stat_band() -> str:
+    """4-card stat band reusing the shared .kpi-strip/.kpi classes. Every figure degrades
+    to an em-dash when its source column is missing/empty — never raises."""
+    n = len(wide)
+    companies = f"{n:,}"
+
+    sec = wide["sector"].astype(str) if "sector" in wide.columns else pd.Series(dtype=str)
+    assigned = sec[sec != UNKNOWN_SECTOR]
+    sectors = _fmt_dash(f"{assigned.nunique()} / 11" if not sec.empty else None)
+    pct_assigned = _fmt_dash(f"{100 * len(assigned) / n:.0f}%" if n else None)
+
+    pe = pd.to_numeric(wide["P/E"], errors="coerce") if "P/E" in wide.columns else pd.Series(dtype=float)
+    pe_pos = pe[pe > 0]
+    median_pe = _fmt_dash(f"{pe_pos.median():.1f}x" if not pe_pos.empty else None)
+
+    return (
+        '<div class="kpi-strip">'
+        f'<div class="kpi"><div class="label">Companies</div><div class="value">{companies}</div></div>'
+        f'<div class="kpi"><div class="label">Sectors</div><div class="value">{sectors}</div>'
+        '<div class="delta flat">GICS</div></div>'
+        f'<div class="kpi"><div class="label">Median P/E</div><div class="value">{median_pe}</div>'
+        '<div class="delta flat">latest FY · ex-negatives</div></div>'
+        f'<div class="kpi"><div class="label">% with sector</div><div class="value">{pct_assigned}</div>'
+        '<div class="delta flat">Wikipedia GICS → IWV → favorites</div></div>'
+        '</div>'
+    )
+
+
+st.markdown(_stat_band(), unsafe_allow_html=True)
+
+dist_col, feat_col = st.columns([1.05, 1])
+
+# --- Sector distribution (left, clickable) ---------------------------------------------
+with dist_col, st.container(key="scr_sectors"):
+    st.markdown(
+        '<div class="scr-panel-head"><h3>Universe by sector</h3>'
+        '<div class="meta">click to filter</div></div>',
+        unsafe_allow_html=True,
+    )
+    if "sector" in wide.columns:
+        counts = wide["sector"].value_counts()
+        counts = counts[counts.index != UNKNOWN_SECTOR]
+    else:
+        counts = pd.Series(dtype=int)
+    top = counts.head(5)
+    max_count = int(top.max()) if not top.empty else 1
+    active_sector = st.session_state.get(SECTOR_KEY, SECTORS[0])
+
+    for sector, cnt in top.items():
+        slug = str(sector).lower().replace(" ", "_")
+        is_active = " is-active" if sector == active_sector else ""
+        st.button(str(sector), key=f"scr_sec_{slug}", on_click=_set_sector, args=(str(sector),),
+                  use_container_width=True)
+        pct = min(100.0, int(cnt) / max_count * 100)
+        st.markdown(
+            f'<div class="scr-bar-wrap{is_active}"><div class="scr-bar">'
+            f'<div class="scr-bar-fill" style="width:{pct:.0f}%"></div></div>'
+            f'<span class="scr-bar-count">{int(cnt):,}</span></div>',
+            unsafe_allow_html=True,
+        )
+
+    # "resto" — display-only muted aggregate of the remaining sectors.
+    rest = counts.iloc[5:]
+    if not rest.empty:
+        rest_pct = min(100.0, int(rest.sum()) / max_count * 100)
+        st.markdown(
+            f'<div class="scr-bar-wrap resto"><span class="scr-rest-label">+ {rest.size} more</span>'
+            f'<div class="scr-bar"><div class="scr-bar-fill" style="width:{rest_pct:.0f}%"></div></div>'
+            f'<span class="scr-bar-count">{int(rest.sum()):,}</span></div>',
+            unsafe_allow_html=True,
+        )
+
+    # Reset — always reachable; a no-op when already on "All sectors".
+    st.button("↺ All sectors", key="scr_sec_reset", on_click=_set_sector, args=(SECTORS[0],),
+              use_container_width=True)
+
+# --- Featured companies (right, clickable) ---------------------------------------------
+with feat_col, st.container(key="scr_featured"):
+    st.markdown(
+        '<div class="scr-panel-head"><h3>Featured</h3><div class="meta">→ detail</div></div>',
+        unsafe_allow_html=True,
+    )
+    feat = wide.copy()
+    feat["_mc"] = pd.to_numeric(feat.get(MARKET_CAP), errors="coerce")
+    feat = feat.sort_values("_mc", ascending=False, na_position="last").head(8)
+
+    feat_rows = feat.to_dict("records")
+    for r0 in range(0, len(feat_rows), 4):
+        for cell, rec in zip(st.columns(4), feat_rows[r0:r0 + 4], strict=False):
+            ticker = str(rec["ticker"])
+            company = str(rec.get("company") or ticker)
+            with cell:
+                # Key present → reuse the Logo.dev render (has_logo not carried in `wide`, so
+                # pass None: the CDN covers misses). Key absent → inline editorial monogram,
+                # WITHOUT re-touching st.secrets (see _LOGO_KEY). Never raises.
+                if _LOGO_KEY:
+                    logo = _render_company_logo(ticker, company, None)
+                else:
+                    letter = html.escape((company or ticker).strip()[:1].upper() or "•")
+                    logo = f'<div class="company-logo is-monogram"><span class="logo-monogram">{letter}</span></div>'
+                st.markdown(
+                    f'<div class="scr-tile">{logo}'
+                    f'<div class="scr-tile-tkr">{html.escape(ticker)}</div>'
+                    f'<div class="scr-tile-co">{html.escape(company)}</div></div>',
+                    unsafe_allow_html=True,
+                )
+                if st.button("→", key=f"scr_feat_{ticker}", use_container_width=True):
+                    _go_to(ticker)
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Filters (top)
 # ──────────────────────────────────────────────────────────────────────────────
@@ -44,7 +193,8 @@ with st.container(border=True):
     with c1:
         universe = st.selectbox("Universe", list(UNIVERSE_FLAGS), index=0)
     with c2:
-        sector = st.selectbox("Sector", SECTORS, index=0)
+        # Keyed so the sector strip's callbacks can drive it; default = "All sectors".
+        sector = st.selectbox("Sector", SECTORS, key=SECTOR_KEY)
     with c3:
         query = st.text_input("Search (ticker or name)", "")
     with c4:
@@ -120,11 +270,6 @@ if MARKET_CAP in cols:
         "Market Cap is as of the calendar year-end; fiscal-year metrics (P/E, "
         "margins, …) use the fiscal year-end — a mixed basis for non-December filers."
     )
-
-
-def _go_to(ticker: str) -> None:
-    st.session_state["ticker"] = ticker
-    st.switch_page(COMPANY_PAGE)
 
 
 if _HAS_DF_SELECTION:

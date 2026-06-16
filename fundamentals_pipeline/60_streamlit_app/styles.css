@@ -854,3 +854,84 @@ div[data-baseweb="popover"] div[role="option"]:hover {
 @media (max-width: 880px) {
   .bs-composition { grid-template-columns: 1fr; }
 }
+
+/* ============================================================
+ * SCREENER LANDING — Streamlit-app-only (below the overrides).
+ * The stat band reuses the shared .kpi-strip/.kpi classes (no change there).
+ * Reuses existing vars only. Button rules are scoped by the EXACT st-key-NAME
+ * container class Streamlit emits per st.container(key=NAME), so they never touch
+ * the tab buttons or the keyless `Open` fallback. Scope with exact `.st-key-NAME`
+ * classes, NOT `[class*=...]` substring selectors. IMPORTANT: keep angle-bracket
+ * tag tokens out of these comments — inject_css wraps this file in a style element,
+ * so a literal tag token here would prematurely close it and drop all the CSS.
+ * Single block; do not duplicate.
+ * ============================================================ */
+.scr-panel-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  margin: 2px 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--rule-soft);
+}
+.scr-panel-head h3 {
+  font-family: var(--display); font-size: 16px; font-weight: 500;
+  font-variation-settings: "opsz" 144;
+}
+.scr-panel-head .meta {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+
+/* Sector strip — proportional bar sits flush under its full-width button. */
+.scr-bar-wrap { display: flex; align-items: center; gap: 8px; margin: -4px 6px 8px; }
+.scr-bar-wrap .scr-rest-label {
+  font-family: var(--sans); font-size: 12.5px; color: var(--ink-3); flex: 0 0 auto;
+}
+.scr-bar { position: relative; flex: 1; height: 6px; background: var(--bg-subtle); border-radius: 3px; }
+.scr-bar-fill { position: absolute; inset: 0 auto 0 0; background: var(--accent); border-radius: 3px; }
+.scr-bar-wrap.is-active .scr-bar-fill { background: var(--accent-ink); }
+.scr-bar-wrap.resto .scr-bar-fill { background: var(--rule); }
+.scr-bar-count {
+  font-family: var(--mono); font-size: 10px; color: var(--ink-3);
+  min-width: 36px; text-align: right;
+}
+
+/* Tighten the vertical rhythm inside the two fold panels (exact st-key container class). */
+.st-key-scr_sectors [data-testid="stVerticalBlock"],
+.st-key-scr_featured [data-testid="stVerticalBlock"] { gap: 0.2rem; }
+
+/* Flat editorial buttons for the sector rows + reset (scoped to the sector container). */
+.st-key-scr_sectors button {
+  background: transparent !important; border: none !important; border-radius: 2px !important;
+  padding: 3px 6px !important; min-height: 0 !important;
+  justify-content: flex-start !important; text-align: left !important;
+  font-family: var(--sans) !important; font-size: 12.5px !important; font-weight: 500 !important;
+  color: var(--ink-2) !important;
+}
+.st-key-scr_sectors button:hover { color: var(--ink) !important; background: var(--bg-hover) !important; }
+.st-key-scr_sec_reset button { color: var(--ink-3) !important; font-size: 11px !important; }
+
+/* Featured logo tiles (scaled-down .company-logo) + compact go-to button. */
+.scr-tile { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 6px; padding: 6px 2px 4px; }
+.scr-tile .company-logo {
+  width: 58px; height: 58px; flex: 0 0 58px; border-radius: 10px; padding: 6px;
+}
+.scr-tile .company-logo .logo-monogram { font-size: 24px; }
+.scr-tile-tkr {
+  font-family: var(--mono); font-size: 11px; font-weight: 500;
+  color: var(--ink); letter-spacing: 0.04em;
+}
+.scr-tile-co {
+  font-size: 9.5px; color: var(--ink-3); line-height: 1.2;
+  max-width: 92px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.st-key-scr_featured button {
+  background: transparent !important; border: 1px solid var(--rule) !important; border-radius: 3px !important;
+  padding: 1px 0 !important; min-height: 0 !important;
+  font-family: var(--mono) !important; font-size: 11px !important; color: var(--ink-2) !important;
+}
+.st-key-scr_featured button:hover {
+  background: var(--ink) !important; color: var(--bg) !important; border-color: var(--ink) !important;
+}
+
+/* Mobile: fold panels stack (Streamlit handles the column reflow). */
+@media (max-width: 880px) {
+  .scr-bar-count { min-width: 28px; }
+}
