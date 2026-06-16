@@ -30,6 +30,8 @@
 # COMMAND ----------
 
 import json
+import os
+from concurrent.futures import ThreadPoolExecutor
 
 import pandas as pd
 import requests
@@ -118,6 +120,64 @@ def _normalize_sector(raw: object) -> str | None:
     if s in _CANONICAL_SECTORS:
         return s
     return _SECTOR_NORMALIZE.get(s)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 0b. Logo.dev presence probe (`has_logo`)
+# MAGIC
+# MAGIC Probe Logo.dev by ticker and persist only a boolean `has_logo` — **never** the image
+# MAGIC bytes (free-tier terms forbid self-hosting/caching; only the flag is stored). The
+# MAGIC Streamlit masthead uses it to fall back to our editorial monogram for known misses
+# MAGIC instead of Logo.dev's generic one. Key from the `LOGO_DEV_PUBLISHABLE_KEY` env var;
+# MAGIC absent → `has_logo` is NULL for every ticker and the app degrades gracefully (hotlink,
+# MAGIC Logo.dev covers misses).
+# MAGIC
+# MAGIC Databricks-only note: the probe is plain `requests` (no `spark`/`dbutils`), so it runs
+# MAGIC fine under Databricks Connect — but set `LOGO_DEV_PUBLISHABLE_KEY` in the Job/cluster
+# MAGIC environment before the run, or every ticker resolves to NULL.
+
+# COMMAND ----------
+
+# fallback=404 + a tiny size so a miss is an empty 404 (not a monogram) and we transfer
+# almost no bytes. Logo.dev has no per-minute rate limit; keep concurrency modest and polite.
+_LOGO_DEV_PROBE     = "https://img.logo.dev/ticker/{t}?token={k}&fallback=404&size=16&format=png"
+_LOGO_PROBE_WORKERS = 8
+
+
+def _probe_has_logo(ticker: str, key: str, session: requests.Session) -> bool | None:
+    """True if Logo.dev has a real logo for the ticker, False if 404, None on error.
+
+    We persist only the boolean — the image itself is never downloaded or stored.
+    """
+    try:
+        r = session.get(_LOGO_DEV_PROBE.format(t=ticker, k=key), timeout=8)
+        if r.status_code == 200:
+            return True
+        if r.status_code == 404:
+            return False
+        return None
+    except requests.RequestException:
+        return None
+
+
+def resolve_has_logo(tickers: list[str]) -> dict[str, bool | None]:
+    """Map each ticker → has_logo (True hit / False miss / None error). All None when no key."""
+    key = os.environ.get("LOGO_DEV_PUBLISHABLE_KEY")
+    if not key:
+        print("  ⚠ LOGO_DEV_PUBLISHABLE_KEY not set — has_logo = None for all tickers")
+        return {t: None for t in tickers}
+    session = requests.Session()
+    session.headers.update(_HEADERS)
+    with ThreadPoolExecutor(max_workers=_LOGO_PROBE_WORKERS) as ex:
+        results = list(ex.map(lambda t: (t, _probe_has_logo(t, key, session)), tickers))
+    out    = dict(results)
+    hits   = sum(1 for v in out.values() if v is True)
+    misses = sum(1 for v in out.values() if v is False)
+    errs   = sum(1 for v in out.values() if v is None)
+    print(f"  Logo.dev: {hits}/{len(tickers)} have a real logo "
+          f"({hits / max(len(tickers), 1):.1%}) · {misses} miss · {errs} error/None")
+    return out
 
 # COMMAND ----------
 
@@ -387,6 +447,39 @@ print(master[bool_cols].sum().to_string())
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ## 2b. Resolve `has_logo` (Logo.dev presence probe)
+# MAGIC
+# MAGIC Sample-validate a spread of tickers (named large caps + a sweep across the universe
+# MAGIC to catch obscure tail names) and print the result, then probe the full universe and
+# MAGIC attach a nullable boolean `has_logo` column. NULL for every ticker when no key is set.
+
+# COMMAND ----------
+
+# Sample validation before the full sweep: AAPL/MSFT must resolve True with a key; an evenly
+# spread sample exercises the miss path (no market cap here to pick true micro-caps, so the
+# stride sample stands in for the long tail). Printed for eyeballing, then discarded.
+_SAMPLE_NAMED = ["AAPL", "MSFT"]
+_universe     = master["ticker"].tolist()
+_step         = max(len(_universe) // 48, 1)
+_sample       = _SAMPLE_NAMED + [t for t in _universe[::_step] if t not in _SAMPLE_NAMED][:48]
+_sample_res   = resolve_has_logo(_sample)
+for _t in _SAMPLE_NAMED:
+    print(f"    {_t}: has_logo={_sample_res.get(_t)}")
+_sh = sum(1 for v in _sample_res.values() if v is True)
+_sm = sum(1 for v in _sample_res.values() if v is False)
+_sn = sum(1 for v in _sample_res.values() if v is None)
+print(f"  sample({len(_sample)}): {_sh} hit · {_sm} miss · {_sn} none")
+
+# COMMAND ----------
+
+# Full-universe resolution → nullable boolean column on master (object dtype keeps None as
+# NULL, not NaN, for the BooleanType write).
+has_logo_map = resolve_has_logo(_universe)
+master["has_logo"] = master["ticker"].map(has_logo_map).astype("object")
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## 3. Write to Delta
 
 # COMMAND ----------
@@ -398,6 +491,7 @@ schema = StructType([
     StructField("is_favorite", BooleanType(), False),
     StructField("in_sp500",    BooleanType(), False),
     StructField("in_r3000",    BooleanType(), False),
+    StructField("has_logo",    BooleanType(), True),
 ])
 
 sdf = spark.createDataFrame(master, schema=schema)
@@ -450,6 +544,17 @@ spark.sql(f"""
     GROUP BY COALESCE(sector, 'Unknown')
     ORDER BY n DESC
 """).show(20, truncate=False)
+
+# has_logo coverage (NULL = probe skipped / errored — e.g. LOGO_DEV_PUBLISHABLE_KEY unset).
+print("Logo.dev has_logo coverage:")
+spark.sql(f"""
+    SELECT
+        SUM(CASE WHEN has_logo = true  THEN 1 ELSE 0 END) AS with_logo,
+        SUM(CASE WHEN has_logo = false THEN 1 ELSE 0 END) AS no_logo,
+        SUM(CASE WHEN has_logo IS NULL THEN 1 ELSE 0 END) AS null_logo,
+        ROUND(100.0 * SUM(CASE WHEN has_logo = true THEN 1 ELSE 0 END) / COUNT(*), 1) AS pct_with_logo
+    FROM {TARGET_TABLE}
+""").show()
 
 fav_count = spark.sql(f"SELECT COUNT(*) FROM {TARGET_TABLE} WHERE is_favorite").collect()[0][0]
 if fav_count > 0:

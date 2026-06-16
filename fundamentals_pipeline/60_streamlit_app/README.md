@@ -3,10 +3,10 @@
 **Live app: https://alm-equity-fundamentals.streamlit.app/**
 
 A public, editorial-style financial statements dashboard powered by Streamlit
-Community Cloud. Serves ~2,500 tickers (S&P 500 + Russell 2000 proxy) with
-synthetic data for preview. When the Databricks pipeline publishes real data to
-a GitHub Release (`latest` tag), the app picks it up automatically — **no
-Databricks credentials** needed at runtime.
+Community Cloud. Serves ~2,500 tickers (S&P 500 + Russell 2000 proxy). The app
+reads the real data the Databricks pipeline publishes to a GitHub Release
+(`latest` tag) automatically — **no Databricks credentials** needed at runtime.
+Synthetic fixtures exist only as a local dev/preview fallback (see *Fixtures*).
 
 The landing page is a **screener** (one row per company) filterable by index
 universe and by **GICS sector** (the 11 canonical sectors from `meta.tickers`,
@@ -33,9 +33,9 @@ Databricks pipeline (nightly)
                               │
                               ▼
        Streamlit Community Cloud (this app)
-       Reads from: committed fixtures/ (synthetic preview data)
-       Falls back to: github.com/alopezmoreira1989/fundamentals_databricks_pj
-                      /releases/download/latest/{dashboard_data,metrics,prices,backtest,meta}.*
+       Reads from: github.com/alopezmoreira1989/fundamentals_databricks_pj
+                   /releases/download/latest/{dashboard_data,metrics,prices,backtest,meta}.*
+       Dev override: local fixtures/ when DASHBOARD_USE_FIXTURES=1 (gitignored)
                               │
                               ▼
            Anonymous viewer: editorial-newspaper dashboard
@@ -51,32 +51,53 @@ Databricks pipeline (nightly)
 - Python 3.10+
 - `pip install -r requirements.txt`
 
-### Fixture data
+### Fixtures
 
-The repo ships with **committed synthetic fixtures** in `fixtures/` (~2,500
-tickers with AAPL-scaled data). These are used for both local dev and the
-Streamlit Cloud preview deployment.
+`fixtures/` is **local-only** — gitignored except for `.gitkeep`, so the data files
+never get committed. The app reads it **only when `DASHBOARD_USE_FIXTURES=1`** is set;
+otherwise it fetches the published artifacts from the `latest` GitHub Release (falling
+back to `fixtures/` only if that fetch fails). Three ways to populate it:
 
-To regenerate or expand the synthetic fixtures:
+**Real full data (recommended)** — download the exact artifacts the live app serves:
 
 ```bash
-python generate_russell2000_fixtures.py
+gh release download latest \
+  --repo alopezmoreira1989/fundamentals_databricks_pj \
+  --dir fixtures --clobber \
+  --pattern 'dashboard_*.parquet' --pattern 'dashboard_meta.json'
 ```
 
-To replace with real data from Databricks (requires Databricks Connect):
+~2,490 tickers. The `dashboard_*.parquet` glob includes `dashboard_prices.parquet`
+(~44 MB daily OHLC, needed for the price chart and Backtest tabs).
+
+**Real favorites slice** — `fetch_fixtures.py` pulls from Databricks but only
+`is_favorite = true` tickers (~8), so it's a tiny dev slice, not the full universe
+(requires Databricks Connect):
 
 ```bash
 python fetch_fixtures.py
 ```
 
+**Synthetic filler** — `generate_russell2000_fixtures.py` fabricates AAPL-scaled rows
+for a ~2,500-ticker S&P 500 + Russell 2000 proxy. It *appends* to whatever is already in
+`fixtures/` and produces no real numbers — use it for layout/preview only, never to
+"restore" real data:
+
+```bash
+python generate_russell2000_fixtures.py
+```
+
+> On Windows, all three scripts print a `✓` that crashes the cp1252 console — prefix the
+> command with `PYTHONUTF8=1 PYTHONIOENCODING=utf-8`.
+
 ### Run locally
 
 ```bash
-streamlit run app.py
+DASHBOARD_USE_FIXTURES=1 streamlit run app.py
 ```
 
-Open `http://localhost:8501`. The app detects `fixtures/` and reads from there
-instead of GitHub.
+Open `http://localhost:8501`. With `DASHBOARD_USE_FIXTURES=1` the app reads `fixtures/`;
+without it, it fetches from the `latest` GitHub Release (no Databricks credentials needed).
 
 ---
 
@@ -90,8 +111,8 @@ instead of GitHub.
    - **Main file path:** `fundamentals_pipeline/60_streamlit_app/app.py`
 4. Deploy. Streamlit Cloud auto-installs from `requirements.txt`.
 
-**No secrets are needed in Streamlit Cloud** — synthetic fixtures are committed
-to the repo.
+**No secrets are needed in Streamlit Cloud** — the app reads the public GitHub
+Release artifacts at runtime; no Databricks credentials and no committed data.
 
 ---
 
@@ -126,7 +147,7 @@ app.py                                  entry point
 styles.css                              CSS spec (editorial-newspaper theme + Streamlit overrides)
 notes.json                              ticker-specific footnotes
 .streamlit/config.toml                  Streamlit theme
-fixtures/                               synthetic data (~2,500 tickers, committed)
+fixtures/                               local-only data cache (gitignored except .gitkeep)
 ├── dashboard_data.parquet              financials (long-format)
 ├── dashboard_metrics.parquet           derived metrics
 └── dashboard_meta.json                 tickers, FY ranges, row counts
