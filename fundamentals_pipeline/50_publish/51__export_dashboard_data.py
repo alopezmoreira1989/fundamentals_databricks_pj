@@ -51,7 +51,7 @@ except ModuleNotFoundError:
     _ensure_core_on_path()
     from fundamentals_pipeline._core import schemas as _schemas
 
-SCHEMA_VERSION = 6   # +sector (GICS) on ticker_meta
+SCHEMA_VERSION = 7   # +has_logo (Logo.dev presence flag) on ticker_meta
 FY_YEARS       = 10
 QUARTERS       = 12
 PRICE_YEARS    = 10                              # daily-price retention window (calendar years)
@@ -74,7 +74,7 @@ BACKTEST_PARQUET = OUT_DIR / "dashboard_backtest.parquet"
 # screener's universe filter. COALESCE to false so NULLs don't leak through.
 tickers_df = spark.sql(f"""
     SELECT
-      t.ticker, t.company, t.sector,
+      t.ticker, t.company, t.sector, t.has_logo,
       COALESCE(t.is_favorite, false) AS is_favorite,
       COALESCE(t.in_sp500,    false) AS in_sp500,
       COALESCE(t.in_r3000,    false) AS in_r3000
@@ -95,6 +95,9 @@ ticker_meta = [
         "ticker":      r.ticker,
         "company":     r.company,
         "sector":      r.sector,   # NULL → app maps to "Unknown"
+        # has_logo: True hit / False miss / None (probe skipped or errored). Keep it a
+        # native bool|None — pd.NA / numpy bool_ would be stringified by json.dumps(default=str).
+        "has_logo":    None if pd.isna(r.has_logo) else bool(r.has_logo),
         "is_favorite": bool(r.is_favorite),
         "in_sp500":    bool(r.in_sp500),
         "in_r3000":    bool(r.in_r3000),

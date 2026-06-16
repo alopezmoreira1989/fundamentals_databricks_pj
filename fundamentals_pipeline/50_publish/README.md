@@ -129,14 +129,18 @@ Long-format derived metrics joined with the metrics hierarchy.
 
 ```json
 {
-  "schema_version":   2,
+  "schema_version":   7,
   "build_timestamp":  "2026-05-24T20:13:04+00:00",
-  "tickers":          [{"ticker": "AAPL", "company": "Apple Inc."}, ...],
+  "tickers":          [{"ticker": "AAPL", "company": "Apple Inc.", "sector": "Information Technology", "has_logo": true}, ...],
   "fy_ranges":        [{"ticker": "AAPL", "fy_min": 2015, "fy_max": 2024}, ...],
   "row_counts":       {"financials": 1621944, "metrics": 1176410},
-  "retention":        {"fy_years": 10, "quarterly_periods": 12}
+  "retention":        {"fy_years": 10, "quarters": 12}
 }
 ```
 
 Bumping `SCHEMA_VERSION` in `51__export_dashboard_data.py` is a signal to the
 Streamlit app that the columns changed — keep the two in sync.
+
+Per-ticker `has_logo` (v7) is a Logo.dev presence flag: `true` = real logo, `false` =
+known miss (app renders an editorial monogram), absent/`null` = probe skipped
+(`LOGO_DEV_PUBLISHABLE_KEY` unset) or a pre-v7 snapshot. `sector` arrived in v6.

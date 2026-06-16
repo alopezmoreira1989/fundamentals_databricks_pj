@@ -143,7 +143,7 @@ def main():
     )
 
     meta = {
-        "schema_version":  6,
+        "schema_version":  7,
         "build_timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "tickers":         ticker_meta,
         "fy_ranges":       fy_ranges,

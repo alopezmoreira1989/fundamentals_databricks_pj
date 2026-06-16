@@ -225,7 +225,7 @@ def main():
             )
 
     meta = {
-        "schema_version": 6,
+        "schema_version": 7,
         "build_timestamp": datetime.now(timezone.utc).isoformat(),
         "tickers": all_tickers_info,
         "fy_ranges": fy_ranges,
