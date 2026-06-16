@@ -11,11 +11,12 @@ and degrades to "" (chart hidden) when its required concept is missing.
 
 from __future__ import annotations
 
+import html
 import math
 
 import pandas as pd
 
-from .colors import AMBER, BLUE, CORAL, GREEN, PURPLE
+from .colors import BLUE, GREEN
 from .format import is_missing, short_year
 from .quarterly import _nice_ceil, _nice_ticks
 from .tables import get_year_columns
@@ -215,14 +216,81 @@ def render_is_revenue_combo(df_is: pd.DataFrame) -> str:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Balance sheet — Assets | Liabilities + Equity composition (A = L + E)
+# Balance sheet — liquidity-ramp composition (family → current/non-current → line item)
 # ──────────────────────────────────────────────────────────────────────────────
+#
+# Two equal-height stacked bars (Assets | Liabilities + Equity) on the left and a
+# hierarchical legend on the right, laid out with a CSS grid (align-items:stretch lets
+# the bars fill the taller legend column, so A = L + E is visual with no dead space).
+# Colour encodes liquidity: a dark→light ramp per family (dark = most liquid). The bars
+# are flex columns; each segment's flex-grow is its $-value, so both stacks — sharing the
+# same Total Assets total — render at identical scale. See the .bs-* classes in styles.css.
+
+# Liquidity ramp endpoints — on-family extensions of the accent / coral palette
+# (dark = most liquid, light = most immobilized); equity is the solid positive green.
+_ASSET_DARK, _ASSET_LIGHT = "#0E3D6B", "#C9DBED"
+_LIAB_DARK, _LIAB_LIGHT = "#7A2415", "#E2B0A4"
+_EQUITY = GREEN  # #0F6E56 (--positive)
+
+# Fixed liquidity rank per subgroup: (display label, concept). Order is liquidity, never
+# value — the item cap below picks the largest 5, but they stay in this order on the bar.
+_ASSET_CURRENT = [
+    ("Cash & equivalents", "Cash & Equivalents"),
+    ("ST investments", "Short-term Investments"),
+    ("Receivables", "Accounts Receivable"),
+    ("Inventory", "Inventory"),
+]
+_ASSET_NONCURRENT = [
+    ("PP&E", "PP&E Net"),
+    ("Goodwill", "Goodwill"),
+    ("Intangibles", "Intangible Assets"),
+]
+_LIAB_CURRENT = [
+    ("Payables", "Accounts Payable"),
+    ("ST debt", "Short-term Debt"),
+]
+_LIAB_NONCURRENT = [
+    ("LT debt", "Long-term Debt"),
+]
+
+_SEG_CAP = 5          # max line items kept per subgroup (remainder folds into Other)
+_EPS = 1e6            # $-threshold below which an Other plug is treated as zero
+
+
+def _hex_to_rgb(h: str) -> tuple[int, int, int]:
+    h = h.lstrip("#")
+    return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+
+
+def _lerp_hex(c0: str, c1: str, t: float) -> str:
+    a, b = _hex_to_rgb(c0), _hex_to_rgb(c1)
+    rgb = tuple(round(a[i] + (b[i] - a[i]) * t) for i in range(3))
+    return f"#{rgb[0]:02X}{rgb[1]:02X}{rgb[2]:02X}"
+
+
+def _ramp(c0: str, c1: str, n: int) -> list[str]:
+    """n colours from dark c0 to light c1 (single colour → c0)."""
+    if n <= 1:
+        return [c0] * max(n, 0)
+    return [_lerp_hex(c0, c1, i / (n - 1)) for i in range(n)]
+
+
+def _ink_for(hex_color: str) -> str:
+    """Dark ink on light shades, cream on dark — so in-bar labels stay readable."""
+    r, g, b = _hex_to_rgb(hex_color)
+    lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+    return _INK if lum > 0.6 else _CREAM
+
 
 def render_bs_composition(df_bs: pd.DataFrame, year: int) -> str:
-    """Two stacked bars (Assets | Liabilities + Equity) for one fiscal year, both sized to
-    the same total so they reach equal height — making ``A = L + E`` visual. An ``Other``
-    bucket per bar absorbs the remainder so each bar ties out to the total exactly.
-    Returns "" when Total Assets is unavailable for the selected year.
+    """Liquidity-ramp balance-sheet composition for one fiscal year.
+
+    Three-level hierarchy (family → current/non-current → line item), colour-encoding
+    liquidity (dark = most liquid). Two equal-height bars (Assets | Liabilities + Equity)
+    on the left, a hierarchical legend with every subtotal on the right. Each group's
+    ``Other …`` = subtotal − Σ(identified line items) so every bar ties out exactly to
+    Total Assets. Filers without a current/non-current split (banks, insurers) render a
+    single liquidity ramp per side. Returns "" when Total Assets is missing for the year.
     """
     if df_bs.empty:
         return ""
@@ -234,115 +302,146 @@ def render_bs_composition(df_bs: pd.DataFrame, year: int) -> str:
         v = r.iloc[0].get(year)
         return None if is_missing(v) else float(v)
 
-    def clamp(concept: str) -> float:
-        v = val(concept)
-        return max(0.0, v) if v is not None else 0.0
-
     total = val("Total Assets")
     if total is None or total <= 0:
         return ""
 
-    # Left bar — Assets (anchor: Total Assets; Other absorbs Goodwill/Intangibles/etc.).
-    cash = clamp("Cash & Equivalents") + clamp("Short-term Investments")
-    recv = clamp("Accounts Receivable")
-    inv = clamp("Inventory")
-    ppe = clamp("PP&E Net")
-    a_other = max(0.0, total - (cash + recv + inv + ppe))
-    assets_segs = [
-        ("Cash & Inv.", cash, _ACCENT_INK, _CREAM),
-        ("Receivables", recv, _ACCENT, _CREAM),
-        ("Inventory", inv, _ACCENT_MID, _CREAM),
-        ("PP&E", ppe, _ACCENT_LT, _INK),
-        ("Other", a_other, _ACCENT_SOFT, _INK),
-    ]
+    def build_subgroup(name, items, subtotal: float) -> dict:
+        """Identified line items (clamped ≥0, capped at 5 by abs value) + an Other plug so
+        the subgroup sums exactly to ``subtotal``. Items stay in liquidity order."""
+        subtotal = max(0.0, subtotal)
+        present = [(lbl, max(0.0, v)) for lbl, c in items if (v := val(c)) is not None and v > 0]
+        if len(present) > _SEG_CAP:
+            keep = {lbl for lbl, _ in sorted(present, key=lambda x: x[1], reverse=True)[:_SEG_CAP]}
+            present = [(lbl, v) for lbl, v in present if lbl in keep]
+        segs = [{"name": lbl, "value": v} for lbl, v in present]
+        other = subtotal - sum(s["value"] for s in segs)
+        if other > _EPS:
+            label = f"Other {name.lower()}" if name else "Other"
+            segs.append({"name": label, "value": other})
+        return {"name": name, "subtotal": subtotal, "segs": segs}
 
-    # Right bar — Liabilities + Equity (non-equity ties to Total Assets − Equity; + Equity).
-    equity = val("Total Stockholders Equity")
-    if equity is not None:
-        total_liab = max(0.0, total - equity)
+    def assign_ramp(subgroups: list[dict], dark: str, light: str) -> list[dict]:
+        """Colour every visible segment across a family's subgroups along one dark→light
+        ramp, and mark the first segment of the second subgroup as the current/non-current
+        boundary (drawn 2px in CSS)."""
+        flat = [s for sg in subgroups for s in sg["segs"]]
+        ramp = _ramp(dark, light, len(flat))
+        for color, s in zip(ramp, flat, strict=False):
+            s["color"] = color
+            s["ink"] = _ink_for(color)
+        for sg in subgroups[1:]:
+            if sg["segs"]:
+                sg["segs"][0]["boundary"] = True
+                break
+        return flat
+
+    tca, tcl = val("Total Current Assets"), val("Total Current Liabilities")
+    classified = tca is not None and tcl is not None
+
+    # Equity anchors the right side; non-equity = Total Assets − Equity forces the right
+    # bar to tie to Total Assets exactly (so both bars are equal height).
+    tse, tl = val("Total Stockholders Equity"), val("Total Liabilities")
+    if tse is not None:
+        equity = max(0.0, tse)
+    elif tl is not None:
+        equity = max(0.0, total - tl)
     else:
-        total_liab = clamp("Total Liabilities")
-        equity = total - total_liab
-    ap = clamp("Accounts Payable")
-    std = clamp("Short-term Debt")
-    ltd = clamp("Long-term Debt")
-    l_other = max(0.0, total_liab - (ap + std + ltd))
-    le_segs = [
-        ("Payables", ap, CORAL, _CREAM),
-        ("ST Debt", std, AMBER, _CREAM),
-        ("LT Debt", ltd, PURPLE, _CREAM),
-        ("Other liab.", l_other, _LIAB_OTHER, _INK),
-        ("Equity", max(0.0, equity), GREEN, _CREAM),
-    ]
+        equity = 0.0
+    non_equity = max(0.0, total - equity)
 
-    # --- SVG layout: two vertical bars side by side ---
-    W, H = 560, 360
-    plot_top, plot_h = 56, 264
-    bar_w = 150
-    left_x, right_x = 70, 340
-
-    def draw_bar(x: float, segs, title: str) -> list[str]:
-        out: list[str] = [
-            f'<text x="{x + bar_w / 2:.0f}" y="{plot_top - 24}" text-anchor="middle" '
-            f'font-family="{_SANS}" font-size="13" font-weight="600" fill="{_INK}">{title}</text>',
-            f'<text x="{x + bar_w / 2:.0f}" y="{plot_top - 8}" text-anchor="middle" '
-            f'font-family="{_MONO}" font-size="11" fill="{_INK3}">${_b(total)}B</text>',
+    if classified:
+        asset_groups = [
+            build_subgroup("Current", _ASSET_CURRENT, tca),
+            build_subgroup("Non-current", _ASSET_NONCURRENT, total - tca),
         ]
-        cursor = float(plot_top)
-        for name, v, fill, tc in segs:
-            if v <= 0:
+        cur_liab = min(max(0.0, tcl), non_equity)
+        liab_groups = [
+            build_subgroup("Current", _LIAB_CURRENT, cur_liab),
+            build_subgroup("Non-current", _LIAB_NONCURRENT, non_equity - cur_liab),
+        ]
+    else:
+        asset_groups = [build_subgroup("", _ASSET_CURRENT + _ASSET_NONCURRENT, total)]
+        liab_groups = [build_subgroup("", _LIAB_CURRENT + _LIAB_NONCURRENT, non_equity)]
+
+    assets_flat = assign_ramp(asset_groups, _ASSET_DARK, _ASSET_LIGHT)
+    liab_flat = assign_ramp(liab_groups, _LIAB_DARK, _LIAB_LIGHT)
+    equity_seg = {"name": "Equity", "value": equity, "color": _EQUITY, "ink": _ink_for(_EQUITY)}
+
+    def bar_html(title: str, segments: list[dict]) -> str:
+        rows = []
+        for s in segments:
+            if s["value"] <= 0:
                 continue
-            h = v / total * plot_h
-            mid = cursor + h / 2
-            out.append(
-                f'<rect x="{x:.0f}" y="{cursor:.1f}" width="{bar_w}" height="{h:.1f}" '
-                f'fill="{fill}" stroke="#FFFFFF" stroke-width="1"/>'
+            cls = "bs-seg bs-boundary" if s.get("boundary") else "bs-seg"
+            pct = s["value"] / total * 100
+            rows.append(
+                f'<div class="{cls}" style="flex-grow:{s["value"] / 1e9:.4f};'
+                f'background:{s["color"]};color:{s["ink"]};">'
+                f'<span class="bs-seg-name">{html.escape(s["name"])}</span>'
+                f'<span class="bs-seg-val">${_b(s["value"])}B · {pct:.0f}%</span>'
+                '</div>'
             )
-            value_line = f"${_b(v)}B · {v / total * 100:.0f}%"
-            if h >= 30:
-                out.append(
-                    f'<text x="{x + bar_w / 2:.0f}" y="{mid - 3:.1f}" text-anchor="middle" '
-                    f'font-family="{_SANS}" font-size="11.5" font-weight="500" fill="{tc}">{name}</text>'
-                )
-                out.append(
-                    f'<text x="{x + bar_w / 2:.0f}" y="{mid + 12:.1f}" text-anchor="middle" '
-                    f'font-family="{_MONO}" font-size="10" fill="{tc}">{value_line}</text>'
-                )
-            elif h >= 15:
-                out.append(
-                    f'<text x="{x + bar_w / 2:.0f}" y="{mid + 3.5:.1f}" text-anchor="middle" '
-                    f'font-family="{_MONO}" font-size="10" fill="{tc}">{value_line}</text>'
-                )
-            cursor += h
-        return out
+        return (
+            '<div class="bs-bar">'
+            f'<div class="bs-bar-head"><span class="bs-bar-name">{html.escape(title)}</span>'
+            f'<span class="bs-bar-total">${_b(total)}B</span></div>'
+            f'<div class="bs-stack">{"".join(rows)}</div>'
+            '</div>'
+        )
 
-    svg = [f'<svg viewBox="0 0 {W} {H}" width="100%" preserveAspectRatio="xMidYMid meet">']
-    svg += draw_bar(left_x, assets_segs, "Assets")
-    svg += draw_bar(right_x, le_segs, "Liabilities + Equity")
-    svg.append("</svg>")
-    svg_str = "\n".join(svg)
+    def legend_family(name: str, fam_total: float, subgroups: list[dict], dot: str | None = None) -> str:
+        dot_html = f'<span class="bs-leg-dot" style="background:{dot};"></span>' if dot else ""
+        parts = [
+            '<div class="bs-leg-fam"><div class="bs-leg-fam-head">'
+            f'<span class="bs-leg-fam-name">{dot_html}{html.escape(name)}</span>'
+            f'<span class="bs-leg-total">${_b(fam_total)}B</span></div>'
+        ]
+        for sg in subgroups:
+            if sg["name"]:
+                parts.append(
+                    f'<div class="bs-leg-sub"><span>{sg["name"]}</span>'
+                    f'<span>${_b(sg["subtotal"])}B</span></div>'
+                )
+            for s in sg["segs"]:
+                if s["value"] <= 0:
+                    continue
+                parts.append(
+                    '<div class="bs-leg-item">'
+                    f'<span class="bs-leg-dot" style="background:{s["color"]};"></span>'
+                    f'<span class="bs-leg-name">{html.escape(s["name"])}</span>'
+                    f'<span class="bs-leg-val">${_b(s["value"])}B</span></div>'
+                )
+        parts.append("</div>")
+        return "".join(parts)
 
-    yr_label = short_year(year) if isinstance(year, (int, float)) else str(year)
-    caption = (
-        '<div class="footnote" style="display:flex; align-items:center; gap:10px;">'
-        '<span style="color:var(--positive); font-weight:500;">✓ A = L + E — balance verified</span>'
-        '<span class="pipe">|</span>'
-        f'<span>FY{yr_label}: assets ${_b(total)}B tie to liabilities + equity</span>'
+    liab_total = sum(s["value"] for s in liab_flat)
+    bars = (
+        '<div class="bs-bars">'
+        f'{bar_html("Assets", assets_flat)}'
+        f'{bar_html("Liabilities + Equity", liab_flat + [equity_seg])}'
+        '</div>'
+    )
+    legend = (
+        '<div class="bs-legend">'
+        '<div class="bs-leg-key"><span>Liquid</span>'
+        f'<span class="bs-leg-grad" style="background:linear-gradient(90deg,{_ASSET_DARK},{_ASSET_LIGHT});">'
+        '</span><span>Immobilized</span></div>'
+        f'{legend_family("Assets", total, asset_groups)}'
+        f'{legend_family("Liabilities", liab_total, liab_groups)}'
+        f'{legend_family("Equity", equity, [], dot=_EQUITY)}'
         '</div>'
     )
 
+    yr_label = short_year(year) if isinstance(year, (int, float)) else str(year)
     return (
         '<div class="qchart">'
         '<div class="qchart-header">'
         f'<h3>Balance sheet composition · FY{yr_label}</h3>'
-        '<div class="qchart-legend">'
-        f'<span><span class="legend-dot" style="background:{_ACCENT};"></span>Assets</span>'
-        f'<span><span class="legend-dot" style="background:{CORAL};"></span>Liabilities</span>'
-        f'<span><span class="legend-dot" style="background:{GREEN};"></span>Equity</span>'
-        '</div></div>'
-        f'<div style="position:relative;">{svg_str}</div>'
+        '<div class="qchart-legend"><span>$B · ordered by liquidity</span></div>'
         '</div>'
-        f'{caption}'
+        f'<div class="bs-composition">{bars}{legend}</div>'
+        '</div>'
     )
 
 

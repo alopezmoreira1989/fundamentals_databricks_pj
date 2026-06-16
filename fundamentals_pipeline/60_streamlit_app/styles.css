@@ -778,3 +778,79 @@ div[data-baseweb="popover"] div[role="option"]:hover {
 .company-logo .logo-monogram {
   font-family: var(--display); font-size: 30px; font-weight: 600; color: var(--accent-ink);
 }
+
+/* ========= BALANCE SHEET COMPOSITION ========= */
+/* Streamlit-app-only (below the synced section). Liquidity-ramp twin bars (left) +
+   hierarchical legend (right). align-items:stretch drives the row height off the taller
+   column (the legend) and lets the bars fill it — no dead space, and both stacks share one
+   scale (each segment's flex-grow is its $-value; both bars total Total Assets). Bar/legend
+   colours are inline (the per-segment liquidity ramp is computed in charts.py). */
+.bs-composition {
+  display: grid;
+  grid-template-columns: 1.6fr 1fr;
+  gap: 28px;
+  align-items: stretch;
+}
+.bs-bars { display: flex; gap: 16px; min-height: 360px; }
+.bs-bar { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.bs-bar-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 8px; margin-bottom: 8px;
+}
+.bs-bar-name { font-family: var(--sans); font-size: 13px; font-weight: 600; color: var(--ink); }
+.bs-bar-total { font-family: var(--mono); font-size: 11px; color: var(--ink-3); }
+.bs-stack {
+  flex: 1; display: flex; flex-direction: column;
+  border-radius: 4px; overflow: hidden; min-height: 0;
+}
+/* Each segment is its own size container; flex-grow (inline) is its $-value, so segment
+   height is dynamic. min-height:0 lets the flex algorithm shrink small slices. */
+.bs-seg {
+  flex-shrink: 0; flex-basis: 0; min-height: 0;
+  container-type: size;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  text-align: center; overflow: hidden; padding: 0 6px;
+}
+/* 1px inter-segment separators; the current/non-current boundary is a thicker 2px ink rule. */
+.bs-stack .bs-seg + .bs-seg { border-top: 1px solid rgba(250, 248, 244, 0.8); }
+.bs-stack .bs-seg.bs-boundary { border-top: 2px solid var(--ink); }
+.bs-seg-name { font-family: var(--sans); font-size: 11.5px; font-weight: 500; line-height: 1.25; }
+.bs-seg-val { font-family: var(--mono); font-size: 10px; line-height: 1.3; }
+/* Container queries decide label visibility from the segment's own height (no JS / height
+   math): drop the name on short segments, then the value on very short ones. The legend
+   carries every value regardless, so nothing is lost. */
+@container (max-height: 34px) { .bs-seg .bs-seg-name { display: none; } }
+@container (max-height: 17px) { .bs-seg .bs-seg-val { display: none; } }
+
+.bs-legend { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+.bs-leg-key {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+.bs-leg-grad { flex: 1; height: 8px; border-radius: 2px; }
+.bs-leg-fam { margin-top: 8px; }
+.bs-leg-fam-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding-bottom: 5px; border-bottom: 1px solid var(--rule);
+  font-family: var(--sans); font-weight: 600; color: var(--ink);
+}
+.bs-leg-fam-name { display: flex; align-items: center; }
+.bs-leg-total { font-family: var(--mono); font-weight: 500; }
+.bs-leg-sub {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-top: 7px; padding-bottom: 2px;
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+.bs-leg-item { display: flex; align-items: center; gap: 8px; padding: 3px 0; color: var(--ink-2); }
+.bs-leg-dot { display: inline-block; width: 9px; height: 9px; border-radius: 2px; flex: 0 0 9px; margin-right: 6px; }
+.bs-leg-item .bs-leg-dot { margin-right: 0; }
+.bs-leg-name { flex: 1; }
+.bs-leg-val { font-family: var(--mono); color: var(--ink); text-align: right; white-space: nowrap; }
+
+/* Mobile: legend drops below the bars. */
+@media (max-width: 880px) {
+  .bs-composition { grid-template-columns: 1fr; }
+}
