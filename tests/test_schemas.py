@@ -1,8 +1,12 @@
 """Tests for the export↔Streamlit schema contract (_core/schemas.py).
 
-Validates the contract against the committed ``fixtures/`` parquet/meta (data, metrics,
-meta) and a synthetic prices frame (no prices fixture is committed yet), plus negative
-cases (missing column, wrong dtype, bad meta, unknown artifact name).
+The contract-logic tests build **synthetic in-memory** frames/dicts that satisfy
+``_core/schemas.py`` — they never read a file, so the suite is green on a clean checkout
+where the ``fixtures/`` parquet/meta are NOT committed (only ``.gitkeep`` is; they are
+generated at runtime by ``fetch_fixtures.py`` / ``generate_russell2000_fixtures.py``).
+
+The real-fixture validations are kept as thin tests, each ``skipif`` the file is absent,
+so they skip cleanly on a clean clone yet still run locally when fixtures exist.
 """
 
 from __future__ import annotations
@@ -18,19 +22,50 @@ from fundamentals_pipeline._core import schemas
 FIXTURE_DIR = Path(__file__).resolve().parent.parent / "fundamentals_pipeline" / "60_streamlit_app" / "fixtures"
 
 
-@pytest.fixture(scope="module")
-def data_df() -> pd.DataFrame:
-    return pd.read_parquet(FIXTURE_DIR / "dashboard_data.parquet")
+# ── synthetic builders (satisfy the contract; no file reads) ──────────────────────
+def _data_frame() -> pd.DataFrame:
+    return pd.DataFrame({
+        "ticker": pd.Series(["AAPL", "AAPL"], dtype="object"),
+        "period_type": pd.Series(["FY", "FY"], dtype="object"),
+        "period_end": pd.to_datetime(["2022-09-24", "2023-09-30"]),
+        "fiscal_year": pd.Series([2022, 2023], dtype="int64"),
+        "stmt": pd.Series(["Income Statement", "Income Statement"], dtype="object"),
+        "section": pd.Series(["", ""], dtype="object"),
+        "group": pd.Series(["", ""], dtype="object"),
+        "concept": pd.Series(["Revenue", "Revenue"], dtype="object"),
+        "display_name": pd.Series(["Revenue", "Revenue"], dtype="object"),
+        "sort_order": pd.Series([10.0, 10.0], dtype="float64"),
+        "value": pd.Series([394328000000.0, 383285000000.0], dtype="float64"),
+    })
 
 
-@pytest.fixture(scope="module")
-def metrics_df() -> pd.DataFrame:
-    return pd.read_parquet(FIXTURE_DIR / "dashboard_metrics.parquet")
+def _metrics_frame() -> pd.DataFrame:
+    return pd.DataFrame({
+        "ticker": pd.Series(["AAPL", "AAPL"], dtype="object"),
+        "period_type": pd.Series(["FY", "FY"], dtype="object"),
+        "period_end": pd.to_datetime(["2022-12-31", "2023-12-31"]),
+        "fiscal_year": pd.Series([2022, 2023], dtype="int64"),
+        "category": pd.Series(["Profitability", "Profitability"], dtype="object"),
+        "subcategory": pd.Series(["Margins", "Margins"], dtype="object"),
+        "metric": pd.Series(["Net Margin %", "Net Margin %"], dtype="object"),
+        "unit": pd.Series(["percent", "percent"], dtype="object"),
+        "sort_order": pd.Series([10.0, 10.0], dtype="float64"),
+        "value": pd.Series([25.31, 25.06], dtype="float64"),
+    })
 
 
-@pytest.fixture(scope="module")
-def meta() -> dict:
-    return json.loads((FIXTURE_DIR / "dashboard_meta.json").read_text(encoding="utf-8"))
+def _meta_dict() -> dict:
+    return {
+        "schema_version": 6,
+        "build_timestamp": "2026-06-16T00:00:00+00:00",
+        "tickers": [
+            {"ticker": "AAPL", "company": "Apple Inc", "sector": "Information Technology",
+             "is_favorite": False, "in_sp500": True, "in_r3000": True},
+        ],
+        "fy_ranges": [{"ticker": "AAPL", "fy_min": 2014, "fy_max": 2023}],
+        "row_counts": {"financials": 2, "metrics": 2, "prices": 0, "backtest": 0},
+        "retention": {"fy_years": 10, "quarters": 12, "price_years": 10},
+    }
 
 
 def _prices_frame() -> pd.DataFrame:
@@ -44,27 +79,6 @@ def _prices_frame() -> pd.DataFrame:
     )
 
 
-# ── positive: committed fixtures satisfy the contract ────────────────────────────
-def test_fixture_data_is_valid(data_df):
-    assert schemas.validate_artifact("dashboard_data", data_df) == []
-    schemas.assert_artifact("dashboard_data", data_df)  # does not raise
-
-
-def test_fixture_metrics_is_valid(metrics_df):
-    assert schemas.validate_artifact("dashboard_metrics", metrics_df) == []
-    schemas.assert_artifact("dashboard_metrics", metrics_df)
-
-
-def test_fixture_meta_is_valid(meta):
-    assert schemas.validate_meta(meta) == []
-    schemas.assert_meta(meta)
-
-
-def test_synthetic_prices_is_valid():
-    df = _prices_frame()
-    assert schemas.validate_artifact("dashboard_prices", df) == []
-
-
 def _backtest_frame() -> pd.DataFrame:
     return pd.DataFrame({
         "archetype": pd.Series(["graham_defensive", "graham_defensive"], dtype="object"),
@@ -75,6 +89,26 @@ def _backtest_frame() -> pd.DataFrame:
         "benchmark_value": pd.Series([110.0, 104.5], dtype="float64"),
         "n_holdings": pd.Series([18, 22], dtype="int64"),
     })
+
+
+# ── positive: synthetic frames satisfy the contract ──────────────────────────────
+def test_synthetic_data_is_valid():
+    assert schemas.validate_artifact("dashboard_data", _data_frame()) == []
+    schemas.assert_artifact("dashboard_data", _data_frame())  # does not raise
+
+
+def test_synthetic_metrics_is_valid():
+    assert schemas.validate_artifact("dashboard_metrics", _metrics_frame()) == []
+    schemas.assert_artifact("dashboard_metrics", _metrics_frame())
+
+
+def test_synthetic_meta_is_valid():
+    assert schemas.validate_meta(_meta_dict()) == []
+    schemas.assert_meta(_meta_dict())
+
+
+def test_synthetic_prices_is_valid():
+    assert schemas.validate_artifact("dashboard_prices", _prices_frame()) == []
 
 
 def test_synthetic_backtest_is_valid():
@@ -114,35 +148,35 @@ def test_date_as_object_accepted_for_prices():
     assert schemas.validate_artifact("dashboard_prices", df) == []
 
 
-# ── negative: violations are reported ────────────────────────────────────────────
-def test_missing_column_reported(data_df):
-    broken = data_df.drop(columns=["value"])
+# ── negative: violations are reported (synthetic inputs) ──────────────────────────
+def test_missing_column_reported():
+    broken = _data_frame().drop(columns=["value"])
     violations = schemas.validate_artifact("dashboard_data", broken)
     assert any("missing required column 'value'" in v for v in violations)
     with pytest.raises(schemas.SchemaError):
         schemas.assert_artifact("dashboard_data", broken)
 
 
-def test_wrong_dtype_reported(data_df):
-    broken = data_df.copy()
+def test_wrong_dtype_reported():
+    broken = _data_frame()
     broken["value"] = broken["value"].astype(str)  # numeric → string
     violations = schemas.validate_artifact("dashboard_data", broken)
     assert any("column 'value'" in v and "expected" in v for v in violations)
 
 
-def test_extra_columns_are_allowed(data_df):
-    extended = data_df.copy()
+def test_extra_columns_are_allowed():
+    extended = _data_frame()
     extended["brand_new_column"] = 1
     assert schemas.validate_artifact("dashboard_data", extended) == []
 
 
-def test_unknown_artifact_raises(data_df):
+def test_unknown_artifact_raises():
     with pytest.raises(ValueError):
-        schemas.validate_artifact("not_an_artifact", data_df)
+        schemas.validate_artifact("not_an_artifact", _data_frame())
 
 
-def test_meta_missing_key_reported(meta):
-    broken = dict(meta)
+def test_meta_missing_key_reported():
+    broken = _meta_dict()
     broken.pop("tickers")
     violations = schemas.validate_meta(broken)
     assert any("missing required key 'tickers'" in v for v in violations)
@@ -161,7 +195,29 @@ def test_meta_ticker_record_missing_company():
     assert any("tickers[0]" in v for v in violations)
 
 
-# ── dtype_family ─────────────────────────────────────────────────────────────────
+# ── real-fixture validation: thin, skip-if-missing (fixtures are not committed) ───
+@pytest.mark.skipif(not (FIXTURE_DIR / "dashboard_data.parquet").exists(),
+                    reason="fixtures not committed; run fetch_fixtures.py")
+def test_fixture_data_is_valid():
+    df = pd.read_parquet(FIXTURE_DIR / "dashboard_data.parquet")
+    assert schemas.validate_artifact("dashboard_data", df) == []
+
+
+@pytest.mark.skipif(not (FIXTURE_DIR / "dashboard_metrics.parquet").exists(),
+                    reason="fixtures not committed; run fetch_fixtures.py")
+def test_fixture_metrics_is_valid():
+    df = pd.read_parquet(FIXTURE_DIR / "dashboard_metrics.parquet")
+    assert schemas.validate_artifact("dashboard_metrics", df) == []
+
+
+@pytest.mark.skipif(not (FIXTURE_DIR / "dashboard_meta.json").exists(),
+                    reason="fixtures not committed; run fetch_fixtures.py")
+def test_fixture_meta_is_valid():
+    meta = json.loads((FIXTURE_DIR / "dashboard_meta.json").read_text(encoding="utf-8"))
+    assert schemas.validate_meta(meta) == []
+
+
+# ── dtype_family ──────────────────────────────────────────────────────────────────
 def test_dtype_family():
     assert schemas.dtype_family(pd.Series([1, 2, 3])) == "numeric"
     assert schemas.dtype_family(pd.Series([True, False])) == "bool"
