@@ -9,6 +9,7 @@ also works standalone. `set_page_config` / CSS injection live in the router
 from pathlib import Path
 
 import streamlit as st
+from lib.charts import render_bs_composition, render_cf_fcf, render_is_revenue_combo
 from lib.data import app_version, load_latest_data, load_notes, load_prices
 from lib.kpis import render_kpi_strip
 from lib.prices import price_chart, prices_for, render_price_kpis, resample_prices
@@ -26,6 +27,7 @@ from lib.render import (
 from lib.tables import (
     balance_sheet_df,
     cash_flow_df,
+    get_year_columns,
     income_statement_df,
     quarterly_df,
 )
@@ -115,6 +117,8 @@ with tab_is:
         '<div class="meta">Up to 10 fiscal years · USD · concept_hierarchy.json</div></div>',
         unsafe_allow_html=True,
     )
+    # Combo chart is fixed in $B (like the Quarterly combo) → ignores the unit-scale control.
+    st.markdown(render_is_revenue_combo(df_is), unsafe_allow_html=True)
     st.markdown(render_table_html(df_is, statement="is", ticker=ticker, notes=notes, divisor=divisor, scale_word=scale_word), unsafe_allow_html=True)
     st.markdown(render_waterfall(df_is), unsafe_allow_html=True)
 
@@ -125,6 +129,15 @@ with tab_bs:
         '<div class="meta">Fiscal year-end snapshots · USD</div></div>',
         unsafe_allow_html=True,
     )
+    # Composition chart is fixed in $B (like the Quarterly combo) → ignores the unit-scale
+    # control. Year picker defaults to the latest fiscal year; the chart redraws on change.
+    bs_years = get_year_columns(df_bs)
+    if bs_years:
+        bs_year = st.selectbox(
+            "Fiscal year", list(reversed(bs_years)), index=0,
+            key="bs_year", format_func=lambda y: f"FY {y}",
+        )
+        st.markdown(render_bs_composition(df_bs, bs_year), unsafe_allow_html=True)
     st.markdown(render_table_html(df_bs, statement="bs", ticker=ticker, notes=notes, divisor=divisor, scale_word=scale_word), unsafe_allow_html=True)
     st.markdown(render_balance_check(df_bs), unsafe_allow_html=True)
 
@@ -135,6 +148,8 @@ with tab_cf:
         '<div class="meta">Operating · Investing · Financing</div></div>',
         unsafe_allow_html=True,
     )
+    # OCF/FCF chart is fixed in $B (like the Quarterly combo) → ignores the unit-scale control.
+    st.markdown(render_cf_fcf(df_cf), unsafe_allow_html=True)
     st.markdown(render_table_html(df_cf, statement="cf", ticker=ticker, notes=notes, divisor=divisor, scale_word=scale_word), unsafe_allow_html=True)
 
 with tab_dm:
