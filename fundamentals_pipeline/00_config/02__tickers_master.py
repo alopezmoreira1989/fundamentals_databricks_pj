@@ -133,9 +133,17 @@ def _normalize_sector(raw: object) -> str | None:
 # MAGIC absent → `has_logo` is NULL for every ticker and the app degrades gracefully (hotlink,
 # MAGIC Logo.dev covers misses).
 # MAGIC
-# MAGIC Databricks-only note: the probe is plain `requests` (no `spark`/`dbutils`), so it runs
-# MAGIC fine under Databricks Connect — but set `LOGO_DEV_PUBLISHABLE_KEY` in the Job/cluster
-# MAGIC environment before the run, or every ticker resolves to NULL.
+# MAGIC Key resolution (first hit wins): the `LOGO_DEV_PUBLISHABLE_KEY` env var, else the
+# MAGIC Databricks secret scope `logo_dev` / key `publishable_key`. The env var path keeps this
+# MAGIC runnable under local Databricks Connect (no `dbutils`); the secret scope is how the
+# MAGIC serverless Job gets it (matching the `github_pat` pattern in `52`). Neither present →
+# MAGIC `has_logo` is NULL for every ticker and the app degrades gracefully (hotlink, Logo.dev
+# MAGIC covers misses).
+# MAGIC
+# MAGIC ```
+# MAGIC databricks secrets create-scope logo_dev
+# MAGIC databricks secrets put-secret  logo_dev publishable_key
+# MAGIC ```
 
 # COMMAND ----------
 
@@ -143,6 +151,19 @@ def _normalize_sector(raw: object) -> str | None:
 # almost no bytes. Logo.dev has no per-minute rate limit; keep concurrency modest and polite.
 _LOGO_DEV_PROBE     = "https://img.logo.dev/ticker/{t}?token={k}&fallback=404&size=16&format=png"
 _LOGO_PROBE_WORKERS = 8
+
+
+def _resolve_logo_key() -> str | None:
+    """Logo.dev publishable key: env var first (local Connect), then the `logo_dev` secret
+    scope (serverless Job). None if neither is set. `dbutils` is undefined under local Connect,
+    so the secret lookup is guarded."""
+    key = os.environ.get("LOGO_DEV_PUBLISHABLE_KEY")
+    if key:
+        return key
+    try:
+        return dbutils.secrets.get(scope="logo_dev", key="publishable_key") or None
+    except Exception:
+        return None
 
 
 def _probe_has_logo(ticker: str, key: str, session: requests.Session) -> bool | None:
@@ -163,9 +184,10 @@ def _probe_has_logo(ticker: str, key: str, session: requests.Session) -> bool | 
 
 def resolve_has_logo(tickers: list[str]) -> dict[str, bool | None]:
     """Map each ticker → has_logo (True hit / False miss / None error). All None when no key."""
-    key = os.environ.get("LOGO_DEV_PUBLISHABLE_KEY")
+    key = _resolve_logo_key()
     if not key:
-        print("  ⚠ LOGO_DEV_PUBLISHABLE_KEY not set — has_logo = None for all tickers")
+        print("  ⚠ no Logo.dev key (env LOGO_DEV_PUBLISHABLE_KEY or secret logo_dev/publishable_key)"
+              " — has_logo = None for all tickers")
         return {t: None for t in tickers}
     session = requests.Session()
     session.headers.update(_HEADERS)
