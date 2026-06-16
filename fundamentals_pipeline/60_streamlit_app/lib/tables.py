@@ -12,6 +12,21 @@ import pandas as pd
 from .colors import row_class as derive_row_class, section_class
 
 
+def _fill_group(sub: pd.DataFrame) -> pd.DataFrame:
+    """Coalesce a NaN ``group`` from ``section`` so pivot_table's NaN-key dropping doesn't
+    silently discard Income-Statement rows / statement subtotals — both legitimately carry
+    group=NULL (the IS has no inner group level; subtotals like Total Assets sit directly under
+    a section). group==section reads as "no inner group" downstream (_decorate → indent 0,
+    render → no subheader). Cast to object first: the export ships these as category dtype and
+    fillna with an out-of-category value raises. Rows with no section either (rare join-orphan
+    synonyms) keep NaN group and are still dropped, preserving prior behavior.
+    """
+    group = sub["group"].astype("object")
+    section = sub["section"].astype("object")
+    sub["group"] = group.fillna(section)
+    return sub
+
+
 def _pivot_financials(
     data: pd.DataFrame,
     ticker: str,
@@ -27,6 +42,14 @@ def _pivot_financials(
     sub = data[mask].copy()
     if sub.empty:
         return pd.DataFrame()
+
+    # The pivot indexes on `group`, but pivot_table's default dropna=True drops any row whose
+    # group key is NaN — and the Income Statement has no inner "group" level (section carries
+    # it), while statement subtotals (Total Assets, Operating Cash Flow) also carry group=NULL.
+    # Left unhandled that blanks the IS entirely and drops subtotals. Coalesce group←section
+    # (←concept as a last resort for join-orphan concepts) so every row survives; group==section
+    # reads as "no inner group" downstream (_decorate → indent 0, render → no subheader).
+    sub = _fill_group(sub)
 
     # For FY: pivot columns are fiscal_year integers.
     # Sort by sort_order (hierarchy position) within the pivoted result.
@@ -124,6 +147,7 @@ def quarterly_df(data: pd.DataFrame, ticker: str) -> pd.DataFrame:
     )
     sub = sub[sub["q_label"].isin(ordered_qs)]
 
+    sub = _fill_group(sub)  # keep NaN-group rows (IS concepts, subtotals) — see _pivot_financials
     pivot = sub.pivot_table(
         index=["stmt", "section", "group", "concept", "display_name", "sort_order"],
         columns="q_label",
