@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import pandas as pd
 
-from .colors import row_class as derive_row_class, section_class
+from .colors import row_class as derive_row_class
+from .colors import section_class
 
 
 def _fill_group(sub: pd.DataFrame) -> pd.DataFrame:
