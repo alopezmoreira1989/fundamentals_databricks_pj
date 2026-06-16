@@ -22,10 +22,13 @@ import time
 
 STEP_TIMINGS = []
 
-def _record_step(name, t0):
+def _record_step(name, t0, status="ok"):
+    # status ∈ {"ok","failed","skipped"} — defaults to "ok" so existing call sites are
+    # unchanged. Non-fatal steps (Coverage/Invariants) pass their own status; a fatal step
+    # aborts the run before reaching its _record_step, so it never gets an "ok" row.
     mins = (time.monotonic() - t0) / 60.0
-    STEP_TIMINGS.append({"step": name, "minutes": mins})
-    print(f"  ⏱ {name}: {mins:.1f} min")
+    STEP_TIMINGS.append({"step": name, "minutes": mins, "status": status})
+    print(f"  ⏱ {name}: {mins:.1f} min ({status})")
 
 # COMMAND ----------
 
@@ -476,7 +479,7 @@ except Exception as e:
     coverage_ok = False
 
 # Non-fatal step (caught above), so record regardless of success.
-_record_step("Coverage Check", _t0)
+_record_step("Coverage Check", _t0, status="ok" if coverage_ok else "failed")
 
 # COMMAND ----------
 
@@ -508,7 +511,7 @@ except Exception as e:
     invariants_ok = False
 
 # Non-fatal step (caught above), so record regardless of success.
-_record_step("Invariants Check", _t0)
+_record_step("Invariants Check", _t0, status="ok" if invariants_ok else "failed")
 
 # COMMAND ----------
 
@@ -662,6 +665,148 @@ if STEP_TIMINGS:
     spark.createDataFrame(_tm_records, schema=_tm_schema) \
          .write.mode("append").saveAsTable(_timings_tbl)
     print(f"✓ {len(_tm_records)} step timings → {_timings_tbl}")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 13c. Run-log telemetry — `main.config.pipeline_runs` + `pipeline_run_coverage`
+# MAGIC
+# MAGIC Persists this run's per-step timings (with `run_id` + `status`) and a coverage/freshness
+# MAGIC snapshot so the run history is queryable over time (read with `30_analysis/36__run_log_report`).
+# MAGIC Supersedes the `pipeline_run_timings` write above (kept for back-compat). Pure observability:
+# MAGIC wrapped in try/except so a telemetry failure never aborts an otherwise-successful run.
+# MAGIC `run_id` = `pipeline_start` stamped `YYYYMMDDThhmmssZ`, tying both tables' rows together.
+
+# COMMAND ----------
+
+_run_id   = pipeline_start.strftime("%Y%m%dT%H%M%SZ")
+_runs_tbl = f"{CATALOG}.config.pipeline_runs"
+_cov_tbl  = f"{CATALOG}.config.pipeline_run_coverage"
+
+try:
+    from pyspark.sql.types import (
+        DateType,
+        DoubleType,
+        IntegerType,
+        LongType,
+        StringType,
+        StructField,
+        StructType,
+        TimestampType,
+    )
+
+    # ── pipeline_runs (per-step) ────────────────────────────────────────────────
+    spark.sql(f"""
+        CREATE TABLE IF NOT EXISTS {_runs_tbl} (
+            run_id         STRING    NOT NULL,
+            run_started_at TIMESTAMP NOT NULL,
+            step           STRING    NOT NULL,
+            minutes        DOUBLE,
+            status         STRING,
+            rows_written   BIGINT
+        )
+        USING DELTA
+        TBLPROPERTIES (
+            'delta.autoOptimize.optimizeWrite' = 'true',
+            'delta.autoOptimize.autoCompact'   = 'true'
+        )
+    """)
+
+    if STEP_TIMINGS:
+        _runs_schema = StructType([
+            StructField("run_id",         StringType(),    False),
+            StructField("run_started_at", TimestampType(), False),
+            StructField("step",           StringType(),    False),
+            StructField("minutes",        DoubleType(),    True),
+            StructField("status",         StringType(),    True),
+            StructField("rows_written",   LongType(),      True),
+        ])
+        _runs_records = [
+            {"run_id": _run_id, "run_started_at": pipeline_start, "step": s["step"],
+             "minutes": float(s["minutes"]), "status": s.get("status", "ok"), "rows_written": None}
+            for s in STEP_TIMINGS
+        ]
+        spark.createDataFrame(_runs_records, schema=_runs_schema).createOrReplaceTempView("incoming_pipeline_runs")
+        # MERGE keyed on (run_id, step) → idempotent if this cell is re-executed in-session.
+        spark.sql(f"""
+            MERGE INTO {_runs_tbl} AS t
+            USING incoming_pipeline_runs AS s
+            ON t.run_id = s.run_id AND t.step = s.step
+            WHEN MATCHED THEN UPDATE SET
+                t.run_started_at = s.run_started_at, t.minutes = s.minutes,
+                t.status = s.status, t.rows_written = s.rows_written
+            WHEN NOT MATCHED THEN INSERT *
+        """)
+        print(f"✓ {len(_runs_records)} step rows → {_runs_tbl} (run_id={_run_id})")
+
+    # ── pipeline_run_coverage (one row per run) ─────────────────────────────────
+    # Reuses 32's favorites-coverage logic + a financials_raw.filed freshness probe.
+    spark.sql(f"""
+        CREATE TABLE IF NOT EXISTS {_cov_tbl} (
+            run_id                 STRING    NOT NULL,
+            run_started_at         TIMESTAMP NOT NULL,
+            total_tickers_ingested INT,
+            total_favorites        INT,
+            favorites_in_metrics   INT,
+            favorites_pct          DOUBLE,
+            max_filed              DATE,
+            staleness_days         INT
+        )
+        USING DELTA
+        TBLPROPERTIES (
+            'delta.autoOptimize.optimizeWrite' = 'true',
+            'delta.autoOptimize.autoCompact'   = 'true'
+        )
+    """)
+
+    _cov = spark.sql(f"""
+        SELECT
+            (SELECT COUNT(DISTINCT ticker) FROM {CATALOG}.{SCHEMA}.financials)                  AS total_tickers_ingested,
+            (SELECT COUNT(*) FROM {CATALOG}.config.tickers WHERE is_favorite = true)            AS total_favorites,
+            (SELECT COUNT(DISTINCT t.ticker)
+               FROM {CATALOG}.config.tickers t
+               JOIN (SELECT DISTINCT ticker FROM {CATALOG}.{SCHEMA}.financials_metrics) m
+                 ON m.ticker = t.ticker
+              WHERE t.is_favorite = true)                                                       AS favorites_in_metrics,
+            (SELECT MAX(filed) FROM {CATALOG}.{SCHEMA}.financials_raw)                           AS max_filed,
+            DATEDIFF(CURRENT_DATE(), (SELECT MAX(filed) FROM {CATALOG}.{SCHEMA}.financials_raw)) AS staleness_days
+    """).collect()[0]
+
+    _tot_fav = int(_cov["total_favorites"] or 0)
+    _fav_pct = round(float(_cov["favorites_in_metrics"] or 0) / _tot_fav * 100, 1) if _tot_fav else None
+
+    _cov_schema = StructType([
+        StructField("run_id",                 StringType(),    False),
+        StructField("run_started_at",         TimestampType(), False),
+        StructField("total_tickers_ingested", IntegerType(),   True),
+        StructField("total_favorites",        IntegerType(),   True),
+        StructField("favorites_in_metrics",   IntegerType(),   True),
+        StructField("favorites_pct",          DoubleType(),    True),
+        StructField("max_filed",              DateType(),      True),
+        StructField("staleness_days",         IntegerType(),   True),
+    ])
+    _cov_record = [{
+        "run_id": _run_id, "run_started_at": pipeline_start,
+        "total_tickers_ingested": int(_cov["total_tickers_ingested"] or 0),
+        "total_favorites": _tot_fav,
+        "favorites_in_metrics": int(_cov["favorites_in_metrics"] or 0),
+        "favorites_pct": _fav_pct,
+        "max_filed": _cov["max_filed"],
+        "staleness_days": int(_cov["staleness_days"]) if _cov["staleness_days"] is not None else None,
+    }]
+    spark.createDataFrame(_cov_record, schema=_cov_schema).createOrReplaceTempView("incoming_pipeline_run_coverage")
+    spark.sql(f"""
+        MERGE INTO {_cov_tbl} AS t
+        USING incoming_pipeline_run_coverage AS s
+        ON t.run_id = s.run_id
+        WHEN MATCHED THEN UPDATE SET *
+        WHEN NOT MATCHED THEN INSERT *
+    """)
+    print(f"✓ coverage snapshot → {_cov_tbl} "
+          f"(favorites {_cov['favorites_in_metrics']}/{_tot_fav} = {_fav_pct}%, "
+          f"tickers={_cov['total_tickers_ingested']}, staleness={_cov['staleness_days']}d)")
+except Exception as _e:
+    print(f"⚠ Run-log telemetry skipped ({type(_e).__name__}: {_e}) — non-fatal, run already succeeded.")
 
 # COMMAND ----------
 
