@@ -16,7 +16,6 @@ showSidebarNavigation=false) — navigation happens via `st.switch_page`:
 from pathlib import Path
 
 import streamlit as st
-
 from lib.render import inject_css
 
 st.set_page_config(

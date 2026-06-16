@@ -602,7 +602,7 @@ pipeline_end = datetime.utcnow()
 duration     = (pipeline_end - pipeline_start).total_seconds()
 
 print(f"\n{'='*55}")
-print(f"  Pipeline completed ✓")
+print("  Pipeline completed ✓")
 print(f"{'='*55}")
 print(f"  Started  : {pipeline_start.isoformat()} UTC")
 print(f"  Finished : {pipeline_end.isoformat()} UTC")
@@ -644,7 +644,7 @@ for schema, tbl in summary_tables:
 _total_min = sum(s["minutes"] for s in STEP_TIMINGS)
 _wall_min  = (datetime.utcnow() - pipeline_start).total_seconds() / 60.0
 print(f"\n{'='*55}")
-print(f"  PER-STEP TIMINGS")
+print("  PER-STEP TIMINGS")
 print(f"{'='*55}")
 print(f"  {'Step':<26}{'min':>8}{'% total':>10}")
 print(f"  {'-'*44}")
@@ -673,7 +673,12 @@ spark.sql(f"""
 
 if STEP_TIMINGS:
     from pyspark.sql.types import (
-        StructType, StructField, StringType, DoubleType, TimestampType, IntegerType,
+        DoubleType,
+        IntegerType,
+        StringType,
+        StructField,
+        StructType,
+        TimestampType,
     )
     _tm_schema = StructType([
         StructField("run_ts",    TimestampType(), False),
