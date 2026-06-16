@@ -163,7 +163,7 @@ with dist_col, st.container(key="scr_sectors"):
         slug = str(sector).lower().replace(" ", "_")
         with st.container():
             st.button(str(sector), key=f"scr_sec_{slug}", on_click=_set_sector,
-                      args=(str(sector),), use_container_width=True)
+                      args=(str(sector),), width="stretch")
             st.markdown(_barline(int(cnt), active=(sector == active_sector)), unsafe_allow_html=True)
 
     # Highlight the active sector's button (the label pill) — one exact-key rule, injected
@@ -188,7 +188,7 @@ with dist_col, st.container(key="scr_sectors"):
 
     # Reset — always reachable; a no-op when already on "All sectors".
     st.button("↺ All sectors", key="scr_sec_reset", on_click=_set_sector, args=(SECTORS[0],),
-              use_container_width=True)
+              width="stretch")
 
 
 # --- Featured companies (right, clickable) ---------------------------------------------
@@ -272,7 +272,7 @@ with feat_col, st.container(key="scr_featured"):
                 # transparent so the artwork shows. Company name → tooltip, not a 3rd line.
                 # _go_to runs in the main flow (not on_click) — matches the proven handoff
                 # pattern and keeps st.switch_page out of a callback.
-                if st.button(ticker, key=f"scr_feat_{ticker}", help=company, use_container_width=True):
+                if st.button(ticker, key=f"scr_feat_{ticker}", help=company, width="stretch"):
                     _go_to(ticker)
                 st.markdown(
                     f'<div class="scr-tile-tkr">{html.escape(ticker)}</div>',
@@ -371,7 +371,7 @@ if _HAS_DF_SELECTION:
         disp,
         column_config=colcfg,
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
         height=720,
         on_select="rerun",
         selection_mode="single-row",
@@ -382,7 +382,7 @@ if _HAS_DF_SELECTION:
         _go_to(disp.iloc[rows[0]]["Ticker"])
 else:
     # Fallback for Streamlit < 1.35 (no on_select).
-    st.dataframe(disp, column_config=colcfg, hide_index=True, use_container_width=True, height=720)
+    st.dataframe(disp, column_config=colcfg, hide_index=True, width="stretch", height=720)
     fb_l, fb_r = st.columns([3, 1])
     with fb_l:
         pick = st.selectbox("Open company", disp["Ticker"].tolist())
