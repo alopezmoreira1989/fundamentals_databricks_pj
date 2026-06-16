@@ -82,10 +82,23 @@ _PRICES_SPEC: dict[str, set[str]] = {
     "adj_close": {"numeric"},
 }
 
+# Backtest equity-curve series (one row per archetype × fiscal_year). benchmark_* are NULL
+# (all-NaN float → still 'numeric') when the benchmark ticker is absent from the price store.
+_BACKTEST_SPEC: dict[str, set[str]] = {
+    "archetype": {"string"},
+    "fiscal_year": {"numeric"},
+    "portfolio_return": {"numeric"},
+    "benchmark_return": {"numeric"},
+    "portfolio_value": {"numeric"},
+    "benchmark_value": {"numeric"},
+    "n_holdings": {"numeric"},
+}
+
 ARTIFACTS: dict[str, dict[str, set[str]]] = {
     "dashboard_data": _DATA_SPEC,
     "dashboard_metrics": _METRICS_SPEC,
     "dashboard_prices": _PRICES_SPEC,
+    "dashboard_backtest": _BACKTEST_SPEC,
 }
 ARTIFACT_NAMES = tuple(ARTIFACTS)
 

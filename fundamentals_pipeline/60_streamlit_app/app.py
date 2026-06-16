@@ -10,6 +10,7 @@ declares the pages. The sidebar nav is hidden (`.streamlit/config.toml`
 showSidebarNavigation=false) — navigation happens via `st.switch_page`:
   • Screener (landing): pick a company from a filterable table
   • Company: the per-ticker statements dashboard
+  • Backtest: investment-archetype strategies vs SPY (degrades if not yet published)
 """
 
 from pathlib import Path
@@ -32,5 +33,6 @@ screener = st.Page(
     "views/screener.py", title="Screener", icon="🔎", url_path="screener", default=True
 )
 company = st.Page("views/company.py", title="Company", icon="📊", url_path="company")
+backtest = st.Page("views/backtest.py", title="Backtest", icon="📈", url_path="backtest")
 
-st.navigation([screener, company]).run()
+st.navigation([screener, company, backtest]).run()

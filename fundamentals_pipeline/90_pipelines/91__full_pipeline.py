@@ -433,6 +433,30 @@ _record_step("Intrinsic Value", _t0)
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ## 9b. Backtest
+# MAGIC Applies investor-archetype screens to historical fundamentals and reports forward
+# MAGIC returns (no look-ahead; survivorship-biased — see notebook). Reads `financials_metrics`,
+# MAGIC `financials_raw` (filing dates) and `market_prices_daily`; writes `backtest_results` +
+# MAGIC `backtest_summary`, which `51` then exports as `dashboard_backtest.parquet`.
+
+# COMMAND ----------
+
+print("=" * 55)
+print("STEP 8b / 12 — Backtest")
+print("=" * 55)
+_t0 = time.monotonic()
+
+# COMMAND ----------
+
+# MAGIC %run "../70_backtest/71__run_backtest"
+
+# COMMAND ----------
+
+_record_step("Backtest", _t0)
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## 10. Analysis
 # MAGIC Runs analysis queries — useful for validation after pipeline runs
 

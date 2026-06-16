@@ -30,10 +30,11 @@ OWNER = "alopezmoreira1989"
 REPO  = "fundamentals_databricks_pj"
 BASE_URL = f"https://github.com/{OWNER}/{REPO}/releases/download/latest"
 
-DATA_FILE   = "dashboard_data.parquet"
-METRIC_FILE = "dashboard_metrics.parquet"
-META_FILE   = "dashboard_meta.json"
-PRICE_FILE  = "dashboard_prices.parquet"
+DATA_FILE     = "dashboard_data.parquet"
+METRIC_FILE   = "dashboard_metrics.parquet"
+META_FILE     = "dashboard_meta.json"
+PRICE_FILE    = "dashboard_prices.parquet"
+BACKTEST_FILE = "dashboard_backtest.parquet"
 
 FIXTURE_DIR = Path(__file__).parent.parent / "fixtures"
 
@@ -157,6 +158,39 @@ def load_prices() -> pd.DataFrame:
     # Do NOT route through _optimize_dtypes: it would downcast nothing harmful here,
     # but close/adj_close must stay float64 (BRK.A-class prices lose cents in float32).
     df["ticker"] = df["ticker"].astype("category")
+    return df
+
+
+@st.cache_data(ttl=3600, max_entries=1, show_spinner="Loading backtest…")
+def load_backtest() -> pd.DataFrame:
+    """Backtest equity-curve series published by 51/52 (archetype, fiscal_year, returns, values).
+
+    MUST degrade gracefully: missing artifact (404 / backtester not run) or absent fixture →
+    return an EMPTY frame with the right columns. Never st.stop() — the Backtest view shows a
+    'no data' notice and the rest of the app keeps working (same rule as load_prices).
+    """
+    cols = ["archetype", "fiscal_year", "portfolio_return", "benchmark_return",
+            "portfolio_value", "benchmark_value", "n_holdings"]
+    empty = pd.DataFrame(columns=cols)
+    use_fixtures = os.environ.get("DASHBOARD_USE_FIXTURES") == "1"
+    if use_fixtures:
+        df = pd.read_parquet(FIXTURE_DIR / BACKTEST_FILE) if (FIXTURE_DIR / BACKTEST_FILE).exists() else empty
+    else:
+        try:
+            df = _fetch_parquet(BACKTEST_FILE)
+        except Exception:
+            df = pd.read_parquet(FIXTURE_DIR / BACKTEST_FILE) if (FIXTURE_DIR / BACKTEST_FILE).exists() else empty
+
+    if df.empty:
+        return empty
+
+    # SOFT schema check (same rule as load_prices — never st.stop()): degrade to no-data.
+    violations = validate_artifact("dashboard_backtest", df)
+    if violations:
+        print("⚠️ dashboard_backtest failed schema validation — degrading to no-data:\n  - " + "\n  - ".join(violations))
+        return empty
+
+    df["archetype"] = df["archetype"].astype("category")
     return df
 
 

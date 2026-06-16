@@ -11,6 +11,15 @@ must mirror these scalar definitions bit-for-bit. The scalar versions exist so t
 formulas are testable in isolation and so the PART 5 backtester can reuse them.
 """
 
+from .backtest import (
+    annualized_vol,
+    as_of_date,
+    as_of_eligible,
+    cagr,
+    max_drawdown,
+    passes_predicates,
+    sharpe,
+)
 from .periods import q4_from_fy_ytd
 from .valuation import (
     dcf_value,
@@ -29,4 +38,11 @@ __all__ = [
     "owner_earnings",
     "eps_cagr",
     "q4_from_fy_ytd",
+    "as_of_date",
+    "as_of_eligible",
+    "passes_predicates",
+    "cagr",
+    "max_drawdown",
+    "annualized_vol",
+    "sharpe",
 ]

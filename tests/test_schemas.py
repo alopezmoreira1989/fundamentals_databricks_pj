@@ -65,6 +65,39 @@ def test_synthetic_prices_is_valid():
     assert schemas.validate_artifact("dashboard_prices", df) == []
 
 
+def _backtest_frame() -> pd.DataFrame:
+    return pd.DataFrame({
+        "archetype": pd.Series(["graham_defensive", "graham_defensive"], dtype="object"),
+        "fiscal_year": pd.Series([2022, 2023], dtype="int64"),
+        "portfolio_return": pd.Series([0.12, -0.04], dtype="float64"),
+        "benchmark_return": pd.Series([0.10, -0.05], dtype="float64"),
+        "portfolio_value": pd.Series([112.0, 107.5], dtype="float64"),
+        "benchmark_value": pd.Series([110.0, 104.5], dtype="float64"),
+        "n_holdings": pd.Series([18, 22], dtype="int64"),
+    })
+
+
+def test_synthetic_backtest_is_valid():
+    assert schemas.validate_artifact("dashboard_backtest", _backtest_frame()) == []
+
+
+def test_backtest_null_benchmark_still_valid():
+    # SPY absent → benchmark_* all-NaN float (still numeric family).
+    df = _backtest_frame()
+    df["benchmark_return"] = float("nan")
+    df["benchmark_value"] = float("nan")
+    assert schemas.validate_artifact("dashboard_backtest", df) == []
+
+
+def test_empty_typed_backtest_is_valid():
+    empty = pd.DataFrame({c: pd.Series(dtype=t) for c, t in {
+        "archetype": "object", "fiscal_year": "int64", "portfolio_return": "float64",
+        "benchmark_return": "float64", "portfolio_value": "float64",
+        "benchmark_value": "float64", "n_holdings": "int64",
+    }.items()})
+    assert schemas.validate_artifact("dashboard_backtest", empty) == []
+
+
 def test_empty_typed_prices_is_valid():
     # Matches the empty-but-typed fallback that 51 writes when market_prices_daily is absent.
     empty = pd.DataFrame(
