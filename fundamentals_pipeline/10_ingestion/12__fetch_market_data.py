@@ -21,6 +21,11 @@
 # MAGIC
 # MAGIC **Fetch strategy:** one **batched** `yf.download(...)` per ~60 tickers (yfinance
 # MAGIC threads within a batch). Full history collapses to ~50 batched calls.
+# MAGIC
+# MAGIC **Benchmark:** `BENCHMARK_TICKERS` (e.g. `SPY`) are priced into `market_prices_daily`
+# MAGIC alongside the fundamentals universe so `70_backtest/71__run_backtest` can compute
+# MAGIC benchmark-relative returns. They are NOT in `config.tickers` (no SEC fundamentals) and are
+# MAGIC excluded from the legacy `market_data` derive.
 
 # COMMAND ----------
 
@@ -48,8 +53,7 @@ from threading import Lock
 import pandas as pd
 import yfinance as yf
 from pyspark.sql import functions as F
-from pyspark.sql.types import (DateType, DoubleType, LongType, StringType,
-                               StructField, StructType, TimestampType)
+from pyspark.sql.types import DateType, DoubleType, LongType, StringType, StructField, StructType, TimestampType
 from pyspark.sql.window import Window
 
 prices_tbl = f"{CATALOG}.{SCHEMA}.market_prices_daily"
@@ -63,6 +67,13 @@ BATCH_SIZE     = 60      # tickers per yf.download call
 BATCH_WORKERS  = 2       # concurrent batches (yf threads internally on top of this)
 STALENESS_DAYS = 7       # incremental: a ticker whose latest stored date is within this is fresh
 INCR_BUFFER_DAYS = 7     # incremental: refetch from (max stored date − buffer) to fill the gap
+
+# Benchmark tickers priced into market_prices_daily for the backtester (70_backtest/71). They are
+# indices/ETFs with NO SEC fundamentals, so they are deliberately NOT in config.tickers — 11 must
+# never try to ingest them — and they are excluded from the legacy market_data derive below.
+# 71__run_backtest reads the benchmark symbol from backtest_archetypes.json (config.benchmark = SPY);
+# keep this list in sync with it. Empty list ⇒ no benchmark priced (71 degrades benchmark to NULL).
+BENCHMARK_TICKERS = ["SPY"]
 
 # ── Refresh policy ────────────────────────────────────────────────────────────
 # Inherit force_full_refresh from the parent 91 via globals() — SAME handoff as
@@ -123,12 +134,17 @@ try:
 except Exception:
     _has_prices = False
 
+# Price universe = active fundamentals tickers + benchmark tickers (deduped, order-preserving).
+# Benchmarks are always priced — even in override mode (e.g. tickers_override=AAPL,MSFT) — so the
+# backtester can always compute benchmark-relative returns.
+PRICE_UNIVERSE = list(dict.fromkeys([*ACTIVE_TICKERS, *BENCHMARK_TICKERS]))
+
 MODE = "full" if (FORCE_FULL_REFRESH or not _has_prices) else "incremental"
 
 full_tickers, incr_tickers, incr_start = [], [], None
 
 if MODE == "full":
-    full_tickers = list(ACTIVE_TICKERS)
+    full_tickers = list(PRICE_UNIVERSE)
     print(f"FULL refresh — {len(full_tickers):,} tickers, period=max (overwrite)")
 else:
     maxd = {
@@ -136,16 +152,16 @@ else:
         for r in spark.sql(f"SELECT ticker, MAX(date) AS max_date FROM {prices_tbl} GROUP BY ticker").collect()
     }
     cutoff = date.today() - timedelta(days=STALENESS_DAYS)
-    full_tickers = [t for t in ACTIVE_TICKERS if t not in maxd]                       # never seen → full hist
-    incr_tickers = [t for t in ACTIVE_TICKERS if t in maxd and maxd[t] < cutoff]      # stale → gap-fill
+    full_tickers = [t for t in PRICE_UNIVERSE if t not in maxd]                       # never seen → full hist
+    incr_tickers = [t for t in PRICE_UNIVERSE if t in maxd and maxd[t] < cutoff]      # stale → gap-fill
     stale_maxes  = [maxd[t] for t in incr_tickers]
     if stale_maxes:
         incr_start = min(stale_maxes) - timedelta(days=INCR_BUFFER_DAYS)
     print("INCREMENTAL run:")
-    print(f"  Universe         : {len(ACTIVE_TICKERS):,}")
+    print(f"  Universe         : {len(PRICE_UNIVERSE):,}  (incl. {len(BENCHMARK_TICKERS)} benchmark)")
     print(f"  New (period=max) : {len(full_tickers):,}")
     print(f"  Stale (gap-fill) : {len(incr_tickers):,}  start={incr_start}")
-    print(f"  Fresh (skipped)  : {len(ACTIVE_TICKERS) - len(full_tickers) - len(incr_tickers):,}")
+    print(f"  Fresh (skipped)  : {len(PRICE_UNIVERSE) - len(full_tickers) - len(incr_tickers):,}")
 
 # COMMAND ----------
 
@@ -358,6 +374,9 @@ if spark.table(prices_tbl).limit(1).count() > 0:
     _yr = Window.partitionBy("ticker", "cy").orderBy(F.col("date").desc())
     year_end = (
         spark.table(prices_tbl)
+        # Benchmarks are priced for the backtester only — they have no fundamentals, so keep them
+        # out of legacy market_data (they'd just carry NULL shares/market_cap). Empty list ⇒ no-op.
+        .filter(~F.col("ticker").isin(BENCHMARK_TICKERS))
         .withColumn("cy", F.year("date"))
         .withColumn("_rn", F.row_number().over(_yr))
         .filter(F.col("_rn") == 1)
