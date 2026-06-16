@@ -1,0 +1,6 @@
+# Development-only dependencies (tests/tooling). NOT read by Streamlit Cloud —
+# that runtime manifest is requirements.txt, which must stay minimal. Install with:
+#   pip install -r requirements-dev.txt
+pytest>=8,<9
+pandas>=2.2,<3
+pyarrow>=14
