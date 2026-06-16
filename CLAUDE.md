@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this project is
 
-Databricks analytical pipeline that ingests SEC EDGAR XBRL filings (10-K/10-Q) for ~3,000 US tickers, joins Yahoo Finance year-end prices, derives financial metrics, and serves them via Delta tables to a Databricks dashboard. Entry point: `90_pipelines/91__full_pipeline.py` (Databricks notebook source format, run as a Databricks Job). **All new work is produced in English** (docs, code, identifiers, comments, commit messages); some legacy content (prose, metric labels, JSON hierarchy values) is still in Spanish and is treated as data — see Conventions.
+Databricks analytical pipeline that ingests SEC EDGAR XBRL filings (10-K/10-Q) for ~3,000 US tickers, joins Yahoo Finance prices, derives financial metrics + intrinsic values, runs an investment-archetype **backtester**, and serves it all via Delta tables to a Databricks dashboard **and a public Streamlit app** (fed by GitHub Release parquet artifacts). Entry point: `90_pipelines/91__full_pipeline.py` (Databricks notebook source format, run as a Databricks Job). A pure-Python `fundamentals_pipeline/_core/` library (no Spark/Databricks dependency) holds the reference formula/contract/backtest logic and is unit-tested by `tests/` (pytest). **All new work is produced in English** (docs, code, identifiers, comments, commit messages); some legacy content (prose, metric labels, JSON hierarchy values) is still in Spanish and is treated as data — see Conventions.
 
 ## Conventions that must be preserved
 
@@ -19,24 +19,34 @@ Databricks analytical pipeline that ingests SEC EDGAR XBRL filings (10-K/10-Q) f
 
 - **SEC User-Agent must be set before running ingestion.** `00_config/01__tickers.py` ships with placeholder `"MyCompany myemail@example.com"`. SEC blocks requests without a real org/email. Flag this if you see it unchanged when working near ingestion.
 - **Unity Catalog schemas are pre-provisioned.** Code reads/writes `main.financials` and `main.config`; it does NOT create catalog or schema. Don't add `CREATE CATALOG` / `CREATE SCHEMA` statements — assume they exist.
-- **`%run` and `dbutils` only work inside Databricks.** Notebooks pull config via `%run "/Workspace/.../01__tickers"`. Flag any change that introduces these in a `.py` that's expected to run locally via Databricks Connect.
-- **No catalog/schema CREATE, no test suite, no lint config currently.** Validation today is ad-hoc via `30_analysis/31__company_analysis.py`.
+- **`%run` and `dbutils` only work inside Databricks.** Notebooks pull config via `%run "/Workspace/.../01__tickers"`. Flag any change that introduces these in a `.py` that's expected to run locally via Databricks Connect. The notebooks that need `_core` (`51`, `71`) bootstrap the repo root onto `sys.path` (cwd-walk fallback) before importing it.
+- **Tests + lint exist (don't repeat the old "none" claim).** A pytest suite at repo root (`tests/`) covers the pure `_core/` modules and the Streamlit `lib/` helpers — no Spark/network needed: `pip install -r requirements-dev.txt && pytest -q` (dev deps only; `requirements.txt` stays minimal as the Streamlit Cloud runtime manifest). Fixture-backed tests skip if `60_streamlit_app/fixtures/*` are absent (gitignored). Lint is `ruff.toml` (line-length 120, py310). There is **no Spark CI** — notebooks are still validated ad-hoc / via `30_analysis` checks.
+- **Still no catalog/schema CREATE.** Code reads/writes `main.financials` / `main.config` only.
 
 ## Workflow
 
 - **Plan before editing notebooks or pipeline `.py` files.** They are stateful and side-effecting (writes to Delta tables, calls SEC/yfinance APIs). Outline the change first, then implement.
 - **Flag Databricks-only assumptions** explicitly when proposing changes (uses `dbutils`, `%run`, `spark`, Unity Catalog three-part names, etc.) so the user knows what will break locally.
-- **Run from `91__full_pipeline.py`** as a Databricks Job; it accepts `tickers_override`, `run_optimization`, `rebuild_config`. Local smoke test for Databricks Connect credentials is `test_connection.py` (gitignored).
+- **Run from `91__full_pipeline.py`** as a Databricks Job; it accepts `tickers_override`, `run_optimization` (gates `93__delta_maintenance`), `rebuild_config`, and `force_full_refresh`. Local smoke test for Databricks Connect credentials is `test_connection.py` (gitignored).
 - **Branch discipline: `main` is the single source of truth.** GitHub `main` is the production source and feeds the read-only Databricks Repo mirror (see *Sync GitHub → Databricks Repo* below). Do feature work on `dev_alm`, validate, then merge to `main` via the normal PR flow. **Never force-push `main`** — it triggers the sync and is the production source.
 
 ## Layout
 
-- `00_config/` — tickers list, XBRL concept map, metric hierarchies, master-table builders
-- `10_ingestion/` — parallel SEC (8-worker, rate-limited) and yfinance fetch
-- `20_transformation/` — annual merge, quarterly derivation, pruning, derived metrics
-- `30_analysis/` — ad-hoc validation queries
+- `00_config/` — tickers list, XBRL concept map, metric hierarchies, master-table builders, `valuation_assumptions.json`, `backtest_archetypes.json`
+- `_core/` — pure-Python library (no Spark/Streamlit dep), unit-tested: `valuation.py` (scalar Graham/DCF/Owner-Earnings/EPS-CAGR refs), `periods.py` (Q4 arithmetic), `schemas.py` (export↔app artifact contract), `backtest.py` (as-of/no-look-ahead, predicate eval, CAGR/drawdown/vol/Sharpe). Exempt from the `NN__` filename rule (it's a library, not a pipeline stage).
+- `10_ingestion/` — parallel SEC (8-worker, rate-limited) and yfinance fetch. `12` also prices `BENCHMARK_TICKERS` (SPY) into `market_prices_daily` for the backtester (not in `config.tickers` — no fundamentals).
+- `20_transformation/` — annual merge, quarterly derivation, pruning, derived metrics, intrinsic value
+- `30_analysis/` — ad-hoc validation queries; `36__run_log_report.py` reads the run-log
 - `40_dashboards/` — dashboard SQL and `.lvdash.json`
-- `90_pipelines/91__full_pipeline.py` — orchestration entry point (Databricks notebook source format)
+- `50_publish/` — `51` exports parquet artifacts (data/metrics/prices/backtest + meta, schema-asserted against `_core/schemas.py`); `52` uploads them to the GitHub Release `latest`
+- `60_streamlit_app/` — public Streamlit Cloud app (Screener / Company / Backtest pages); reads the Release artifacts, no Databricks dependency
+- `70_backtest/71__run_backtest.py` — applies `backtest_archetypes.json` screens to history (no look-ahead) → `backtest_results` + `backtest_summary`
+- `90_pipelines/` — `91__full_pipeline.py` orchestration entry point; `93__delta_maintenance.py` (OPTIMIZE/VACUUM, gated on `run_optimization`)
+- `tests/` — pytest suite (repo root) for `_core/` + Streamlit `lib/`
+
+### Delta tables (Unity Catalog)
+- `main.financials`: `financials_raw` (append-only audit), `financials` (clean facts), `financials_metrics`, `financials_intrinsic_value`, `market_prices_daily` (daily prices, liquid-clustered), `market_data` (legacy), `backtest_results` + `backtest_summary` (backtester), `ingestion_failures`, `pipeline_run_timings` (legacy).
+- `main.config`: `tickers`, `concept_hierarchy`, `metrics_hierarchy`, `pipeline_runs` (per-step run-log: `run_id`/`step`/`minutes`/`status`), `pipeline_run_coverage` (per-run coverage/freshness snapshot).
 
 ## Sync GitHub → Databricks Repo
 
