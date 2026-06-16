@@ -62,11 +62,15 @@ def _set_sector(sector: str) -> None:
 
 
 st.markdown(
-    f'<div class="masthead"><div class="masthead-left">'
-    f'<div class="eyebrow">US Equities · Fundamental Analysis</div><h1>US Stock FA Screener</h1>'
-    f'<div class="ticker-row"><span class="ticker-chip">{len(wide):,} companies</span></div>'
-    f'</div><div class="masthead-right"><div>Latest available FY · USD</div>'
-    f'<div style="margin-top:6px;">SEC EDGAR XBRL</div></div></div>',
+    '<div class="scr-masthead">'
+    '<div class="scr-kicker"><span class="scr-hair"></span>'
+    '<span class="scr-kick-txt">US Equities · Fundamental Analysis</span>'
+    '<span class="scr-hair"></span></div>'
+    '<h1>US Stock FA Screener</h1>'
+    f'<div class="scr-dateline"><span class="ticker-chip">{len(wide):,} companies</span>'
+    '<span class="scr-sep">|</span><span>Latest available FY · USD</span>'
+    '<span class="scr-sep">|</span><span>SEC EDGAR XBRL</span></div>'
+    '</div>',
     unsafe_allow_html=True,
 )
 

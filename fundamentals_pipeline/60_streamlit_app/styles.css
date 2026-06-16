@@ -867,13 +867,53 @@ div[data-baseweb="popover"] div[role="option"]:hover {
  * inject_css wraps this file in a style element, so a literal tag token here would
  * prematurely close it and drop all the CSS. Single block; do not duplicate.
  * ============================================================ */
+
+/* Screener masthead — centered nameplate (Option A). Scoped to .scr-masthead so the
+   company/backtest pages keep the shared flex-row .masthead untouched. Reuses the shared
+   .ticker-chip for the count chip; existing vars only. */
+.scr-masthead {
+  padding-bottom: 20px; border-bottom: 1px solid var(--ink);
+  margin-bottom: 30px; text-align: center;
+}
+.scr-masthead .scr-kicker {
+  display: flex; align-items: center; gap: 16px; max-width: 560px; margin: 0 auto 14px;
+}
+.scr-masthead .scr-hair { flex: 1; height: 1px; background: var(--rule); }
+.scr-masthead .scr-kick-txt {
+  font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.22em;
+  text-transform: uppercase; color: var(--accent-ink); white-space: nowrap;
+}
+.scr-masthead h1 {
+  font-family: var(--display); font-variation-settings: "opsz" 144;
+  font-weight: 500; font-size: 52px; letter-spacing: -0.025em; line-height: 1; margin: 0;
+}
+.scr-masthead .scr-dateline {
+  display: flex; align-items: center; justify-content: center; gap: 14px; margin-top: 16px;
+  font-family: var(--mono); font-size: 11px; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+.scr-masthead .scr-sep { color: var(--rule); }
+@media (max-width: 760px) {
+  .scr-masthead h1 { font-size: 34px; }
+  .scr-masthead .scr-dateline { flex-wrap: wrap; gap: 8px 12px; }
+}
+
 .scr-panel-head {
   display: flex; align-items: baseline; justify-content: space-between;
-  margin: 2px 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--rule-soft);
+  margin: 2px 0 14px; padding-bottom: 9px; border-bottom: 1px solid var(--rule-soft);
+  position: relative;
+}
+.scr-panel-head::after {
+  content: ""; position: absolute; left: 0; bottom: -1px; width: 38px;
+  height: 2px; background: var(--accent);
 }
 .scr-panel-head h3 {
-  font-family: var(--display); font-size: 16px; font-weight: 500;
-  font-variation-settings: "opsz" 144;
+  font-family: var(--display); font-variation-settings: "opsz" 144;
+  font-weight: 500; font-size: 19px; letter-spacing: -0.01em;
+  display: flex; align-items: center; gap: 11px;
+}
+.scr-panel-head h3::before {
+  content: ""; width: 3px; height: 15px; background: var(--accent);
 }
 .scr-panel-head .meta {
   font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em;
