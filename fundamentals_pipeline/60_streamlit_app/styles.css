@@ -680,8 +680,9 @@ button[data-baseweb="tab"] {
 }
 button[data-baseweb="tab"]:hover { color: var(--ink) !important; }
 button[data-baseweb="tab"][aria-selected="true"] {
-  color: var(--ink) !important;
-  border-bottom-color: var(--ink) !important;
+  color: var(--accent) !important;
+  border-bottom-color: var(--accent) !important;
+  font-weight: 500 !important;
 }
 /* Streamlit adds a blue highlight bar under the active tab — kill it. */
 div[data-baseweb="tab-highlight"], div[data-baseweb="tab-border"] {
@@ -977,3 +978,53 @@ div[data-baseweb="popover"] div[role="option"]:hover {
 @media (max-width: 880px) {
   .scr-count { flex-basis: 28px; }
 }
+
+/* Screener results table — semantic color-banded HTML table (replaces st.dataframe).
+   Chips reuse the existing positive/negative tokens; amber is a value-only tint mixed
+   from --warning (no new :root var, no inline hex). Header + ticker cells are plain
+   query-param links (st.html strips JS), styled to read as the editorial table. */
+.scr-tbl-wrap {
+  background: var(--bg-card); border: 1px solid var(--rule); border-radius: 4px;
+  max-height: 720px; overflow: auto; margin-top: 6px;
+}
+.scr-tbl {
+  width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums;
+  min-width: 720px;
+}
+.scr-tbl thead th {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--ink-3); font-weight: 400;
+  padding: 13px 12px 11px; border-bottom: 1px solid var(--ink);
+  background: var(--bg-card); position: sticky; top: 0; z-index: 1;
+  white-space: nowrap; text-align: right;
+}
+.scr-tbl thead th.scr-th-tkr, .scr-tbl thead th.scr-th-co { text-align: left; }
+.scr-tbl thead th a { color: inherit; text-decoration: none; }
+.scr-tbl thead th a:hover { color: var(--accent); }
+.scr-tbl thead th .scr-arrow { color: var(--accent); margin-left: 3px; }
+
+.scr-tbl tbody td {
+  padding: 9px 12px; font-size: 12.5px; border-bottom: 1px solid var(--rule-soft);
+  text-align: right; font-family: var(--mono); color: var(--ink); white-space: nowrap;
+}
+.scr-tbl tbody tr:hover td { background: var(--bg-subtle); }
+.scr-tbl td.scr-td-tkr { text-align: left; }
+.scr-tbl td.scr-td-tkr a {
+  color: var(--accent); text-decoration: none; font-weight: 500; letter-spacing: 0.02em;
+}
+.scr-tbl td.scr-td-tkr a:hover { text-decoration: underline; }
+.scr-tbl td.scr-td-co {
+  text-align: left; font-family: var(--sans); color: var(--ink-2);
+  max-width: 180px; overflow: hidden; text-overflow: ellipsis;
+}
+.scr-tbl td.scr-na { color: var(--ink-3); }
+
+/* Semantic chips — green/red reuse the positive/negative soft+ink tokens; amber is a
+   value-only tint mixed from --warning over the card bg so it stays subordinate. */
+.scr-chip-g, .scr-chip-a, .scr-chip-r {
+  display: inline-block; min-width: 46px; padding: 2px 8px;
+  border-radius: 10px; font-size: 11.5px; font-weight: 500; text-align: center;
+}
+.scr-chip-g { background: var(--positive-soft); color: var(--positive); }
+.scr-chip-r { background: var(--negative-soft); color: var(--negative); }
+.scr-chip-a { background: color-mix(in srgb, var(--warning) 15%, var(--bg-card)); color: var(--warning); }

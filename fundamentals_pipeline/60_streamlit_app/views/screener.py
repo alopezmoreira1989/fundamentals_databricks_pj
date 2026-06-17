@@ -30,9 +30,15 @@ from lib.screener import (
     sector_mask,
     universe_mask,
 )
+from lib.signals import signal_absolute
 
 COMPANY_PAGE = "views/company.py"
 SECTOR_KEY = "scr_sector"   # selectbox key the sector strip drives via callback
+# Results-table sort state. st.html can't run JS (and iframes are out), so the column
+# headers are query-param links (?sort=COL) that drive a server-side rerun; the resolved
+# column/direction live in session_state so the URL can be cleared after each click.
+SORT_COL_KEY = "scr_sort_col"
+SORT_DIR_KEY = "scr_sort_dir"
 
 # Resolve the Logo.dev key ONCE per run. _logo_dev_key() touches st.secrets; with no
 # secrets.toml that surfaces a "No secrets found" alert, and calling it per featured tile
@@ -40,9 +46,6 @@ SECTOR_KEY = "scr_sector"   # selectbox key the sector strip drives via callback
 # masthead's single access; when it returns None we paint inline monograms without
 # re-touching st.secrets. On deployed apps the key is present, so tiles hotlink Logo.dev.
 _LOGO_KEY = _logo_dev_key()
-
-# st.dataframe row selection (on_select) needs Streamlit ≥ 1.35.
-_HAS_DF_SELECTION = tuple(int(p) for p in st.__version__.split(".")[:2]) >= (1, 35)
 
 wide, unit_map, metric_order = build_screener_frame()
 
@@ -64,6 +67,28 @@ def _set_sector(sector: str) -> None:
     """on_click callback — runs before the sector selectbox is instantiated, so writing
     its session-state key here is the valid way to drive it from the bars."""
     st.session_state[SECTOR_KEY] = sector
+
+
+# Query-param handoffs from the HTML results table (st.html anchors, no JS):
+#   ?ticker=XYZ  → a row was clicked → navigate to detail via the single _go_to entry point.
+#   ?sort=COL    → a header was clicked → toggle/set the sort, fold it into session_state,
+#                  then clear the URL so a manual rerun can't re-toggle it.
+# The ticker handler runs first and short-circuits the page (switch_page aborts the run).
+_qp_ticker = st.query_params.get("ticker")
+if _qp_ticker:
+    st.query_params.clear()
+    _go_to(str(_qp_ticker))
+
+_qp_sort = st.query_params.get("sort")
+if _qp_sort is not None:
+    if st.session_state.get(SORT_COL_KEY) == _qp_sort:
+        st.session_state[SORT_DIR_KEY] = (
+            "desc" if st.session_state.get(SORT_DIR_KEY, "asc") == "asc" else "asc"
+        )
+    else:
+        st.session_state[SORT_COL_KEY] = _qp_sort
+        st.session_state[SORT_DIR_KEY] = "asc"
+    del st.query_params["sort"]
 
 
 st.markdown(
@@ -326,37 +351,61 @@ for metric, sel in selections.items():
 fdf = wide[mask].reset_index(drop=True)
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Display table (numeric values + column_config so column sorting works)
+# Display table — semantic color-banded HTML (chips reuse lib.signals thresholds)
 # ──────────────────────────────────────────────────────────────────────────────
+# Replaces st.dataframe with an st.html() <table>: numeric cells carry green/amber/red
+# chips driven by signal_absolute() (the same good/warn/bad bands as the detail page and
+# the bucket pills), ticker cells link to the detail page via ?ticker=, and headers sort
+# server-side via ?sort=. st.html strips JS, so all interactivity is plain anchors.
 show_cols = ["ticker", "company"] + [c for c in cols if c in fdf.columns]
 disp = fdf[show_cols].rename(columns={"ticker": "Ticker", "company": "Company"})
 
-colcfg = {
-    "Ticker": st.column_config.TextColumn(width="small"),
-    "Company": st.column_config.TextColumn(width="medium"),
-}
+# usd metrics (incl. Market Cap) render in $B — convert once so display AND sort agree.
 for c in cols:
-    if c not in disp.columns:
-        continue
-    unit = unit_map.get(c, "")
-    if c == MARKET_CAP or unit == "usd":
-        # Raw USD → readable $B.
+    if c in disp.columns and (c == MARKET_CAP or unit_map.get(c, "") == "usd"):
         disp[c] = pd.to_numeric(disp[c], errors="coerce") / 1e9
-        help_txt = None
-        if c == MARKET_CAP:
-            # Market Cap is calendar-year; P/E etc. are fiscal-year (see caption).
-            help_txt = (
-                "Calendar year-end value. P/E and other fiscal-year metrics use "
-                "the company's fiscal year-end, so non-December filers (e.g. "
-                "AAPL/Sep, MSFT/Jun, WMT/Jan) have a 0–11 month basis offset."
-            )
-        colcfg[c] = st.column_config.NumberColumn(f"{c} ($B)", format="$%.1fB", help=help_txt)
-    elif unit == "percent":
-        colcfg[c] = st.column_config.NumberColumn(c, format="%.1f%%")
-    elif unit == "ratio":
-        colcfg[c] = st.column_config.NumberColumn(c, format="%.2fx")
-    else:
-        colcfg[c] = st.column_config.NumberColumn(c, format="%.2f")
+
+metric_cols = [c for c in disp.columns if c not in ("Ticker", "Company")]
+
+_MARKET_CAP_HELP = (
+    "Calendar year-end value. P/E and other fiscal-year metrics use the company's "
+    "fiscal year-end, so non-December filers (e.g. AAPL/Sep, MSFT/Jun, WMT/Jan) have "
+    "a 0–11 month basis offset."
+)
+_SIG_CHIP = {"good": "scr-chip-g", "warn": "scr-chip-a", "bad": "scr-chip-r"}
+
+
+def _header_label(col: str) -> str:
+    """Friendly header text — mirrors the old column_config labels ($B suffix for USD)."""
+    if col == MARKET_CAP or unit_map.get(col, "") == "usd":
+        return f"{col} ($B)"
+    return col
+
+
+def _fmt_value(col: str, val) -> str:
+    """Format one numeric cell to match the old column_config formats; NaN → em-dash."""
+    if pd.isna(val):
+        return "—"
+    unit = unit_map.get(col, "")
+    if col == MARKET_CAP or unit == "usd":   # already divided to $B above
+        return f"${val:.1f}B"
+    if unit == "percent":
+        return f"{val:.1f}%"
+    if unit == "ratio":
+        return f"{val:.2f}x"
+    return f"{val:.2f}"
+
+
+# Sort (server-side — st.html can't run JS). Text columns sort case-insensitively; numeric
+# columns sort on their coerced value. NaN sinks to the bottom either way.
+sort_col = st.session_state.get(SORT_COL_KEY)
+sort_dir = st.session_state.get(SORT_DIR_KEY, "asc")
+if sort_col and sort_col in disp.columns:
+    key = (lambda s: s.astype(str).str.lower()) if sort_col in ("Ticker", "Company") \
+        else (lambda s: pd.to_numeric(s, errors="coerce"))
+    disp = disp.sort_values(
+        by=sort_col, ascending=(sort_dir == "asc"), key=key, na_position="last",
+    )
 
 st.caption(f"{len(disp):,} companies after filters")
 if MARKET_CAP in cols:
@@ -366,23 +415,58 @@ if MARKET_CAP in cols:
     )
 
 
-if _HAS_DF_SELECTION:
-    event = st.dataframe(
-        disp,
-        column_config=colcfg,
-        hide_index=True,
-        width="stretch",
-        height=720,
-        on_select="rerun",
-        selection_mode="single-row",
-        key="screener_table",
+def _table_html() -> str:
+    """Build the full results table as a sanitiser-safe HTML string (no JS, no inline hex)."""
+    arrow = "▾" if sort_dir == "desc" else "▴"
+
+    def _mark(col: str) -> str:
+        return f'<span class="scr-arrow">{arrow}</span>' if sort_col == col else ""
+
+    head = [
+        f'<th class="scr-th-tkr"><a href="?sort=Ticker">Ticker{_mark("Ticker")}</a></th>',
+        f'<th class="scr-th-co"><a href="?sort=Company">Company{_mark("Company")}</a></th>',
+    ]
+    for c in metric_cols:
+        title = f' title="{html.escape(_MARKET_CAP_HELP)}"' if c == MARKET_CAP else ""
+        head.append(
+            f'<th{title}><a href="?sort={quote(c)}">'
+            f'{html.escape(_header_label(c))}{_mark(c)}</a></th>'
+        )
+
+    body = []
+    for rec in disp.to_dict("records"):
+        tkr = str(rec["Ticker"])
+        co = str(rec["Company"])
+        cells = [
+            f'<td class="scr-td-tkr"><a href="?ticker={quote(tkr)}">{html.escape(tkr)}</a></td>',
+            f'<td class="scr-td-co" title="{html.escape(co)}">{html.escape(co)}</td>',
+        ]
+        for c in metric_cols:
+            text = _fmt_value(c, rec[c])
+            if text == "—":
+                cells.append('<td class="scr-na">—</td>')
+                continue
+            chip = _SIG_CHIP.get(signal_absolute(c, rec[c]))
+            cells.append(
+                f'<td><span class="{chip}">{text}</span></td>' if chip else f"<td>{text}</td>"
+            )
+        body.append("<tr>" + "".join(cells) + "</tr>")
+
+    return (
+        '<div class="scr-tbl-wrap"><table class="scr-tbl"><thead><tr>'
+        + "".join(head)
+        + "</tr></thead><tbody>"
+        + "".join(body)
+        + "</tbody></table></div>"
     )
-    rows = getattr(event.selection, "rows", []) if hasattr(event, "selection") else []
-    if rows:
-        _go_to(disp.iloc[rows[0]]["Ticker"])
+
+
+if hasattr(st, "html"):
+    st.html(_table_html())
 else:
-    # Fallback for Streamlit < 1.35 (no on_select).
-    st.dataframe(disp, column_config=colcfg, hide_index=True, width="stretch", height=720)
+    # Fallback for very old Streamlit without st.html — plain dataframe + a selectbox bridge
+    # (kept so the page still works, just without the color chips / clickable rows).
+    st.dataframe(disp, hide_index=True, width="stretch", height=720)
     fb_l, fb_r = st.columns([3, 1])
     with fb_l:
         pick = st.selectbox("Open company", disp["Ticker"].tolist())
