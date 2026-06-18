@@ -1,5 +1,4 @@
 ---
-
 name: validate-concept-hierarchy
 description: Cross-check that 00_config/concept_hierarchy.json (dashboard layout) and the STATEMENTS maps in 00_config/01__tickers.py (ingestion contract) stay in sync, with an optional live check against main.financials.financials for orphan concepts. Reports concepts present in one file but not the other, statement mismatches, and invalid kind values. Use to validate or audit the hierarchy, to confirm the two lists are in sync after editing concept_hierarchy.json, or before a pipeline run that adds concepts. To author a new concept, map an XBRL tag, or fix a NULL or zero metric, use xbrl-concept-mapping.
 metadata:
