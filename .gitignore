@@ -17,6 +17,7 @@ test_connection.py
 
 # One-off backfill / cleanup scripts (run once against Unity Catalog, not pipeline stages)
 purge_negative_pe.py
+purge_negative_pe_connect.py
 
 # Scratch / temp files de sesiones de auditoría (Databricks Jobs API submits,
 # notebook exports, parches temporales con TICKERS_OVERRIDE, etc.)
