@@ -39,6 +39,34 @@ def safe_div(num: Number, den: Number) -> float | None:
     return float(num) / float(den)
 
 
+def pe_ratio(market_cap: Number, net_income: Number) -> float | None:
+    """P/E = market_cap / net_income.
+
+    Returns ``None`` when net_income is missing, zero, or negative — a loss-making
+    company has no meaningful P/E multiple. Mirrors the ``F.when(net_income > 0, ...)``
+    guard in ``22__derived_metrics.py`` (which the general ``safe_div`` does NOT apply,
+    since other multiples like P/B accept negative denominators).
+    """
+    if _is_missing(net_income) or float(net_income) <= 0:
+        return None
+    if _is_missing(market_cap):
+        return None
+    return float(market_cap) / float(net_income)
+
+
+def earnings_yield(net_income: Number, market_cap: Number) -> float | None:
+    """Earnings Yield % = net_income / market_cap × 100.
+
+    Returns ``None`` when net_income is missing, zero, or negative.
+    Mirrors the same guard as ``pe_ratio`` (they are inverses of each other).
+    """
+    if _is_missing(net_income) or float(net_income) <= 0:
+        return None
+    if _is_missing(market_cap) or float(market_cap) == 0.0:
+        return None
+    return float(net_income) / float(market_cap) * 100.0
+
+
 def graham_number(eps: Number, bvps: Number, magic: float = 22.5) -> float | None:
     """Graham's napkin rule: ``sqrt(magic * eps * bvps)``.
 
