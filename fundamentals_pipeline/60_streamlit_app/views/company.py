@@ -104,29 +104,38 @@ with tab_px:
     # Header text is window/frequency-aware, so reserve its slot now and fill it once both are
     # resolved below — keeps it visually on top while computed last.
     header_slot = st.empty()
-    # Frequency (3 options) + window picker (≤7 options) share one row, left-aligned: column
-    # weights mirror the option counts so neither stretches across the full page width.
-    col_freq, col_win = st.columns([3, 7], gap="small")
-    with col_freq:
+    # Frequency control + window buttons as ONE tight, left-aligned row. st.columns always
+    # expands to full page width (which spreads the buttons apart), so instead wrap both controls
+    # in a keyed st.container and flip its vertical block to a content-width flex row via CSS.
+    st.markdown(
+        "<style>"
+        # .st-key-pxctrl IS the container's (already display:flex) vertical block — flip it to a row.
+        ".st-key-pxctrl{flex-direction:row;flex-wrap:wrap;align-items:center;gap:6px;}"
+        '.st-key-pxctrl>[data-testid="stElementContainer"]{width:auto;}'
+        '.st-key-pxctrl>[data-testid="stElementContainer"]:has(>[data-testid="stMarkdownContainer"])'
+        "{display:none;}"   # collapse the style-only markdown so it adds no gap in the flex row
+        "</style>",
+        unsafe_allow_html=True,
+    )
+    with st.container(key="pxctrl"):
         freq = st.segmented_control(
             "Frequency", ["Daily", "Weekly", "Monthly"], default="Daily",
             key="price_freq", label_visibility="collapsed",
         ) or "Daily"
 
-    # Quick-range window. On a frequency switch, keep the current window if it still exists in the
-    # new (narrower) set, else fall back to that frequency's default.
-    window_set = WINDOW_SETS[freq]
-    active_window = st.session_state.get("price_window", WINDOW_DEFAULTS[freq])
-    if active_window not in window_set:
-        active_window = WINDOW_DEFAULTS[freq]
-    st.session_state["price_window"] = active_window
+        # Quick-range window. On a frequency switch, keep the current window if it still exists in
+        # the new (narrower) set, else fall back to that frequency's default.
+        window_set = WINDOW_SETS[freq]
+        active_window = st.session_state.get("price_window", WINDOW_DEFAULTS[freq])
+        if active_window not in window_set:
+            active_window = WINDOW_DEFAULTS[freq]
+        st.session_state["price_window"] = active_window
 
-    # Compact button row (one st.button per option). Click → record selection, rerun so the
-    # active highlight and the windowed KPIs/chart redraw. CSS highlights the active key.
-    st.markdown(price_window_css(active_window), unsafe_allow_html=True)
-    with col_win:
-        for col, label in zip(st.columns(len(window_set)), window_set, strict=True):
-            if col.button(label, key=f"pxwin-{label}"):
+        # One st.button per option; CSS highlights the active key. Click → record + rerun so the
+        # active highlight and the windowed KPIs/chart redraw.
+        st.markdown(price_window_css(active_window), unsafe_allow_html=True)
+        for label in window_set:
+            if st.button(label, key=f"pxwin-{label}"):
                 st.session_state["price_window"] = label
                 st.rerun()
 
