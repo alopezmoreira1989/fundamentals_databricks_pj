@@ -36,9 +36,10 @@ WINDOW_OFFSETS = {
 # — so "SMA 200" always means 200 days, never 200 weeks/months.
 SMA_WINDOWS = {"sma20": 20, "sma50": 50, "sma200": 200}
 
-# Price + SMA palette on cream. Price = strong accent; SMAs fast→slow, warm→earth. GREEN/CORAL
-# reuse the shared colors.py tokens; SMA 20's amber (#C8881F) has no exact token, kept literal.
-_SERIES_COLORS = {"Price": ACCENT, "SMA 20": "#C8881F", "SMA 50": GREEN, "SMA 200": CORAL}
+# Price + SMA palette on cream. Price = near-black ink (the primary series); SMAs fast→slow,
+# warm→earth and de-emphasised. GREEN/CORAL reuse the shared colors.py tokens; SMA 20's amber
+# (#C8881F) has no exact token, kept literal. Hierarchy (stroke width + opacity) lives in price_chart.
+_SERIES_COLORS = {"Price": "#1a1a18", "SMA 20": "#C8881F", "SMA 50": GREEN, "SMA 200": CORAL}
 _SERIES_ORDER = list(_SERIES_COLORS)
 
 
@@ -224,7 +225,11 @@ def price_chart(df: pd.DataFrame, ticker: str, freq: str = "Daily"):
     return (
         alt.Chart(plot)
         .transform_fold(value_cols, as_=["series", "value"])
-        .mark_line(strokeWidth=1.4)
+        # Visual hierarchy: Price is the primary series, the SMAs are supporting context. Stash the
+        # per-series base opacity in a field so the legend-toggle condition can layer on top of it
+        # (selected → base 1.0/0.55; deselected → dimmed 0.12) instead of overwriting it.
+        .transform_calculate(_base_op="datum.series === 'Price' ? 1.0 : 0.55")
+        .mark_line()
         .encode(
             x=alt.X("date:T", title=None,
                     axis=alt.Axis(labelExpr=label_expr, labelAngle=0, labelOverlap=True)),
@@ -234,7 +239,9 @@ def price_chart(df: pd.DataFrame, ticker: str, freq: str = "Daily"):
                             scale=alt.Scale(domain=_SERIES_ORDER,
                                             range=[_SERIES_COLORS[s] for s in _SERIES_ORDER]),
                             legend=alt.Legend(orient="top-left", symbolStrokeWidth=2)),
-            opacity=alt.condition(sel, alt.value(1.0), alt.value(0.12)),
+            strokeWidth=alt.condition(alt.datum.series == "Price", alt.value(2.5), alt.value(1.2)),
+            opacity=alt.condition(sel, alt.Opacity("_base_op:Q", scale=None, legend=None),
+                                  alt.value(0.12)),
             tooltip=[alt.Tooltip("date:T", title="Date", format="%Y-%m-%d"),
                      alt.Tooltip("series:N", title="Series"),
                      alt.Tooltip("value:Q", title="Value", format="$,.2f")],
