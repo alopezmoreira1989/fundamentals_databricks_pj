@@ -12,6 +12,26 @@ ACCENT = BLUE   # accent blue #185FA5 (reuse the shared token)
 # pandas>=2.2: 'ME' = month-end (not deprecated 'M'); 'W' = weekly. None = daily (no resample).
 RESAMPLE = {"Daily": None, "Weekly": "W", "Monthly": "ME"}
 
+# Quick-range windows. Labels are calendar-invariant (the user thinks in calendar time, not grain
+# units), so the option set narrows with the grain — no "1M" on a monthly view. "Max" = full history.
+WINDOW_SETS = {
+    "Daily":   ["1M", "3M", "6M", "1Y", "3Y", "5Y", "Max"],
+    "Weekly":  ["3M", "6M", "1Y", "3Y", "5Y", "Max"],
+    "Monthly": ["1Y", "3Y", "5Y", "10Y", "Max"],
+}
+WINDOW_DEFAULTS = {"Daily": "1Y", "Weekly": "1Y", "Monthly": "5Y"}
+# Trailing offset per label, applied to the series' max date. "Max" maps to None (no truncation).
+WINDOW_OFFSETS = {
+    "1M":  pd.DateOffset(months=1),
+    "3M":  pd.DateOffset(months=3),
+    "6M":  pd.DateOffset(months=6),
+    "1Y":  pd.DateOffset(years=1),
+    "3Y":  pd.DateOffset(years=3),
+    "5Y":  pd.DateOffset(years=5),
+    "10Y": pd.DateOffset(years=10),
+    "Max": None,
+}
+
 # SMA windows in TRADING DAYS (computed on the daily series, then sampled at the chart frequency)
 # — so "SMA 200" always means 200 days, never 200 weeks/months.
 SMA_WINDOWS = {"sma20": 20, "sma50": 50, "sma200": 200}
@@ -34,6 +54,38 @@ def prices_for(prices: pd.DataFrame, ticker: str) -> pd.DataFrame:
     for col, win in SMA_WINDOWS.items():
         out[col] = out["adj_close"].rolling(win).mean()   # NaN until `win` days exist (correct)
     return out
+
+
+def slice_window(df: pd.DataFrame, window: str) -> pd.DataFrame:
+    """Return df filtered to the trailing window. 'Max' (or an unknown label) is a pass-through.
+
+    The anchor is the series' most recent date, so the last row of the slice is always the
+    latest price — render_price_kpis()'s LATEST PRICE card stays a point-in-time fact regardless
+    of the window.
+    """
+    if df is None or df.empty:
+        return df
+    offset = WINDOW_OFFSETS.get(window)
+    if offset is None:   # "Max" or unrecognised → full history
+        return df
+    dates = pd.to_datetime(df["date"])
+    return df[dates >= dates.max() - offset].reset_index(drop=True)
+
+
+def price_window_css(active: str) -> str:
+    """Compact styling for the quick-range button row; fills the active button with the accent.
+
+    Targets Streamlit's per-key wrapper class (``st-key-pxwin-<label>``); the button keys in the
+    view must match that ``pxwin-<label>`` scheme.
+    """
+    return (
+        "<style>"
+        'div[class*="st-key-pxwin-"] button{padding:0.1rem 0.5rem;min-height:0;line-height:1.3;'
+        "border-radius:6px;font-size:0.78rem;font-weight:600;}"
+        f'.st-key-pxwin-{active} button{{background:{ACCENT};border-color:{ACCENT};}}'
+        f'.st-key-pxwin-{active} button p{{color:#fff;}}'
+        "</style>"
+    )
 
 
 def resample_prices(df: pd.DataFrame, freq_label: str) -> pd.DataFrame:
