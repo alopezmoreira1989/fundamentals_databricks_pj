@@ -104,10 +104,14 @@ with tab_px:
     # Header text is window/frequency-aware, so reserve its slot now and fill it once both are
     # resolved below — keeps it visually on top while computed last.
     header_slot = st.empty()
-    freq = st.segmented_control(
-        "Frequency", ["Daily", "Weekly", "Monthly"], default="Daily",
-        key="price_freq", label_visibility="collapsed",
-    ) or "Daily"
+    # Frequency (3 options) + window picker (≤7 options) share one row, left-aligned: column
+    # weights mirror the option counts so neither stretches across the full page width.
+    col_freq, col_win = st.columns([3, 7], gap="small")
+    with col_freq:
+        freq = st.segmented_control(
+            "Frequency", ["Daily", "Weekly", "Monthly"], default="Daily",
+            key="price_freq", label_visibility="collapsed",
+        ) or "Daily"
 
     # Quick-range window. On a frequency switch, keep the current window if it still exists in the
     # new (narrower) set, else fall back to that frequency's default.
@@ -120,10 +124,11 @@ with tab_px:
     # Compact button row (one st.button per option). Click → record selection, rerun so the
     # active highlight and the windowed KPIs/chart redraw. CSS highlights the active key.
     st.markdown(price_window_css(active_window), unsafe_allow_html=True)
-    for col, label in zip(st.columns(len(window_set)), window_set, strict=True):
-        if col.button(label, key=f"pxwin-{label}"):
-            st.session_state["price_window"] = label
-            st.rerun()
+    with col_win:
+        for col, label in zip(st.columns(len(window_set)), window_set, strict=True):
+            if col.button(label, key=f"pxwin-{label}"):
+                st.session_state["price_window"] = label
+                st.rerun()
 
     header_slot.markdown(
         '<div class="panel-header"><h2>Price</h2>'
