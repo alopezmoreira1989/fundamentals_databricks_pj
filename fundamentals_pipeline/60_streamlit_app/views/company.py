@@ -12,7 +12,16 @@ import streamlit as st
 from lib.charts import render_bs_composition, render_cf_fcf, render_is_revenue_combo
 from lib.data import app_version, load_latest_data, load_notes, load_prices
 from lib.kpis import render_kpi_strip
-from lib.prices import price_chart, prices_for, render_price_kpis, resample_prices
+from lib.prices import (
+    WINDOW_DEFAULTS,
+    WINDOW_SETS,
+    price_chart,
+    price_window_css,
+    prices_for,
+    render_price_kpis,
+    resample_prices,
+    slice_window,
+)
 from lib.quarterly import render_quarterly_combo
 from lib.render import (
     iv_price_from_metrics,
@@ -92,22 +101,50 @@ tab_px, tab_is, tab_bs, tab_cf, tab_dm, tab_qt = st.tabs(
 )
 
 with tab_px:
-    st.markdown(
+    # Header text is window/frequency-aware, so reserve its slot now and fill it once both are
+    # resolved below — keeps it visually on top while computed last.
+    header_slot = st.empty()
+    # Frequency (3 options) + window picker (≤7 options) share one row, left-aligned: column
+    # weights mirror the option counts so neither stretches across the full page width.
+    col_freq, col_win = st.columns([3, 7], gap="small")
+    with col_freq:
+        freq = st.segmented_control(
+            "Frequency", ["Daily", "Weekly", "Monthly"], default="Daily",
+            key="price_freq", label_visibility="collapsed",
+        ) or "Daily"
+
+    # Quick-range window. On a frequency switch, keep the current window if it still exists in the
+    # new (narrower) set, else fall back to that frequency's default.
+    window_set = WINDOW_SETS[freq]
+    active_window = st.session_state.get("price_window", WINDOW_DEFAULTS[freq])
+    if active_window not in window_set:
+        active_window = WINDOW_DEFAULTS[freq]
+    st.session_state["price_window"] = active_window
+
+    # Compact button row (one st.button per option). Click → record selection, rerun so the
+    # active highlight and the windowed KPIs/chart redraw. CSS highlights the active key.
+    st.markdown(price_window_css(active_window), unsafe_allow_html=True)
+    with col_win:
+        for col, label in zip(st.columns(len(window_set)), window_set, strict=True):
+            if col.button(label, key=f"pxwin-{label}"):
+                st.session_state["price_window"] = label
+                st.rerun()
+
+    header_slot.markdown(
         '<div class="panel-header"><h2>Price</h2>'
-        '<div class="meta">Adjusted close · SMA 20/50/200 · last 10 years · source: market_prices_daily</div></div>',
+        f'<div class="meta">Adjusted close · SMA 20/50/200 · last {active_window} · {freq} '
+        '· source: market_prices_daily</div></div>',
         unsafe_allow_html=True,
     )
-    freq = st.segmented_control(
-        "Frequency", ["Daily", "Weekly", "Monthly"], default="Daily",
-        key="price_freq", label_visibility="collapsed",
-    ) or "Daily"
-    pdf = prices_for(prices, ticker)          # daily slice (+ SMAs) — drives the KPIs
-    if pdf.empty:
+
+    pdf_full = prices_for(prices, ticker)     # full daily history (+ SMAs) — anchors LATEST PRICE
+    if pdf_full.empty:
         st.info("No price history available for this ticker yet. "
                 "Prices publish with the next pipeline run (51 → 52).")
     else:
-        st.markdown(render_price_kpis(pdf), unsafe_allow_html=True)   # 4-card strip
-        chart = price_chart(resample_prices(pdf, freq), ticker, freq)
+        pdf_win = slice_window(pdf_full, active_window)   # trailing window → KPIs + chart
+        st.markdown(render_price_kpis(pdf_win), unsafe_allow_html=True)   # 4-card strip
+        chart = price_chart(resample_prices(pdf_win, freq), ticker, freq)
         st.altair_chart(chart, use_container_width=True)
 
 with tab_is:
