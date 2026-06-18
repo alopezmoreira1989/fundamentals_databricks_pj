@@ -539,14 +539,27 @@ if pe_mcap is not None:
     val_metrics = (
         val_wide
         # Price multiples
-        .withColumn("P/E",       safe_div_col(F.col("market_cap"), F.col("Net Income")))
+        # NULL when Net Income ≤ 0: a negative P/E is meaningless (loss-making company).
+        # safe_div_col only guards 0/missing denominators, so the >0 gate is added here and
+        # NOT in safe_div_col (other multiples — P/B, P/FCF — accept negative denominators).
+        .withColumn("P/E",
+            F.when(
+                F.col("Net Income").isNotNull() & (F.col("Net Income") > 0),
+                safe_div_col(F.col("market_cap"), F.col("Net Income")),
+            ))
         .withColumn("P/S",       safe_div_col(F.col("market_cap"), F.col("Revenue")))
         .withColumn("P/FCF",     safe_div_col(F.col("market_cap"), F.col("_fcf")))
         .withColumn("P/B",       safe_div_col(F.col("market_cap"), F.col("Total Stockholders Equity")))
         .withColumn("EV",        F.col("_ev"))
         .withColumn("EV/EBITDA", safe_div_col(F.col("_ev"),        F.col("_ebitda")))
         # Yields
-        .withColumn("Earnings Yield %",     safe_div_col(F.col("Net Income"),                F.col("market_cap")) * 100)
+        # NULL when Net Income ≤ 0: a negative earnings yield is equally misleading
+        # (inverse of P/E — same loss-making guard).
+        .withColumn("Earnings Yield %",
+            F.when(
+                F.col("Net Income").isNotNull() & (F.col("Net Income") > 0),
+                safe_div_col(F.col("Net Income"), F.col("market_cap")) * 100,
+            ))
         .withColumn("Sales Yield %",        safe_div_col(F.col("Revenue"),                   F.col("market_cap")) * 100)
         .withColumn("FCF Yield %",          safe_div_col(F.col("_fcf"),                      F.col("market_cap")) * 100)
         .withColumn("Op Cash Flow Yield %", safe_div_col(F.col("Operating Cash Flow"),       F.col("market_cap")) * 100)

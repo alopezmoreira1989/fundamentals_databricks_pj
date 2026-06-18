@@ -32,6 +32,53 @@ def test_safe_div_tiny_denominator_is_finite_not_explosion():
     assert math.isfinite(out)
 
 
+# ── pe_ratio ──────────────────────────────────────────────────────────────────
+def test_pe_ratio_positive():
+    assert v.pe_ratio(1_000_000, 100_000) == pytest.approx(10.0)
+
+
+def test_pe_ratio_zero_ni_returns_none():
+    assert v.pe_ratio(1_000_000, 0) is None
+
+
+def test_pe_ratio_negative_ni_returns_none():
+    assert v.pe_ratio(1_000_000, -50_000) is None
+
+
+def test_pe_ratio_missing_returns_none():
+    assert v.pe_ratio(None, 100_000) is None
+    assert v.pe_ratio(1_000_000, None) is None
+    assert v.pe_ratio(1_000_000, float("nan")) is None
+
+
+# ── earnings_yield ──────────────────────────────────────────────────────────────
+def test_earnings_yield_positive():
+    # 100_000 / 1_000_000 * 100 = 10.0
+    assert v.earnings_yield(100_000, 1_000_000) == pytest.approx(10.0)
+
+
+def test_earnings_yield_zero_ni_returns_none():
+    assert v.earnings_yield(0, 1_000_000) is None
+
+
+def test_earnings_yield_negative_ni_returns_none():
+    assert v.earnings_yield(-50_000, 1_000_000) is None
+
+
+def test_earnings_yield_missing_or_zero_mcap_returns_none():
+    assert v.earnings_yield(100_000, None) is None
+    assert v.earnings_yield(100_000, 0) is None
+    assert v.earnings_yield(None, 1_000_000) is None
+
+
+def test_pe_ratio_and_earnings_yield_are_inverses():
+    # EY% = 100 / (P/E) — both guard NI > 0 identically.
+    pe = v.pe_ratio(1_000_000, 80_000)
+    ey = v.earnings_yield(80_000, 1_000_000)
+    assert pe is not None and ey is not None
+    assert ey == pytest.approx(100.0 / pe)
+
+
 # ── graham_number ─────────────────────────────────────────────────────────────
 def test_graham_number_basic():
     # sqrt(22.5 * 5 * 20) = sqrt(2250)
