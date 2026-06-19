@@ -21,8 +21,8 @@
 # MAGIC   vs **non-mappable** (`custom`); `ORACLE_VALUE_MISMATCH` (app has a value, but it
 # MAGIC   disagrees with the **highest-priority presented** us-gaap tag — the wrong-tag /
 # MAGIC   value-mangle case that Tier B/C cannot see, because there the app matches its own
-# MAGIC   chosen raw fact; Net Income on the Cash Flow line is excluded — its value is reconciled
-# MAGIC   on the Income Statement, and the CF line legitimately uses total `ProfitLoss` incl. NCI);
+# MAGIC   chosen raw fact; priority is statement-aware, so the Cash Flow line correctly expects the
+# MAGIC   consolidated `ProfitLoss` incl. NCI — the indirect-method start — and reconciles against it);
 # MAGIC   and `ORACLE_PARSE_FAIL` (counts against the validator).
 # MAGIC
 # MAGIC **Writes only `main.config.reconciliation_findings`** (append-only audit, partitioned by
@@ -106,7 +106,7 @@ _cl_map: dict[tuple, tuple] = {}
 for _stmt, _cmap in STATEMENTS.items():
     for _label, (_xbrl, _kind) in _cmap.items():
         _canon = CONCEPT_SYNONYMS.get(_label, _label)
-        _prio  = CONCEPT_PRIORITY.get(_label, 0)
+        _prio  = concept_priority(_stmt, _label)   # statement-aware (Cash Flow → ProfitLoss wins)
         for _tag in ([_xbrl] if isinstance(_xbrl, str) else _xbrl):
             _k = (_tag, _stmt)
             if _k not in _cl_map or _prio < _cl_map[_k][2]:
@@ -345,16 +345,19 @@ if _have_oracle:
     # ORACLE_VALUE_MISMATCH — the app published a non-NULL FY value, but it disagrees with the
     # value carried by the **highest-priority presented us-gaap tag** for that statement line.
     # The `winner` is the tag the merge SHOULD have picked (MIN priority, then larger magnitude —
-    # mirrors CONCEPT_PRIORITY → value-desc in 21). Two failure modes collapse here:
+    # mirrors concept_priority() → value-desc in 21). `priority` is now STATEMENT-AWARE, so on the
+    # Cash Flow line the winner is the consolidated ProfitLoss (the indirect-method start) — the
+    # same tag the merge now publishes — and CF Net Income reconciles instead of being excluded.
+    # Two failure modes collapse here:
     #   • wrong tag among coexisting synonyms (e.g. WMB Revenue picked `contract` over `Revenues`)
     #   • value mangled at merge for the right tag.
     # Quiet by construction when the app matches the winner. Sign flips that the linkbase explains
     # (`negated`) are excluded; oracle_value = 0 is skipped (rel_diff NULL) to avoid div-by-zero noise.
-    # Two concepts are carved out (see the WHERE clause): Net Income on the Cash Flow line (the
-    # indirect-method reconciliation start, ProfitLoss/total incl. NCI vs the app's attributable
-    # NetIncomeLoss — an immaterial NCI difference already covered by the Income Statement check),
-    # and Sales of Investments on the Cash Flow line (a sales-vs-maturities sibling-line ambiguity —
-    # validator mapping noise, not a value mangle; see the WHERE comment for the full rationale).
+    # One concept stays carved out (see the WHERE clause): Sales of Investments on the Cash Flow
+    # line (a sales-vs-maturities sibling-line ambiguity — validator mapping noise, not a value
+    # mangle; see the WHERE comment for the full rationale). The former Net Income / Cash Flow
+    # carve-out was REMOVED: with statement-aware priority the app and the oracle winner now agree
+    # on the consolidated ProfitLoss, so the line validates cleanly.
     df_vm = spark.sql(f"""
         WITH oa AS (
             SELECT o.cik, o.ticker, o.accession, o.form, o.fiscal_year, o.period_end, o.stmt,
@@ -390,12 +393,9 @@ if _have_oracle:
         WHERE app_value <> oracle_value
           AND ABS((app_value - oracle_value) / NULLIF(oracle_value, 0)) > {VALUE_TOL}
           AND NOT (negated AND ABS((app_value + oracle_value) / NULLIF(oracle_value, 0)) <= {VALUE_TOL})
-          -- Net Income on the Cash Flow statement is the indirect-method reconciliation start line:
-          -- filers present it as ProfitLoss (total, incl. NCI) while the app publishes the
-          -- attributable NetIncomeLoss (the CONCEPT_PRIORITY winner). The NCI-only difference is
-          -- immaterial (OCF is a direct concept; ROE uses attributable NI) and Net Income's value
-          -- is already reconciled on the Income Statement line. Drop it to keep the high bucket clean.
-          AND NOT (concept = 'Net Income' AND stmt = 'Cash Flow')
+          -- (The former Net Income / Cash Flow carve-out was removed: statement-aware priority now
+          -- makes the consolidated ProfitLoss the oracle winner AND the app's published value, so
+          -- the indirect-method reconciliation start reconciles cleanly instead of being excluded.)
           -- Sales of Investments on the Cash Flow statement is a known sibling-line ambiguity, not a
           -- value mangle: securities-heavy filers present *sales* and *maturities/calls* of marketable
           -- securities as SEPARATE investing lines. The concept intentionally tracks only the sales-

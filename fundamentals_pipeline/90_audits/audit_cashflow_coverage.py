@@ -94,6 +94,7 @@ CANDIDATES = {
     "Share Repurchases": [
         "PaymentsForRepurchaseOfCommonStock",
         "PaymentsForRepurchaseOfEquity",
+        "StockRepurchasedDuringPeriodValue",   # LP/MLP + LP→C-corp filers (VNOM FY2023): equity-statement tag
     ],
     "Net Change in Cash": [
         "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalentsPeriodIncreaseDecreaseIncludingExchangeRateEffect",
@@ -101,9 +102,14 @@ CANDIDATES = {
         "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalentsPeriodIncreaseDecrease",
         "CashAndCashEquivalentsPeriodIncreaseDecrease",
     ],
-    # report-only aggregate variants (true split case needs summation, out of scope)
+    # report-only aggregate variants (true split case needs summation, out of scope).
+    # Oil & gas royalty/mineral filers report DEPLETION as an isolated line (VNOM: aggregate absent);
+    # the standalone depletion tags are now in CASH_FLOW's fallback list, so include them here too —
+    # otherwise the audit would classify these tickers as "genuinely absent" rather than mapped.
     "Depreciation & Amortization": [
         "DepreciationDepletionAndAmortization",
+        "DepletionOfOilAndGasProperties",
+        "OilAndGasPropertyFullCostMethodDepletion",
         "DepreciationAmortizationAndAccretionNet",
         "DepreciationAndAmortization",
         "Depreciation",
@@ -132,15 +138,16 @@ SECTION_RE = {
     "Debt Issuance": re.compile(r"^ProceedsFrom.*(Debt|Notes|LinesOfCredit|Borrowings)"),
     "Debt Repayment": re.compile(r"^Repayments"),
     "Dividends Paid": re.compile(r"^PaymentsOfDividends"),
-    "Share Repurchases": re.compile(r"^PaymentsForRepurchase"),
+    "Share Repurchases": re.compile(r"^(PaymentsForRepurchase|StockRepurchasedDuringPeriodValue)"),
     "Net Change in Cash": re.compile(r"(CashCashEquivalents.*PeriodIncreaseDecrease|CashAndCashEquivalentsPeriodIncreaseDecrease)"),
-    "Depreciation & Amortization": re.compile(r"^(Depreciation|Amortization)"),
+    "Depreciation & Amortization": re.compile(r"^(Depreciation|Amortization|Depletion|OilAndGasProperty.*Depletion)"),
 }
 
 # One broad regex to retain only relevant annual tags per ticker (memory bound).
 BROAD_RE = re.compile(
     r"^(PaymentsToAcquire|PaymentsFor|PaymentsOf|ProceedsFrom|Repayments|NetCash"
-    r"|CashCashEquivalents|CashAndCashEquivalents|Depreciation|Amortization)"
+    r"|CashCashEquivalents|CashAndCashEquivalents|Depreciation|Amortization"
+    r"|Depletion|OilAndGasProperty|StockRepurchasedDuringPeriodValue)"
 )
 
 # ── SEC fetch (rate-limited, mirrors 11__fetch_sec_xbrl) ──────────────────────
