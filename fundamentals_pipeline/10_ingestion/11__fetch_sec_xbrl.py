@@ -434,6 +434,13 @@ def process_ticker(ticker: str, scraped_at_ts: datetime) -> tuple:
                 series = extract_series_multi(facts, xbrl_concept, kind)
                 if series.empty:
                     continue
+                # Share Repurchases is a positive cash-outflow MAGNITUDE by definition. Some filers
+                # report it with the treasury / contra-equity (negative) convention — both in the cash
+                # tags (e.g. GE PaymentsForRepurchaseOfCommonStock = -22.6B) and in the
+                # StockRepurchasedDuringPeriodValue fallback (HON -1,085M, where the real buyback is
+                # +1,085M). A negative "repurchase" is never a genuine value, so normalise to magnitude.
+                if label == "Share Repurchases":
+                    series = series.assign(value=series["value"].abs())
                 frames.append(series.assign(stmt=stmt_name, concept=label, kind=kind))
 
         if not frames:
