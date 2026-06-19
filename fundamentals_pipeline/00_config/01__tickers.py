@@ -136,7 +136,19 @@ CASH_FLOW = {
     "Net Income":                  ("NetIncomeLoss",                                                 "flow_additive"),
     "Net Income (to common)":      ("NetIncomeLossAvailableToCommonStockholdersBasic",               "flow_additive"),
     "Net Income (incl NCI)":       ("ProfitLoss",                                                    "flow_additive"),
-    "Depreciation & Amortization": ("DepreciationDepletionAndAmortization",                          "flow_additive"),
+    # ── Depreciation & Amortization — per-period fallback list (extract_series_multi, coalesce,
+    # never sums). The aggregate DepreciationDepletionAndAmortization is the canonical line and
+    # wins when present (covers BSM/KRP/DMLP and the vast majority of filers). Oil & gas
+    # royalty/mineral companies that report DEPLETION as an isolated cash-flow line and OMIT the
+    # aggregate came out NULL (VNOM: DepletionOfOilAndGasProperties = 214,412 / 146,118 / 121,071
+    # for FY24/23/22, aggregate absent). The standalone depletion tags fill those periods only when
+    # the aggregate is missing; full-cost filers use the …FullCostMethod… variant. Bare `Depletion`
+    # is EXCLUDED on purpose — it is generic (mining/timber) and a classic summable component, the
+    # OUT_OF_SCOPE (component-sum) case tracked in audit_cashflow_coverage.MECHANISM.
+    "Depreciation & Amortization": (["DepreciationDepletionAndAmortization",
+                                     "DepletionOfOilAndGasProperties",
+                                     "OilAndGasPropertyFullCostMethodDepletion"],
+                                    "flow_additive"),
     "Stock-based Compensation":    ("ShareBasedCompensation",                                        "flow_additive"),
     "Changes in Working Capital":  ("IncreaseDecreaseInOperatingCapital",                            "flow_additive"),
     "Operating Cash Flow":         ("NetCashProvidedByUsedInOperatingActivities",                    "flow_additive"),
@@ -209,11 +221,18 @@ CASH_FLOW = {
     # common-only would undercount the total when only components are reported → pending SUM logic
     # (like D&A). Keep the single aggregate tag.
     "Dividends Paid":              ("PaymentsOfDividends",                                           "flow_additive"),
-    # ── Share Repurchases — common-stock is the canonical line (11/17); the Equity aggregate is
-    # added. Preferred-stock repurchase is EXCLUDED (a separate summable component, not an
-    # equivalent aggregate).
+    # ── Share Repurchases — the common-stock cash line is canonical (11/17); the Equity aggregate
+    # is next. StockRepurchasedDuringPeriodValue (statement-of-changes-in-equity value of shares/
+    # units repurchased) is the LAST-resort fallback: LP/MLP filers and the LP→C-corp conversion
+    # year tag the buyback ONLY there, not under any cash-flow PaymentsForRepurchase* tag (VNOM
+    # FY2023: $95,221K under StockRepurchasedDuringPeriodValue in the FY2023 LP 10-K; the cash tag
+    # carries 2023 only as a later-filing comparative that 21's comparative guard drops). Per-period
+    # coalesce + lowest priority → it ONLY fills periods where both cash tags are absent and can
+    # NEVER overwrite a published cash value. Preferred-stock repurchase is EXCLUDED (a separate
+    # summable component, not an equivalent aggregate).
     "Share Repurchases":           (["PaymentsForRepurchaseOfCommonStock",
-                                     "PaymentsForRepurchaseOfEquity"],
+                                     "PaymentsForRepurchaseOfEquity",
+                                     "StockRepurchasedDuringPeriodValue"],
                                     "flow_additive"),
     "Financing Cash Flow":         ("NetCashProvidedByUsedInFinancingActivities",                    "flow_additive"),
     # cont-ops: same pattern as Investing CF (RCAT) → ...ContinuingOperations. Synonym+priority below.
@@ -360,6 +379,45 @@ CONCEPT_PRIORITY = {
     "Interest Expense (nonoperating)": 1,   # InterestExpenseNonoperating
     "Interest Expense (incl debt)":    2,   # InterestAndDebtExpense
 }
+
+# COMMAND ----------
+
+# MAGIC %md ## Statement-scoped priority overrides (Cash Flow Net Income)
+# MAGIC
+# MAGIC `CONCEPT_PRIORITY` above is the global default and is correct for the Income Statement
+# MAGIC (attributable `NetIncomeLoss` wins → EPS/ROE). The **Cash Flow** statement needs the
+# MAGIC OPPOSITE Net Income preference: GAAP's indirect-method reconciliation starts from the
+# MAGIC CONSOLIDATED net income (`ProfitLoss`, incl. non-controlling interest) — the figure that,
+# MAGIC after the listed adjustments, equals Operating Cash Flow. For NCI-heavy filers (VNOM:
+# MAGIC ~40% NCI via Diamondback's stake in the operating LLC — FY2024 attributable 359,245 vs
+# MAGIC consolidated 603,646) the attributable figure that wins on the Income Statement is the
+# MAGIC wrong CF start. `CONCEPT_PRIORITY_BY_STMT` inverts the Net Income order for `Cash Flow`
+# MAGIC only; every other (stmt, label) falls back to the global `CONCEPT_PRIORITY` via
+# MAGIC `concept_priority()`. Consumed by `21` and `21b` (Spark `_prio` column) and `35` (oracle
+# MAGIC winner) — `concept_priority()` below is the single source of truth; keep the three in sync.
+
+# COMMAND ----------
+
+CONCEPT_PRIORITY_BY_STMT = {
+    "Cash Flow": {
+        "Net Income (incl NCI)":  0,   # ProfitLoss — consolidated, the indirect-method start
+        "Net Income":             1,   # NetIncomeLoss — attributable to parent
+        "Net Income (to common)": 2,
+    },
+}
+
+
+def concept_priority(stmt: str, label: str) -> int:
+    """Merge tie-break priority for a (stmt, source label) pair — lower = preferred.
+
+    Statement-scoped overrides in CONCEPT_PRIORITY_BY_STMT win; otherwise the global
+    CONCEPT_PRIORITY applies; unlisted labels → 0 (no preference). `21`/`21b` replicate this
+    in Spark (chained F.when on stmt + concept); `35` calls it directly. Keep them in sync.
+    """
+    _over = CONCEPT_PRIORITY_BY_STMT.get(stmt)
+    if _over is not None and label in _over:
+        return _over[label]
+    return CONCEPT_PRIORITY.get(label, 0)
 
 # COMMAND ----------
 

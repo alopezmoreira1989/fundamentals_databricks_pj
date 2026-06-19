@@ -138,13 +138,22 @@ print(f"FY rows incoming: {incoming.count():,}")
 
 # COMMAND ----------
 
-# Synonym priority (lower = preferred) computed BEFORE the rename, from the SOURCE label.
-# Net Income coexists as NetIncomeLoss + ProfitLoss + (to common) in the same fy,
-# so the tiebreak cannot be `value desc`. CONCEPT_PRIORITY forces attributable-first;
-# unlisted labels → 0 (previous Revenue behaviour preserved).
+# Statement-aware synonym priority (lower = preferred), computed BEFORE the rename from the
+# SOURCE label. Net Income coexists as NetIncomeLoss + ProfitLoss + (to common) in the same fy,
+# so the tiebreak cannot be `value desc`. The global CONCEPT_PRIORITY forces attributable-first
+# (correct for the Income Statement); CONCEPT_PRIORITY_BY_STMT then INVERTS the Net Income order
+# for `Cash Flow` so the consolidated ProfitLoss — the indirect-method reconciliation start —
+# wins there (NCI-heavy filers like VNOM). Mirrors concept_priority() in 01__tickers; unlisted
+# labels → 0 (previous Revenue behaviour preserved). Apply the global map first, then the
+# statement-scoped overrides (added last → outermost F.when → take precedence for matching pairs).
 _prio = F.lit(0)
 for _label, _rank in CONCEPT_PRIORITY.items():
     _prio = F.when(F.col("concept") == _label, F.lit(_rank)).otherwise(_prio)
+for _stmt, _over in CONCEPT_PRIORITY_BY_STMT.items():
+    for _label, _rank in _over.items():
+        _prio = F.when(
+            (F.col("stmt") == _stmt) & (F.col("concept") == _label), F.lit(_rank)
+        ).otherwise(_prio)
 incoming = incoming.withColumn("prio", _prio)
 
 # Normalise: collapse XBRL synonyms to the canonical concept via CONCEPT_SYNONYMS
