@@ -61,7 +61,7 @@ TABLES = [
     {"name": "financials_raw",             "clustered": False, "zorder_cols": ["concept", "period_end"]},
     {"name": "financials",                 "clustered": False, "zorder_cols": ["concept", "period_end"]},
     {"name": "financials_metrics",         "clustered": False, "zorder_cols": ["metric", "fiscal_year"]},
-    {"name": "financials_intrinsic_value", "clustered": False, "zorder_cols": ["method", "fiscal_year"]},
+    {"name": "financials_intrinsic_value", "clustered": False, "zorder_cols": ["method", "scenario", "fiscal_year"]},
     {"name": "market_prices_daily",        "clustered": True,  "zorder_cols": []},  # liquid-clustered
     {"name": "market_data",                "clustered": False, "zorder_cols": []},  # legacy/back-compat
 ]

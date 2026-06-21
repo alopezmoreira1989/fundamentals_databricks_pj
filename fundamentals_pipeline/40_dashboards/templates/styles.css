@@ -575,6 +575,51 @@ table.q-table tbody td.latest-q { font-weight: 500; }
 }
 .footnote .pipe { margin: 0 8px; color: var(--rule); }
 
+/* ── Intrinsic Value — Bull / Mid / Bear scenario rows ──────────────────────
+   Per-method 3-column (bear/mid/bull) value + MoS rows with a bear→bull range
+   bar. Class names mirror iv_bull_mid_bear_mockup.html; design tokens only. */
+.metric-card .scn-colheads {
+  display: grid; grid-template-columns: 1fr 64px 64px 64px;
+  gap: 10px; padding: 0 0 6px 0; margin-bottom: 4px;
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+.metric-card .scn-colheads span { text-align: right; }
+.metric-card .scn-colheads span:first-child { text-align: left; }
+
+.metric-card .iv-row {
+  display: grid; grid-template-columns: 1fr 64px 64px 64px;
+  gap: 10px; align-items: center; padding: 6px 0; font-size: 12px;
+  border-top: 1px solid var(--rule-soft);
+}
+.metric-card .iv-row:first-of-type { border-top: none; }
+.metric-card .iv-row .m-label { color: var(--ink-2); }
+.metric-card .iv-row .v { text-align: right; font-family: var(--mono); font-weight: 500; }
+.metric-card .iv-row .v-bear { color: var(--negative); }
+.metric-card .iv-row .v-mid  { color: var(--ink); font-weight: 700; }
+.metric-card .iv-row .v-bull { color: var(--positive); }
+
+.metric-card .iv-mos-row {
+  display: grid; grid-template-columns: 1fr 64px 64px 64px;
+  gap: 10px; padding: 0 0 9px 0; font-size: 10px; color: var(--ink-3);
+}
+.metric-card .iv-mos-row .v { text-align: right; font-family: var(--mono); }
+
+.metric-card .iv-bar-row { grid-column: 1 / -1; padding: 2px 0 8px 0; }
+.metric-card .iv-bar {
+  position: relative; height: 5px; background: var(--bg-subtle); border-radius: 3px;
+}
+.metric-card .iv-bar .seg {
+  position: absolute; top: 0; bottom: 0; background: var(--accent-soft); border-radius: 3px;
+}
+.metric-card .iv-bar .mk {
+  position: absolute; top: -3px; width: 2px; height: 11px; border-radius: 1px;
+}
+.metric-card .iv-bar .mk-bear { background: var(--negative); }
+.metric-card .iv-bar .mk-mid  { background: var(--ink); }
+.metric-card .iv-bar .mk-bull { background: var(--positive); }
+.metric-card .iv-bar .mk-price { background: var(--accent); width: 1.5px; }
+
 /* Responsive */
 @media (max-width: 880px) {
   .kpi-strip { grid-template-columns: repeat(2, 1fr); }
