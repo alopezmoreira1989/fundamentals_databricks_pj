@@ -216,12 +216,23 @@ agg_base = (
         pick("Q1", "Q_standalone").alias("ytd_q1"),   # YTD at Q1 = standalone Q1
         pick("Q2", "YTD_6M").alias("ytd_q2"),
         pick("Q3", "YTD_9M").alias("ytd_q3"),
-        # FY value (from 10-K)
+        # FY value (from 10-K).
+        # CURRENT-YEAR GUARD (`year(period_end) >= fy`): a 10-K re-reports the prior
+        # year's FY_or_TTM total as a comparative, labelled with the FILING's `fy`. When
+        # the issuer reports NO current-year value for a concept (e.g. BNL Share Repurchases
+        # in fy2021), the dedup window leaves ONLY that prior-year comparative in the fy
+        # partition, so `fy_val`/`fy_end` silently anchor a full year too early — Q4 then
+        # comes out at the prior fiscal close (period_end year < fy) and collides with the
+        # real prior-year Q4 (the +1yr duplicate). No issuer labels its fiscal year AHEAD
+        # of its close, so a period_end whose year < fy is ALWAYS a comparative — same guard
+        # 21__clean_and_merge applies to FY rows. Scoped to the FY anchor ONLY; the Q1–Q3
+        # standalone/YTD picks stay unguarded (mid-year closers legitimately end in fy-1).
         F.first(
             F.when(
                 (F.col("fp") == "FY")
                 & (F.col("period_shape") == "FY_or_TTM")
-                & (F.col("form").isin("10-K", "10-K/A")),
+                & (F.col("form").isin("10-K", "10-K/A"))
+                & (F.year(F.col("period_end")) >= F.col("fy")),
                 F.col("value")
             ),
             ignorenulls=True,
@@ -232,11 +243,12 @@ agg_base = (
         pick("Q3", "Q_standalone", "period_end").alias("q3_std_end"),
         pick("Q2", "YTD_6M",      "period_end").alias("q2_ytd_end"),
         pick("Q3", "YTD_9M",      "period_end").alias("q3_ytd_end"),
-        F.first(
+        F.first(   # same current-year guard as fy_val above (keeps fy_end in lockstep)
             F.when(
                 (F.col("fp") == "FY")
                 & (F.col("period_shape") == "FY_or_TTM")
-                & (F.col("form").isin("10-K", "10-K/A")),
+                & (F.col("form").isin("10-K", "10-K/A"))
+                & (F.year(F.col("period_end")) >= F.col("fy")),
                 F.col("period_end")
             ),
             ignorenulls=True,
@@ -254,6 +266,10 @@ q4_std_rows = (
     .filter(F.col("fp") == "FY")
     .filter(F.col("period_shape") == "Q_standalone")
     .filter(F.col("form").isin("10-K", "10-K/A"))
+    # Drop prior-year Q4 standalone comparatives (year(period_end) < fy). The fy_end guard
+    # above already excludes them via the q4_std_end == fy_end join, but guarding here too
+    # keeps the Q4-standalone path from anchoring a year early on its own.
+    .filter(F.year(F.col("period_end")) >= F.col("fy"))
     .select(
         "ticker", "stmt", "concept", "fy",
         F.col("period_end").alias("q4_std_end"),
@@ -426,6 +442,18 @@ flow_quarterly = (
 )
 
 flow_quarterly = flow_quarterly.withColumn("scraped_at", F.lit(latest_scrape).cast("timestamp"))
+
+# Sign guard for DERIVED Share Repurchases (parity with 11__fetch_sec_xbrl's ingestion abs()).
+# Share Repurchases is a positive cash-outflow MAGNITUDE. The ingestion abs() only normalises
+# REPORTED rows (is_derived=false); the values computed here — Q4 = FY − YTD_Q3 and the
+# Q1–Q3 YTD deltas — bypass it, so a magnitude can come out negative when the FY/YTD inputs are
+# inconsistent (restatement, net issuance folded into the period, or a comparative leak). A
+# negative repurchase is never a genuine value → normalise to magnitude. abs() of an
+# already-positive standalone is a no-op, so applying it to ALL Share Repurchases rows is safe.
+flow_quarterly = flow_quarterly.withColumn(
+    "value",
+    F.when(F.col("concept") == "Share Repurchases", F.abs(F.col("value"))).otherwise(F.col("value")),
+)
 
 # Materialize flow_quarterly: read 3× (count here + union into all_quarterly → count + MERGE).
 # localCheckpoint instead of cache (not supported on serverless).

@@ -34,11 +34,92 @@ from lib.signals import signal_absolute
 
 COMPANY_PAGE = "views/company.py"
 SECTOR_KEY = "scr_sector"   # selectbox key the sector strip drives via callback
-# Results-table sort state. st.html can't run JS (and iframes are out), so the column
-# headers are query-param links (?sort=COL) that drive a server-side rerun; the resolved
-# column/direction live in session_state so the URL can be cleared after each click.
-SORT_COL_KEY = "scr_sort_col"
-SORT_DIR_KEY = "scr_sort_dir"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# URL = single source of truth for ALL filter state.
+# st.html injects into the top-level DOM (no iframe) and strips JS, so the table's
+# header links are real browser navigations — a HARD reload that wipes session_state.
+# To survive that, every header link carries the COMPLETE filter state (universe,
+# sector, search, columns, bucket selections, sort column + direction) in the query
+# string. On load each keyed widget seeds its initial value from st.query_params
+# (falling back to today's defaults); because the widgets are keyed, that seed only
+# matters on the first instantiation after a reload — normal in-session interaction
+# keeps working via session_state, untouched.
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+def _slug(name: str) -> str:
+    """lowercase, collapse runs of non-alphanumerics to ``_``, strip leading/trailing ``_``."""
+    return re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+
+
+def _encode_buckets(selections: dict[str, list[str]]) -> str:
+    """Encode active bucket selections as ``<slug>:<label1>,<label2>|<slug2>:...``.
+
+    Metrics with an empty selection are omitted, so an all-clear state encodes to "".
+    Slugs are alphanumeric/underscore only and bucket labels never contain the
+    ``|`` / ``:`` / ``,`` delimiters (verified), so the encoding is unambiguous.
+    """
+    parts = []
+    for metric, labels in selections.items():
+        if not labels:
+            continue
+        parts.append(f"{_slug(metric)}:{','.join(labels)}")
+    return "|".join(parts)
+
+
+def _decode_buckets(raw: str, metrics: list[str]) -> dict[str, list[str]]:
+    """Inverse of :func:`_encode_buckets`, keyed by the ORIGINAL metric name.
+
+    Slugs are resolved back to metric names by recomputing ``_slug(m)`` for each
+    ``m`` in ``metrics``. Tolerant of empty/malformed input — never raises, just
+    yields ``{}`` for anything it can't parse cleanly.
+    """
+    out: dict[str, list[str]] = {}
+    if not raw:
+        return out
+    slug_to_metric = {_slug(m): m for m in metrics}
+    for chunk in raw.split("|"):
+        if ":" not in chunk:
+            continue
+        slug, _, labels_raw = chunk.partition(":")
+        metric = slug_to_metric.get(slug)
+        if metric is None:
+            continue
+        labels = [lbl for lbl in labels_raw.split(",") if lbl]
+        if labels:
+            out[metric] = labels
+    return out
+
+
+def _state_qs(
+    universe: str, sector: str, query: str, cols: list[str],
+    selections: dict[str, list[str]], sort_col: str | None, sort_dir: str,
+) -> str:
+    """Build the FULL query string (no leading "?") encoding all filter state + sort.
+
+    Each value is percent-encoded via ``quote(..., safe="")``. A key is omitted
+    when its value is falsy/default (universe "All", sector "All sectors", empty
+    search, no columns, no buckets) to keep URLs short — but ``sort``/``dir`` are
+    ALWAYS emitted once a sort is active.
+    """
+    parts: list[tuple[str, str]] = []
+    if universe and universe != "All":
+        parts.append(("u", universe))
+    if sector and sector != SECTORS[0]:
+        parts.append(("sec", sector))
+    if query:
+        parts.append(("q", query))
+    if cols:
+        parts.append(("cols", "|".join(cols)))
+    encoded_buckets = _encode_buckets(selections)
+    if encoded_buckets:
+        parts.append(("b", encoded_buckets))
+    if sort_col:
+        parts.append(("sort", sort_col))
+        parts.append(("dir", sort_dir))
+    return "&".join(f"{k}={quote(str(v), safe='')}" for k, v in parts)
+
 
 # Resolve the Logo.dev key ONCE per run. _logo_dev_key() touches st.secrets; with no
 # secrets.toml that surfaces a "No secrets found" alert, and calling it per featured tile
@@ -48,6 +129,13 @@ SORT_DIR_KEY = "scr_sort_dir"
 _LOGO_KEY = _logo_dev_key()
 
 wide, unit_map, metric_order = build_screener_frame()
+
+# Seed the sector filter from the URL BEFORE anything reads SECTOR_KEY (the stat band,
+# the sector strip and the selectbox all share it). Only fires when the key is absent —
+# i.e. right after a hard reload — so in-session sector clicks are never clobbered.
+if SECTOR_KEY not in st.session_state:
+    _sec_qp = st.query_params.get("sec")
+    st.session_state[SECTOR_KEY] = _sec_qp if _sec_qp in SECTORS else SECTORS[0]
 
 # The active sector — resolved ONCE here and reused by the stat band, the sector strip and
 # Featured. It is the session key both the sector bars (_set_sector callback) and the filter
@@ -71,24 +159,18 @@ def _set_sector(sector: str) -> None:
 
 # Query-param handoffs from the HTML results table (st.html anchors, no JS):
 #   ?ticker=XYZ  → a row was clicked → navigate to detail via the single _go_to entry point.
-#   ?sort=COL    → a header was clicked → toggle/set the sort, fold it into session_state,
-#                  then clear the URL so a manual rerun can't re-toggle it.
+#   ?sort=COL&dir=…&u=…&sec=…&q=…&cols=…&b=…  → a header was clicked → a hard reload that
+#                  carries the full filter state; widgets re-seed from it (see helpers above).
 # The ticker handler runs first and short-circuits the page (switch_page aborts the run).
 _qp_ticker = st.query_params.get("ticker")
 if _qp_ticker:
     st.query_params.clear()
     _go_to(str(_qp_ticker))
 
-_qp_sort = st.query_params.get("sort")
-if _qp_sort is not None:
-    if st.session_state.get(SORT_COL_KEY) == _qp_sort:
-        st.session_state[SORT_DIR_KEY] = (
-            "desc" if st.session_state.get(SORT_DIR_KEY, "asc") == "asc" else "asc"
-        )
-    else:
-        st.session_state[SORT_COL_KEY] = _qp_sort
-        st.session_state[SORT_DIR_KEY] = "asc"
-    del st.query_params["sort"]
+# Sort state comes straight from the URL — toggling happens when the link is BUILT
+# (see _sort_href below), not when it's read, so there is nothing to clean up here.
+sort_col = st.query_params.get("sort")
+sort_dir = st.query_params.get("dir", "asc")
 
 
 st.markdown(
@@ -310,14 +392,21 @@ with feat_col, st.container(key="scr_featured"):
 with st.container(border=True):
     c1, c2, c3, c4 = st.columns([1.1, 1.4, 1.6, 3])
     with c1:
-        universe = st.selectbox("Universe", list(UNIVERSE_FLAGS), index=0)
+        # Seed the universe from the URL (first instantiation only) — falls back to index 0.
+        _univ_list = list(UNIVERSE_FLAGS)
+        _univ_qp = st.query_params.get("u")
+        _univ_index = _univ_list.index(_univ_qp) if _univ_qp in _univ_list else 0
+        universe = st.selectbox("Universe", _univ_list, index=_univ_index)
     with c2:
-        # Keyed so the sector strip's callbacks can drive it; default = "All sectors".
+        # Keyed so the sector strip's callbacks can drive it; SECTOR_KEY is pre-seeded from
+        # the URL above, so default = that value on a fresh load, else "All sectors".
         sector = st.selectbox("Sector", SECTORS, key=SECTOR_KEY)
     with c3:
-        query = st.text_input("Search (ticker or name)", "")
+        query = st.text_input("Search (ticker or name)", st.query_params.get("q", ""))
     with c4:
-        default_cols = [c for c in DEFAULT_COLUMNS if c in metric_order]
+        # Seed columns from the URL (filtered to ones that still exist), else today's defaults.
+        _cols_qp = [c for c in st.query_params.get("cols", "").split("|") if c in metric_order]
+        default_cols = _cols_qp or [c for c in DEFAULT_COLUMNS if c in metric_order]
         cols = st.multiselect("Columns (metrics)", metric_order, default=default_cols)
 
     # Filterable metrics follow the selected columns (always incl. Market Cap),
@@ -325,6 +414,9 @@ with st.container(border=True):
     # per-metric / unit-based bands in lib.screener — no percentile clamping.
     filter_metrics = [MARKET_CAP] + [c for c in cols if c != MARKET_CAP]
     filter_metrics = [m for m in filter_metrics if m in wide.columns]
+
+    # Decode any bucket selections carried in the URL once, keyed by metric name.
+    _bucket_defaults = _decode_buckets(st.query_params.get("b", ""), metric_order)
 
     st.caption("Range filters")
     bucket_specs: dict[str, list[tuple[str, float, float]]] = {}
@@ -335,10 +427,13 @@ with st.container(border=True):
         if not buckets:
             continue
         bucket_specs[metric] = buckets
+        labels = [b[0] for b in buckets]
+        # Seed from the URL (first instantiation only); drop any stale/invalid labels.
+        seed = [lbl for lbl in _bucket_defaults.get(metric, []) if lbl in labels]
         with pcols[i % 3]:
             sel = st.pills(
-                metric, [b[0] for b in buckets],
-                selection_mode="multi", key=f"bucket_{metric}",
+                metric, labels,
+                selection_mode="multi", key=f"bucket_{metric}", default=seed,
             )
         selections[metric] = sel or []
 
@@ -396,10 +491,9 @@ def _fmt_value(col: str, val) -> str:
     return f"{val:.2f}"
 
 
-# Sort (server-side — st.html can't run JS). Text columns sort case-insensitively; numeric
-# columns sort on their coerced value. NaN sinks to the bottom either way.
-sort_col = st.session_state.get(SORT_COL_KEY)
-sort_dir = st.session_state.get(SORT_DIR_KEY, "asc")
+# Sort (server-side — st.html can't run JS). sort_col/sort_dir were read from the URL at
+# the top of the page. Text columns sort case-insensitively; numeric columns sort on their
+# coerced value. NaN sinks to the bottom either way.
 if sort_col and sort_col in disp.columns:
     key = (lambda s: s.astype(str).str.lower()) if sort_col in ("Ticker", "Company") \
         else (lambda s: pd.to_numeric(s, errors="coerce"))
@@ -422,14 +516,25 @@ def _table_html() -> str:
     def _mark(col: str) -> str:
         return f'<span class="scr-arrow">{arrow}</span>' if sort_col == col else ""
 
+    def _next_dir(col: str) -> str:
+        """Direction this header should request: flip if it's the active sort, else asc."""
+        if sort_col == col:
+            return "desc" if sort_dir == "asc" else "asc"
+        return "asc"
+
+    def _sort_href(col: str) -> str:
+        """Full href carrying ALL filter state + the requested sort (HTML-attribute safe)."""
+        qs = _state_qs(universe, sector, query, cols, selections, col, _next_dir(col))
+        return html.escape("?" + qs)
+
     head = [
-        f'<th class="scr-th-tkr"><a href="?sort=Ticker">Ticker{_mark("Ticker")}</a></th>',
-        f'<th class="scr-th-co"><a href="?sort=Company">Company{_mark("Company")}</a></th>',
+        f'<th class="scr-th-tkr"><a href="{_sort_href("Ticker")}">Ticker{_mark("Ticker")}</a></th>',
+        f'<th class="scr-th-co"><a href="{_sort_href("Company")}">Company{_mark("Company")}</a></th>',
     ]
     for c in metric_cols:
         title = f' title="{html.escape(_MARKET_CAP_HELP)}"' if c == MARKET_CAP else ""
         head.append(
-            f'<th{title}><a href="?sort={quote(c)}">'
+            f'<th{title}><a href="{_sort_href(c)}">'
             f'{html.escape(_header_label(c))}{_mark(c)}</a></th>'
         )
 

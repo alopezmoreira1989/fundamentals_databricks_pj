@@ -58,6 +58,12 @@ def _record_step(name, t0, status="ok"):
 # MAGIC       ↓
 # MAGIC 21b__derive_quarterly           derive Q1–Q4 standalone rows (Q4 = FY − YTD_Q3 fallback)
 # MAGIC       ↓
+# MAGIC 21e__derive_fy_from_quarterly   synth FY = ΣQ for flow_additive concepts lacking a real FY
+# MAGIC       ↓
+# MAGIC 21f__dedup_balance_sheet        one BS snapshot per (ticker, concept, period_end)
+# MAGIC       ↓
+# MAGIC 21g__dedup_flow_orphans         one IS/CF fact per (ticker, concept, period_end, period_type)
+# MAGIC       ↓
 # MAGIC 22__derived_metrics             margins, FCF, YoY, leverage, valuation ratios
 # MAGIC       ↓
 # MAGIC 23__intrinsic_value             Graham, Graham revised, DCF, Owner Earnings (FY + TTM)
@@ -380,6 +386,30 @@ _t0 = time.monotonic()
 # COMMAND ----------
 
 _record_step("Dedup Balance Sheet", _t0)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 7e. Dedup Flow Orphans
+# MAGIC `financials` — IS/CF analogue of `21f`: enforces "one flow fact per `(ticker, stmt, concept,
+# MAGIC period_end, period_type)`", collapsing the `+1yr` fiscal_year orphans that MERGE never deletes.
+# MAGIC Recurring and idempotent: if no duplicates exist, nothing is rewritten. Must run after all flow
+# MAGIC writers (21, 21b, 21e) and after 21f, before metrics.
+
+# COMMAND ----------
+
+print("=" * 55)
+print("STEP 6d / 12 — Dedup Flow Orphans")
+print("=" * 55)
+_t0 = time.monotonic()
+
+# COMMAND ----------
+
+# MAGIC %run "../20_transformation/21g__dedup_flow_orphans"
+
+# COMMAND ----------
+
+_record_step("Dedup Flow Orphans", _t0)
 
 # COMMAND ----------
 
