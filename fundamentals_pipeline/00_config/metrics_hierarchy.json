@@ -13,6 +13,10 @@
       { "metric": "ROIC %",  "unit": "percent", "requires_market_data": false },
       { "metric": "ROCE %",  "unit": "percent", "requires_market_data": false },
       { "metric": "CROIC %", "unit": "percent", "requires_market_data": false }
+    ],
+    "Tangible Returns": [
+      { "metric": "ROTCE %",                     "unit": "percent", "requires_market_data": false },
+      { "metric": "Return on Tangible Equity %", "unit": "percent", "requires_market_data": false }
     ]
   },
 
@@ -78,6 +82,11 @@
       { "metric": "NCAV",         "unit": "usd",   "requires_market_data": false },
       { "metric": "NCAV / Share", "unit": "usd",   "requires_market_data": false },
       { "metric": "NCAV Ratio",   "unit": "ratio", "requires_market_data": true  }
+    ],
+    "Tangible Value": [
+      { "metric": "Tangible Book Value",         "unit": "usd",     "requires_market_data": false },
+      { "metric": "Tangible Book Value / Share", "unit": "usd",     "requires_market_data": false },
+      { "metric": "Price / Tangible Book Value", "unit": "ratio",   "requires_market_data": true  }
     ]
   },
 
@@ -104,6 +113,11 @@
     "Quality": [
       { "metric": "Piotroski F-Score", "unit": "ratio", "requires_market_data": false },
       { "metric": "Accruals Ratio",    "unit": "ratio", "requires_market_data": false }
+    ],
+    "Goodwill Risk": [
+      { "metric": "Goodwill / Total Assets %",    "unit": "percent", "requires_market_data": false },
+      { "metric": "Goodwill / Tangible Equity %", "unit": "percent", "requires_market_data": false },
+      { "metric": "Goodwill / Market Cap %",      "unit": "percent", "requires_market_data": true  }
     ]
   },
 

@@ -93,6 +93,8 @@ def safe_div(num, den):
 # already referenced unguarded above by Current Ratio / ROA / ROE / Net Buyback Yield, so present.)
 _inv_expr = F.col("Inventory")         if "Inventory"         in wide.columns else F.lit(None)
 _tl_expr  = F.col("Total Liabilities") if "Total Liabilities" in wide.columns else F.lit(None)
+_gw_expr     = F.col("Goodwill")           if "Goodwill"           in wide.columns else F.lit(None)
+_intang_expr = F.col("Intangible Assets")  if "Intangible Assets"  in wide.columns else F.lit(None)
 
 metrics_wide = (
     wide
@@ -253,6 +255,63 @@ metrics_wide = (
             & (F.col("Shares Diluted") != 0),
             F.col("NCAV") / F.col("Shares Diluted"),
         ))
+
+    # ── Tangible Value & Goodwill Risk (base; no market data) ───────────────────
+    # Re-materialize Goodwill/Intangible Assets as guaranteed-present columns (guards above
+    # handle universes where a ticker never reports either tag) so downstream safe_div() calls
+    # can reference them by name like any other column.
+    .withColumn("Goodwill", _gw_expr)
+    .withColumn("Intangible Assets", _intang_expr)
+    # Tangible Book Value = reported equity stripped of Goodwill and Intangible Assets —
+    # Graham's "real" floor on a liquidation basis. Goodwill/Intangibles coalesce a missing
+    # side to 0 (a real, common case — not every company carries both); Total Stockholders
+    # Equity itself is NOT coalesced, so TBV is NULL when equity is absent (mirrors P/B).
+    .withColumn("Tangible Book Value",
+        F.when(
+            F.col("Total Stockholders Equity").isNotNull(),
+            F.col("Total Stockholders Equity")
+            - F.coalesce(F.col("Goodwill"), F.lit(0))
+            - F.coalesce(F.col("Intangible Assets"), F.lit(0))
+        ))
+    .withColumn("Tangible Book Value / Share",
+        F.when(
+            F.col("Tangible Book Value").isNotNull()
+            & F.col("Shares Diluted").isNotNull()
+            & (F.col("Shares Diluted") != 0),
+            F.col("Tangible Book Value") / F.col("Shares Diluted")
+        ))
+    # Goodwill / Total Assets %: composition risk — what fraction of the balance sheet is
+    # unverifiable acquisition residue. Goodwill coalesced to 0 in the numerator: the
+    # us-gaap:Goodwill tag is standard/reliable enough that "absent" reads as "true zero"
+    # (unlike the multi-tag debt case, where absence was ambiguous).
+    .withColumn("Goodwill / Total Assets %",
+        safe_div("Goodwill", "Total Assets") * 100)
+    # Goodwill / Tangible Equity %: how much of "real" equity Goodwill alone would wipe out
+    # on a liquidation basis. >100% = Goodwill exceeds the entire tangible equity base, i.e.
+    # the company is more intangible than real. Gated on Tangible Book Value > 0 — when TBV
+    # is negative the ratio sign flips and becomes uninterpretable; the negative TBV itself
+    # is the real signal there (surfaced via Tangible Book Value directly).
+    .withColumn("Goodwill / Tangible Equity %",
+        F.when(F.col("Tangible Book Value") > 0,
+               safe_div("Goodwill", "Tangible Book Value") * 100))
+    # ROTCE % — Return on Tangible Capital Employed. Mirrors ROCE % (Operating Income /
+    # Capital Employed) with Goodwill + Intangibles stripped from the denominator. If this
+    # comfortably exceeds the cost of capital, the excess return over ROCE is real,
+    # capitalizable goodwill rather than an artifact of the intangible asset base.
+    .withColumn("Tangible Capital Employed",
+        F.when(
+            F.col("Capital Employed").isNotNull(),
+            F.col("Capital Employed")
+            - F.coalesce(F.col("Goodwill"), F.lit(0))
+            - F.coalesce(F.col("Intangible Assets"), F.lit(0))
+        ))
+    .withColumn("ROTCE %", safe_div("Operating Income", "Tangible Capital Employed") * 100)
+    # Return on Tangible Equity % vs. ROE %: a large gap shows how much reported ROE is
+    # inflated by the intangible base rather than real capital efficiency. Both columns land
+    # in "Tangible Returns" next to ROE % in metrics_hierarchy.json for direct comparison.
+    .withColumn("Return on Tangible Equity %",
+        F.when(F.col("Tangible Book Value") > 0,
+               safe_div("Net Income", "Tangible Book Value") * 100))
 )
 
 # COMMAND ----------
@@ -351,6 +410,10 @@ base_metric_cols = [
     "Piotroski F-Score", "Accruals Ratio",
     # Net-Net — base (NCAV Ratio is market-gated → val block / val_metric_cols)
     "NCAV", "NCAV / Share",
+    # Tangible Value & Goodwill Risk
+    "Tangible Book Value", "Tangible Book Value / Share",
+    "Goodwill / Total Assets %", "Goodwill / Tangible Equity %",
+    "ROTCE %", "Return on Tangible Equity %",
 ]
 
 def unpivot(df, metric_cols):
@@ -472,7 +535,9 @@ if pe_mcap is not None:
                     "Short-term Investments", "Long-term Debt", "Short-term Debt",
                     # Altman Z inputs (Revenue / Operating Income already in the IS branch):
                     "Total Assets", "Total Liabilities", "Total Current Assets",
-                    "Total Current Liabilities", "Retained Earnings"
+                    "Total Current Liabilities", "Retained Earnings",
+                    # Tangible Value / Goodwill Risk inputs:
+                    "Goodwill", "Intangible Assets"
                 ))
             )
         )
@@ -525,6 +590,16 @@ if pe_mcap is not None:
                 + F.coalesce(F.col("Depreciation & Amortization"), F.lit(0))
             )
         )
+        # Tangible Book Value, recomputed here (val_wide does NOT see the base-block column).
+        # Goodwill/Intangible Assets coalesce to 0 — same true-zero rationale as the base block.
+        .withColumn("_tbv_val",
+            F.when(
+                F.col("Total Stockholders Equity").isNotNull(),
+                F.col("Total Stockholders Equity")
+                - F.coalesce(F.col("Goodwill"), F.lit(0))
+                - F.coalesce(F.col("Intangible Assets"), F.lit(0))
+            )
+        )
     )
 
     val_metric_cols = [
@@ -534,6 +609,7 @@ if pe_mcap is not None:
         "Dividend Yield %", "Buyback Yield %", "Shareholder Yield %",
         "Altman Z-Score",
         "NCAV Ratio",
+        "Price / Tangible Book Value", "Goodwill / Market Cap %",
     ]
 
     val_metrics = (
@@ -552,6 +628,15 @@ if pe_mcap is not None:
         .withColumn("P/B",       safe_div_col(F.col("market_cap"), F.col("Total Stockholders Equity")))
         .withColumn("EV",        F.col("_ev"))
         .withColumn("EV/EBITDA", safe_div_col(F.col("_ev"),        F.col("_ebitda")))
+        # Price / Tangible Book Value — Graham's preferred substitute for P/B when Goodwill is
+        # large. NOT gated on _tbv_val > 0: same convention as P/B above, which is also
+        # ungated — a negative tangible book value still produces a (negative) ratio, which is
+        # itself the signal (balance-sheet insolvent on a tangible basis).
+        .withColumn("Price / Tangible Book Value", safe_div_col(F.col("market_cap"), F.col("_tbv_val")))
+        # Goodwill / Market Cap %: how much of what you're paying for today is unverifiable
+        # accounting residue. Goodwill coalesced to 0 — true-zero rationale, see base block.
+        .withColumn("Goodwill / Market Cap %",
+            safe_div_col(F.coalesce(F.col("Goodwill"), F.lit(0)), F.col("market_cap")) * 100)
         # Yields
         # NULL when Net Income ≤ 0: a negative earnings yield is equally misleading
         # (inverse of P/E — same loss-making guard).
