@@ -10,6 +10,11 @@ from .format import is_missing
 _LOWER_IS_BETTER = {          # more expensive/risky the higher the value
     "P/E": (15, 25), "P/S": (2, 5), "P/FCF": (15, 25), "P/B": (1.5, 3),
     "EV/EBITDA": (15, 25),
+    # Tangible Value / Goodwill Risk (lower = less acquisition residue / cheaper on tangibles).
+    "Goodwill / Total Assets %":    (15, 30),   # green ≤15% of assets, red ≥30% — acquisition-heavy threshold
+    "Goodwill / Tangible Equity %": (50, 100),  # green ≤50%, red ≥100% (Goodwill exceeds tangible equity)
+    "Goodwill / Market Cap %":      (20, 50),   # green ≤20% of price is goodwill, red ≥50%
+    "Price / Tangible Book Value":  (1.5, 3),   # Graham's preferred P/B substitute — same band as P/B
     "Debt / Equity": (0.5, 1.0), "Debt / Assets": (0.3, 0.5),
     # Net Debt / EBITDA: lower = healthier. A NEGATIVE value (net cash) is < green_max,
     # so it correctly reads "good" — better than zero leverage, no special-casing needed.
@@ -30,6 +35,9 @@ _HIGHER_IS_BETTER = {         # better the higher the value
     "Cash Flow to Debt": (0.4, 0.15),  # green ≥ 40% of debt retired per yr of OCF, red ≤ 15%
     "ROE %": (15, 8), "ROIC %": (15, 8), "ROCE %": (15, 8),
     "ROA %": (10, 5), "CROIC %": (15, 8),
+    # Tangible Returns (higher = real capital efficiency, intangible base stripped out).
+    "ROTCE %": (15, 8),                          # mirrors ROCE % — same conservative band
+    "Return on Tangible Equity %": (15, 8),      # mirrors ROE %
     "Gross Margin %": (40, 20), "Operating Margin %": (20, 10),
     "Net Margin %": (20, 10), "FCF Margin %": (15, 8),
     "Op Cash Flow Margin %": (15, 8),

@@ -103,7 +103,15 @@ BALANCE_SHEET = {
     "Total Current Assets":       ("AssetsCurrent",                              "stock"),
     "PP&E Net":                   ("PropertyPlantAndEquipmentNet",               "stock"),
     "Goodwill":                   ("Goodwill",                                   "stock"),
-    "Intangible Assets":          ("FiniteLivedIntangibleAssetsNet",             "stock"),
+    # List of tags in priority order (extract_series_multi, first-hit-wins). Many filers
+    # (esp. those with indefinite-lived intangibles like trademarks) don't tag
+    # FiniteLivedIntangibleAssetsNet at all — the aggregate ExcludingGoodwill tag is the
+    # more general/common one and is tried first; FiniteLived is kept as a fallback for
+    # filers that only break out the finite-lived piece. Fixes understated Intangible
+    # Assets → overstated Tangible Book Value for those filers.
+    "Intangible Assets":          (["IntangibleAssetsNetExcludingGoodwill",
+                                     "FiniteLivedIntangibleAssetsNet",
+                                     "OtherIntangibleAssetsNet"],               "stock"),
     "Total Assets":               ("Assets",                                     "stock"),
     "Accounts Payable":           ("AccountsPayableCurrent",                     "stock"),
     # Debt uses a LIST of tags in priority order (first-hit-wins at ingestion,
