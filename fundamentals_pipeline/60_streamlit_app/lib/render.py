@@ -483,6 +483,60 @@ def _clean_iv(name: str) -> str:
     return name
 
 
+# Intrinsic-value methods that carry bull/mid/bear scenarios. Maps the value-metric base
+# (no period/scenario suffix) → the tag used in its paired "MoS % ({tag}, {period})" label.
+# 23__intrinsic_value writes mid unsuffixed and bull/bear with a " — Bull"/" — Bear" suffix
+# AFTER the (FY)/(TTM) parenthetical.
+_IV_SCENARIO_METHODS = {
+    "Graham Number":              "Graham Number",
+    "Graham Revised Value":       "Graham Revised",
+    "DCF Value per Share":        "DCF",
+    "Owner Earnings Value/Share": "Owner Earnings",
+}
+
+
+def _iv_metric_action(metric_name: str) -> str:
+    """Classify an Intrinsic Value metric for the scenario-aware grid:
+      'skip'     — a Bull/Bear variant, or any MoS row (both folded into a scenario row);
+      'scenario' — the mid (unsuffixed) value metric of a scenario method → render a 3-col row;
+      'normal'   — anything else (e.g. the absolute Owner Earnings $), rendered as today."""
+    if metric_name.endswith(" — Bull") or metric_name.endswith(" — Bear"):
+        return "skip"
+    base = metric_name.split(" (")[0].strip()
+    if base == "MoS %":
+        return "skip"
+    if base in _IV_SCENARIO_METHODS:
+        return "scenario"
+    return "normal"
+
+
+def _build_iv_scenario_row(subcat_df: pd.DataFrame, mid_value_metric: str,
+                           iv_period: str, price) -> str:
+    """Gather bear/mid/bull for a scenario method's value + paired MoS rows and render them.
+
+    `mid_value_metric` is the unsuffixed value label (e.g. "DCF Value per Share (FY)"); its
+    paired MoS label and the bull/bear variants are derived from `_IV_SCENARIO_METHODS` and
+    the SCENARIO suffix convention. The value metric and its MoS always live in the same
+    subcategory, so both are present in `subcat_df`.
+    """
+    base = mid_value_metric.split(" (")[0].strip()
+    mos_tag = _IV_SCENARIO_METHODS[base]
+    val_mid = f"{base} ({iv_period})"
+    mos_mid = f"MoS % ({mos_tag}, {iv_period})"
+
+    def latest(label: str):
+        r = subcat_df[subcat_df["metric"] == label].sort_values("fiscal_year")
+        vals = r["value"].tolist()
+        return vals[-1] if vals else None
+
+    bear, mid, bull = latest(val_mid + " — Bear"), latest(val_mid), latest(val_mid + " — Bull")
+    bear_mos, mid_mos, bull_mos = latest(mos_mid + " — Bear"), latest(mos_mid), latest(mos_mid + " — Bull")
+
+    unit_row = subcat_df[subcat_df["metric"] == val_mid]
+    unit = unit_row.iloc[0].get("unit", "usd") if not unit_row.empty else "usd"
+    return _render_iv_scenario_row(base, bear, mid, bull, bear_mos, mid_mos, bull_mos, unit, price)
+
+
 def render_metrics_grid(metrics: pd.DataFrame, ticker: str, iv_period: str = "FY") -> str:
     """Render the derived metrics cards — one per category from metrics_hierarchy.json.
 
@@ -516,6 +570,14 @@ def render_metrics_grid(metrics: pd.DataFrame, ticker: str, iv_period: str = "FY
         )
 
         rows_html: list[str] = []
+        # Intrinsic Value cards render bull/mid/bear side by side; back out the anchor price
+        # once (mid) and emit the Bear/Mid/Bull column heads above the first method row.
+        iv_price = iv_price_from_metrics(metrics, ticker, iv_period) if is_iv else None
+        if is_iv:
+            rows_html.append(
+                '<div class="scn-colheads">'
+                '<span></span><span>Bear</span><span>Mid</span><span>Bull</span></div>'
+            )
         first_sub = True
         for subcat in subcategories:
             sub_display = _clean_iv(subcat) if is_iv else subcat
@@ -528,6 +590,17 @@ def render_metrics_grid(metrics: pd.DataFrame, ticker: str, iv_period: str = "FY
 
             subcat_df = cat_df[cat_df["subcategory"] == subcat]
             for metric_name in subcat_df["metric"].unique():
+                if is_iv:
+                    action = _iv_metric_action(metric_name)
+                    if action == "skip":
+                        continue   # Bull/Bear variant or MoS row — folded into the scenario row
+                    if action == "scenario":
+                        row = _build_iv_scenario_row(subcat_df, metric_name, iv_period, iv_price)
+                        if row:
+                            rows_html.append(row)
+                        continue
+                    # action == "normal" → fall through to the generic single-value path below
+                    #                       (e.g. the absolute "Owner Earnings (FY)" $ row)
                 m_rows = subcat_df[subcat_df["metric"] == metric_name].sort_values("fiscal_year")
                 unit = m_rows.iloc[0].get("unit", None)
                 values = m_rows["value"].tolist()
@@ -632,11 +705,75 @@ def _render_valuation_row(metric: str, display: str, unit, values, latest) -> st
     )
 
 
+def _iv_bar_row(bear, mid, bull, price) -> str:
+    """Mini range bar for one scenario method: a .seg spanning [bear, bull] over a local
+    domain of [min(bear,price)..max(bull,price)] (+pad), with bear/mid/bull tick marks and a
+    price tick. Degrades gracefully — returns "" when mid is missing/≤0; a missing bear or
+    bull bound collapses the seg toward mid. Class names mirror iv_bull_mid_bear_mockup.html.
+    """
+    if is_missing(mid) or mid <= 0:
+        return ""
+    pts = [v for v in (bear, mid, bull) if not is_missing(v) and v > 0]
+    lo, hi = min(pts), max(pts)
+    has_price = price is not None and not is_missing(price) and math.isfinite(price) and price > 0
+    if has_price:
+        lo, hi = min(lo, price), max(hi, price)
+    pad = (hi - lo) * 0.08 or hi * 0.08 or 1.0   # ~8% domain padding so end marks don't clip
+    dmin, span = lo - pad, ((hi + pad) - (lo - pad)) or 1.0
+
+    def pct(v):
+        return max(0.0, min(100.0, (v - dmin) / span * 100.0))
+
+    # seg spans bear→bull; a missing bound falls back to mid (degrades to a point).
+    seg_lo = bear if (not is_missing(bear) and bear > 0) else mid
+    seg_hi = bull if (not is_missing(bull) and bull > 0) else mid
+    p_lo, p_hi = pct(min(seg_lo, seg_hi)), pct(max(seg_lo, seg_hi))
+    parts = [f'<div class="seg" style="left:{p_lo:.1f}%; width:{max(p_hi - p_lo, 0.5):.1f}%;"></div>']
+    if not is_missing(bear) and bear > 0:
+        parts.append(f'<div class="mk mk-bear" style="left:{pct(bear):.1f}%;"></div>')
+    parts.append(f'<div class="mk mk-mid" style="left:{pct(mid):.1f}%;"></div>')
+    if not is_missing(bull) and bull > 0:
+        parts.append(f'<div class="mk mk-bull" style="left:{pct(bull):.1f}%;"></div>')
+    if has_price:
+        parts.append(f'<div class="mk mk-price" style="left:{pct(price):.1f}%;"></div>')
+    return f'<div class="iv-bar-row"><div class="iv-bar">{"".join(parts)}</div></div>'
+
+
+def _render_iv_scenario_row(label: str, bear, mid, bull, bear_mos, mid_mos, bull_mos,
+                            unit, price) -> str:
+    """One intrinsic-value method rendered as a Bear/Mid/Bull row: the value triplet
+    (.iv-row, v-bear/v-mid/v-bull), the MoS triplet (.iv-mos-row), and the .iv-bar-row range
+    bar. Missing/non-positive scenario values show an em-dash in that column.
+    """
+    def vfmt(v):
+        return fmt_metric(v, unit) if (not is_missing(v) and v > 0) else EM_DASH
+
+    def mfmt(v):
+        return fmt_mos(v) if not is_missing(v) else EM_DASH
+
+    iv_row = (
+        '<div class="iv-row">'
+        f'<div class="m-label">{html.escape(label)}</div>'
+        f'<div class="v v-bear">{vfmt(bear)}</div>'
+        f'<div class="v v-mid">{vfmt(mid)}</div>'
+        f'<div class="v v-bull">{vfmt(bull)}</div>'
+        '</div>'
+    )
+    mos_row = (
+        '<div class="iv-mos-row">'
+        '<div></div>'
+        f'<div class="v">{mfmt(bear_mos)}</div>'
+        f'<div class="v">{mfmt(mid_mos)}</div>'
+        f'<div class="v">{mfmt(bull_mos)}</div>'
+        '</div>'
+    )
+    return iv_row + mos_row + _iv_bar_row(bear, mid, bull, price)
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Valuation football field — horizontal range chart of IV methods vs market price
 # ──────────────────────────────────────────────────────────────────────────────
 
-FF_BAND = 0.15   # ±15% presentational sensitivity envelope around each point estimate
 # Methods shown, in display order. Graham Number is EXCLUDED on purpose: it is suppressed
 # upstream for distorted-book firms and, where present, is often a wild outlier that would
 # crush the shared x-scale. (value-metric base, MoS method tag, display label)
@@ -682,27 +819,34 @@ def render_valuation_football_field(metrics: pd.DataFrame, ticker: str, price,
                                     iv_period: str = "FY") -> str:
     """Horizontal 'football field' of intrinsic-value methods vs the market price.
 
-    Each method is a bar over [base·(1−FF_BAND), base·(1+FF_BAND)] with a base-case dot;
-    a single vertical line marks `price`. Bars tint by base-vs-price — base above price →
-    undervalued → positive; base below → overvalued → negative; neutral when price is
-    unknown. Returns "" when no method has a usable (finite, >0) value so the page shows
-    nothing. Render-layer only.
-    TODO: if a real low/high is ever stored from the DCF assumption sweep, read it here
-    instead of constructing the ±FF_BAND envelope.
+    Each method is a bar spanning the REAL bear→bull scenario range (from 23's bull/mid/bear
+    profiles) with a mid-case dot; a single vertical line marks `price`. Bars tint by
+    mid-vs-price — mid above price → undervalued → positive; mid below → overvalued →
+    negative; neutral when price is unknown. Returns "" when no method has a usable (finite,
+    >0) mid value so the page shows nothing. Render-layer only.
     """
     sub = metrics[(metrics["ticker"] == ticker) & (metrics["period_type"] == "FY")]
     if sub.empty:
         return ""
 
-    bars = []  # (label, base, low, high)
+    def _latest(label):
+        vals = [v for v in sub[sub["metric"] == label].sort_values("fiscal_year")["value"].tolist()
+                if not is_missing(v)]
+        return vals[-1] if vals else None
+
+    bars = []  # (label, base=mid, low=bear, high=bull)
     for base_metric, _tag, label in FF_METHODS:
-        vals = [v for v in sub[sub["metric"] == f"{base_metric} ({iv_period})"]
-                .sort_values("fiscal_year")["value"].tolist() if not is_missing(v)]
-        base = vals[-1] if vals else None
-        # Skip NaN / ≤0 — a non-positive per-share value can't anchor a ±band bar.
+        base = _latest(f"{base_metric} ({iv_period})")            # mid → the dot
+        # Skip NaN / ≤0 — a non-positive per-share value can't anchor a bar.
         if base is None or not math.isfinite(base) or base <= 0:
             continue
-        bars.append((label, float(base), float(base) * (1 - FF_BAND), float(base) * (1 + FF_BAND)))
+        low = _latest(f"{base_metric} ({iv_period}) — Bear")
+        high = _latest(f"{base_metric} ({iv_period}) — Bull")
+        # A missing bear/bull bound falls back to mid so the bar degrades to a point rather
+        # than disappearing.
+        low = low if (low is not None and math.isfinite(low) and low > 0) else base
+        high = high if (high is not None and math.isfinite(high) and high > 0) else base
+        bars.append((label, float(base), float(min(low, high)), float(max(low, high))))
     if not bars:
         return ""
 
@@ -766,8 +910,7 @@ def render_valuation_football_field(metrics: pd.DataFrame, ticker: str, price,
                    f'text-anchor="middle">${v:,.0f}</text>')
     svg.append("</svg>")
 
-    notes = [f"bars show ±{int(FF_BAND * 100)}% sensitivity band around each method's "
-             f"point estimate (not a confidence interval)"]
+    notes = ["bars span the bear→bull scenario range per method · dot = mid case"]
     if len(bars) == 1:
         notes.append("only one method available")
     if not has_price:

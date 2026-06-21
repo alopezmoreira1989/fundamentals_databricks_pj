@@ -86,8 +86,12 @@ def _load_assumptions(path: str) -> dict:
 
 
 ASSUMPTIONS = _load_assumptions(ASSUMPTIONS_JSON_PATH)
-DEFAULTS    = ASSUMPTIONS["defaults"]
-OVERRIDES   = ASSUMPTIONS.get("overrides", {})
+# Three independently-tunable assumption profiles (bull / mid / bear), each a FULL profile.
+# `mid` == the former single `defaults` profile, so the mid case is byte-for-byte the legacy
+# behaviour. Every (ticker, period_type, fiscal_year, method) is now computed once per scenario.
+SCENARIOS      = ASSUMPTIONS["scenarios"]
+SCENARIO_NAMES = ("bull", "mid", "bear")
+OVERRIDES      = ASSUMPTIONS.get("overrides", {})
 
 # Sector-aware flow-model skip policy. `_load_assumptions` already stripped the `_doc` key,
 # so only `flow_model_skip_sectors` (sector → bool) survives. Energy/Financials/Real Estate
@@ -95,11 +99,11 @@ OVERRIDES   = ASSUMPTIONS.get("overrides", {})
 SECTOR_POLICY           = ASSUMPTIONS.get("sector_policy", {})
 FLOW_MODEL_SKIP_SECTORS = SECTOR_POLICY.get("flow_model_skip_sectors", {})
 
-print(f"✓ Loaded assumptions — {len(OVERRIDES)} ticker override(s)")
-print(f"  DCF defaults  : WACC={DEFAULTS['dcf']['wacc']}, "
-      f"g1={DEFAULTS['dcf']['growth_stage1']}, "
-      f"g_terminal={DEFAULTS['dcf']['growth_terminal']}, "
-      f"horizon={DEFAULTS['dcf']['horizon_years']}y")
+print(f"✓ Loaded assumptions — {len(SCENARIOS)} scenario(s), {len(OVERRIDES)} ticker override(s)")
+for _scn in SCENARIO_NAMES:
+    _d = SCENARIOS[_scn]["dcf"]
+    print(f"  DCF {_scn:<4}: WACC={_d['wacc']}, g1={_d['growth_stage1']}, "
+          f"g_terminal={_d['growth_terminal']}, horizon={_d['horizon_years']}y")
 print(f"  Flow-model skip sectors: "
       f"{sorted(s for s, v in FLOW_MODEL_SKIP_SECTORS.items() if v) or '(none)'}")
 
@@ -113,18 +117,34 @@ SECTOR_MAP = {
 print(f"✓ Sector map built — {len(SECTOR_MAP):,} tickers")
 
 
-def _merge_dicts(base: dict, over: dict) -> dict:
-    out = {k: dict(v) if isinstance(v, dict) else v for k, v in base.items()}
+def _is_scenario_leaf(v) -> bool:
+    """A non-empty dict whose keys are a subset of {bull, mid, bear} is a per-scenario
+    override leaf (e.g. {"bull": 0.13, "mid": 0.10, "bear": 0.05}), NOT a structural
+    sub-dict like `dcf` (whose keys are wacc/growth_stage1/…)."""
+    return isinstance(v, dict) and len(v) > 0 and set(v.keys()) <= {"bull", "mid", "bear"}
+
+
+def _merge_scenario_aware(base: dict, over: dict, scenario: str) -> dict:
+    """Deep-merge an override into a resolved scenario profile, scenario-aware.
+
+    Like the former `_merge_dicts`, but an override leaf that is a {bull, mid, bear} object
+    resolves to `leaf[scenario]`; a flat scalar (or a flat dict missing the scenario key)
+    applies as-is. Structural sub-dicts (`dcf`, `graham`, …) recurse so nested leaves are
+    resolved individually (e.g. dcf.growth_stage1 = {bull,mid,bear} while dcf.horizon_years
+    stays a flat scalar)."""
+    out = {k: (dict(v) if isinstance(v, dict) else v) for k, v in base.items()}
     for k, v in over.items():
-        if isinstance(v, dict) and isinstance(out.get(k), dict):
-            out[k] = {**out[k], **v}
+        if _is_scenario_leaf(v):
+            out[k] = v.get(scenario, out.get(k))          # per-scenario value (fall back to base)
+        elif isinstance(v, dict) and isinstance(out.get(k), dict):
+            out[k] = _merge_scenario_aware(out[k], v, scenario)   # structural sub-dict → recurse
         else:
-            out[k] = v
+            out[k] = v                                    # flat scalar (skip flag, horizon_years, …)
     return out
 
 
-def assumptions_for(ticker: str) -> dict:
-    return _merge_dicts(DEFAULTS, OVERRIDES.get(ticker, {}))
+def assumptions_for(ticker: str, scenario: str) -> dict:
+    return _merge_scenario_aware(SCENARIOS[scenario], OVERRIDES.get(ticker, {}), scenario)
 
 # COMMAND ----------
 
@@ -487,12 +507,13 @@ def _resolve_skip(ticker: str, method_assumptions: dict) -> bool:
     return bool(FLOW_MODEL_SKIP_SECTORS.get(SECTOR_MAP.get(ticker), False))
 
 
-def _params_for(ticker: str) -> dict:
-    """Flattens assumptions_for(ticker) into scalar columns. Called ONCE per UNIQUE ticker
-    (not per row), reusing the same defaults+overrides merge logic."""
-    a = assumptions_for(ticker)
+def _params_for(ticker: str, scenario: str) -> dict:
+    """Flattens assumptions_for(ticker, scenario) into scalar columns. Called ONCE per UNIQUE
+    ticker per scenario (not per row), reusing the same scenario+overrides merge logic."""
+    a = assumptions_for(ticker, scenario)
     g, gr, d, oe = a["graham"], a["graham_revised"], a["dcf"], a["owner_earnings"]
     return {
+        "scenario":       scenario,
         "ticker":         ticker,
         "magic":          float(g["magic_number"]),
         "gr_base_pe":     float(gr["base_pe"]),
@@ -518,13 +539,16 @@ def _params_for(ticker: str) -> dict:
 
 # COMMAND ----------
 
-def compute_all(pdf, period_type, computed_at):
-    """Computes all 4 methods for the ENTIRE dataframe (numpy, no iterrows) and builds the rows."""
+def compute_all(pdf, period_type, computed_at, scenario):
+    """Computes all 4 methods for the ENTIRE dataframe (numpy, no iterrows) and builds the rows,
+    under a single assumption `scenario` (bull / mid / bear). The four formulas are
+    scenario-agnostic — only the parameter columns feeding them differ per scenario."""
     if len(pdf) == 0:
         return []
 
-    # Parameters per unique ticker → columns; merge instead of a per-row dict-merge.
-    params = pd.DataFrame([_params_for(t) for t in pdf["ticker"].unique()])
+    # Parameters per unique ticker (for this scenario) → columns; merge instead of a per-row
+    # dict-merge. `scenario` is dropped from the params frame so the merge key stays just ticker.
+    params = pd.DataFrame([_params_for(t, scenario) for t in pdf["ticker"].unique()]).drop(columns=["scenario"])
     m = pdf.merge(params, on="ticker", how="left")
 
     def col(name):
@@ -660,6 +684,7 @@ def compute_all(pdf, period_type, computed_at):
                 "fiscal_year":               int(year[i]) if pd.notna(year[i]) else None,
                 "period_end":                pend[i],
                 "method":                    method_name,
+                "scenario":                  scenario,
                 "intrinsic_value_per_share": ivv,
                 "intrinsic_value_total":     float(ivv * sh) if not np.isnan(sh) else None,
                 "price_close":               float(pr) if not np.isnan(pr) else None,
@@ -672,14 +697,17 @@ def compute_all(pdf, period_type, computed_at):
 
 computed_at = datetime.utcnow()
 
-fy_rows  = compute_all(fy_pdf,  "FY",  computed_at)
-ttm_rows = compute_all(ttm_pdf, "TTM", computed_at)
-all_rows = fy_rows + ttm_rows
+# One pass per scenario × period_type. Bull/mid/bear are full independent profiles, so each
+# scenario re-runs the same vectorized block with its own parameter columns.
+all_rows = []
+for scenario in SCENARIO_NAMES:
+    all_rows += compute_all(fy_pdf,  "FY",  computed_at, scenario)
+    all_rows += compute_all(ttm_pdf, "TTM", computed_at, scenario)
 
 iv_pdf = pd.DataFrame(all_rows)
-print(f"✓ Computed {len(iv_pdf):,} valuations ({len(fy_rows):,} FY + {len(ttm_rows):,} TTM)")
+print(f"✓ Computed {len(iv_pdf):,} valuations across {len(SCENARIO_NAMES)} scenarios")
 if len(iv_pdf):
-    print(iv_pdf.groupby(["period_type", "method"]).size().unstack(fill_value=0))
+    print(iv_pdf.groupby(["scenario", "period_type", "method"]).size().unstack(fill_value=0))
 
 # COMMAND ----------
 
@@ -694,6 +722,7 @@ schema = T.StructType([
     T.StructField("fiscal_year",               T.IntegerType(),   True),
     T.StructField("period_end",                T.DateType(),      True),
     T.StructField("method",                    T.StringType(),    False),
+    T.StructField("scenario",                  T.StringType(),    False),
     T.StructField("intrinsic_value_per_share", T.DoubleType(),    True),
     T.StructField("intrinsic_value_total",     T.DoubleType(),    True),
     T.StructField("price_close",               T.DoubleType(),    True),
@@ -701,6 +730,18 @@ schema = T.StructType([
     T.StructField("assumptions",               T.StringType(),    True),
     T.StructField("computed_at",               T.TimestampType(), True),
 ])
+
+# Schema migration for the live table. `CREATE TABLE IF NOT EXISTS` is a no-op when the table
+# already exists, so it will NOT add the new `scenario` column to a pre-existing table. Add it
+# explicitly and backfill the legacy single-profile rows as 'mid' (the old `defaults` profile
+# IS today's mid case) — a non-destructive alternative to drop/recreate. The next run then also
+# populates bull/bear. Guarded so a fresh workspace (table absent) falls through to CREATE below.
+if spark.catalog.tableExists(iv_tbl):
+    existing_cols = {f.name for f in spark.table(iv_tbl).schema.fields}
+    if "scenario" not in existing_cols:
+        spark.sql(f"ALTER TABLE {iv_tbl} ADD COLUMN scenario STRING")
+        spark.sql(f"UPDATE {iv_tbl} SET scenario = 'mid' WHERE scenario IS NULL")
+        print(f"✓ Migrated {iv_tbl}: added scenario column, backfilled existing rows as 'mid'")
 
 spark.sql(f"""
     CREATE TABLE IF NOT EXISTS {iv_tbl} (
@@ -710,6 +751,7 @@ spark.sql(f"""
         fiscal_year               INT,
         period_end                DATE,
         method                    STRING    NOT NULL,
+        scenario                  STRING    NOT NULL,
         intrinsic_value_per_share DOUBLE,
         intrinsic_value_total     DOUBLE,
         price_close               DOUBLE,
@@ -729,10 +771,10 @@ if len(iv_pdf):
     iv_sdf = spark.createDataFrame(iv_pdf, schema=schema)
     iv_sdf.createOrReplaceTempView("incoming_iv")
 
-    # MERGE: unique key is (ticker, period_type, fiscal_year, method).
+    # MERGE: unique key is (ticker, period_type, fiscal_year, method, scenario).
     # For TTM, fiscal_year is that of the most recent quarter, so each TTM run
     # upserts the same row (if the quarter hasn't changed) or inserts a new one
-    # (if there is a more recent quarter).
+    # (if there is a more recent quarter). `scenario` makes bull/mid/bear coexist.
     spark.sql(f"""
         MERGE INTO {iv_tbl} AS target
         USING incoming_iv AS source
@@ -740,6 +782,7 @@ if len(iv_pdf):
         AND target.period_type = source.period_type
         AND COALESCE(target.fiscal_year, -1) = COALESCE(source.fiscal_year, -1)
         AND target.method      = source.method
+        AND target.scenario    = source.scenario
 
         WHEN MATCHED THEN UPDATE SET
             target.intrinsic_value_per_share = source.intrinsic_value_per_share,
@@ -769,23 +812,23 @@ if len(iv_pdf):
             SELECT 1 FROM incoming_iv s
             WHERE s.ticker = t.ticker AND s.period_type = t.period_type
               AND COALESCE(s.fiscal_year, -1) = COALESCE(t.fiscal_year, -1)
-              AND s.method = t.method)
+              AND s.method = t.method AND s.scenario = t.scenario)
     """).count()
     spark.sql(f"""
         MERGE INTO {iv_tbl} AS t
         USING (
-            SELECT t.ticker, t.period_type, t.fiscal_year, t.method
+            SELECT t.ticker, t.period_type, t.fiscal_year, t.method, t.scenario
             FROM {iv_tbl} t
             JOIN iv_processed_tickers p ON t.ticker = p.ticker
             WHERE NOT EXISTS (
                 SELECT 1 FROM incoming_iv s
                 WHERE s.ticker = t.ticker AND s.period_type = t.period_type
                   AND COALESCE(s.fiscal_year, -1) = COALESCE(t.fiscal_year, -1)
-                  AND s.method = t.method)
+                  AND s.method = t.method AND s.scenario = t.scenario)
         ) AS s
         ON  t.ticker = s.ticker AND t.period_type = s.period_type
         AND COALESCE(t.fiscal_year, -1) = COALESCE(s.fiscal_year, -1)
-        AND t.method = s.method
+        AND t.method = s.method AND t.scenario = s.scenario
         WHEN MATCHED THEN DELETE
     """)
     print(f"✓ Orphan cleanup on {iv_tbl}: {n_orphan_iv:,} stale method-rows deleted")
@@ -824,6 +867,12 @@ EXPOSED = [
     ("owner_earnings", "TTM", "margin_of_safety_pct",      "MoS % (Owner Earnings, TTM)"),
 ]
 
+# Scenario suffix appended AFTER the (FY)/(TTM) parenthetical so the dashboard's label-base
+# parsing (`metric.split(" (")[0]`) keeps matching the same threshold/bucket logic as mid.
+# mid keeps the legacy unsuffixed label verbatim — the backward-compatibility anchor for saved
+# screener filters, favorites, and the football field's price back-out.
+SCENARIO_SUFFIX = {"bull": " — Bull", "mid": "", "bear": " — Bear"}
+
 # Detect the actual financials_metrics schema (may have fiscal_year or year)
 try:
     metrics_cols = {f.name for f in spark.table(metrics_tbl).schema.fields}
@@ -835,15 +884,18 @@ print(f"  financials_metrics year column: '{year_col}'")
 
 exposed_frames = []
 if len(iv_pdf):
-    for method, ptype, field, metric_label in EXPOSED:
-        subset = iv_pdf[
-            (iv_pdf["method"] == method) & (iv_pdf["period_type"] == ptype)
-        ][["ticker", "company", "fiscal_year", field]].copy()
+    for scenario in SCENARIO_NAMES:
+        for method, ptype, field, metric_label in EXPOSED:
+            subset = iv_pdf[
+                (iv_pdf["method"] == method)
+                & (iv_pdf["period_type"] == ptype)
+                & (iv_pdf["scenario"] == scenario)
+            ][["ticker", "company", "fiscal_year", field]].copy()
 
-        subset = subset.rename(columns={field: "value", "fiscal_year": year_col})
-        subset["metric"] = metric_label
-        subset = subset[["ticker", "company", year_col, "metric", "value"]]
-        exposed_frames.append(subset)
+            subset = subset.rename(columns={field: "value", "fiscal_year": year_col})
+            subset["metric"] = metric_label + SCENARIO_SUFFIX[scenario]
+            subset = subset[["ticker", "company", year_col, "metric", "value"]]
+            exposed_frames.append(subset)
 
 # Absolute Owner Earnings (FY and TTM) — useful standalone metric. `oe_dollars` is already
 # a column (vectorized, = _owner_earnings_dollars with _safe→0), never NaN → every row
@@ -893,7 +945,12 @@ if exposed_frames:
         # linger in financials_metrics. Delete IV-label rows absent from the fresh set,
         # for evaluated tickers only. The IN-list confines the delete to the intrinsic
         # labels this notebook owns — it never touches metrics produced by 22.
-        _iv_labels = [lbl for *_, lbl in EXPOSED] + ["Owner Earnings (FY)", "Owner Earnings (TTM)"]
+        # Every EXPOSED label now owns three scenario variants (mid = unsuffixed, plus Bull/Bear).
+        # Include all three so the cleanup can retire any of them; the absolute Owner Earnings
+        # rows are scenario-independent and stay unsuffixed.
+        _iv_labels = [
+            lbl + suf for *_, lbl in EXPOSED for suf in ("", " — Bull", " — Bear")
+        ] + ["Owner Earnings (FY)", "Owner Earnings (TTM)"]
         _iv_labels_sql = ", ".join("'" + lbl.replace("'", "''") + "'" for lbl in _iv_labels)
         spark.sql(f"""
             MERGE INTO {metrics_tbl} AS t
@@ -923,13 +980,13 @@ else:
 # COMMAND ----------
 
 spark.sql(f"""
-    SELECT period_type, fiscal_year, method,
+    SELECT period_type, fiscal_year, method, scenario,
            ROUND(intrinsic_value_per_share, 2) AS iv_per_share,
            ROUND(price_close,               2) AS price,
            ROUND(margin_of_safety_pct,      1) AS mos_pct,
            period_end
     FROM {iv_tbl}
     WHERE ticker = 'AAPL'
-    ORDER BY period_type DESC, fiscal_year DESC, method
-    LIMIT 40
+    ORDER BY period_type DESC, fiscal_year DESC, method, scenario
+    LIMIT 60
 """).display()
