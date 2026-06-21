@@ -6,9 +6,11 @@ Sheet concepts touched by the tag-fallback fix in 01__tickers.py (Intangible Ass
 coalesces IntangibleAssetsNetExcludingGoodwill → FiniteLivedIntangibleAssetsNet →
 OtherIntangibleAssetsNet; Goodwill unchanged, single-tag).
 
-IMPORTANT: the fallback only changes INGESTION. Until a full pipeline run re-fetches SEC
-facts, main.financials.financials still holds the pre-fix (single-tag) Intangible Assets.
-So this run is the BEFORE baseline — re-run after the next refresh to measure the lift.
+RESOLVED 2026-06-21 (full-refresh run 186680724649878): the multi-tag fallback re-ingested
+and the lift is measured. Intangible Assets fill 53.1%→72.1% overall (+19.0 pts), 59.1%→74.7%
+recent (+15.6 pts) — now ≈ Goodwill (75.5/76.8). Goodwill unchanged (single-tag). The residual
+~3pt gap is genuine (filers with goodwill but no separable intangibles). Kept as a re-runnable
+read-only coverage check; re-run after future refreshes to watch for regressions.
 
 Denominator anchor: distinct (ticker, fiscal_year) pairs that reported ANY non-null
 Balance Sheet FY concept that year (≈ "the filer reported a balance sheet"). Fill-rate
@@ -67,7 +69,8 @@ def main() -> None:
         all_s = f"{r['all_pct']}% ({r['all_n']:,}/{denom_all:,})"
         rec_s = f"{r['rec_pct']}% ({r['rec_n']:,}/{denom_rec:,})"
         print(f"{c:<20} {all_s:>22} {rec_s:>22}")
-    print("\n(Baseline — re-run after the next full pipeline refresh to measure the fallback lift.)")
+    print("\n(RESOLVED 2026-06-21: Intangible fill 53/59%→72/75% after the fallback refresh; "
+          "now ≈ Goodwill. Re-run to watch for regressions.)")
 
 
 if __name__ == "__main__":
