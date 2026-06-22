@@ -234,7 +234,106 @@ def _stat_band(src: pd.DataFrame, active_sector: str) -> str:
     )
 
 
-st.markdown(_stat_band(wide[sector_mask(wide, active_sector)], active_sector), unsafe_allow_html=True)
+# ── Valuation tape (hero signature) ───────────────────────────────────────────
+# Graham P/E bands. The labels MUST equal _VALUATION_MULTIPLE_BAND in lib.screener
+# so a band click round-trips into the P/E pill. Each tuple is
+# (label, lo_inclusive, hi_exclusive, axis text, fill class).
+_PE_TAPE_BANDS: list[tuple[str, float, float, str, str]] = [
+    ("Loss",  float("-inf"), 0.0,           "&lt; 0",   "b-loss"),
+    ("Cheap", 0.0, 10.0,                     "0–10x",    "b-cheap"),
+    ("Fair",  10.0, 15.0,                    "10–15x",   "b-fair"),
+    ("Full",  15.0, 25.0,                    "15–25x",   "b-full"),
+    ("Rich",  25.0, float("inf"),            "&gt; 25x", "b-rich"),
+]
+
+
+def _valuation_tape(src: pd.DataFrame, active_sector: str) -> str:
+    """Hero ribbon — the (sector-filtered) universe binned into Graham P/E bands.
+
+    Each segment grows with its company count and is an anchor whose href carries
+    the FULL filter state with that band toggled in the P/E selection (the same
+    state-in-URL mechanism the sortable headers use). Current state is read from
+    the URL so this stays self-contained at the top of the page, before the filter
+    widgets are instantiated. NaN P/E rows are excluded from every band (matching
+    ``bucket_mask``). Note: because the column multiselect lives in session (not the
+    URL) during normal interaction, a band click resets columns to the URL/default
+    set (always incl. P/E) — acceptable for a top-of-page overview lens.
+    """
+    pe = pd.to_numeric(src.get("P/E"), errors="coerce")
+    counts = [int(((pe >= lo) & (pe < hi)).sum()) for _, lo, hi, *_ in _PE_TAPE_BANDS]
+    total = int(sum(counts))
+    pe_pos = pe[pe > 0]
+    mpe = f"{pe_pos.median():.1f}x" if not pe_pos.empty else "—"
+    scope = "All US equities" if active_sector == SECTORS[0] else active_sector
+
+    # Current state from the URL → toggle hrefs + active-band highlighting.
+    sel_top = _decode_buckets(st.query_params.get("b", ""), metric_order)
+    active_pe = set(sel_top.get("P/E", []))
+    universe_top = st.query_params.get("u", "All")
+    if universe_top not in UNIVERSE_FLAGS:
+        universe_top = "All"
+    query_top = st.query_params.get("q", "")
+    cols_top = [c for c in st.query_params.get("cols", "").split("|") if c in metric_order] \
+        or [c for c in DEFAULT_COLUMNS if c in metric_order]
+    # P/E must be a column for its pill (hence the filter) to instantiate after the reload.
+    cols_href = cols_top if "P/E" in cols_top else cols_top + ["P/E"]
+
+    segs, axis = [], []
+    for (label, _lo, _hi, axis_txt, cls), cnt in zip(_PE_TAPE_BANDS, counts, strict=True):
+        cur = [b for b in active_pe if b != label]
+        if label not in active_pe:
+            cur.append(label)
+        toggled = {k: v for k, v in sel_top.items() if k != "P/E"}
+        toggled["P/E"] = cur
+        href = html.escape("?" + _state_qs(
+            universe_top, active_sector, query_top, cols_href, toggled, sort_col, sort_dir))
+        is_active = " is-active" if label in active_pe else ""
+        segs.append(
+            f'<a class="scr-band {cls}{is_active}" href="{href}" '
+            f'style="flex-grow:{cnt}" '
+            f'title="{html.escape(label)} · P/E {axis_txt} · {cnt:,} companies">'
+            f'<span class="b-count">{cnt:,}</span>'
+            f'<span class="b-label">{html.escape(label)}</span></a>'
+        )
+        axis.append(f'<span style="flex-grow:{cnt}">{axis_txt}</span>')
+
+    return (
+        '<div class="scr-tape-card">'
+        '<div class="scr-tape-head">'
+        f'<span class="t-title">{html.escape(scope)}, by valuation</span>'
+        f'<span class="t-note">median P/E <b>{mpe}</b> · {total:,} companies with a P/E</span>'
+        '</div>'
+        '<div class="scr-tape">' + "".join(segs) + '</div>'
+        '<div class="scr-tape-axis">' + "".join(axis) + '</div>'
+        '</div>'
+    )
+
+
+def _medians_line(src: pd.DataFrame, active_sector: str) -> str:
+    """Slim mono medians strip — supporting metadata under the tape (replaces the
+    legacy 4-card .kpi-strip on the screener; P/E now lives in the tape header)."""
+    companies = f"{len(src):,}"
+    roe = _fmt_dash(_median_pct(src, "ROE %"))
+    yoy = _fmt_dash(_median_pct(src, "Revenue YoY %"))
+    scope = ("S&amp;P 500 + Russell 3000" if active_sector == SECTORS[0]
+             else f'<span style="color:var(--accent-ink)">{html.escape(active_sector)}</span>')
+    return (
+        '<div class="scr-medians">'
+        f'<span class="m-item"><b>{companies}</b>&nbsp;companies · {scope}</span>'
+        f'<span class="m-item">Median ROE&nbsp;<b>{roe}</b></span>'
+        f'<span class="m-item">Median Rev YoY&nbsp;<b>{yoy}</b></span>'
+        '</div>'
+    )
+
+
+# Hero: the valuation tape (signature) + the slim medians line. Falls back to the
+# legacy 4-card stat band only when P/E is absent from the published artifacts.
+_src = wide[sector_mask(wide, active_sector)]
+if "P/E" in wide.columns:
+    st.markdown(_valuation_tape(_src, active_sector), unsafe_allow_html=True)
+    st.markdown(_medians_line(_src, active_sector), unsafe_allow_html=True)
+else:
+    st.markdown(_stat_band(_src, active_sector), unsafe_allow_html=True)
 
 dist_col, feat_col = st.columns([1.05, 1])
 

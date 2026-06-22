@@ -1073,3 +1073,88 @@ div[data-baseweb="popover"] div[role="option"]:hover {
 .scr-chip-g { background: var(--positive-soft); color: var(--positive); }
 .scr-chip-r { background: var(--negative-soft); color: var(--negative); }
 .scr-chip-a { background: color-mix(in srgb, var(--warning) 15%, var(--bg-card)); color: var(--warning); }
+
+/* ============================================================
+ * VALUATION TAPE — screener hero signature (Streamlit-app-only).
+ * A single horizontal distribution of the universe across Graham P/E bands;
+ * each segment grows with its company count (flex-grow set inline) and links
+ * (full filter-state query string, same mechanism as the sortable headers) to
+ * toggle that band in the P/E filter. Band fills reuse the semantic chip tokens
+ * so a tape band reads like a results-table chip. The slim .scr-medians line
+ * replaces the old 4-card .kpi-strip on this page. Existing vars only.
+ * ============================================================ */
+.scr-tape-card { margin: 2px 0 8px; }
+.scr-tape-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 16px; margin-bottom: 12px; flex-wrap: wrap;
+}
+.scr-tape-head .t-title {
+  font-family: var(--display); font-style: italic;
+  font-variation-settings: "opsz" 144; font-weight: 500;
+  font-size: 23px; letter-spacing: -0.01em; color: var(--ink);
+}
+.scr-tape-head .t-note {
+  font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--ink-3); white-space: nowrap;
+}
+.scr-tape-head .t-note b { color: var(--ink); font-weight: 600; }
+
+.scr-tape {
+  display: flex; width: 100%; height: 66px;
+  border: 1px solid var(--rule); border-radius: 5px; overflow: hidden;
+}
+.scr-band {
+  position: relative; flex-basis: 0; min-width: 52px;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  text-decoration: none; container-type: inline-size;
+  border-right: 1px solid var(--bg);
+  transition: filter 0.15s ease;
+}
+.scr-band:last-child { border-right: none; }
+.scr-band:hover { filter: brightness(0.95) saturate(1.08); }
+.scr-band:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
+.scr-band .b-count {
+  font-family: var(--display); font-variation-settings: "opsz" 144;
+  font-weight: 500; font-size: 21px; line-height: 1; letter-spacing: -0.01em;
+}
+.scr-band .b-label {
+  font-family: var(--mono); font-size: 9px; letter-spacing: 0.12em;
+  text-transform: uppercase; margin-top: 5px; opacity: 0.8;
+}
+.scr-band.is-active { box-shadow: inset 0 0 0 2px var(--ink); }
+.scr-band.is-active .b-label { opacity: 1; font-weight: 500; }
+@container (max-width: 56px) { .scr-band .b-label { display: none; } }
+
+/* Band fills — the semantic chip ramp (cheap=green, fair=blue, full=amber,
+   rich=coral, loss=muted). Class names map 1:1 to the Graham P/E bands. */
+.scr-band.b-loss  { background: var(--bg-subtle);     color: var(--ink-3); }
+.scr-band.b-cheap { background: var(--positive-soft); color: var(--positive); }
+.scr-band.b-fair  { background: var(--accent-soft);   color: var(--accent-ink); }
+.scr-band.b-full  { background: color-mix(in srgb, var(--warning) 14%, var(--bg-card)); color: var(--warning); }
+.scr-band.b-rich  { background: var(--negative-soft); color: var(--negative); }
+
+.scr-tape-axis { display: flex; width: 100%; margin-top: 7px; }
+.scr-tape-axis span {
+  flex-basis: 0; min-width: 52px; text-align: center;
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.04em;
+  color: var(--ink-3);
+}
+
+.scr-medians {
+  display: flex; flex-wrap: wrap; gap: 6px 22px; align-items: baseline;
+  margin: 16px 0 26px;
+  font-family: var(--mono); font-size: 11px; letter-spacing: 0.04em;
+  color: var(--ink-3);
+}
+.scr-medians .m-item { display: inline-flex; align-items: baseline; gap: 7px; }
+.scr-medians .m-item b {
+  font-family: var(--sans); font-weight: 600; letter-spacing: 0;
+  font-size: 13px; color: var(--ink);
+}
+
+@media (max-width: 760px) {
+  .scr-tape { height: 58px; }
+  .scr-band .b-count { font-size: 18px; }
+  .scr-tape-head .t-title { font-size: 19px; }
+}
