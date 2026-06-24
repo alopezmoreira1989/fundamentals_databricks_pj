@@ -195,5 +195,7 @@ Expected differences from the reference:
 - The app renders **all** concepts in `concept_hierarchy.json`, not just the
   curated AAPL subset in the reference. Extra rows render as regular rows with
   `—` for missing years.
-- 6 metric cards (including Intrinsic Value) vs. 5 in the reference.
+- 8 metric cards — one per `metrics_hierarchy.json` category (now including
+  Quality & Risk and Intrinsic Value) vs. 5 in the reference. The Intrinsic Value
+  card renders the bull/mid/bear scenarios side by side (Bear/Mid/Bull columns).
 - Quarterly chart axes auto-fit to each ticker's revenue scale.
