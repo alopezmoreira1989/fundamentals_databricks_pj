@@ -167,7 +167,7 @@ Both hierarchies are JSON files in `00_config/` editable from the repo. The pipe
 
 **`concept_hierarchy.json`** — accounting tree (Income Statement, Balance Sheet, Cash Flow): which concepts go under which group and in what order they appear in the dashboard.
 
-**`metrics_hierarchy.json`** — organizes the derived metrics into 2 levels: `category → subcategory → metric`. Seven categories: Profitability, Cash Flow, Growth, Financial Health, Valuation, Capital Returns, Intrinsic Value.
+**`metrics_hierarchy.json`** — organizes the derived metrics into 2 levels: `category → subcategory → metric`. Eight categories: Profitability, Cash Flow, Growth, Financial Health, Valuation, Capital Returns, Quality & Risk, Intrinsic Value.
 
 To modify them: edit the JSON, commit + push, and the next pipeline run rebuilds the table automatically.
 
@@ -184,7 +184,7 @@ To modify them: edit the JSON, commit + push, and the next pipeline run rebuilds
 | `{CATALOG}.{SCHEMA}.financials` | Long-format fact table — one row per ticker / fiscal_year / period_type / concept |
 | `{CATALOG}.{SCHEMA}.market_data` | Year-end closing prices and market cap per ticker / fiscal_year |
 | `{CATALOG}.{SCHEMA}.financials_metrics` | Derived metrics — margins, FCF, YoY, leverage, valuation ratios |
-| `{CATALOG}.{SCHEMA}.financials_intrinsic_value` | Intrinsic value models — Graham, DCF, Owner Earnings (FY + TTM) |
+| `{CATALOG}.{SCHEMA}.financials_intrinsic_value` | Intrinsic value models — Graham, DCF, Owner Earnings (FY + TTM), each computed for the `bull` / `mid` / `bear` scenario (`scenario` column) |
 | `{CATALOG}.{SCHEMA}.backtest_results` | Backtest equity-curve series — one row per archetype × fiscal_year (returns + values) |
 | `{CATALOG}.{SCHEMA}.backtest_summary` | Per-archetype backtest metrics — CAGR, max drawdown, vol, Sharpe, vs benchmark |
 | `{CATALOG}.{SCHEMA}.ingestion_failures` | Append-only log of ingestion errors (SEC + yfinance) per run |
@@ -348,7 +348,7 @@ AAPL   | Apple   | 2023        | Free Cash Flow  | 99584000000
 AAPL   | Apple   | 2023        | P/E             |     28.74
 ```
 
-The metrics are organized into 6 categories. The full hierarchy lives in
+The metrics are organized into 8 categories. The full hierarchy lives in
 `00_config/metrics_hierarchy.json` and is materialized into `main.config.metrics_hierarchy`.
 
 ### Profitability — Margins
@@ -369,6 +369,18 @@ The metrics are organized into 6 categories. The full hierarchy lives in
 | `ROIC %` | `Operating Income / Invested Capital × 100` |
 | `ROCE %` | `Operating Income / Capital Employed × 100` |
 | `CROIC %` | `Free Cash Flow / Invested Capital × 100` |
+
+### Profitability — Tangible Returns
+
+Mirror ROCE / ROE with Goodwill + Intangible Assets stripped from the denominator, so the
+return is measured against *real* (tangible) capital. A large gap vs. the headline ratio shows
+how much reported profitability is leaning on the acquired-intangible base rather than capital
+efficiency. See also the *Goodwill Risk* and *Tangible Value* metrics below.
+
+| Metric | Formula | Notes |
+|---|---|---|
+| `ROTCE %` | `Operating Income / Tangible Capital Employed × 100` | `Tangible Capital Employed = Capital Employed − Goodwill − Intangible Assets`. Tangible analogue of `ROCE %`. |
+| `Return on Tangible Equity %` | `Net Income / Tangible Book Value × 100` | NULL unless Tangible Book Value > 0 (a negative tangible base flips the sign and is uninterpretable — the negative TBV is itself the signal). |
 
 ### Cash Flow — Absolute
 
@@ -446,6 +458,19 @@ The metrics are organized into 6 categories. The full hierarchy lives in
 | `NCAV / Share` | `NCAV / Shares Diluted` | per-share net-net value |
 | `NCAV Ratio` | `Market Cap / NCAV` *(only when NCAV > 0)* | price-over-NCAV; lower = cheaper, `< 1` = cap below net current assets, net-net buy ≈ `≤ 0.67`. NULL for negative-NCAV firms. *requires `market_data`* |
 
+### Valuation — Tangible Value
+
+Strips Goodwill + Intangible Assets out of book value — Graham's "real" floor on a liquidation
+basis. Goodwill/Intangibles coalesce a missing side to 0 (a common, real case — not every firm
+carries both); equity itself is **not** coalesced, so the value is NULL when equity is absent
+(same rule as `P/B`).
+
+| Metric | Formula | Notes |
+|---|---|---|
+| `Tangible Book Value` | `Total Stockholders Equity − Goodwill − Intangible Assets` | USD; can be **negative** (more intangibles than equity) — itself the signal. |
+| `Tangible Book Value / Share` | `Tangible Book Value / Shares Diluted` | per-share tangible floor |
+| `Price / Tangible Book Value` | `Market Cap / Tangible Book Value` | Graham's preferred substitute for `P/B` when Goodwill is large. **Ungated** (like `P/B`) — a negative ratio flags tangible-basis insolvency. *requires `market_data`* |
+
 ### Capital Returns — Payout
 
 SEC reports `Dividends Paid` and `Share Repurchases` as **positive magnitudes** (the repo flips
@@ -480,6 +505,18 @@ ratios stay NULL when their one component is absent.
 | `Piotroski F-Score` | Sum of 9 binary signals (0–9 integer) | Fundamental health. Profitability: ROA > 0, Operating CF > 0, ΔROA > 0, Operating CF > Net Income. Leverage/liquidity/dilution: Δ(Debt/Assets) < 0, ΔCurrent Ratio > 0, no share dilution (≤ +0.1%). Efficiency: ΔGross Margin > 0, ΔAsset Turnover > 0. NULL in a ticker's first year (no prior to compare). ≥ 7 strong, ≤ 3 weak. |
 | `Accruals Ratio` | `(Net Income − Operating Cash Flow) / Total Assets` | Earnings quality. High positive accruals = earnings not backed by cash → **lower is better** (≤ 0.05 good, ≥ 0.15 poor). A company with operating cash flow above net income shows a negative (good) accrual. |
 
+### Quality & Risk — Goodwill Risk
+
+How exposed the company is to acquisition-residue write-down risk. Goodwill coalesces to 0 in
+the numerator — the `us-gaap:Goodwill` tag is standard/reliable enough that "absent" reads as a
+true zero (unlike the multi-tag debt case, where absence was ambiguous).
+
+| Metric | Formula | Notes |
+|---|---|---|
+| `Goodwill / Total Assets %` | `Goodwill / Total Assets × 100` | what fraction of the balance sheet is unverifiable acquisition residue |
+| `Goodwill / Tangible Equity %` | `Goodwill / Tangible Book Value × 100` | how much of *real* equity a full Goodwill write-off would wipe out. `> 100%` = Goodwill exceeds the entire tangible equity base. NULL unless Tangible Book Value > 0. |
+| `Goodwill / Market Cap %` | `Goodwill / Market Cap × 100` | how much of today's price is accounting residue. *requires `market_data`* |
+
 ### Intrinsic Value *(requires `market_data`)*
 
 Computed by `23__intrinsic_value` for **each fiscal year** and for **TTM** (rolling 4 quarters), under four lenses. Each is emitted both into `financials_intrinsic_value` (one row per `ticker / period_type / fiscal_year / method`, with an `assumptions` JSON column) and exposed as `(FY)` / `(TTM)` metrics here.
@@ -507,7 +544,20 @@ Computed by `23__intrinsic_value` for **each fiscal year** and for **TTM** (roll
 
 The Graham methods are **never** sector-gated, and the absolute `Owner Earnings` ($) metric is always emitted regardless of the valuation skip.
 
-> Valuation metrics are only populated for `ticker / fiscal_year` combinations where `market_data` has a valid `market_cap`. Assumptions (WACC, growth, multiples, per-ticker and per-sector skips) are configured in `00_config/valuation_assumptions.json` — editing it requires no code change.
+**Bull / Mid / Bear scenarios.** Every method is computed under three assumption profiles —
+`bull`, `mid`, `bear` — declared in `valuation_assumptions.json → scenarios`. `mid` is the base
+case and is **byte-for-byte the former single `defaults` profile**, so legacy numbers are
+unchanged; `bull`/`bear` widen and tighten the levers (Graham `magic_number`, Graham-Revised
+`base_pe` / `graham_aaa_yield` / `growth_cap`, DCF `wacc` / `growth_stage1` / `growth_terminal`,
+Owner-Earnings `multiple` / `discount_rate`). Each `(ticker, period_type, fiscal_year, method,
+scenario)` is one row in `financials_intrinsic_value` (MERGE-keyed on that grain, including the
+`scenario` column). In the metrics hierarchy the `mid` case is the unsuffixed metric (e.g.
+`DCF Value per Share (FY)`) and the other two are emitted as `… — Bull` / `… — Bear` siblings.
+Per-ticker `overrides` are **scenario-aware**: a lever that varies by scenario must be given as a
+`{bull, mid, bear}` object so the override doesn't collapse that name's spread; structural flags
+(`skip`, `horizon_years`) stay flat scalars.
+
+> Valuation metrics are only populated for `ticker / fiscal_year` combinations where `market_data` has a valid `market_cap`. Assumptions (WACC, growth, multiples, per-ticker and per-sector skips, per-scenario profiles) are configured in `00_config/valuation_assumptions.json` — editing it requires no code change.
 
 ---
 
@@ -573,6 +623,21 @@ is an opt-in block, **disabled** by design (the table is append-only).
 A read-only dashboard at Streamlit Community Cloud renders the same data without Databricks credentials. Currently serves ~2,500 tickers (S&P 500 + Russell 2000 proxy) with synthetic data for preview; production data is published via GitHub Release. See [`60_streamlit_app/README.md`](fundamentals_pipeline/60_streamlit_app/README.md) for details.
 
 The landing-page **screener** filters the universe by index membership (All / S&P 500 / Russell 3000 / Favorites) and by **GICS sector** — the 11 canonical sectors sourced from `config.tickers.sector`, with a no-op `All sectors` default. Tickers with no sector (NULL/legacy artifacts) fall into an **Unknown** bucket. Each company's sector is also shown as a chip on the detail-page masthead.
+
+### Valuation tape (screener hero)
+
+The screener's hero is a **P/E band ribbon** (the "valuation tape") that bins the
+sector-filtered universe into Graham-style P/E bands — **Loss** (`< 0`), **Cheap** (`0–10x`),
+**Fair** (`10–15x`), **Full** (`15–25x`), **Rich** (`> 25x`). It replaces the legacy 4-card stat
+band (which is kept only as a fallback when P/E is absent from the published artifacts). Each
+band is a **one-click P/E filter**: clicking it round-trips the band's range into the P/E pill by
+toggling the full filter state in the URL (state-in-URL, so it survives reloads and is
+shareable). NaN-P/E rows are excluded from every band. A slim mono **medians** line sits under
+the tape as supporting metadata. Pure frontend — no pipeline or schema change.
+
+> **Invariant:** the band edges in `_valuation_tape` (`views/screener.py`) must stay equal to
+> `_VALUATION_MULTIPLE_BAND` in `lib/screener.py`, or a band click won't round-trip into the
+> P/E pill correctly.
 
 ### Valuation football field
 
