@@ -15,6 +15,13 @@ per-ticker detail page, whose masthead shows the company's sector. Sector arrive
 in the published `meta` at `schema_version` ≥ 6 — older artifacts without it still
 load (every consumer defaults `sector`), so the filter degrades to all-`Unknown`.
 
+Its hero is the **valuation tape** — a P/E band ribbon (Loss `< 0` / Cheap `0–10x` /
+Fair `10–15x` / Full `15–25x` / Rich `> 25x`) binning the sector-filtered universe;
+each band is a one-click P/E filter that round-trips into the P/E pill via state-in-URL.
+The band edges in `_valuation_tape` (`views/screener.py`) **must** equal
+`_VALUATION_MULTIPLE_BAND` in `lib/screener.py`. It falls back to the legacy 4-card stat
+band only when P/E is absent from the artifacts.
+
 A third page, **Backtest**, shows investment-archetype strategies (Graham-defensive,
 Lynch GARP, quality-compounder) as an equity curve vs SPY with CAGR / max-drawdown /
 Sharpe cards and a **survivorship-bias caveat banner**. It reads
