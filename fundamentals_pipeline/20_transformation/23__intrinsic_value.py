@@ -58,6 +58,11 @@ market_tbl  = f"{CATALOG}.{SCHEMA}.market_data"
 iv_tbl      = f"{CATALOG}.{SCHEMA}.financials_intrinsic_value"
 metrics_tbl = f"{CATALOG}.{SCHEMA}.financials_metrics"
 
+# The per-row `assumptions` JSON is diagnostic only (not consumed by the dashboard or export).
+# Building + json.dumps-ing it for every surviving row (3 scenarios × ~30k FY × 4 methods)
+# costs a lot of driver time for nothing, so default it OFF; flip to True for ad-hoc debugging.
+EMIT_ASSUMPTIONS = False
+
 print(f"Source        : {full_table}")
 print(f"Market data   : {market_tbl}")
 print(f"Target IV     : {iv_tbl}")
@@ -689,7 +694,8 @@ def compute_all(pdf, period_type, computed_at, scenario):
                 "intrinsic_value_total":     float(ivv * sh) if not np.isnan(sh) else None,
                 "price_close":               float(pr) if not np.isnan(pr) else None,
                 "margin_of_safety_pct":      float((ivv - pr) / ivv * 100) if not np.isnan(pr) else None,
-                "assumptions":               json.dumps(meta_fn(i), default=str),
+                # Short-circuits: meta_fn(i) (dict build) is skipped entirely when disabled.
+                "assumptions":               json.dumps(meta_fn(i), default=str) if EMIT_ASSUMPTIONS else None,
                 "computed_at":               computed_at,
             })
     return rows

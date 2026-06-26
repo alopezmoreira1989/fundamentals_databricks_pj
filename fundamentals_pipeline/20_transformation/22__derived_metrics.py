@@ -460,7 +460,9 @@ if not _has_prices:
     pe_mcap = None
 else:
     # FY period_end per (ticker, fiscal_year). One fiscal close per FY; MAX is defensive.
-    fy_dates = (
+    # ~30k rows → broadcast it on both as-of joins below so the multi-million-row daily
+    # price / shares stores aren't shuffled on `ticker` before the date filter.
+    fy_dates = F.broadcast(
         spark.table(full_tbl)
         .filter(F.col("period_type") == "FY")
         .groupBy("ticker", "fiscal_year")
