@@ -74,9 +74,16 @@ with back_col:
     if st.button("← Screener", width="stretch"):
         st.switch_page("views/screener.py")
 
+# Slice the long-format frames to the selected ticker ONCE. Every renderer below otherwise
+# re-runs `df["ticker"] == ticker` on the full multi-million-row frames, and the page reruns
+# on every tab click / control change / price-window button. The renderers still mask by
+# ticker internally, so passing the pre-sliced frames is behavior-identical, just cheaper.
+tdata = data[data["ticker"] == ticker]
+tmetrics = metrics[metrics["ticker"] == ticker]
+
 # Masthead + KPI strip — single markdown block so the spacing matches the spec.
-st.markdown(render_masthead(ticker, data, meta), unsafe_allow_html=True)
-st.markdown(render_kpi_strip(ticker, data, metrics), unsafe_allow_html=True)
+st.markdown(render_masthead(ticker, tdata, meta), unsafe_allow_html=True)
+st.markdown(render_kpi_strip(ticker, tdata, tmetrics), unsafe_allow_html=True)
 
 # Unit scale for the statement tables (IS / BS / CF / Quarterly). One control governs
 # all four. Billion = 1e9 (US short scale). Default "Units" → unchanged full-resolution USD.
@@ -157,7 +164,7 @@ with tab_px:
         st.altair_chart(chart, use_container_width=True)
 
 with tab_is:
-    df_is = income_statement_df(data, ticker)
+    df_is = income_statement_df(tdata, ticker)
     st.markdown(
         '<div class="panel-header"><h2>Income statement</h2>'
         '<div class="meta">Up to 10 fiscal years · USD · concept_hierarchy.json</div></div>',
@@ -169,7 +176,7 @@ with tab_is:
     st.markdown(render_waterfall(df_is), unsafe_allow_html=True)
 
 with tab_bs:
-    df_bs = balance_sheet_df(data, ticker)
+    df_bs = balance_sheet_df(tdata, ticker)
     st.markdown(
         '<div class="panel-header"><h2>Balance sheet</h2>'
         '<div class="meta">Fiscal year-end snapshots · USD</div></div>',
@@ -188,7 +195,7 @@ with tab_bs:
     st.markdown(render_balance_check(df_bs), unsafe_allow_html=True)
 
 with tab_cf:
-    df_cf = cash_flow_df(data, ticker)
+    df_cf = cash_flow_df(tdata, ticker)
     st.markdown(
         '<div class="panel-header"><h2>Cash flow statement</h2>'
         '<div class="meta">Operating · Investing · Financing</div></div>',
@@ -213,17 +220,22 @@ with tab_dm:
     )
     # segmented_control returns None if the user deselects the active chip.
     iv_period = iv_period or "FY"
-    st.markdown(render_metrics_grid(metrics, ticker, iv_period=iv_period), unsafe_allow_html=True)
-    # Valuation football field — fills the gap below the grid. Price is backed out of the
-    # IV methods' MoS rows (the app stores no per-share price directly). Returns "" → hidden.
-    ff_price = iv_price_from_metrics(metrics, ticker, iv_period=iv_period)
+    # Back out the IV anchor price ONCE (the app stores no per-share price directly) and reuse
+    # it for both the metrics grid and the football field below — otherwise the same MoS
+    # inversion runs 2–3× per rerun. Returns None when unavailable → both renderers degrade.
+    ff_price = iv_price_from_metrics(tmetrics, ticker, iv_period=iv_period)
     st.markdown(
-        render_valuation_football_field(metrics, ticker, ff_price, iv_period=iv_period),
+        render_metrics_grid(tmetrics, ticker, iv_period=iv_period, iv_price=ff_price),
+        unsafe_allow_html=True,
+    )
+    # Valuation football field — fills the gap below the grid.
+    st.markdown(
+        render_valuation_football_field(tmetrics, ticker, ff_price, iv_period=iv_period),
         unsafe_allow_html=True,
     )
 
 with tab_qt:
-    df_q = quarterly_df(data, ticker)
+    df_q = quarterly_df(tdata, ticker)
     st.markdown(
         '<div class="panel-header"><h2>Quarterly</h2>'
         '<div class="meta">Last 12 quarters · USD · YoY = same quarter prior year</div></div>',

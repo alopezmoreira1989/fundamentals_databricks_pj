@@ -557,7 +557,6 @@ print(f"Stock quarterly rows: {stock_quarterly.count():,}")
 
 all_quarterly = (
     flow_quarterly
-    .withColumn("company", F.initcap(F.col("company")) if False else F.col("company"))
     .unionByName(stock_quarterly)
     .withColumn("company", F.initcap(F.col("company")))
 )

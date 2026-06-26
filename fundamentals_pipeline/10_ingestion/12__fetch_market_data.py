@@ -323,7 +323,7 @@ if all_frames:
         # Initial / full backfill: single overwrite, NOT a MERGE (MERGE is for incrementals).
         (prices_sdf.write.format("delta").mode("overwrite")
          .option("overwriteSchema", "true").saveAsTable(prices_tbl))
-        print(f"✓ OVERWROTE {prices_tbl} — {prices_sdf.count():,} rows")
+        print(f"✓ OVERWROTE {prices_tbl} — {len(prices_pd):,} rows")
     else:
         prices_sdf.createOrReplaceTempView("incoming_prices")
         spark.sql(f"""
@@ -337,7 +337,7 @@ if all_frames:
                 INSERT (ticker, date, close, adj_close, volume, fetched_at)
                 VALUES (s.ticker, s.date, s.close, s.adj_close, s.volume, s.fetched_at)
         """)
-        print(f"✓ MERGED {prices_sdf.count():,} rows into {prices_tbl}")
+        print(f"✓ MERGED {len(prices_pd):,} rows into {prices_tbl}")
     _wrote_prices = True
 else:
     print("✓ No new daily prices to write (incremental, all fresh).")

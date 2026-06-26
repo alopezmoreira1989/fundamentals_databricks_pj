@@ -537,12 +537,20 @@ def _build_iv_scenario_row(subcat_df: pd.DataFrame, mid_value_metric: str,
     return _render_iv_scenario_row(base, bear, mid, bull, bear_mos, mid_mos, bull_mos, unit, price)
 
 
-def render_metrics_grid(metrics: pd.DataFrame, ticker: str, iv_period: str = "FY") -> str:
+_IV_PRICE_UNSET = object()   # sentinel: distinguishes "caller didn't pass a price" from None
+
+
+def render_metrics_grid(metrics: pd.DataFrame, ticker: str, iv_period: str = "FY",
+                        iv_price=_IV_PRICE_UNSET) -> str:
     """Render the derived metrics cards — one per category from metrics_hierarchy.json.
 
     `iv_period` ("FY" | "TTM") selects which Intrinsic Value flavour to show — the
     two are distinguished only by the (FY)/(TTM) suffix in the metric/subcategory
     names, never by `period_type` (both are stored as FY rows).
+
+    `iv_price` is the back-out anchor price for the Intrinsic Value scenario rows. The
+    caller (company.py) reuses the same value for the football field, so it can pass it
+    in to avoid a second `iv_price_from_metrics` pass; left unset it's computed here.
     """
     sub = metrics[(metrics["ticker"] == ticker) & (metrics["period_type"] == "FY")].copy()
     if sub.empty:
@@ -572,7 +580,9 @@ def render_metrics_grid(metrics: pd.DataFrame, ticker: str, iv_period: str = "FY
         rows_html: list[str] = []
         # Intrinsic Value cards render bull/mid/bear side by side; back out the anchor price
         # once (mid) and emit the Bear/Mid/Bull column heads above the first method row.
-        iv_price = iv_price_from_metrics(metrics, ticker, iv_period) if is_iv else None
+        # Reuse a caller-supplied price when given; otherwise compute it here.
+        if is_iv and iv_price is _IV_PRICE_UNSET:
+            iv_price = iv_price_from_metrics(metrics, ticker, iv_period)
         if is_iv:
             rows_html.append(
                 '<div class="scn-colheads">'
