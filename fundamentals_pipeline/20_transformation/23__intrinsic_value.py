@@ -21,7 +21,7 @@
 # MAGIC
 # MAGIC **Reads from:**
 # MAGIC - `financials` (long-format with `period_type`, `period_end`, `fiscal_year`)
-# MAGIC - `market_data` (price_close, market_cap per ticker × fiscal_year)
+# MAGIC - `market_cap_asof` (period_end price_close, market_cap per ticker × fiscal_year)
 # MAGIC - `00_config/valuation_assumptions.json` (defaults + per-ticker overrides)
 # MAGIC
 # MAGIC > **Important warning:** valuations are only as good as their assumptions.
@@ -54,12 +54,20 @@ from pyspark.sql.window import Window
 ASSUMPTIONS_JSON_PATH = "../00_config/valuation_assumptions.json"
 
 full_table  = f"{CATALOG}.{SCHEMA}.{TABLE}"
-market_tbl  = f"{CATALOG}.{SCHEMA}.market_data"
+# Period_end-aligned price + market cap written by 22 (replaces legacy calendar-aligned
+# market_data). Keyed by (ticker, fiscal_year); `price_close` is the as-of fiscal-close price,
+# so Margin of Safety is now consistent with every multiple in financials_metrics.
+market_tbl  = f"{CATALOG}.{SCHEMA}.market_cap_asof"
 iv_tbl      = f"{CATALOG}.{SCHEMA}.financials_intrinsic_value"
 metrics_tbl = f"{CATALOG}.{SCHEMA}.financials_metrics"
 
+# The per-row `assumptions` JSON is diagnostic only (not consumed by the dashboard or export).
+# Building + json.dumps-ing it for every surviving row (3 scenarios × ~30k FY × 4 methods)
+# costs a lot of driver time for nothing, so default it OFF; flip to True for ad-hoc debugging.
+EMIT_ASSUMPTIONS = False
+
 print(f"Source        : {full_table}")
-print(f"Market data   : {market_tbl}")
+print(f"Price source  : {market_tbl}")
 print(f"Target IV     : {iv_tbl}")
 print(f"Metrics table : {metrics_tbl}")
 
@@ -373,10 +381,10 @@ print(f"✓ TTM wide: {ttm_wide.count():,} ticker rows")
 
 # COMMAND ----------
 
-# MAGIC %md ## 5. Join with market_data and collect to Pandas
+# MAGIC %md ## 5. Join with the period_end price source and collect to Pandas
 # MAGIC
 # MAGIC For **FY**: price from the same `fiscal_year`.
-# MAGIC For **TTM**: price from the most recent `fiscal_year` available in market_data.
+# MAGIC For **TTM**: price from the most recent `fiscal_year` available in market_cap_asof.
 
 # COMMAND ----------
 
@@ -392,7 +400,7 @@ try:
     )
     has_market_data = True
 except Exception:
-    print("⚠ market_data not available — Margin of Safety will be NULL.")
+    print("⚠ market_cap_asof not available — Margin of Safety will be NULL.")
     mkt = None
     has_market_data = False
 
@@ -406,7 +414,7 @@ else:
         .withColumn("market_cap",  F.lit(None).cast("double"))
     )
 
-# TTM: use the most recent price_close available in market_data per ticker
+# TTM: use the most recent price_close available in market_cap_asof per ticker
 # (may be the current year without shares yet, or the previous year).
 if has_market_data:
     w_latest_price = Window.partitionBy("ticker").orderBy(F.col("year").desc())
@@ -689,7 +697,8 @@ def compute_all(pdf, period_type, computed_at, scenario):
                 "intrinsic_value_total":     float(ivv * sh) if not np.isnan(sh) else None,
                 "price_close":               float(pr) if not np.isnan(pr) else None,
                 "margin_of_safety_pct":      float((ivv - pr) / ivv * 100) if not np.isnan(pr) else None,
-                "assumptions":               json.dumps(meta_fn(i), default=str),
+                # Short-circuits: meta_fn(i) (dict build) is skipped entirely when disabled.
+                "assumptions":               json.dumps(meta_fn(i), default=str) if EMIT_ASSUMPTIONS else None,
                 "computed_at":               computed_at,
             })
     return rows

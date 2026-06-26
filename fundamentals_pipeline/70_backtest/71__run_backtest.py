@@ -48,7 +48,6 @@ import numpy as np
 import pandas as pd
 import pyspark.sql.functions as F
 import pyspark.sql.types as T
-from pyspark.sql.window import Window
 
 
 # Make the pure-Python _core helpers importable (see 51 for the rationale + Databricks note).
@@ -169,18 +168,21 @@ asof = (
     .select("ticker", "fiscal_year", "as_of_date")
 )
 
-# Entry price: latest close on/before as_of_date.
+# Entry price: latest close on/before as_of_date. `asof` is ~30k rows → broadcast it so the
+# ~75M-row daily price store isn't shuffled on `ticker`. Pick the latest row per
+# (ticker, fiscal_year) with a partial-aggregable max-of-struct instead of a global
+# row_number window (which would sort the whole exploded join just to keep rn==1). `date` is
+# unique per ticker in the daily store, so max(struct(date, …)) is an unambiguous "latest".
 prices = spark.table(prices_tbl).select("ticker", "date", "close", "adj_close")
-_targets = asof.join(prices, on="ticker").filter(F.col("date") <= F.col("as_of_date"))
-_w_entry = Window.partitionBy("ticker", "fiscal_year").orderBy(F.col("date").desc())
+_targets = F.broadcast(asof).join(prices, on="ticker").filter(F.col("date") <= F.col("as_of_date"))
 entry = (
-    _targets.withColumn("_rn", F.row_number().over(_w_entry))
-    .filter(F.col("_rn") == 1)
+    _targets.groupBy("ticker", "fiscal_year")
+    .agg(F.max(F.struct(F.col("date"), F.col("adj_close"), F.col("close"))).alias("_e"))
     .select(
         "ticker", "fiscal_year",
-        F.col("date").alias("entry_date"),
-        F.col("adj_close").alias("entry_adj"),
-        F.col("close").alias("entry_close"),
+        F.col("_e.date").alias("entry_date"),
+        F.col("_e.adj_close").alias("entry_adj"),
+        F.col("_e.close").alias("entry_close"),
     )
 )
 
@@ -251,15 +253,23 @@ def _metric_dict(row) -> dict:
     return {m: (None if pd.isna(row[m]) else float(row[m])) for m in NEEDED_METRICS}
 
 
+# The metric dicts are archetype-independent — build them ONCE (aligned to pdf row order)
+# instead of rebuilding inside every archetype's pdf.apply (was ~8× redundant). Only the
+# predicate evaluation below varies per archetype.
+_metric_recs = [_metric_dict(rec) for rec in pdf.to_dict("records")]
+_has_return = pdf["holding_return"].notna().to_numpy()
+
 for name, a in ARCHETYPES.items():
     preds = a["predicates"]
     cap = int(a.get("max_holdings", 9999))
     rank_by = a.get("rank_by")
 
     # Predicate filter (pure _core.backtest.passes_predicates) + measurable forward return.
-    # _p=preds binds the loop variable at lambda-definition time (avoids late-binding).
-    mask = pdf.apply(lambda r, _p=preds: bt.passes_predicates(_metric_dict(r), _p), axis=1)
-    sel = pdf[mask & pdf["holding_return"].notna()].copy()
+    mask = np.fromiter(
+        (bt.passes_predicates(mr, preds) for mr in _metric_recs),
+        dtype=bool, count=len(_metric_recs),
+    )
+    sel = pdf[mask & _has_return].copy()
 
     per_year = []
     for fy, grp in sel.groupby("fiscal_year"):

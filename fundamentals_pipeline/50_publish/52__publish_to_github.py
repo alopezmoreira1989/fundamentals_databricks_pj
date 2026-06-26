@@ -2,7 +2,7 @@
 # MAGIC %md
 # MAGIC # 50_publish / 52__publish_to_github
 # MAGIC
-# MAGIC Uploads the three artifacts written by `51__export_dashboard_data` to a
+# MAGIC Uploads the artifacts written by `51__export_dashboard_data` to a
 # MAGIC GitHub Release tagged `data-YYYY-MM-DD`, then moves the floating `latest`
 # MAGIC tag/release to point at the new artifacts so the public Streamlit app can
 # MAGIC always pull from `.../releases/download/latest/<file>`.
@@ -38,6 +38,7 @@ ARTIFACTS = [
     Path("/tmp/dashboard_data.parquet"),
     Path("/tmp/dashboard_metrics.parquet"),
     Path("/tmp/dashboard_prices.parquet"),
+    Path("/tmp/dashboard_backtest.parquet"),
     Path("/tmp/dashboard_meta.json"),
 ]
 

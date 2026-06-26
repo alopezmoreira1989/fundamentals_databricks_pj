@@ -190,37 +190,41 @@ metrics = spark.sql(f"""
     WHERE yr_rank <= {FY_YEARS}
 """).toPandas()
 
-# Market Cap lives in market_data (not financials_metrics) — inject it as a
-# `Market Cap` metric row so the Streamlit screener can pivot it like any other
-# metric. category/subcategory are NULL on purpose: the detail page's metrics
-# grid filters on category.dropna(), so these rows are invisible there but the
-# screener still picks them up.
-# ⚠️ market_data.fiscal_year is the CALENDAR year, while metrics.fiscal_year is
-# the FISCAL year — for non-December fiscal-year-end tickers (AAPL/Sep, MSFT/Jun,
-# WMT/Jan) there's a known 0–11 month offset. Acceptable for the screener.
-market_cap = spark.sql(f"""
-    WITH ranked AS (
-      SELECT
-        md.ticker,
-        'FY'                  AS period_type,
-        MAKE_DATE(md.fiscal_year, 12, 31) AS period_end,
-        md.fiscal_year,
-        CAST(NULL AS STRING)  AS category,
-        CAST(NULL AS STRING)  AS subcategory,
-        'Market Cap'          AS metric,
-        'usd'                 AS unit,
-        CAST(NULL AS DOUBLE)  AS sort_order,
-        md.market_cap         AS value,
-        DENSE_RANK() OVER (PARTITION BY md.ticker ORDER BY md.fiscal_year DESC) AS yr_rank
-      FROM {CATALOG}.{SCHEMA}.market_data md
-      WHERE md.ticker IN (SELECT ticker FROM _export_universe)
-        AND md.market_cap IS NOT NULL
-    )
-    SELECT ticker, period_type, period_end, fiscal_year,
-           category, subcategory, metric, unit, sort_order, value
-    FROM ranked
-    WHERE yr_rank <= {FY_YEARS}
-""").toPandas()
+# Market Cap lives in market_cap_asof (period_end-aligned, written by 22) — inject it as a
+# `Market Cap` metric row so the Streamlit screener can pivot it like any other metric.
+# category/subcategory are NULL on purpose: the detail page's metrics grid filters on
+# category.dropna(), so these rows are invisible there but the screener still picks them up.
+# `period_end` is the REAL fiscal close and the value is priced as-of it, so — unlike the old
+# market_data source — it's on the same fiscal basis as every other FY metric (no 0–11mo offset).
+MKT_COLUMNS = ["ticker", "period_type", "period_end", "fiscal_year",
+               "category", "subcategory", "metric", "unit", "sort_order", "value"]
+try:
+    market_cap = spark.sql(f"""
+        WITH ranked AS (
+          SELECT
+            md.ticker,
+            'FY'                  AS period_type,
+            md.period_end         AS period_end,
+            md.fiscal_year,
+            CAST(NULL AS STRING)  AS category,
+            CAST(NULL AS STRING)  AS subcategory,
+            'Market Cap'          AS metric,
+            'usd'                 AS unit,
+            CAST(NULL AS DOUBLE)  AS sort_order,
+            md.market_cap         AS value,
+            DENSE_RANK() OVER (PARTITION BY md.ticker ORDER BY md.fiscal_year DESC) AS yr_rank
+          FROM {CATALOG}.{SCHEMA}.market_cap_asof md
+          WHERE md.ticker IN (SELECT ticker FROM _export_universe)
+            AND md.market_cap IS NOT NULL
+        )
+        SELECT ticker, period_type, period_end, fiscal_year,
+               category, subcategory, metric, unit, sort_order, value
+        FROM ranked
+        WHERE yr_rank <= {FY_YEARS}
+    """).toPandas()
+except Exception as e:
+    print(f"⚠ market_cap_asof unavailable ({e}) — skipping Market Cap rows.")
+    market_cap = pd.DataFrame(columns=MKT_COLUMNS)
 
 # Retention now enforced in SQL (last FY_YEARS years per ticker, per source), so no
 # driver-side trim needed — just stack the two long-format metric frames.

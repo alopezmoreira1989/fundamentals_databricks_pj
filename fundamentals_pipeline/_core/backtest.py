@@ -133,10 +133,12 @@ def sharpe(returns: list[float], risk_free: float = 0.0) -> float | None:
     ``None`` for fewer than two observations or zero volatility.
     """
     pts = [float(r) for r in returns if not _is_missing(r)]
-    if len(pts) < 2:
+    n = len(pts)
+    if n < 2:
         return None
-    vol = annualized_vol(pts)
-    if vol is None or vol < 1e-12:   # ~constant returns → zero vol (FP-safe) → undefined Sharpe
+    mean = sum(pts) / n
+    var = sum((r - mean) ** 2 for r in pts) / (n - 1)
+    vol = math.sqrt(var)
+    if vol < 1e-12:   # ~constant returns → zero vol (FP-safe) → undefined Sharpe
         return None
-    mean = sum(pts) / len(pts)
     return (mean - risk_free) / vol

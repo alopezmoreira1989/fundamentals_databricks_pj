@@ -64,6 +64,7 @@ TABLES = [
     {"name": "financials_intrinsic_value", "clustered": False, "zorder_cols": ["method", "scenario", "fiscal_year"]},
     {"name": "market_prices_daily",        "clustered": True,  "zorder_cols": []},  # liquid-clustered
     {"name": "market_data",                "clustered": False, "zorder_cols": []},  # legacy/back-compat
+    {"name": "market_cap_asof",            "clustered": False, "zorder_cols": []},  # small, full-overwrite each run by 22
 ]
 
 print(f"run_optimization = {RUN_OPTIMIZATION}")
