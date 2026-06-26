@@ -54,11 +54,8 @@ import pandas as pd
 import yfinance as yf
 from pyspark.sql import functions as F
 from pyspark.sql.types import DateType, DoubleType, LongType, StringType, StructField, StructType, TimestampType
-from pyspark.sql.window import Window
 
 prices_tbl = f"{CATALOG}.{SCHEMA}.market_prices_daily"
-market_tbl = f"{CATALOG}.{SCHEMA}.market_data"
-full_tbl   = f"{CATALOG}.{SCHEMA}.{TABLE}"
 
 # ── Batched download config ──────────────────────────────────────────────────────
 # yf.download already parallelizes WITHIN a batch (threads=True), so batch-level
@@ -344,78 +341,14 @@ else:
 
 # COMMAND ----------
 
-# MAGIC %md ## 5. Derive legacy `market_data` from `market_prices_daily`
+# MAGIC %md ## 5. Legacy `market_data` — no longer rebuilt
 # MAGIC
-# MAGIC Last **raw** close per calendar year × FY `Shares Diluted`. Always rebuilt from the
-# MAGIC FULL daily table (overwrite — idempotent), so it stays complete even on incremental
-# MAGIC runs. For December filers these values are identical to the previous implementation
-# MAGIC (regression-tested). Deprecated: nothing new should read `market_data`.
-
-# COMMAND ----------
-
-spark.sql(f"""
-    CREATE TABLE IF NOT EXISTS {market_tbl} (
-        ticker         STRING    NOT NULL,
-        fiscal_year    INT       NOT NULL,
-        price_close    DOUBLE,
-        shares_diluted DOUBLE,
-        market_cap     DOUBLE,
-        fetched_at     TIMESTAMP
-    )
-    USING DELTA
-    PARTITIONED BY (ticker)
-    TBLPROPERTIES (
-        'delta.autoOptimize.optimizeWrite' = 'true',
-        'delta.autoOptimize.autoCompact'   = 'true'
-    )
-""")
-
-if spark.table(prices_tbl).limit(1).count() > 0:
-    _yr = Window.partitionBy("ticker", "cy").orderBy(F.col("date").desc())
-    year_end = (
-        spark.table(prices_tbl)
-        # Benchmarks are priced for the backtester only — they have no fundamentals, so keep them
-        # out of legacy market_data (they'd just carry NULL shares/market_cap). Empty list ⇒ no-op.
-        .filter(~F.col("ticker").isin(BENCHMARK_TICKERS))
-        .withColumn("cy", F.year("date"))
-        .withColumn("_rn", F.row_number().over(_yr))
-        .filter(F.col("_rn") == 1)
-        .select(
-            "ticker",
-            F.col("cy").alias("fiscal_year"),          # calendar year (name kept for schema compat)
-            F.col("close").alias("price_close"),
-            F.col("fetched_at"),
-        )
-    )
-
-    shares_df = (
-        spark.table(full_tbl)
-        .filter(
-            (F.col("stmt") == "Income Statement")
-            & (F.col("concept") == "Shares Diluted")
-            & (F.col("period_type") == "FY")
-        )
-        .select("ticker", "fiscal_year", F.col("value").alias("shares_diluted"))
-    )
-
-    market_df = (
-        year_end
-        .join(shares_df, on=["ticker", "fiscal_year"], how="left")
-        .withColumn(
-            "market_cap",
-            F.when(
-                F.col("shares_diluted").isNotNull() & F.col("price_close").isNotNull(),
-                F.col("price_close") * F.col("shares_diluted"),
-            ),
-        )
-        .select("ticker", "fiscal_year", "price_close", "shares_diluted", "market_cap", "fetched_at")
-    )
-
-    (market_df.write.format("delta").mode("overwrite")
-     .option("overwriteSchema", "true").saveAsTable(market_tbl))
-    print(f"✓ Rebuilt {market_tbl} from {prices_tbl} — {market_df.count():,} rows")
-else:
-    print("⊘ market_prices_daily empty — market_data not rebuilt.")
+# MAGIC `market_data` (last **raw** close per CALENDAR year × FY `Shares Diluted`) is **frozen**:
+# MAGIC it is no longer rebuilt here. Its calendar-vs-fiscal 0–11mo offset distorted multiples for
+# MAGIC non-December filers. The period_end-aligned replacement is `market_cap_asof` (price +
+# MAGIC market cap as-of each FY's real fiscal close), written by `22__derived_metrics` and read
+# MAGIC by `23__intrinsic_value` (Margin of Safety) and `51__export_dashboard_data` (Market Cap).
+# MAGIC The old table is left in place for any ad-hoc back-compat query but receives no new data.
 
 # COMMAND ----------
 
@@ -473,11 +406,4 @@ spark.sql(f"""
     SELECT 'market_prices_daily' AS tbl, COUNT(*) AS rows, COUNT(DISTINCT ticker) AS tickers,
            MIN(date) AS min_date, MAX(date) AS max_date
     FROM {prices_tbl}
-""").display()
-
-spark.sql(f"""
-    SELECT 'market_data' AS tbl, COUNT(*) AS rows, COUNT(DISTINCT ticker) AS tickers,
-           MIN(fiscal_year) AS min_year, MAX(fiscal_year) AS max_year,
-           COUNT(market_cap) AS rows_with_market_cap
-    FROM {market_tbl}
 """).display()

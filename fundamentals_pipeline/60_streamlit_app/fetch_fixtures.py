@@ -100,17 +100,17 @@ def main():
     metrics = _trim_recent(metrics, ["FY"], FY_YEARS)
     metrics = _trim_recent(metrics, ["Q1", "Q2", "Q3", "Q4"], QUARTERS)
 
-    # Market Cap (from market_data) as a `Market Cap` metric row — see
-    # 50_publish/51__export_dashboard_data.py for rationale. category NULL keeps
-    # it out of the detail page's metrics grid but visible to the screener.
-    # ⚠️ market_data.fiscal_year is the calendar year (0–11mo offset vs fiscal).
+    # Market Cap (from market_cap_asof — period_end-aligned) as a `Market Cap` metric row — see
+    # 50_publish/51__export_dashboard_data.py for rationale. category NULL keeps it out of the
+    # detail page's metrics grid but visible to the screener. `period_end` is the real fiscal
+    # close (no calendar offset), matching prod after the market_data → market_cap_asof migration.
     import pandas as pd
 
     market_cap = spark.sql(f"""
         SELECT
             md.ticker,
             'FY'                  AS period_type,
-            MAKE_DATE(md.fiscal_year, 12, 31) AS period_end,
+            md.period_end         AS period_end,
             md.fiscal_year,
             CAST(NULL AS STRING)  AS category,
             CAST(NULL AS STRING)  AS subcategory,
@@ -118,7 +118,7 @@ def main():
             'usd'                 AS unit,
             CAST(NULL AS DOUBLE)  AS sort_order,
             md.market_cap         AS value
-        FROM {CATALOG}.{SCHEMA}.market_data md
+        FROM {CATALOG}.{SCHEMA}.market_cap_asof md
         WHERE md.ticker IN ({tickers_sql})
           AND md.market_cap IS NOT NULL
     """).toPandas()

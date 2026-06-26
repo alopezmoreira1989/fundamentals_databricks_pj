@@ -28,6 +28,7 @@ full_tbl    = f"{CATALOG}.{SCHEMA}.{TABLE}"
 market_tbl  = f"{CATALOG}.{SCHEMA}.market_data"            # legacy (deprecated; not read here)
 prices_tbl  = f"{CATALOG}.{SCHEMA}.market_prices_daily"   # daily price store — pricing source
 metrics_tbl = f"{CATALOG}.{SCHEMA}.financials_metrics"
+mca_tbl     = f"{CATALOG}.{SCHEMA}.market_cap_asof"       # period_end-aligned price + market cap
 
 # COMMAND ----------
 
@@ -52,6 +53,29 @@ _company_w = Window.partitionBy("ticker")
 raw = _raw_full.withColumn(
     "company", F.first("company", ignorenulls=True).over(_company_w)
 )
+
+# Net Income is reported in BOTH the Income Statement and the Cash Flow statement (CF carries
+# consolidated ProfitLoss), and the two can differ (parent-only vs consolidated). The pivot
+# below groups by `concept` alone, so without this its Net Income would be a nondeterministic
+# F.first() across the IS and CF rows. Pin it to the IS row when present so ROE / Net Margin
+# here agree with the P/E in the valuation block (which takes Net Income from the IS). Targeted
+# dedup of the Net-Income concept only — every other concept is single-statement, so the rest
+# of the pivot is untouched. Filers reporting Net Income ONLY in the CF keep that row (no loss).
+_ni = F.col("concept") == "Net Income"
+_ni_pref = F.when(F.col("stmt") == "Income Statement", 0).otherwise(1)
+_w_ni = Window.partitionBy("ticker", "fiscal_year").orderBy(_ni_pref.asc())
+_ni_rows = (
+    raw.filter(_ni)
+    .withColumn("_rn", F.row_number().over(_w_ni))
+    .filter(F.col("_rn") == 1)
+    .drop("_rn")
+)
+raw = raw.filter(~_ni).unionByName(_ni_rows)
+
+# `raw` (FY long-format facts, value-non-null, company resolved) is reused 3×: the `wide`
+# pivot, the valuation concepts, and the company lookup downstream. Materialize once so those
+# don't each re-scan `financials`. Serverless: localCheckpoint(eager), not .cache()/.persist().
+raw = raw.localCheckpoint(eager=True)
 
 wide = (
     raw
@@ -515,13 +539,36 @@ else:
     pe_mcap = pe_mcap.localCheckpoint(eager=True)
     print(f"✓ period_end-aligned market_cap — {pe_mcap.count():,} (ticker, fy) rows")
 
+    # Persist the period_end-aligned price + market cap as a small table so the intrinsic-value
+    # step (23) and the export (51) can read fiscal-close-correct values instead of the legacy,
+    # CALENDAR-aligned `market_data` (which `12` no longer rebuilds). Keyed by (ticker,
+    # fiscal_year) like market_data, but `period_end` is the REAL fiscal close and `price_close`
+    # / `market_cap` are priced as-of it (the same basis as every multiple in financials_metrics).
+    # Full overwrite each run — 22 recomputes all FY. saveAsTable(overwrite) creates if absent
+    # (no MERGE → no schema-evolution trap; no CREATE SCHEMA — main.financials is provisioned).
+    market_cap_asof = (
+        fy_dates
+        .join(asof_close, on=["ticker", "fiscal_year"], how="inner")
+        .join(pe_mcap,    on=["ticker", "fiscal_year"], how="inner")
+        .select(
+            "ticker", "fiscal_year", "period_end",
+            F.col("asof_close").alias("price_close"),
+            "market_cap",
+        )
+    )
+    (market_cap_asof.write.format("delta").mode("overwrite")
+     .option("overwriteSchema", "true").saveAsTable(mca_tbl))
+    print(f"✓ wrote {mca_tbl}")
+
 # COMMAND ----------
 
 if pe_mcap is not None:
 
+    # Reuse the already-materialized `raw` (FY rows, value-non-null) instead of re-scanning
+    # `financials` — the explicit per-concept stmt filters below are unchanged, so the selected
+    # (concept, stmt) values are identical (Net Income from IS, OCF/CapEx/D&A from CF, etc.).
     val_concepts = (
-        spark.table(full_tbl)
-        .filter(F.col("period_type") == "FY")
+        raw
         .filter(
             (
                 (F.col("stmt") == "Income Statement")
@@ -713,12 +760,11 @@ if pe_mcap is not None:
         F.when(F.abs(F.col("EV/EBITDA")) > 500, F.lit(None)).otherwise(F.col("EV/EBITDA"))
     )
 
-    # Need company column for downstream join — pull from financials.
-    # Same guard as above: if a ticker has >1 company value in financials
-    # (rare SEC escapes, restructures, etc.), .distinct() would return multiple
-    # rows and the join would duplicate. We take the first non-null per ticker.
+    # Need company column for downstream join — reuse the materialized `raw` (company already
+    # resolved to the first non-null per ticker by the window above) instead of re-scanning
+    # financials. One row per ticker so the left join can't duplicate.
     company_lookup = (
-        spark.table(full_tbl)
+        raw
         .groupBy("ticker")
         .agg(F.first("company", ignorenulls=True).alias("company"))
     )

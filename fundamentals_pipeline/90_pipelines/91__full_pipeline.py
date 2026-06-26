@@ -647,6 +647,7 @@ summary_tables = [
     (SCHEMA,        "financials_raw"),
     (SCHEMA,        "financials"),
     (SCHEMA,        "market_data"),
+    (SCHEMA,        "market_cap_asof"),
     (SCHEMA,        "financials_metrics"),
     (SCHEMA,        "financials_intrinsic_value"),
 ]
