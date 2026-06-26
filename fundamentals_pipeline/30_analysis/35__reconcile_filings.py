@@ -404,6 +404,17 @@ if _have_oracle:
           -- economic total would require summing two distinct tags (a definitional change, declined);
           -- left as-is, this is validator mapping noise. Drop it to keep the bucket clean.
           AND NOT (concept = 'Sales of Investments' AND stmt = 'Cash Flow')
+          -- Short-term Debt on the Balance Sheet is intentionally a SUM of two disjoint current-debt
+          -- components: ShortTermBorrowings (commercial paper / revolver) + LongTermDebtCurrent
+          -- (current maturities of long-term debt). DebtCurrent is the us-gaap aggregate of both;
+          -- when a filer presents only the parts (LIN, WMT, many CP issuers) the app sums them at
+          -- ingestion (extract_series_aggregate_or_sum / AGGREGATE_OR_SUM_CONCEPTS in 11). The Tier-A
+          -- oracle is single-line — its magnitude tie-break picks the larger component alone — so the
+          -- app (the sum) ALWAYS exceeds the oracle winner by the other component. Unlike Sales of
+          -- Investments, summing here was the CORRECT fix (it un-did an undercount of leverage), so
+          -- the residual mismatch is structural validator noise, not a mangle. The value is still
+          -- guarded by Tier B/C, which now matches the app against its own (summed) raw fact. Drop it.
+          AND NOT (concept = 'Short-term Debt' AND stmt = 'Balance Sheet')
     """)
     print(f"  Tier A ORACLE_VALUE_MISMATCH findings: {df_vm.count():,}")
 

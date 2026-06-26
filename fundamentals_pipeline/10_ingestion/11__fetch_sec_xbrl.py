@@ -365,6 +365,60 @@ def extract_series_multi(facts: dict, concepts, kind: str, namespace: str = "us-
     merged = merged[merged["_priority"] == best]
     return merged.drop(columns="_priority").reset_index(drop=True)
 
+
+def extract_series_aggregate_or_sum(facts, aggregate_tag, component_tags, kind, namespace="us-gaap"):
+    """Resolve a concept as the AGGREGATE tag when the filer reports it, else the per-context
+    SUM of its disjoint component tags.
+
+    Unlike ``extract_series_multi`` (which COALESCES — one tag wins per period and the rest are
+    dropped), some balance-sheet lines are an aggregate over genuinely ADDITIVE sub-lines. Short-term
+    Debt is the canonical case: total current debt = ``ShortTermBorrowings`` (commercial paper /
+    revolver) + the current maturities of long-term debt (``LongTermDebtCurrent``). ``DebtCurrent``
+    is the us-gaap AGGREGATE of both. Filers that present ONLY the two components (e.g. LIN, WMT)
+    made the coalesce keep one and silently DROP the other → Short-term Debt — and Total Debt /
+    Debt-to-Equity / leverage — understated. (Confirmed via the linkbase-oracle reconciliation:
+    LIN FY24 published 2.057B = current maturities only, omitting 4.223B of short-term borrowings.)
+
+    Rule, resolved PER FILING CONTEXT (fy, fp, form, period_start, period_end, filed):
+      • if the aggregate tag carries a value for that context → use it (it already folds in the
+        parts), so no double-count;
+      • else → SUM the component tags present for that context.
+
+    Two distinct component tags in ONE filing are genuinely separate line items (a single XBRL tag
+    has one value per context), so summing them is exact. Across filings each context is kept
+    separate, so the downstream dedup still picks the latest-filed snapshot (restatements win). A
+    context with a single component sums to that component → byte-identical to the old coalesce for
+    single-component filers (the overwhelming majority).
+    """
+    _CTX = ["fy", "fp", "form", "period_start", "period_end", "period_shape", "filed"]
+
+    agg = extract_series(facts, aggregate_tag, kind, namespace=namespace)
+
+    comp_frames = [
+        f for f in (extract_series(facts, t, kind, namespace=namespace) for t in component_tags)
+        if not f.empty
+    ]
+    if comp_frames:
+        comps = pd.concat(comp_frames, ignore_index=True)
+        # Sum the (disjoint) component tags within each filing context.
+        comp_sum = comps.groupby(_CTX, dropna=False, as_index=False)["value"].sum()
+    else:
+        comp_sum = pd.DataFrame(columns=_CTX + ["value"])
+
+    if agg.empty:
+        return comp_sum[_CTX + ["value"]].reset_index(drop=True)
+    if comp_sum.empty:
+        return agg[_CTX + ["value"]].reset_index(drop=True)
+
+    # Aggregate wins per context; components fill only the contexts the aggregate does not cover.
+    have_agg = agg[_CTX].drop_duplicates()
+    comp_only = (
+        comp_sum.merge(have_agg, on=_CTX, how="left", indicator=True)
+        .query("_merge == 'left_only'")
+        .drop(columns="_merge")
+    )
+    return pd.concat([agg[_CTX + ["value"]], comp_only], ignore_index=True).reset_index(drop=True)
+
 # COMMAND ----------
 
 # MAGIC %md ## 4. Per-ticker worker
@@ -428,10 +482,19 @@ def process_ticker(ticker: str, scraped_at_ts: datetime) -> tuple:
         # T/VZ/WMB): same counts and values. (extract — the other ~50% — would need real
         # parallelism to improve; see ingestion bottleneck investigation.)
         frames = []
+        _agg_sum = globals().get("AGGREGATE_OR_SUM_CONCEPTS", {})
         for stmt_name, concept_map in STATEMENTS.items():
             for label, (xbrl_concept, kind) in concept_map.items():
-                # xbrl_concept may be a single tag (str) or a priority list[str].
-                series = extract_series_multi(facts, xbrl_concept, kind)
+                # Most concepts COALESCE a priority list (extract_series_multi). A few are an
+                # aggregate over additive sub-lines (e.g. Short-term Debt) and must SUM the
+                # components when the aggregate tag is absent — see AGGREGATE_OR_SUM_CONCEPTS.
+                _spec = _agg_sum.get(label)
+                if _spec is not None:
+                    series = extract_series_aggregate_or_sum(
+                        facts, _spec["aggregate"], _spec["sum"], kind)
+                else:
+                    # xbrl_concept may be a single tag (str) or a priority list[str].
+                    series = extract_series_multi(facts, xbrl_concept, kind)
                 if series.empty:
                     continue
                 # Share Repurchases is a positive cash-outflow MAGNITUDE by definition. Some filers

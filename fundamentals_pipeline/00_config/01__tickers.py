@@ -114,13 +114,17 @@ BALANCE_SHEET = {
                                      "OtherIntangibleAssetsNet"],               "stock"),
     "Total Assets":               ("Assets",                                     "stock"),
     "Accounts Payable":           ("AccountsPayableCurrent",                     "stock"),
-    # Debt uses a LIST of tags in priority order (first-hit-wins at ingestion,
-    # see extract_series_multi in 11__fetch_sec_xbrl.py). Many filers (e.g. T/VZ)
-    # do NOT report under ShortTermBorrowings/LongTermDebtNoncurrent → column came out
-    # NULL → Total Debt=0 → Debt/Equity=0.00. The fallback covers us-gaap variants.
-    "Short-term Debt":            (["DebtCurrent",            # current portion of total debt (more general)
-                                    "LongTermDebtCurrent",    # current portion of long-term debt
-                                    "ShortTermBorrowings"],   # original
+    # Debt uses a LIST of tags. Long-term Debt COALESCES (first-hit-wins per period, see
+    # extract_series_multi). Short-term Debt is special: DebtCurrent is the us-gaap AGGREGATE of
+    # ShortTermBorrowings (commercial paper) + LongTermDebtCurrent (current maturities of LT debt),
+    # which are DISJOINT additive lines. Coalescing dropped one when a filer presents both without
+    # the aggregate (LIN/WMT) → understated leverage. So Short-term Debt is registered in
+    # AGGREGATE_OR_SUM_CONCEPTS below and resolved by extract_series_aggregate_or_sum (aggregate if
+    # present, else sum the components). The list here stays the full tag set for the oracle /
+    # dimensional / reconciler readers (13/14/35), which only need to know the tags → concept map.
+    "Short-term Debt":            (["DebtCurrent",            # AGGREGATE — total current debt (wins when present)
+                                    "LongTermDebtCurrent",    # component — current maturities of long-term debt
+                                    "ShortTermBorrowings"],   # component — commercial paper / revolver
                                    "stock"),
     "Total Current Liabilities":  ("LiabilitiesCurrent",                         "stock"),
     # Order: prefer the noncurrent/current split first to avoid double-counting;
@@ -260,6 +264,22 @@ STATEMENTS = {
     "Income Statement": INCOME_STATEMENT,
     "Balance Sheet":    BALANCE_SHEET,
     "Cash Flow":        CASH_FLOW,
+}
+
+# ── Aggregate-or-sum concepts ──────────────────────────────────────────────────
+# Concepts whose value is an AGGREGATE over genuinely additive sub-lines. At ingestion (11),
+# extract_series_aggregate_or_sum resolves these PER FILING CONTEXT: use the `aggregate` tag when
+# the filer reports it (it already folds in the parts → no double-count), else SUM the `sum`
+# components present for that context. This is the exception to the default COALESCE (one tag wins
+# per period) used by every other multi-tag concept — coalescing here dropped a disjoint component
+# and understated the line (Short-term Debt for commercial-paper issuers; confirmed by the
+# linkbase-oracle reconciliation on LIN/WMT). Keyed by the canonical concept label; the matching
+# STATEMENTS entry keeps the full tag list (aggregate + components) for the 13/14/35 readers.
+AGGREGATE_OR_SUM_CONCEPTS = {
+    "Short-term Debt": {
+        "aggregate": "DebtCurrent",
+        "sum":       ["LongTermDebtCurrent", "ShortTermBorrowings"],
+    },
 }
 
 # COMMAND ----------
