@@ -27,6 +27,7 @@ from pyspark.sql.window import Window
 full_tbl    = f"{CATALOG}.{SCHEMA}.{TABLE}"
 market_tbl  = f"{CATALOG}.{SCHEMA}.market_data"            # legacy (deprecated; not read here)
 prices_tbl  = f"{CATALOG}.{SCHEMA}.market_prices_daily"   # daily price store — pricing source
+splits_tbl  = f"{CATALOG}.{SCHEMA}.stock_splits"          # for split-adjusting cross-year share metrics
 metrics_tbl = f"{CATALOG}.{SCHEMA}.financials_metrics"
 mca_tbl     = f"{CATALOG}.{SCHEMA}.market_cap_asof"       # period_end-aligned price + market cap
 
@@ -97,6 +98,41 @@ if "Revenue" in wide.columns and "Revenue (contract)" in wide.columns:
 wide = wide.localCheckpoint(eager=True)
 
 print(f"Wide table: {wide.count():,} rows × {len(wide.columns)} columns")
+
+# ── Split-adjusted diluted share count (internal `_shares_adj`) ────────────────────────────
+# Used ONLY by the CROSS-YEAR share metrics — Net Buyback Yield % and the Piotroski no-dilution
+# signal — where a stock split otherwise reads as a huge YoY jump (NVDA's 10:1 → +900% "dilution").
+# factor(period_end) = ∏ ratio for splits with ex_date > period_end; Shares_adj = Shares × factor
+# (see _core/splits.py). The most recent year has factor 1. NOT used by the market-cap path
+# (asof_shares below stays raw) nor by per-row metrics (NCAV/Share, TBV/Share) — those are
+# own-period-consistent. `_shares_adj` is internal (absent from base_metric_cols → never exported).
+_fy_pe = raw.groupBy("ticker", "fiscal_year").agg(F.max("period_end").alias("_pe"))
+try:
+    _splits = (spark.table(splits_tbl)
+               .select("ticker", "split_date", "ratio").filter(F.col("ratio") > 0))
+    _split_factor = (
+        _fy_pe.join(F.broadcast(_splits), on="ticker", how="left")
+        .withColumn("_lr", F.when(F.col("split_date") > F.col("_pe"), F.log(F.col("ratio"))))
+        .groupBy("ticker", "fiscal_year")
+        .agg(F.exp(F.sum("_lr")).alias("_f"))                 # NULL when no qualifying split → 1.0
+        .withColumn("_split_factor", F.coalesce(F.col("_f"), F.lit(1.0)))
+        .select("ticker", "fiscal_year", "_split_factor")
+    )
+except Exception as _e:
+    print(f"⚠ stock_splits unavailable ({_e}); cross-year share metrics use raw counts.")
+    _split_factor = _fy_pe.select("ticker", "fiscal_year").withColumn("_split_factor", F.lit(1.0))
+
+wide = (
+    wide.join(_split_factor, on=["ticker", "fiscal_year"], how="left")
+    .withColumn(
+        "_shares_adj",
+        F.when(
+            F.col("Shares Diluted").isNotNull(),
+            F.col("Shares Diluted") * F.coalesce(F.col("_split_factor"), F.lit(1.0)),
+        ),
+    )
+    .drop("_split_factor")
+)
 
 # COMMAND ----------
 
@@ -365,7 +401,8 @@ metrics_wide = (
     # Net Buyback Yield % = negative of the YoY % change in diluted share count.
     # A shrinking share count → positive yield. Dilution-aware (it nets SBC/issuance
     # against buybacks), unlike the gross cash-based Buyback Yield %. Reuses w_yoy via yoy().
-    .withColumn("Net Buyback Yield %", -yoy("Shares Diluted"))
+    # Uses the SPLIT-ADJUSTED count so a split isn't mistaken for a +900% issuance.
+    .withColumn("Net Buyback Yield %", -yoy("_shares_adj"))
 
     # ── Quality & Risk — Piotroski F-Score (base; uses w_yoy lag) ───────────────
     # Nine 1-pt signals. Profitability: ROA>0, CFO>0, ΔROA>0, CFO>NI (accrual quality).
@@ -381,7 +418,7 @@ metrics_wide = (
     .withColumn("_pf_accr",    F.when(F.col("Operating Cash Flow") > F.col("Net Income"), 1).otherwise(0))
     .withColumn("_pf_d_lev",   F.when(F.col("Debt / Assets") < F.lag(F.col("Debt / Assets")).over(w_yoy), 1).otherwise(0))
     .withColumn("_pf_d_cr",    F.when(F.col("Current Ratio") > F.lag(F.col("Current Ratio")).over(w_yoy), 1).otherwise(0))
-    .withColumn("_pf_no_dil",  F.when(F.col("Shares Diluted") <= F.lag(F.col("Shares Diluted")).over(w_yoy) * 1.001, 1).otherwise(0))
+    .withColumn("_pf_no_dil",  F.when(F.col("_shares_adj") <= F.lag(F.col("_shares_adj")).over(w_yoy) * 1.001, 1).otherwise(0))
     .withColumn("_pf_d_gm",    F.when(F.col("Gross Margin %") > F.lag(F.col("Gross Margin %")).over(w_yoy), 1).otherwise(0))
     .withColumn("_pf_d_at",    F.when(F.col("_pf_at") > F.lag(F.col("_pf_at")).over(w_yoy), 1).otherwise(0))
     .withColumn("Piotroski F-Score",
