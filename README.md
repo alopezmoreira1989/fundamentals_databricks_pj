@@ -55,6 +55,7 @@ fundamentals_databricks_pj/
 │   ├── valuation.py                         ← scalar reference impls (Graham, DCF, Owner Earnings, EPS CAGR)
 │   ├── periods.py                           ← Q4 = FY − YTD_Q3 period arithmetic
 │   ├── schemas.py                           ← export↔Streamlit artifact schema contract (single source of truth)
+│   ├── splits.py                            ← cumulative stock-split factor for cross-year per-share rescaling
 │   └── backtest.py                          ← as-of (no look-ahead), predicate eval, CAGR/drawdown/vol/Sharpe
 │
 ├── 10_ingestion/
@@ -71,6 +72,7 @@ fundamentals_databricks_pj/
 ├── 30_analysis/
 │   ├── 31__company_analysis.py       ← ad-hoc validation queries
 │   ├── 32__coverage_check.py         ← post-pipeline check: favorites coverage + ingestion failures
+│   ├── 37__split_adjust_check.py     ← post-pipeline check: stock_splits + split-adjusted cross-year metrics
 │   └── 36__run_log_report.py         ← read-only report over the pipeline_runs run-log (last N runs + trend)
 │
 ├── 40_dashboards/
@@ -183,6 +185,7 @@ To modify them: edit the JSON, commit + push, and the next pipeline run rebuilds
 | `{CATALOG}.{SCHEMA}.financials_raw` | Append-only audit log of all SEC scrapes (10-K + 10-Q) |
 | `{CATALOG}.{SCHEMA}.financials` | Long-format fact table — one row per ticker / fiscal_year / period_type / concept |
 | `{CATALOG}.{SCHEMA}.market_data` | Year-end closing prices and market cap per ticker / fiscal_year |
+| `{CATALOG}.{SCHEMA}.stock_splits` | Sparse corporate-action store — one row per split (`ticker`, `split_date`, `ratio`); feeds the split-adjusted cross-year per-share computations (EPS-CAGR, Net Buyback Yield %, Piotroski no-dilution). Self-backfilled by `12` on first run |
 | `{CATALOG}.{SCHEMA}.financials_metrics` | Derived metrics — margins, FCF, YoY, leverage, valuation ratios |
 | `{CATALOG}.{SCHEMA}.financials_intrinsic_value` | Intrinsic value models — Graham, DCF, Owner Earnings (FY + TTM), each computed for the `bull` / `mid` / `bear` scenario (`scenario` column) |
 | `{CATALOG}.{SCHEMA}.backtest_results` | Backtest equity-curve series — one row per archetype × fiscal_year (returns + values) |
@@ -223,6 +226,20 @@ Post-pipeline notebook (`30_analysis/32__coverage_check.py`) that verifies all f
 3. Tickers with ingestion failures in the latest run
 
 **Threshold:** raises `RuntimeError` (hard fail) if >5% of favorites are missing from `financials`. Otherwise warnings only. Runs as step 10/12 in `91__full_pipeline`.
+
+---
+
+## Split-adjust check — `37__split_adjust_check`
+
+Post-pipeline notebook (`30_analysis/37__split_adjust_check.py`) that validates the split-adjust handling for cross-year per-share computations. Per-share concepts (EPS, Shares Diluted) are stored on the **as-originally-filed** split basis per fiscal year, so a stock split (e.g. NVDA 4:1 in 2021, 10:1 in 2024) creates a basis discontinuity that, left uncorrected, reads as a ~−75% / −90% collapse across the split year — corrupting trailing EPS-CAGR (→ Graham Revised), Net Buyback Yield %, and the Piotroski no-dilution signal. `_core/splits.py` rescales **only** those cross-year inputs to a consistent current basis (`factor(period_end) = ∏ ratio for split_date > period_end`); per-row IVs, price comparisons, market cap, and the P/E / Earnings Yield multiples are untouched. Checks:
+
+1. `stock_splits` landed, is non-empty, and has no malformed rows (NULL key / ratio ≤ 0)
+2. Known recent splits (NVDA, AAPL, TSLA, AMZN, GOOGL) are present (±3-day window, ratio within 1%) — advisory
+3. NVDA Graham Revised + Net Buyback Yield % series, to eyeball against the pre-fix baseline
+4. Net Buyback Yield % and Graham Revised MoS% **split-artifact scans** — split tickers should no longer dominate the implausible-magnitude tails
+5. **factor = 1 invariant** — each ticker's most-recent fiscal year carries no future split, so current headline valuations are provably unchanged (recomputed in SQL)
+
+**Non-raising by design:** records findings into a module-level `SPLIT_ADJUST_OK` boolean instead of asserting, so `91` can run it **inline via `%run`** (serverless-safe, no child-notebook stall) and treat a red check as non-fatal. Runs as step 10c/12 in `91__full_pipeline`, after the invariants check.
 
 ---
 
@@ -495,7 +512,7 @@ ratios stay NULL when their one component is absent.
 | `Dividend Yield %` | `abs(Dividends Paid) / Market Cap × 100` | *requires `market_data`* |
 | `Buyback Yield %` | `abs(Share Repurchases) / Market Cap × 100` | gross cash spent on buybacks; *requires `market_data`* |
 | `Shareholder Yield %` | `(abs(Dividends Paid) + abs(Share Repurchases)) / Market Cap × 100` | *requires `market_data`* |
-| `Net Buyback Yield %` | `−(YoY % change in Shares Diluted)` | **share-count based, dilution-aware** — nets SBC/issuance against buybacks (a shrinking share count → positive yield), unlike the gross cash-based `Buyback Yield %`. No market data needed. |
+| `Net Buyback Yield %` | `−(YoY % change in Shares Diluted)` | **share-count based, dilution-aware** — nets SBC/issuance against buybacks (a shrinking share count → positive yield), unlike the gross cash-based `Buyback Yield %`. No market data needed. The YoY share count is **split-adjusted** (`_core/splits.py`) so a split isn't misread as ±900% dilution. |
 
 ### Quality & Risk
 
@@ -533,7 +550,7 @@ Computed by `23__intrinsic_value` for **each fiscal year** and for **TTM** (roll
 **Applicability guards (a method returns NaN and emits no row when it doesn't apply):**
 
 - **`Graham Number`** is suppressed for distorted book value — negative Retained Earnings or `P/B > 10` — and requires positive EPS and BVPS.
-- **`Graham Revised`** requires positive EPS; growth `g = min(DCF stage-1 growth, growth_cap)` (capped at 15% to avoid absurd hyper-growth valuations).
+- **`Graham Revised`** requires positive EPS; growth `g` is the company's own **trailing 5-year EPS CAGR** (point-in-time), floored at 0 (Graham's 8.5 base *is* the no-growth P/E — a shrinking firm shouldn't push the multiple below it) and capped at `growth_cap`, falling back to the `dcf.growth_stage1` assumption when the CAGR is undefined. The EPS series feeding this CAGR is **split-adjusted** (`_core/splits.py`) so a stock split isn't misread as an earnings collapse — see the *Split-adjust check* section.
 - **`DCF` / `Owner Earnings`** require positive shares and positive starting cash flow, and `WACC > terminal growth`.
 
 **Sector-aware flow-model skip.** The flow-based models — **DCF** and **Owner Earnings Value/Share** — are skipped by default for **Energy, Financials, and Real Estate** (`sector_policy.flow_model_skip_sectors` in `valuation_assumptions.json`, keyed off `config.tickers.sector`). The rationale: depleting commodity assets (a 2-stage perpetual-growth DCF doesn't apply, and depletion baked into OCF inflates FCF), financial-intermediation balance sheets, and REIT book depreciation that distorts Net Income — these belong on FFO, not DCF/OE. Precedence per ticker × method:
