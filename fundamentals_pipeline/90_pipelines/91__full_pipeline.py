@@ -570,6 +570,41 @@ _record_step("Invariants Check", _t0, status="ok" if invariants_ok else "failed"
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ## 11c. Split-adjust check
+# MAGIC Validates the split-adjust fix (PR #90): confirms `stock_splits` landed and that the
+# MAGIC cross-year per-share computations it feeds (EPS-CAGR → Graham Revised, Net Buyback
+# MAGIC Yield %, Piotroski no-dilution) no longer read a stock split as a real collapse/dilution,
+# MAGIC and checks the latest-period factor=1 invariant (current valuations unchanged). Read-only.
+# MAGIC
+# MAGIC Runs **inline via `%run`** (same Spark/driver context — serverless-safe, avoids the
+# MAGIC `dbutils.notebook.run` child-notebook stall). `37` is **non-raising by design**: it records
+# MAGIC findings into a module-level `SPLIT_ADJUST_OK` boolean instead of asserting, so a red check
+# MAGIC is logged and the pipeline continues (tables are already committed; the check flags split
+# MAGIC data to investigate without blocking the dashboard refresh).
+
+# COMMAND ----------
+
+print("=" * 55)
+print("STEP 10c / 12 — Split-Adjust Check")
+print("=" * 55)
+_t0 = time.monotonic()
+
+# COMMAND ----------
+
+# MAGIC %run "../30_analysis/37__split_adjust_check"
+
+# COMMAND ----------
+
+# `37` sets SPLIT_ADJUST_OK in the shared session (inline %run). Default to failed if it is
+# somehow undefined (e.g. the notebook aborted before the summary cell).
+split_adjust_ok = bool(globals().get("SPLIT_ADJUST_OK", False))
+if not split_adjust_ok:
+    print("⚠ Split-adjust check reported issues (non-fatal) — see output above.")
+_record_step("Split-Adjust Check", _t0, status="ok" if split_adjust_ok else "failed")
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## 12. Export dashboard data
 # MAGIC `dashboard_data.parquet` + `dashboard_metrics.parquet` + `dashboard_meta.json`
 # MAGIC written to `/tmp/` on the driver. Consumed by step 13 (GitHub publish).
