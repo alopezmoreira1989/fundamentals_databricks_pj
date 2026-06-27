@@ -56,6 +56,7 @@ from pyspark.sql import functions as F
 from pyspark.sql.types import DateType, DoubleType, LongType, StringType, StructField, StructType, TimestampType
 
 prices_tbl = f"{CATALOG}.{SCHEMA}.market_prices_daily"
+splits_tbl = f"{CATALOG}.{SCHEMA}.stock_splits"
 
 # ── Batched download config ──────────────────────────────────────────────────────
 # yf.download already parallelizes WITHIN a batch (threads=True), so batch-level
@@ -108,6 +109,25 @@ spark.sql(f"""
     )
     USING DELTA
     CLUSTER BY (ticker, date)
+    TBLPROPERTIES (
+        'delta.autoOptimize.optimizeWrite' = 'true',
+        'delta.autoOptimize.autoCompact'   = 'true'
+    )
+""")
+
+# Stock splits — sparse corporate-action store (a handful of rows per ticker, most have none).
+# Consumed PER PERIOD by 22 (Net Buyback Yield % / Piotroski no-dilution) and 23 (EPS-CAGR growth)
+# to rescale per-share figures to a consistent current basis (see _core/splits.py). NOT used for
+# market cap — that stays raw close × raw as-of shares, both period-consistent. `ratio` is yfinance
+# convention: 4:1 → 4.0, 10:1 → 10.0, 1-for-10 reverse → 0.1.
+spark.sql(f"""
+    CREATE TABLE IF NOT EXISTS {splits_tbl} (
+        ticker      STRING  NOT NULL,
+        split_date  DATE    NOT NULL,
+        ratio       DOUBLE,
+        fetched_at  TIMESTAMP
+    )
+    USING DELTA
     TBLPROPERTIES (
         'delta.autoOptimize.optimizeWrite' = 'true',
         'delta.autoOptimize.autoCompact'   = 'true'
@@ -338,6 +358,126 @@ if all_frames:
     _wrote_prices = True
 else:
     print("✓ No new daily prices to write (incremental, all fresh).")
+
+# COMMAND ----------
+
+# MAGIC %md ## 4b. Stock splits (sparse corporate actions)
+# MAGIC
+# MAGIC Fetched independently of prices (its own `yf.download(actions=True)` pass) so the delicate
+# MAGIC price path stays untouched. Splits seldom change, so we pull FULL history only on the first
+# MAGIC run (empty `stock_splits`) or a forced refresh; otherwise we re-pull the recent window and
+# MAGIC MERGE on `(ticker, split_date)` (idempotent over the over-fetch). Consumed by 22/23 to
+# MAGIC split-adjust per-share figures across periods — NOT by the market-cap path.
+
+# COMMAND ----------
+
+def fetch_splits_batch(batch: list, period: str | None = None, start=None) -> list:
+    """One `yf.download(actions=True)` → per-ticker `(ticker, split_date, ratio)` frames.
+    Splits-only: prices/dividends in the response are ignored. Missing column / no split days /
+    yf error → no rows (never a 'failure' — most tickers simply never split)."""
+    kw = dict(group_by="ticker", threads=True, progress=False, auto_adjust=False, actions=True)
+    if start is not None:
+        kw["start"] = start.isoformat() if hasattr(start, "isoformat") else start
+    else:
+        kw["period"] = period or "max"
+    try:
+        data = yf.download(batch, **kw)
+    except Exception:
+        return []
+    if data is None or data.empty:
+        return []
+    multi = isinstance(data.columns, pd.MultiIndex)
+    out = []
+    for t in batch:
+        try:
+            sub = data[t] if multi else data
+            if "Stock Splits" not in sub.columns:
+                continue
+            ss = pd.to_numeric(sub["Stock Splits"], errors="coerce")
+            ss = ss[ss.fillna(0) != 0]                 # split days only (0.0 on normal days)
+            if ss.empty:
+                continue
+            out.append(pd.DataFrame({
+                "ticker":     t.upper(),
+                "split_date": pd.to_datetime(ss.index).date,
+                "ratio":      ss.astype(float).values,
+            }))
+        except Exception:
+            continue
+    return out
+
+
+def _run_splits_fetch(tickers: list, period=None, start=None, label="") -> list:
+    """Batch + thread a splits fetch set (mirrors _run_fetch; no failure tracking)."""
+    if not tickers:
+        return []
+    frames = []
+    lock = Lock()
+    batches = [tickers[i:i + BATCH_SIZE] for i in range(0, len(tickers), BATCH_SIZE)]
+    print(f"  splits {label}: {len(tickers):,} tickers → {len(batches)} batches")
+    with ThreadPoolExecutor(max_workers=BATCH_WORKERS) as pool:
+        futs = [pool.submit(fetch_splits_batch, b, period, start) for b in batches]
+        for fut in as_completed(futs):
+            try:
+                fr = fut.result()
+            except Exception:
+                fr = []
+            with lock:
+                frames.extend(fr)
+    return frames
+
+# COMMAND ----------
+
+try:
+    _splits_seen = spark.table(splits_tbl).limit(1).count() > 0
+except Exception:
+    _splits_seen = False
+
+# Full split history on first run / forced; else the same recent window as the price gap-fill
+# (catches a split announced since the last run). Whole universe each time — splits are tiny.
+_splits_full = FORCE_FULL_REFRESH or not _splits_seen
+if _splits_full:
+    _split_frames = _run_splits_fetch(PRICE_UNIVERSE, period="max", label="full-history")
+else:
+    _split_cutoff = date.today() - timedelta(days=STALENESS_DAYS + INCR_BUFFER_DAYS)
+    _split_frames = _run_splits_fetch(PRICE_UNIVERSE, start=_split_cutoff, label="recent-window")
+
+_splits_schema = StructType([
+    StructField("ticker",     StringType(),    False),
+    StructField("split_date", DateType(),      False),
+    StructField("ratio",      DoubleType(),    True),
+    StructField("fetched_at", TimestampType(), True),
+])
+
+if _split_frames:
+    splits_pd = pd.concat(_split_frames, ignore_index=True)
+    splits_pd = splits_pd[splits_pd["ratio"] > 0].copy()
+    splits_pd["ticker"]     = splits_pd["ticker"].astype(str)
+    splits_pd["split_date"] = pd.to_datetime(splits_pd["split_date"]).dt.date
+    splits_pd["ratio"]      = splits_pd["ratio"].astype(float)
+    splits_pd["fetched_at"] = pd.Timestamp(_mkt_scraped_at)
+    splits_pd = splits_pd.drop_duplicates(subset=["ticker", "split_date"], keep="last")
+    splits_sdf = spark.createDataFrame(splits_pd, schema=_splits_schema)
+
+    if _splits_full:
+        (splits_sdf.write.format("delta").mode("overwrite")
+         .option("overwriteSchema", "true").saveAsTable(splits_tbl))
+        print(f"✓ OVERWROTE {splits_tbl} — {len(splits_pd):,} split rows "
+              f"({splits_pd['ticker'].nunique():,} tickers)")
+    else:
+        splits_sdf.createOrReplaceTempView("incoming_splits")
+        spark.sql(f"""
+            MERGE INTO {splits_tbl} AS t
+            USING incoming_splits AS s
+            ON t.ticker = s.ticker AND t.split_date = s.split_date
+            WHEN MATCHED THEN UPDATE SET t.ratio = s.ratio, t.fetched_at = s.fetched_at
+            WHEN NOT MATCHED THEN
+                INSERT (ticker, split_date, ratio, fetched_at)
+                VALUES (s.ticker, s.split_date, s.ratio, s.fetched_at)
+        """)
+        print(f"✓ MERGED {len(splits_pd):,} split rows into {splits_tbl}")
+else:
+    print("✓ No splits fetched this run.")
 
 # COMMAND ----------
 

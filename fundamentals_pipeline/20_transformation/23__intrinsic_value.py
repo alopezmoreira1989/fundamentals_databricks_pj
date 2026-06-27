@@ -60,6 +60,7 @@ full_table  = f"{CATALOG}.{SCHEMA}.{TABLE}"
 market_tbl  = f"{CATALOG}.{SCHEMA}.market_cap_asof"
 iv_tbl      = f"{CATALOG}.{SCHEMA}.financials_intrinsic_value"
 metrics_tbl = f"{CATALOG}.{SCHEMA}.financials_metrics"
+splits_table = f"{CATALOG}.{SCHEMA}.stock_splits"   # for split-adjusting the EPS-CAGR growth input
 
 # The per-row `assumptions` JSON is diagnostic only (not consumed by the dashboard or export).
 # Building + json.dumps-ing it for every surviving row (3 scenarios × ~30k FY × 4 methods)
@@ -263,9 +264,40 @@ print(f"✓ FY wide: {fy_wide.count():,} (ticker, year) rows")
 # no lookahead): a 5y trailing CAGR, falling back to the longest span available in [3,5]y.
 # Both the start and end EPS must be > 0 for a CAGR to be meaningful; rows with < 3y of
 # positive history get NULL and are coalesced to the dcf.growth_stage1 assumption downstream.
+#
+# Split-adjust the EPS series to a CONSISTENT CURRENT basis FIRST (see _core/splits.py): a stock
+# split otherwise reads as a step change in EPS (NVDA's Jun-2024 10:1 made FY2024→FY2025 look like
+# a −75% collapse → CAGR garbage → Graham Revised floored to the no-growth P/E). factor(period_end)
+# = ∏ ratio for splits with ex_date > period_end; EPS_adj = EPS / factor. The most recent year has
+# factor 1 (no later split), so current valuations are unchanged. This rescales ONLY the CAGR input;
+# per-row EPS / bvps / Graham Number / DCF·OE-per-share stay on their own-period basis (consistent
+# with that period's price → Margin of Safety unaffected). Market cap is never touched.
+_fy_pe = (
+    fin_subset.filter(F.col("period_type") == "FY")
+    .groupBy("ticker", F.col("fiscal_year").alias("year"))
+    .agg(F.max("period_end").alias("period_end"))
+)
+try:
+    _splits = (spark.table(splits_table)
+               .select("ticker", "split_date", "ratio").filter(F.col("ratio") > 0))
+    _split_factor = (
+        _fy_pe.join(F.broadcast(_splits), on="ticker", how="left")
+        .withColumn("_lr", F.when(F.col("split_date") > F.col("period_end"), F.log(F.col("ratio"))))
+        .groupBy("ticker", "year")
+        .agg(F.exp(F.sum("_lr")).alias("_f"))                 # NULL when no qualifying split → 1.0
+        .withColumn("split_factor", F.coalesce(F.col("_f"), F.lit(1.0)))
+        .select("ticker", "year", "split_factor")
+    )
+except Exception as _e:
+    print(f"⚠ stock_splits unavailable ({_e}); EPS-CAGR uses raw (unadjusted) EPS.")
+    _split_factor = _fy_pe.select("ticker", "year").withColumn("split_factor", F.lit(1.0))
+
 eps_fy = (
     fy_wide.select("ticker", "year", F.col("eps").cast("double").alias("eps"))
     .filter(F.col("eps") > 0)
+    .join(_split_factor, on=["ticker", "year"], how="left")
+    .withColumn("eps", F.col("eps") / F.coalesce(F.col("split_factor"), F.lit(1.0)))
+    .select("ticker", "year", "eps")
 )
 _cagr_pairs = (
     eps_fy.join(
