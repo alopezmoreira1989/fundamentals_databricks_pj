@@ -46,6 +46,7 @@ from lib.tables import (
     income_statement_df,
     quarterly_df,
 )
+from views.overview import render_overview
 
 APP_DIR = Path(__file__).parents[1]
 
@@ -117,9 +118,12 @@ scale_label = st.segmented_control(
 )
 divisor, scale_word = SCALE_OPTIONS[scale_label or "Units"]
 
-tab_px, tab_is, tab_bs, tab_cf, tab_dm, tab_qt = st.tabs(
-    ["Price", "Income statement", "Balance sheet", "Cash flow", "Derived metrics", "Quarterly"]
+tab_ov, tab_px, tab_is, tab_bs, tab_cf, tab_dm, tab_qt = st.tabs(
+    ["Overview", "Price", "Income statement", "Balance sheet", "Cash flow", "Derived metrics", "Quarterly"]
 )
+
+with tab_ov:
+    st.markdown(render_overview(ticker, tdata, tmetrics, meta), unsafe_allow_html=True)
 
 with tab_px:
     # Header text is window/frequency-aware, so reserve its slot now and fill it once both are
