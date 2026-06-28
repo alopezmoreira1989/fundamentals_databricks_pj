@@ -258,16 +258,22 @@ _INDUSTRY_PROBE_WORKERS = 8
 # the legacy field (drives the Sectors page); the other 6 power the Company Overview tab. Stored
 # verbatim on config.tickers and surfaced in the meta artifact (51 → ticker_meta).
 _COMPANY_INFO_FIELDS = ("industry", "description", "exchange", "country", "employees", "website", "founded")
+# `industry` is the carry-forward ANCHOR: a ticker with a non-NULL industry is considered resolved
+# and is NOT re-probed (the proven behavior that accumulated ~95% industry coverage over 3 runs).
+# The other obtainable fields ride the SAME `.info` call, so they fill alongside industry; `founded`
+# is ~never exposed by yfinance, so it is deliberately NOT part of the gate — gating on it would
+# leave every ticker permanently "unresolved" and force a full universe re-probe every run.
+_PROBE_ANCHOR_FIELD = "industry"
 _DESCRIPTION_MAX_CHARS = 2000
 
 
 def _read_known_company_info() -> dict:
     """Prior {ticker: {field: value}} from the existing config.tickers, to avoid re-probing every run.
 
-    Guarded: the table may not exist (first run) or may predate any of these columns — either way
-    returns {} (→ full probe). MUST be called BEFORE the table is overwritten in section 3. A ticker
-    is only carried forward when ALL 7 fields are non-NULL; if any is missing it re-probes (so
-    newly-added columns backfill on the next rebuild without a force refresh).
+    Returns EVERY ticker that already has a non-NULL anchor (`industry`), carrying all 7 of its
+    stored fields forward. Guarded: the table may not exist (first run) or may predate these columns
+    — either way returns {} (→ full probe). MUST be called BEFORE the table is overwritten in
+    section 3.
     """
     try:
         cols = ", ".join(_COMPANY_INFO_FIELDS)
@@ -277,7 +283,7 @@ def _read_known_company_info() -> dict:
     known = {}
     for r in rows:
         rec = {f: r[f] for f in _COMPANY_INFO_FIELDS}
-        if all(rec[f] is not None for f in _COMPANY_INFO_FIELDS):
+        if rec[_PROBE_ANCHOR_FIELD] is not None:
             known[r["ticker"]] = rec
     return known
 
@@ -319,12 +325,15 @@ def _probe_company_info(ticker: str) -> dict:
 
 
 def resolve_company_info(tickers: list, known: dict) -> dict:
-    """Map each ticker → {field: value} dict of the 7 company-info fields (industry + 5 more, None ok).
+    """Map each ticker → {field: value} dict of the 7 company-info fields (industry + 6 more, None ok).
 
-    CACHE-AWARE: tickers already fully resolved in `known` keep their values and are NOT re-fetched
-    unless FORCE_FULL_REFRESH is set; only the remainder hit `.info` (one HTTP call/ticker — no batch
-    form, the flakiest yfinance endpoint, hence threaded + graceful None). A miss just leaves the
-    ticker NULL ("Unknown" in the app) and fills on a later rebuild.
+    CACHE-AWARE + COVERAGE-MONOTONIC: tickers with a known anchor (`industry`) are carried forward
+    and NOT re-fetched unless FORCE_FULL_REFRESH; only anchor-less tickers hit `.info` (one HTTP
+    call/ticker — no batch form, the flakiest yfinance endpoint, hence threaded + graceful None).
+
+    Merge is FIELD-LEVEL: a freshly-probed value is used only when non-NULL, otherwise the cached
+    value is kept. So a flaky probe that returns NULL for a field can never *erase* a value an
+    earlier run resolved — coverage only ever grows across runs, never regresses.
     """
     to_fetch = list(tickers) if FORCE_FULL_REFRESH else [t for t in tickers if t not in known]
     carried  = 0 if FORCE_FULL_REFRESH else sum(1 for t in tickers if t in known)
@@ -337,8 +346,16 @@ def resolve_company_info(tickers: list, known: dict) -> dict:
             fetched = dict(ex.map(lambda t: (t, _probe_company_info(t)), to_fetch))
 
     blank = {f: None for f in _COMPANY_INFO_FIELDS}
-    out   = {t: (fetched[t] if t in fetched else known.get(t, blank)) for t in tickers}
-    hits  = sum(1 for v in out.values() if v.get("industry"))
+    out   = {}
+    for t in tickers:
+        prior = known.get(t, blank)
+        fresh = fetched.get(t)
+        if fresh is None:
+            out[t] = dict(prior)
+        else:
+            # Keep a freshly-resolved value; fall back to the cached one where the probe came back NULL.
+            out[t] = {f: (fresh[f] if fresh[f] is not None else prior.get(f)) for f in _COMPANY_INFO_FIELDS}
+    hits  = sum(1 for v in out.values() if v.get(_PROBE_ANCHOR_FIELD))
     print(f"  Industry: {hits:,}/{len(out):,} resolved ({hits / max(len(out), 1):.1%}) · "
           f"{len(out) - hits:,} NULL")
     return out
