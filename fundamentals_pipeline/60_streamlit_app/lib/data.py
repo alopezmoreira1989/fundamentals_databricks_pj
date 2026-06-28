@@ -45,6 +45,27 @@ _CATEGORICAL_COLS = (
 )
 
 
+def _resolve_data_ttl() -> int:
+    """Cache TTL (seconds) for the Release-artifact loaders. Default 600 (10 min) so the
+    app picks up a freshly published Release without a manual reboot. Override per
+    environment via the ``DASHBOARD_DATA_TTL`` env var / Streamlit secret — e.g. a shorter
+    value on staging for fast QA, a longer one on prod. Read once at import so it can
+    parameterise the ``@st.cache_data`` decorators below; same code on both branches."""
+    raw = os.environ.get("DASHBOARD_DATA_TTL")
+    if raw is None:
+        try:
+            raw = st.secrets.get("DASHBOARD_DATA_TTL")   # Streamlit Cloud secret, if set
+        except Exception:
+            raw = None
+    try:
+        return max(30, int(raw)) if raw not in (None, "") else 600
+    except (TypeError, ValueError):
+        return 600
+
+
+_DATA_TTL = _resolve_data_ttl()
+
+
 def _optimize_dtypes(df: pd.DataFrame) -> pd.DataFrame:
     """Reduce resident RAM: repeated strings → category, numerics → smaller precision."""
     for col in _CATEGORICAL_COLS:
@@ -61,7 +82,7 @@ def _optimize_dtypes(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-@st.cache_data(ttl=3600, max_entries=1, show_spinner="Loading financial data…")
+@st.cache_data(ttl=_DATA_TTL, max_entries=1, show_spinner="Loading financial data…")
 def load_latest_data() -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
     """Return (financials, metrics, meta).
 
@@ -132,7 +153,7 @@ class IndustryBenchmarks(TypedDict):
 _BENCH_EXCLUDE_METRICS = ("Piotroski F-Score", "Altman Z-Score", "Accruals Ratio")
 
 
-@st.cache_data(ttl=3600, max_entries=1)
+@st.cache_data(ttl=_DATA_TTL, max_entries=1)
 def compute_industry_benchmarks(metrics: pd.DataFrame, meta: dict) -> IndustryBenchmarks:
     """Per-metric benchmark context for the company-page derived-metrics grid.
 
@@ -201,7 +222,7 @@ def compute_industry_benchmarks(metrics: pd.DataFrame, meta: dict) -> IndustryBe
     return {"company_10y": company_10y, "industry_ly": industry_ly}
 
 
-@st.cache_data(ttl=3600, max_entries=1, show_spinner="Loading prices…")
+@st.cache_data(ttl=_DATA_TTL, max_entries=1, show_spinner="Loading prices…")
 def load_prices() -> pd.DataFrame:
     """Daily price slice published by 51/52 (ticker, date, close, adj_close).
 
@@ -241,7 +262,7 @@ def load_prices() -> pd.DataFrame:
     return df
 
 
-@st.cache_data(ttl=3600, max_entries=1, show_spinner="Loading backtest…")
+@st.cache_data(ttl=_DATA_TTL, max_entries=1, show_spinner="Loading backtest…")
 def load_backtest() -> pd.DataFrame:
     """Backtest equity-curve series published by 51/52 (archetype, fiscal_year, returns, values).
 
