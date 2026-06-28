@@ -652,7 +652,14 @@ def render_metrics_grid(metrics: pd.DataFrame, ticker: str, iv_period: str = "FY
                 display = _clean_iv(metric_name) if is_iv else metric_name
 
                 if is_val:
-                    rows_html.append(_render_valuation_row(metric_name, display, unit, values, latest))
+                    c_avg = None
+                    i_avg = None
+                    if benchmarks and unit in ("percent", "ratio"):
+                        c_avg = benchmarks.get("company_10y", {}).get(metric_name, {}).get(ticker)
+                        i_avg = (benchmarks.get("industry_ly", {}).get(metric_name, {}).get(ticker_industry)
+                                 if ticker_industry else None)
+                    rows_html.append(_render_valuation_row(metric_name, display, unit, values, latest,
+                                                           company_avg=c_avg, industry_avg=i_avg))
                     continue
 
                 # MoS rows clamp the display to ±100% (a distorted method can produce an
@@ -709,7 +716,8 @@ def render_metrics_grid(metrics: pd.DataFrame, ticker: str, iv_period: str = "FY
     return f'<div class="metrics-grid">{"".join(cards)}</div>'
 
 
-def _render_valuation_row(metric: str, display: str, unit, values, latest) -> str:
+def _render_valuation_row(metric: str, display: str, unit, values, latest,
+                          company_avg=None, industry_avg=None) -> str:
     """A Valuation card row: dot-leader + value, plus a min–avg–max range bar for multiples."""
     base = metric.split(" (")[0].strip()
     is_multiple = base in _VALUATION_MULTIPLES
@@ -748,6 +756,26 @@ def _render_valuation_row(metric: str, display: str, unit, values, latest) -> st
             dev = (now - avg) / abs(avg)
             chip = f'<span class="vchip">media {avg:.1f}x · {dev:+.0%}</span>'
 
+    # Benchmark sub-row (same pattern as the non-Valuation rows): 10y avg + industry median
+    # for percent/ratio valuation metrics (multiples & yields). fmt_metric/is_missing are
+    # module-level imports — no per-call import needed.
+    bench_html = ""
+    if unit in ("percent", "ratio"):
+        c_fmt = fmt_metric(company_avg, unit) if not is_missing(company_avg) else None
+        i_fmt = fmt_metric(industry_avg, unit) if not is_missing(industry_avg) else None
+        if c_fmt or i_fmt:
+            items = []
+            if c_fmt:
+                items.append(f'<span class="bench-item">10y avg <strong>{c_fmt}</strong></span>')
+            if i_fmt:
+                items.append(f'<span class="bench-item">Ind <strong>{i_fmt}</strong></span>')
+            bench_html = (
+                '<div class="metric-bench">'
+                '  <span></span>'
+                f'  <div class="bench-values">{"".join(items)}</div>'
+                '</div>'
+            )
+
     return (
         f'<div class="val-row{sig_cls}"{title_attr}>'
         f'  <div class="m-label">{display}</div>'
@@ -755,6 +783,7 @@ def _render_valuation_row(metric: str, display: str, unit, values, latest) -> st
         f'  <div class="m-value">{formatted}</div>'
         f'  {chip}'
         f'</div>'
+        + bench_html
     )
 
 
