@@ -140,6 +140,7 @@ def render_masthead(ticker: str, data: pd.DataFrame, meta: dict[str, Any]) -> st
     # Resolve company name + GICS sector from meta (schema v2: list of dicts) or fallback.
     company = ticker
     sector = "Unknown"   # NULL / missing / legacy (pre-v6) artifacts → "Unknown" bucket
+    industry = ""
     has_logo: bool | None = None   # True / False / None (None = pre-bump snapshot, unknown)
     ticker_info_list = meta.get("tickers", [])
     if ticker_info_list and isinstance(ticker_info_list[0], dict):
@@ -147,6 +148,7 @@ def render_masthead(ticker: str, data: pd.DataFrame, meta: dict[str, Any]) -> st
         if match:
             company = match.get("company", ticker)
             sector = match.get("sector") or "Unknown"
+            industry = match.get("industry") or ""
             has_logo = match.get("has_logo")
 
     # FY range for this ticker.
@@ -172,7 +174,8 @@ def render_masthead(ticker: str, data: pd.DataFrame, meta: dict[str, Any]) -> st
         '      <div class="ticker-row">'
         f'        <span class="ticker-chip">{ticker}</span>'
         f'        <span class="ticker-chip">{html.escape(str(sector))}</span>'
-        '      </div>'
+        + (f'        <span class="ticker-chip">{html.escape(industry)}</span>' if industry else "")
+        + '      </div>'
         '    </div>'
         '  </div>'
         '  <div class="masthead-right">'
