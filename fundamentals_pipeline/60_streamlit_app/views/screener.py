@@ -148,10 +148,15 @@ if SECTOR_KEY not in st.session_state:
 # selectbox write; default "All sectors" (sector_mask is a no-op for that default).
 active_sector = st.session_state.get(SECTOR_KEY, SECTORS[0])
 
-# Industry filter — data-driven options. Seeded from ?ind on a hard reload; the compare-page
-# drill-through instead writes INDUSTRY_KEY into session_state before switching here (so seeding
-# is skipped). A handed value absent from this artifact's option list falls back to the default.
-_industry_opts = industry_options(wide)
+# Industry filter — data-driven options, SCOPED to the active sector. Yahoo `industry` does not
+# strictly nest under GICS `sector` (≈43% of industries span >1 sector), so this only SHORTENS the
+# menu to industries with ≥1 member in the chosen sector — it never hides companies (the sector and
+# industry masks below stay independent AND filters). With "All sectors" sector_mask is a no-op, so
+# the full industry set is offered. Seeded from ?ind on a hard reload; the compare-page drill-through
+# instead writes INDUSTRY_KEY into session_state before switching here (so seeding is skipped). A
+# value absent from the (now sector-scoped) option list falls back to the default — so changing the
+# sector resets an out-of-scope industry to "All industries".
+_industry_opts = industry_options(wide[sector_mask(wide, active_sector)])
 if INDUSTRY_KEY not in st.session_state:
     _ind_qp = st.query_params.get("ind")
     st.session_state[INDUSTRY_KEY] = _ind_qp if _ind_qp in _industry_opts else ALL_INDUSTRIES
