@@ -2,35 +2,99 @@
 
 End-to-end Databricks pipeline that ingests **annual (10-K) and quarterly (10-Q)** XBRL financial filings from SEC EDGAR, fetches market data from Yahoo Finance, and serves Income Statement, Balance Sheet, Cash Flow, and derived financial metrics via direct queries on Delta tables. A public Streamlit dashboard provides read-only access without Databricks credentials.
 
-```
-favorites.json / concept_hierarchy.json / metrics_hierarchy.json   ← edit here
-valuation_assumptions.json                                         ← edit here
-        ↓
-02__tickers_master              build main.config.tickers
-        ↓
-03__concept_hierarchy_master    build main.config.concept_hierarchy
-        ↓
-04__metrics_hierarchy_master    build main.config.metrics_hierarchy
-        ↓
-11__fetch_sec_xbrl              SEC API → financials_raw  (10-K + 10-Q)
-        ↓
-12__fetch_market_data           Yahoo Finance → market_data
-        ↓
-21__clean_and_merge             FY rows   → MERGE into financials
-21b__derive_quarterly           Q1..Q4    → MERGE into financials
-21c__prune_quarterly            keep last 12 quarters per ticker
-        ↓
-22__derived_metrics             margins, FCF, YoY growth, leverage, valuation ratios
-        ↓
-23__intrinsic_value             Graham, Graham Revised, DCF, Owner Earnings (FY + TTM)
-        ↓
-31__company_analysis            validation queries
-        ↓
-32__coverage_check              verify favorites reached financials + metrics
-        ↓
-51__export_dashboard_data       slice + write parquet artifacts to /tmp/
-        ↓
-52__publish_to_github           upload artifacts as GitHub Release (latest tag)
+```mermaid
+flowchart TD
+    %% ---- Config / JSON inputs (edit here) ----
+    fav[favorites.json]
+    ch[concept_hierarchy.json]
+    mh[metrics_hierarchy.json]
+    va[valuation_assumptions.json]
+    ba[backtest_archetypes.json]
+
+    subgraph CFG[Config build]
+        s02["02 tickers_master (manual)"]
+        s1["STEP 1/12 · 03 concept_hierarchy_master"]
+        s2["STEP 2/12 · 04 metrics_hierarchy_master"]
+    end
+
+    subgraph ING[Ingestion]
+        s3["STEP 3/12 · 11 fetch_sec_xbrl"]
+        s3b["STEP 3b/12 · 13 fetch_dimensional_10k"]
+        s4["STEP 4/12 · 12 fetch_market_data"]
+    end
+
+    subgraph XF[Transformation]
+        s5["STEP 5/12 · 21 clean_and_merge"]
+        s6["STEP 6/12 · 21b derive_quarterly"]
+        s6b["STEP 6b/12 · 21e derive_fy_from_quarterly"]
+        s6c["STEP 6c/12 · 21f dedup_balance_sheet"]
+        s6d["STEP 6d/12 · 21g dedup_flow_orphans"]
+        s7["STEP 7/12 · 22 derived_metrics"]
+        s8["STEP 8/12 · 23 intrinsic_value"]
+        s8b["STEP 8b/12 · 71 run_backtest"]
+    end
+
+    subgraph AN[Analysis / validation · read-only]
+        s9["STEP 9/12 · 31 company_analysis"]
+        s10["STEP 10/12 · 32 coverage_check"]
+        s10b["STEP 10b/12 · 34 invariants_check"]
+        s10c["STEP 10c/12 · 37 split_adjust_check"]
+    end
+
+    subgraph PUB[Publish]
+        s11["STEP 11/12 · 51 export_dashboard_data"]
+        s12["STEP 12/12 · 52 publish_to_github"]
+    end
+
+    %% ---- Delta tables / outputs ----
+    t_tickers[(config.tickers)]
+    t_ch[(config.concept_hierarchy)]
+    t_mh[(config.metrics_hierarchy)]
+    t_raw[(financials_raw)]
+    t_prices[(market_prices_daily)]
+    t_splits[(stock_splits)]
+    t_fin[(financials)]
+    t_capasof[(market_cap_asof)]
+    t_metrics[(financials_metrics)]
+    t_iv[(financials_intrinsic_value)]
+    t_bt[(backtest_results + backtest_summary)]
+    gh{{GitHub Release · latest}}
+
+    %% ---- Config edges ----
+    fav --> s02 --> t_tickers
+    ch --> s1 --> t_ch
+    mh --> s2 --> t_mh
+
+    %% ---- Ingestion edges ----
+    t_tickers --> s3 --> t_raw
+    s3 --> s3b --> t_raw
+    s3b --> s4
+    s4 --> t_prices
+    s4 --> t_splits
+
+    %% ---- Transformation edges ----
+    t_raw --> s5 --> t_fin
+    s5 --> s6 --> s6b --> s6c --> s6d --> t_fin
+    t_fin --> s7 --> t_metrics
+    t_prices --> s7
+    s7 --> t_capasof
+    t_metrics --> s8 --> t_iv
+    t_capasof --> s8
+    va --> s8
+    t_metrics --> s8b --> t_bt
+    t_prices --> s8b
+    ba --> s8b
+
+    %% ---- Analysis edges (sequential, read-only) ----
+    s8b --> s9 --> s10 --> s10b --> s10c
+
+    %% ---- Publish edges ----
+    s10c --> s11
+    t_metrics --> s11
+    t_iv --> s11
+    t_prices --> s11
+    t_bt --> s11
+    s11 --> s12 --> gh
 ```
 
 ---
@@ -700,6 +764,63 @@ Example:
 ```json
 {"tickers_override": "AAPL,TSLA,MSFT", "run_optimization": "false"}
 ```
+
+---
+
+## Pipeline observability
+
+`91__full_pipeline` times every step as it runs and persists the result so freshness, coverage,
+and per-step cost are queryable over time — not just printed once into the Job log.
+
+### Per-step wall-clock timing
+
+A small helper defined right after the `%pip` cell (it must survive the interpreter restart `%pip`
+forces) captures the cost of each step:
+
+```python
+def _record_step(name, t0, status="ok"):
+    mins = (time.monotonic() - t0) / 60.0
+    STEP_TIMINGS.append({"step": name, "minutes": mins, "status": status})
+    print(f"  ⏱ {name}: {mins:.1f} min ({status})")
+```
+
+Each step stamps `_t0 = time.monotonic()` before its `%run`, then calls `_record_step(...)` after
+it returns. The deltas accumulate in the in-session `STEP_TIMINGS` list (relying on shared-session
+state across `%run` cells — the same Databricks-only assumption `pipeline_start` already depends on).
+Section **13b** prints the breakdown slowest-first with each step's share of the total, then the
+`Σ steps` total against the `Wall-clock (start→now)` — the small gap between them is the untimed
+`%pip` + banner cells.
+
+### Persistence targets
+
+Section **13b** also writes the timings to an append-only history table, and section **13c** writes
+the current run-log + a coverage snapshot. Both writes are wrapped so a telemetry failure never
+aborts an otherwise-successful run.
+
+| Table | Status | Columns |
+|---|---|---|
+| `{CATALOG}.{SCHEMA}.pipeline_run_timings` | **legacy** (back-compat) | `run_ts`, `step`, `minutes`, `n_tickers` — append-only, keyed implicitly by `run_ts = pipeline_start` |
+| `{CATALOG}.config.pipeline_runs` | **current** | `run_id`, `run_started_at`, `step`, `minutes`, `status` (`ok`/`failed`/`skipped`), `rows_written` — MERGE-keyed on `(run_id, step)`, so re-running the cell in-session is idempotent |
+| `{CATALOG}.config.pipeline_run_coverage` | **current** | one snapshot per run: `total_tickers_ingested`, `total_favorites`, `favorites_in_metrics`, `favorites_pct`, `max_filed`, `staleness_days` |
+
+`run_id` is `pipeline_start` stamped `YYYYMMDDThhmmssZ`, tying the per-step rows to their coverage
+snapshot. `pipeline_runs` supersedes `pipeline_run_timings` (it adds `run_id` + `status`); the legacy
+table is still written for back-compat but new readers should use `pipeline_runs`.
+
+### Querying run history
+
+`30_analysis/36__run_log_report` is a read-only report (pure `SELECT`s + `display()`, Databricks-only)
+over `pipeline_runs` + `pipeline_run_coverage`. It shows the last `N_RUNS` (= 20) runs with total
+duration / step count / failures, the latest run's per-step breakdown (slowest first), and the
+coverage/freshness trend over time.
+
+### A failed step is absent from the log
+
+`_record_step` runs **only after** its `%run` returns. A fatal step (e.g. ingestion or the inline
+export/publish) aborts the run before reaching its `_record_step`, so it never gets an `ok` row —
+its absence from `STEP_TIMINGS` (and from both tables) *is* the failure signal. The non-fatal checks
+(Coverage, Invariants, Split-Adjust) are caught and pass their own `status="failed"`, so they appear
+with a red status rather than vanishing.
 
 ---
 
