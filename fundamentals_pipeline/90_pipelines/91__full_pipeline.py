@@ -166,9 +166,29 @@ print(f"Pipeline started at {pipeline_start.isoformat()} UTC")
 #
 # The hierarchies (next steps) are always rebuilt — they are cheap.
 
+# `rebuild_config` does NOT auto-run 02__tickers_master. That step is intentionally MANUAL: it
+# calls Wikipedia / iShares / yfinance and does a full DROP+overwrite of main.config.tickers
+# (incl. a ~3k-ticker yfinance `industry` sweep), which we don't want inside every pipeline run.
+# A conditional %run isn't serverless-safe either (dbutils.notebook.exit() in a %run'd notebook
+# aborts the PARENT), and this workspace moved off dbutils.notebook.run due to child-notebook
+# stalls. So the flag is a reminder + a read-only PREFLIGHT, not an action: when set, it reports
+# config.tickers status (incl. whether `industry` is populated) so you know if a manual 02 run +
+# 53__republish is needed.
 if rebuild_config.lower() == "true":
-    print("⚠ rebuild_config=true detected, but the ticker rebuild is done")
-    print("  manually — run 02__tickers_master separately.")
+    print("⚠ rebuild_config=true — 02__tickers_master is a MANUAL step and is NOT auto-run here.")
+    print("  To rebuild the universe / populate `industry`: run 00_config/02__tickers_master,")
+    print("  then 50_publish/53__republish. Current main.config.tickers status:")
+    try:
+        _tk = spark.table(f"{CATALOG}.config.tickers")
+        _has_industry = "industry" in _tk.columns
+        _n = _tk.count()
+        _n_ind = _tk.filter("industry IS NOT NULL").count() if _has_industry else 0
+        print(f"    rows={_n:,} · industry column={'present' if _has_industry else 'ABSENT'}"
+              f" · non-null industry={_n_ind:,}")
+        if not _has_industry or _n_ind == 0:
+            print("    → industry not populated yet: run 02__tickers_master to fill it.")
+    except Exception as _e:
+        print(f"    ⚠ could not read {CATALOG}.config.tickers: {_e}")
 else:
     print("⊘ Skipping ticker rebuild — using main.config.tickers as-is")
 
