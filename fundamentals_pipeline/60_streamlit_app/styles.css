@@ -1158,3 +1158,18 @@ div[data-baseweb="popover"] div[role="option"]:hover {
   .scr-band .b-count { font-size: 18px; }
   .scr-tape-head .t-title { font-size: 19px; }
 }
+
+/* ── Benchmark sub-rows (company 10y avg + industry median) ── */
+.metric-bench {
+    display: flex;
+    gap: 12px;
+    padding: 1px 8px 4px 8px;
+    font-size: 0.72rem;
+    color: var(--ink-3);
+    border-bottom: 1px solid var(--rule-soft);
+}
+.bench-item strong {
+    color: var(--ink-2);
+    font-family: var(--mono);
+    font-weight: 500;
+}
