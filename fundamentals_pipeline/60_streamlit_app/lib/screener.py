@@ -5,11 +5,12 @@ detail page uses) — there is **no Databricks connection at runtime**. The wide
 frame is built by pivoting the long-format `dashboard_metrics.parquet` to the
 latest available fiscal year per ticker.
 
-Universe flags (`is_favorite` / `in_sp500` / `in_r3000`), the GICS `sector`, and
-**Market Cap** (a `Market Cap` metric row) all come from
-`50_publish/51__export_dashboard_data.py` (schema v6). Older artifacts that predate
-a field simply yield its default — all-False flags, ``"Unknown"`` sector, an empty
-Market Cap column — so the screener degrades gracefully until the next publish.
+Universe flags (`is_favorite` / `in_sp500` / `in_r3000`), the GICS `sector`, the
+Yahoo `industry` (sub-sector grouping key, schema v8), and **Market Cap** (a
+`Market Cap` metric row) all come from `50_publish/51__export_dashboard_data.py`.
+Older artifacts that predate a field simply yield its default — all-False flags,
+``"Unknown"`` sector/industry, an empty Market Cap column — so the screener degrades
+gracefully until the next publish.
 """
 
 from __future__ import annotations
@@ -36,6 +37,8 @@ _FLAG_COLS = ("is_favorite", "in_sp500", "in_r3000")
 
 # Bucket for tickers with no/NULL/legacy sector (the app's "Unknown" bucket).
 UNKNOWN_SECTOR = "Unknown"
+# Same "Unknown" bucket for the Yahoo `industry` sub-sector key (NULL / pre-v8 artifacts).
+UNKNOWN_INDUSTRY = "Unknown"
 # 11 canonical GICS sectors (sorted) + a no-op default. Mirrors the hardcoded
 # UNIVERSE_FLAGS pattern; "All sectors" is the no-op default.
 SECTORS = ["All sectors"] + sorted([
@@ -101,7 +104,7 @@ def build_screener_frame() -> tuple[pd.DataFrame, dict[str, str], list[str]]:
     # company + universe flags + GICS sector from meta.
     info = pd.DataFrame(meta.get("tickers", []))
     if "ticker" in info.columns:
-        keep = ["ticker"] + [c for c in ("company", "sector", *_FLAG_COLS) if c in info.columns]
+        keep = ["ticker"] + [c for c in ("company", "sector", "industry", *_FLAG_COLS) if c in info.columns]
         wide = wide.merge(info[keep], on="ticker", how="left")
     if "company" not in wide.columns:
         wide["company"] = wide["ticker"]
@@ -115,6 +118,14 @@ def build_screener_frame() -> tuple[pd.DataFrame, dict[str, str], list[str]]:
     wide["sector"] = (
         wide["sector"].astype("object").where(wide["sector"].notna(), UNKNOWN_SECTOR)
         .astype(str).str.strip().replace("", UNKNOWN_SECTOR)
+    )
+
+    # Industry (Yahoo sub-sector): NULL / missing / pre-v8 artifacts → "Unknown" bucket.
+    if "industry" not in wide.columns:
+        wide["industry"] = UNKNOWN_INDUSTRY
+    wide["industry"] = (
+        wide["industry"].astype("object").where(wide["industry"].notna(), UNKNOWN_INDUSTRY)
+        .astype(str).str.strip().replace("", UNKNOWN_INDUSTRY)
     )
 
     # Market Cap may not exist yet (Release predating schema v3).

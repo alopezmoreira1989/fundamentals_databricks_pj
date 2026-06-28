@@ -14,6 +14,9 @@ defaulting to `"Unknown"` for missing/legacy fixtures); clicking a row opens the
 per-ticker detail page, whose masthead shows the company's sector. Sector arrives
 in the published `meta` at `schema_version` ≥ 6 — older artifacts without it still
 load (every consumer defaults `sector`), so the filter degrades to all-`Unknown`.
+A finer **`industry`** (Yahoo sub-sector, the grouping key for upcoming sub-sector
+valuation comparisons) arrives at `schema_version` ≥ 8 and degrades the same way —
+older artifacts default it to `"Unknown"`.
 
 Its hero is the **valuation tape** — a P/E band ribbon (Loss `< 0` / Cheap `0–10x` /
 Fair `10–15x` / Full `15–25x` / Rich `> 25x`) binning the sector-filtered universe;
