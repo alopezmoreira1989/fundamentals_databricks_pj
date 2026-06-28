@@ -51,8 +51,33 @@ except ImportError:
 
     subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "lxml"])
 
+# yfinance powers the per-ticker `industry` probe (resolve_industry below). Same defensive
+# subprocess install as lxml — %pip is unsupported when this notebook is pulled in via %run
+# (e.g. from 91). No-op where yfinance already ships; idempotent on re-runs.
+try:
+    import yfinance as yf  # noqa: F401
+except ImportError:
+    import subprocess
+    import sys
+
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "yfinance"])
+    import yfinance as yf  # noqa: F401
+
 INGEST_SP500  = True
 INGEST_R3000  = True
+
+# ── Refresh policy for the industry probe ──────────────────────────────────────
+# Inherit force_full_refresh from the parent 91 via globals() — SAME handoff as 11/12
+# (dbutils.widgets.get() does not reliably read the parent's widget under %run). Standalone
+# runs fall back to this notebook's own widget, else False. When False, `industry` is fetched
+# only for tickers without a cached value; when True, every ticker is re-probed.
+if "force_full_refresh" in globals():
+    FORCE_FULL_REFRESH = str(force_full_refresh).strip().lower() == "true"
+else:
+    try:
+        FORCE_FULL_REFRESH = dbutils.widgets.get("force_full_refresh").strip().lower() == "true"
+    except Exception:
+        FORCE_FULL_REFRESH = False
 
 # FAVORITES_JSON_PATH inherited from 01__tickers via %run
 
@@ -199,6 +224,77 @@ def resolve_has_logo(tickers: list[str]) -> dict[str, bool | None]:
     errs   = sum(1 for v in out.values() if v is None)
     print(f"  Logo.dev: {hits}/{len(tickers)} have a real logo "
           f"({hits / max(len(tickers), 1):.1%}) · {misses} miss · {errs} error/None")
+    return out
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 0c. Industry probe (`industry`)
+# MAGIC
+# MAGIC Per-ticker Yahoo Finance sub-sector label (`Ticker.info["industry"]`) — the grouping key
+# MAGIC for sub-sector valuation comparisons (median P/E, P/FCF *by industry group*), finer than
+# MAGIC the 11 broad GICS sectors. `.info` is one HTTP call per ticker (no batch form) and the
+# MAGIC flakiest yfinance endpoint, so the probe is threaded with graceful `None` on any failure
+# MAGIC and is **cache-aware**: only tickers without a cached industry are fetched (new names +
+# MAGIC prior misses), unless `force_full_refresh` re-probes the whole universe. Stored raw (Yahoo
+# MAGIC display string); NULL → the app renders "Unknown".
+# MAGIC
+# MAGIC ⚠ Yahoo's `industry` nests under Yahoo's OWN sector taxonomy, which is NOT the GICS `sector`
+# MAGIC column (Wikipedia/IWV). Group valuation comps by `industry` directly; keep `sector` for the
+# MAGIC broad rollup.
+
+# COMMAND ----------
+
+_INDUSTRY_PROBE_WORKERS = 8
+
+
+def _read_known_industries() -> dict:
+    """Prior {ticker: industry} from the existing config.tickers, to avoid re-probing every run.
+
+    Guarded: the table may not exist (first run) or may predate the `industry` column — either
+    way returns {} (→ full probe). MUST be called BEFORE the table is overwritten in section 3.
+    """
+    try:
+        rows = spark.sql(
+            f"SELECT ticker, industry FROM {TARGET_TABLE} WHERE industry IS NOT NULL"
+        ).collect()
+        return {r["ticker"]: r["industry"] for r in rows}
+    except Exception:
+        return {}
+
+
+def _probe_industry(ticker: str):
+    """Yahoo Finance `industry` for one ticker; None on any error or missing/blank field."""
+    try:
+        info = yf.Ticker(ticker).info or {}
+        ind  = info.get("industry")
+        return ind.strip() if isinstance(ind, str) and ind.strip() else None
+    except Exception:
+        return None
+
+
+def resolve_industry(tickers: list, known: dict) -> dict:
+    """Map each ticker → Yahoo `industry` (display string) or None.
+
+    CACHE-AWARE: tickers already in `known` keep their value and are NOT re-fetched unless
+    FORCE_FULL_REFRESH is set; only the remainder hit `.info` (one HTTP call/ticker — no batch
+    form, the flakiest yfinance endpoint, hence threaded + graceful None). A miss just leaves the
+    ticker NULL ("Unknown" in the app) and fills on a later rebuild.
+    """
+    to_fetch = list(tickers) if FORCE_FULL_REFRESH else [t for t in tickers if t not in known]
+    carried  = 0 if FORCE_FULL_REFRESH else sum(1 for t in tickers if t in known)
+    print(f"  Industry probe: {len(to_fetch):,} to fetch, {carried:,} carried forward"
+          f"{' (force refresh — all re-probed)' if FORCE_FULL_REFRESH else ''}")
+
+    fetched = {}
+    if to_fetch:
+        with ThreadPoolExecutor(max_workers=_INDUSTRY_PROBE_WORKERS) as ex:
+            fetched = dict(ex.map(lambda t: (t, _probe_industry(t)), to_fetch))
+
+    out  = {t: (fetched[t] if t in fetched else known.get(t)) for t in tickers}
+    hits = sum(1 for v in out.values() if v)
+    print(f"  Industry: {hits:,}/{len(out):,} resolved ({hits / max(len(out), 1):.1%}) · "
+          f"{len(out) - hits:,} NULL")
     return out
 
 # COMMAND ----------
@@ -502,6 +598,20 @@ master["has_logo"] = master["ticker"].map(has_logo_map).astype("object")
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ## 2c. Resolve `industry` (Yahoo sub-sector, cache-aware)
+# MAGIC
+# MAGIC Read prior industries from the existing table (BEFORE the overwrite in section 3) and probe
+# MAGIC only the tickers without a cached value, so steady-state rebuilds fetch just the new names.
+
+# COMMAND ----------
+
+_known_industry    = _read_known_industries()
+industry_map       = resolve_industry(_universe, _known_industry)
+master["industry"] = master["ticker"].map(industry_map).astype("object")
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## 3. Write to Delta
 
 # COMMAND ----------
@@ -514,6 +624,7 @@ schema = StructType([
     StructField("in_sp500",    BooleanType(), False),
     StructField("in_r3000",    BooleanType(), False),
     StructField("has_logo",    BooleanType(), True),
+    StructField("industry",    StringType(),  True),
 ])
 
 sdf = spark.createDataFrame(master, schema=schema)
@@ -566,6 +677,24 @@ spark.sql(f"""
     GROUP BY COALESCE(sector, 'Unknown')
     ORDER BY n DESC
 """).show(20, truncate=False)
+
+# Industry coverage + top groups (NULL bucketed as "Unknown", matching the app).
+spark.sql(f"""
+    SELECT
+        COUNT(*)                                                  AS total_tickers,
+        SUM(CASE WHEN industry IS NOT NULL THEN 1 ELSE 0 END)     AS with_industry,
+        ROUND(100.0 * SUM(CASE WHEN industry IS NOT NULL THEN 1 ELSE 0 END)
+              / COUNT(*), 1)                                      AS pct_coverage
+    FROM {TARGET_TABLE}
+""").show()
+
+print("Top industries:")
+spark.sql(f"""
+    SELECT COALESCE(industry, 'Unknown') AS industry, COUNT(*) AS n
+    FROM {TARGET_TABLE}
+    GROUP BY COALESCE(industry, 'Unknown')
+    ORDER BY n DESC
+""").show(25, truncate=False)
 
 # has_logo coverage (NULL = probe skipped / errored — e.g. LOGO_DEV_PUBLISHABLE_KEY unset).
 print("Logo.dev has_logo coverage:")
