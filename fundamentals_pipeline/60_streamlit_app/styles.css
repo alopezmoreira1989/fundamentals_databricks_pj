@@ -151,6 +151,121 @@ body {
 .delta.down { color: var(--negative); }
 .delta.flat { color: var(--ink-3); }
 
+/* ========= OVERVIEW PROFILE (info card + description) ========= */
+.overview-profile {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 1px;
+  background: var(--rule);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 32px;
+}
+
+.overview-info,
+.overview-desc {
+  background: var(--bg-card);
+  padding: 18px 22px;
+}
+
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--rule-soft);
+}
+.info-row:last-child { border-bottom: none; }
+
+.info-row .k {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+.info-row .v {
+  font-size: 13px;
+  color: var(--ink);
+  text-align: right;
+}
+.info-row .v a { color: var(--accent); text-decoration: none; }
+.info-row .v a:hover { text-decoration: underline; }
+.info-row .v .muted { color: var(--ink-3); }
+
+.overview-desc-eyebrow {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-bottom: 10px;
+}
+
+.overview-desc p {
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--ink-2);
+  margin: 0;
+}
+.overview-desc p.muted { color: var(--ink-3); font-style: italic; }
+
+@media (max-width: 640px) {
+  .overview-profile { grid-template-columns: 1fr; }
+}
+
+/* ========= OVERVIEW NEWS (Yahoo Finance RSS) ========= */
+.overview-news {
+  background: var(--bg-card);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 18px 22px;
+  margin-bottom: 32px;
+}
+
+.overview-news-eyebrow {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-bottom: 6px;
+}
+
+.news-list { display: flex; flex-direction: column; }
+
+.news-item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--rule-soft);
+  text-decoration: none;
+}
+.news-item:last-child { border-bottom: none; }
+.news-item:hover .news-title { color: var(--accent); }
+
+.news-title {
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--ink);
+}
+
+.news-date {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-3);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.news-list p.muted { color: var(--ink-3); font-style: italic; margin: 4px 0 0; }
+
 /* ========= PANEL HEADER ========= */
 .panel-header {
   display: flex;

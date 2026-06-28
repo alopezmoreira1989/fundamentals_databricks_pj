@@ -36,7 +36,14 @@ from concurrent.futures import ThreadPoolExecutor
 import pandas as pd
 import requests
 from pyspark.sql import functions as F
-from pyspark.sql.types import BooleanType, StringType, StructField, StructType
+from pyspark.sql.types import (
+    BooleanType,
+    IntegerType,
+    LongType,
+    StringType,
+    StructField,
+    StructType,
+)
 
 # `fetch_sp500()` parses the Wikipedia table with `pd.read_html(flavor="lxml")`, but
 # lxml is NOT in the Databricks serverless base image (ImportError: lxml not found).
@@ -51,7 +58,7 @@ except ImportError:
 
     subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "lxml"])
 
-# yfinance powers the per-ticker `industry` probe (resolve_industry below). Same defensive
+# yfinance powers the per-ticker company-info probe (resolve_company_info below). Same defensive
 # subprocess install as lxml — %pip is unsupported when this notebook is pulled in via %run
 # (e.g. from 91). No-op where yfinance already ships; idempotent on re-runs.
 try:
@@ -247,52 +254,91 @@ def resolve_has_logo(tickers: list[str]) -> dict[str, bool | None]:
 
 _INDUSTRY_PROBE_WORKERS = 8
 
+# The 7 company-info fields resolved from a single `yf.Ticker(ticker).info` dict. `industry` is
+# the legacy field (drives the Sectors page); the other 6 power the Company Overview tab. Stored
+# verbatim on config.tickers and surfaced in the meta artifact (51 → ticker_meta).
+_COMPANY_INFO_FIELDS = ("industry", "description", "exchange", "country", "employees", "website", "founded")
+_DESCRIPTION_MAX_CHARS = 2000
 
-def _read_known_industries() -> dict:
-    """Prior {ticker: industry} from the existing config.tickers, to avoid re-probing every run.
 
-    Guarded: the table may not exist (first run) or may predate the `industry` column — either
-    way returns {} (→ full probe). MUST be called BEFORE the table is overwritten in section 3.
+def _read_known_company_info() -> dict:
+    """Prior {ticker: {field: value}} from the existing config.tickers, to avoid re-probing every run.
+
+    Guarded: the table may not exist (first run) or may predate any of these columns — either way
+    returns {} (→ full probe). MUST be called BEFORE the table is overwritten in section 3. A ticker
+    is only carried forward when ALL 7 fields are non-NULL; if any is missing it re-probes (so
+    newly-added columns backfill on the next rebuild without a force refresh).
     """
     try:
-        rows = spark.sql(
-            f"SELECT ticker, industry FROM {TARGET_TABLE} WHERE industry IS NOT NULL"
-        ).collect()
-        return {r["ticker"]: r["industry"] for r in rows}
+        cols = ", ".join(_COMPANY_INFO_FIELDS)
+        rows = spark.sql(f"SELECT ticker, {cols} FROM {TARGET_TABLE}").collect()
     except Exception:
         return {}
+    known = {}
+    for r in rows:
+        rec = {f: r[f] for f in _COMPANY_INFO_FIELDS}
+        if all(rec[f] is not None for f in _COMPANY_INFO_FIELDS):
+            known[r["ticker"]] = rec
+    return known
 
 
-def _probe_industry(ticker: str):
-    """Yahoo Finance `industry` for one ticker; None on any error or missing/blank field."""
+def _clean_str(v):
+    """Trim a yfinance string field to None when missing/blank, else the stripped value."""
+    return v.strip() if isinstance(v, str) and v.strip() else None
+
+
+def _clean_int(v):
+    """Coerce a yfinance numeric field to int, or None when missing/non-numeric."""
     try:
-        info = yf.Ticker(ticker).info or {}
-        ind  = info.get("industry")
-        return ind.strip() if isinstance(ind, str) and ind.strip() else None
-    except Exception:
+        return int(v) if v is not None else None
+    except (TypeError, ValueError):
         return None
 
 
-def resolve_industry(tickers: list, known: dict) -> dict:
-    """Map each ticker → Yahoo `industry` (display string) or None.
+def _probe_company_info(ticker: str) -> dict:
+    """Yahoo Finance company metadata for one ticker from a SINGLE `.info` call.
 
-    CACHE-AWARE: tickers already in `known` keep their value and are NOT re-fetched unless
-    FORCE_FULL_REFRESH is set; only the remainder hit `.info` (one HTTP call/ticker — no batch
+    Returns all 7 fields (None each on any error or missing/blank field). `founded` is rarely
+    exposed by yfinance — left None when absent, never fabricated.
+    """
+    blank = {f: None for f in _COMPANY_INFO_FIELDS}
+    try:
+        info = yf.Ticker(ticker).info or {}
+    except Exception:
+        return blank
+    desc = _clean_str(info.get("longBusinessSummary"))
+    return {
+        "industry":    _clean_str(info.get("industry")),
+        "description": desc[:_DESCRIPTION_MAX_CHARS] if desc else None,
+        "exchange":    _clean_str(info.get("exchange")),
+        "country":     _clean_str(info.get("country")),
+        "employees":   _clean_int(info.get("fullTimeEmployees")),
+        "website":     _clean_str(info.get("website")),
+        "founded":     _clean_int(info.get("founded")),
+    }
+
+
+def resolve_company_info(tickers: list, known: dict) -> dict:
+    """Map each ticker → {field: value} dict of the 7 company-info fields (industry + 5 more, None ok).
+
+    CACHE-AWARE: tickers already fully resolved in `known` keep their values and are NOT re-fetched
+    unless FORCE_FULL_REFRESH is set; only the remainder hit `.info` (one HTTP call/ticker — no batch
     form, the flakiest yfinance endpoint, hence threaded + graceful None). A miss just leaves the
     ticker NULL ("Unknown" in the app) and fills on a later rebuild.
     """
     to_fetch = list(tickers) if FORCE_FULL_REFRESH else [t for t in tickers if t not in known]
     carried  = 0 if FORCE_FULL_REFRESH else sum(1 for t in tickers if t in known)
-    print(f"  Industry probe: {len(to_fetch):,} to fetch, {carried:,} carried forward"
+    print(f"  Company-info probe: {len(to_fetch):,} to fetch, {carried:,} carried forward"
           f"{' (force refresh — all re-probed)' if FORCE_FULL_REFRESH else ''}")
 
     fetched = {}
     if to_fetch:
         with ThreadPoolExecutor(max_workers=_INDUSTRY_PROBE_WORKERS) as ex:
-            fetched = dict(ex.map(lambda t: (t, _probe_industry(t)), to_fetch))
+            fetched = dict(ex.map(lambda t: (t, _probe_company_info(t)), to_fetch))
 
-    out  = {t: (fetched[t] if t in fetched else known.get(t)) for t in tickers}
-    hits = sum(1 for v in out.values() if v)
+    blank = {f: None for f in _COMPANY_INFO_FIELDS}
+    out   = {t: (fetched[t] if t in fetched else known.get(t, blank)) for t in tickers}
+    hits  = sum(1 for v in out.values() if v.get("industry"))
     print(f"  Industry: {hits:,}/{len(out):,} resolved ({hits / max(len(out), 1):.1%}) · "
           f"{len(out) - hits:,} NULL")
     return out
@@ -605,9 +651,10 @@ master["has_logo"] = master["ticker"].map(has_logo_map).astype("object")
 
 # COMMAND ----------
 
-_known_industry    = _read_known_industries()
-industry_map       = resolve_industry(_universe, _known_industry)
-master["industry"] = master["ticker"].map(industry_map).astype("object")
+_known_company_info = _read_known_company_info()
+company_info_map    = resolve_company_info(_universe, _known_company_info)
+for _field in _COMPANY_INFO_FIELDS:
+    master[_field] = master["ticker"].map(lambda t, f=_field: company_info_map[t][f]).astype("object")
 
 # COMMAND ----------
 
@@ -625,6 +672,12 @@ schema = StructType([
     StructField("in_r3000",    BooleanType(), False),
     StructField("has_logo",    BooleanType(), True),
     StructField("industry",    StringType(),  True),
+    StructField("description", StringType(),  True),
+    StructField("exchange",    StringType(),  True),
+    StructField("country",     StringType(),  True),
+    StructField("employees",   LongType(),    True),
+    StructField("website",     StringType(),  True),
+    StructField("founded",     IntegerType(), True),
 ])
 
 sdf = spark.createDataFrame(master, schema=schema)
