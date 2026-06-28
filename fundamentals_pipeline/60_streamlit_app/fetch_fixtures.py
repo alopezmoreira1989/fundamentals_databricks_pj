@@ -30,10 +30,10 @@ def main():
     spark = DatabricksSession.builder.getOrCreate()
     print("✓ Connected")
 
-    # 1. Ticker universe (favorites only) — with universe flags + GICS sector (schema v6).
+    # 1. Ticker universe (favorites only) — with universe flags + GICS sector + Yahoo industry.
     tickers_df = spark.sql(f"""
         SELECT
-            ticker, company, sector,
+            ticker, company, sector, industry,
             COALESCE(is_favorite, false) AS is_favorite,
             COALESCE(in_sp500,    false) AS in_sp500,
             COALESCE(in_r3000,    false) AS in_r3000
@@ -52,6 +52,7 @@ def main():
             "ticker":      r.ticker,
             "company":     r.company,
             "sector":      r.sector,   # NULL → app maps to "Unknown"
+            "industry":    r.industry, # NULL → app maps to "Unknown"
             "is_favorite": bool(r.is_favorite),
             "in_sp500":    bool(r.in_sp500),
             "in_r3000":    bool(r.in_r3000),

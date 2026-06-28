@@ -107,6 +107,17 @@ def test_synthetic_meta_is_valid():
     schemas.assert_meta(_meta_dict())
 
 
+def test_meta_industry_is_optional_additive():
+    # `industry` (schema v8) is additive/optional: present → valid; absent → still valid
+    # (old artifacts must keep loading; it is NOT in TICKER_REQUIRED_KEYS).
+    with_industry = _meta_dict()
+    with_industry["schema_version"] = 8
+    with_industry["tickers"][0]["industry"] = "Consumer Electronics"
+    assert schemas.validate_meta(with_industry) == []
+    assert "industry" not in schemas.TICKER_REQUIRED_KEYS
+    assert schemas.validate_meta(_meta_dict()) == []  # no industry key → still valid
+
+
 def test_synthetic_prices_is_valid():
     assert schemas.validate_artifact("dashboard_prices", _prices_frame()) == []
 

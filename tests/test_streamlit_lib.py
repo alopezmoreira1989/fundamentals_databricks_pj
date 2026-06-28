@@ -158,3 +158,48 @@ def test_bucket_mask_or_and_nan_excluded(frame):
 def test_bucket_mask_empty_selection_is_noop(frame):
     buckets = screener.buckets_for("P/E", None)
     assert screener.bucket_mask(frame["P/E"], [], buckets).all()
+
+
+# ── industry plumbing in build_screener_frame (schema v8) ─────────────────────
+def _fake_load(meta: dict):
+    """Stand-in for lib.data.load_latest_data → (data, metrics, meta)."""
+    metrics = pd.DataFrame(
+        {
+            "ticker": ["AAPL", "XOM"],
+            "metric": ["P/E", "P/E"],
+            "period_type": ["FY", "FY"],
+            "fiscal_year": [2024, 2024],
+            "unit": ["ratio", "ratio"],
+            "sort_order": [1.0, 1.0],
+            "value": [28.0, 11.0],
+        }
+    )
+    return pd.DataFrame(), metrics, meta
+
+
+def test_build_screener_frame_industry_roundtrips_and_defaults(monkeypatch):
+    # AAPL carries industry; XOM's record omits it → NaN → "Unknown" bucket.
+    meta = {"tickers": [
+        {"ticker": "AAPL", "company": "Apple Inc", "sector": "Information Technology",
+         "industry": "Consumer Electronics"},
+        {"ticker": "XOM", "company": "Exxon Mobil", "sector": "Energy"},
+    ]}
+    monkeypatch.setattr(screener, "load_latest_data", lambda: _fake_load(meta))
+    screener.build_screener_frame.clear()
+    wide, _unit_map, _order = screener.build_screener_frame()
+    by_ticker = wide.set_index("ticker")["industry"]
+    assert by_ticker["AAPL"] == "Consumer Electronics"
+    assert by_ticker["XOM"] == screener.UNKNOWN_INDUSTRY
+
+
+def test_build_screener_frame_industry_column_absent_defaults(monkeypatch):
+    # Pre-v8 artifact: no record has an industry key → column created, all "Unknown".
+    meta = {"tickers": [
+        {"ticker": "AAPL", "company": "Apple Inc", "sector": "Information Technology"},
+        {"ticker": "XOM", "company": "Exxon Mobil", "sector": "Energy"},
+    ]}
+    monkeypatch.setattr(screener, "load_latest_data", lambda: _fake_load(meta))
+    screener.build_screener_frame.clear()
+    wide, _unit_map, _order = screener.build_screener_frame()
+    assert "industry" in wide.columns
+    assert (wide["industry"] == screener.UNKNOWN_INDUSTRY).all()

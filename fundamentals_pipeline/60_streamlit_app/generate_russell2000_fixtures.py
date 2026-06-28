@@ -45,6 +45,21 @@ def _assign_sector(ticker: str) -> str:
     return GICS_SECTORS[zlib.crc32(ticker.encode("utf-8")) % len(GICS_SECTORS)]
 
 
+# Placeholder sub-sector labels — synthetic fixtures carry no real Yahoo industry, so each
+# ticker gets a deterministic placeholder purely so the industry grouping is demonstrable in
+# the preview deployment (real industries arrive in the published artifacts at schema v8).
+_PLACEHOLDER_INDUSTRIES = [
+    "Software—Application", "Semiconductors", "Banks—Diversified", "Oil & Gas E&P",
+    "Drug Manufacturers", "Specialty Retail", "Aerospace & Defense", "Utilities—Regulated",
+    "REIT—Industrial", "Packaged Foods", "Telecom Services", "Auto Manufacturers",
+]
+
+
+def _assign_industry(ticker: str) -> str:
+    """Deterministic placeholder sub-sector for a synthetic preview ticker."""
+    return _PLACEHOLDER_INDUSTRIES[zlib.crc32(("ind:" + ticker).encode("utf-8")) % len(_PLACEHOLDER_INDUSTRIES)]
+
+
 def build_market_cap_rows(data: pd.DataFrame, metrics: pd.DataFrame) -> pd.DataFrame:
     """Synthetic `Market Cap` metric rows = P/S × Revenue per (ticker, FY).
 
@@ -195,13 +210,14 @@ def main():
     merged_metrics = pd.concat([merged_metrics, market_cap], ignore_index=True)
     print(f"   + Market Cap rows: {len(market_cap):,}")
 
-    # 7. Build meta — with universe flags + placeholder GICS sector (schema v6).
+    # 7. Build meta — with universe flags + placeholder GICS sector + placeholder industry.
     def _flags(t: str) -> dict:
         return {
             "is_favorite": t in FAVORITES,
             "in_sp500":    t in existing_tickers,   # base fixtures = S&P 500
             "in_r3000":    True,                     # proxy: all in Russell 3000
             "sector":      _assign_sector(t),        # deterministic placeholder
+            "industry":    _assign_industry(t),      # deterministic placeholder
         }
 
     base_info = [{"ticker": e["ticker"], "company": e["company"]} for e in existing_meta["tickers"]]
