@@ -543,8 +543,32 @@ def _build_iv_scenario_row(subcat_df: pd.DataFrame, mid_value_metric: str,
 _IV_PRICE_UNSET = object()   # sentinel: distinguishes "caller didn't pass a price" from None
 
 
+def _render_benchmark_subrow(benchmarks, metric_name: str, ticker: str,
+                             ticker_industry: str, unit) -> str:
+    """Context line under a percent/ratio metric: the company's 10y average and its
+    industry median (from compute_industry_benchmarks). Each item is shown only when
+    present; emits nothing when neither is available (so no empty div)."""
+    if not benchmarks:
+        return ""
+    items: list[str] = []
+    company_avg = benchmarks.get("company_10y", {}).get(metric_name, {}).get(ticker)
+    if not is_missing(company_avg):
+        items.append(
+            f'<span class="bench-item">10y avg <strong>{fmt_metric(company_avg, unit)}</strong></span>'
+        )
+    if ticker_industry:
+        industry_avg = benchmarks.get("industry_ly", {}).get(metric_name, {}).get(ticker_industry)
+        if not is_missing(industry_avg):
+            items.append(
+                f'<span class="bench-item">Industry <strong>{fmt_metric(industry_avg, unit)}</strong></span>'
+            )
+    if not items:
+        return ""
+    return f'<div class="metric-bench">{"".join(items)}</div>'
+
+
 def render_metrics_grid(metrics: pd.DataFrame, ticker: str, iv_period: str = "FY",
-                        iv_price=_IV_PRICE_UNSET) -> str:
+                        iv_price=_IV_PRICE_UNSET, benchmarks=None, ticker_industry: str = "") -> str:
     """Render the derived metrics cards — one per category from metrics_hierarchy.json.
 
     `iv_period` ("FY" | "TTM") selects which Intrinsic Value flavour to show — the
@@ -658,6 +682,15 @@ def render_metrics_grid(metrics: pd.DataFrame, ticker: str, iv_period: str = "FY
                     f'  <div class="m-spark">{svg}</div>'
                     f'</div>'
                 )
+
+                # Benchmark context — only on plain percent/ratio rows (not IV/Valuation; the
+                # excluded score/MoS metrics aren't in the benchmark dicts, so they no-op anyway).
+                if not is_iv and not is_val and unit in ("percent", "ratio"):
+                    bench = _render_benchmark_subrow(
+                        benchmarks, metric_name, ticker, ticker_industry, unit
+                    )
+                    if bench:
+                        rows_html.append(bench)
 
         cards.append(
             f'<div class="metric-card">'

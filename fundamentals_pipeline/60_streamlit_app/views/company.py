@@ -10,7 +10,13 @@ from pathlib import Path
 
 import streamlit as st
 from lib.charts import render_bs_composition, render_cf_fcf, render_is_revenue_combo
-from lib.data import app_version, load_latest_data, load_notes, load_prices
+from lib.data import (
+    app_version,
+    compute_industry_benchmarks,
+    load_latest_data,
+    load_notes,
+    load_prices,
+)
 from lib.kpis import render_kpi_strip
 from lib.prices import (
     WINDOW_DEFAULTS,
@@ -44,6 +50,7 @@ from lib.tables import (
 APP_DIR = Path(__file__).parents[1]
 
 data, metrics, meta = load_latest_data()
+benchmarks = compute_industry_benchmarks(metrics, meta)   # cached: company 10y avg + industry median
 prices = load_prices()   # heavy daily frame; own cache entry, empty if not yet published
 notes = load_notes(APP_DIR / "notes.json")
 
@@ -80,6 +87,13 @@ with back_col:
 # ticker internally, so passing the pre-sliced frames is behavior-identical, just cheaper.
 tdata = data[data["ticker"] == ticker]
 tmetrics = metrics[metrics["ticker"] == ticker]
+
+# Selected ticker's industry (for the industry-median benchmark column) — same lookup as render_masthead.
+ticker_industry = ""
+for t_info in meta.get("tickers", []):
+    if t_info.get("ticker") == ticker:
+        ticker_industry = t_info.get("industry") or ""
+        break
 
 # Masthead + KPI strip — single markdown block so the spacing matches the spec.
 st.markdown(render_masthead(ticker, tdata, meta), unsafe_allow_html=True)
@@ -225,7 +239,8 @@ with tab_dm:
     # inversion runs 2–3× per rerun. Returns None when unavailable → both renderers degrade.
     ff_price = iv_price_from_metrics(tmetrics, ticker, iv_period=iv_period)
     st.markdown(
-        render_metrics_grid(tmetrics, ticker, iv_period=iv_period, iv_price=ff_price),
+        render_metrics_grid(tmetrics, ticker, iv_period=iv_period, iv_price=ff_price,
+                            benchmarks=benchmarks, ticker_industry=ticker_industry),
         unsafe_allow_html=True,
     )
     # Valuation football field — fills the gap below the grid.

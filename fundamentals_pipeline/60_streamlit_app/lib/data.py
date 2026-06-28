@@ -8,7 +8,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, NoReturn
+from typing import Any, NoReturn, TypedDict
 
 import pandas as pd
 import requests
@@ -119,6 +119,86 @@ def load_latest_data() -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
     data    = _optimize_dtypes(data)
     metrics = _optimize_dtypes(metrics)
     return data, metrics, meta
+
+
+class IndustryBenchmarks(TypedDict):
+    # metric_name → ticker → 10y avg (NaN if < 2 data points)
+    company_10y: dict[str, dict[str, float]]
+    # metric_name → industry → median of latest-FY values across tickers (NaN if < 3 tickers)
+    industry_ly: dict[str, dict[str, float]]
+
+
+# Score metrics are levels you don't average for comps; MoS % is method-dependent + clamped.
+_BENCH_EXCLUDE_METRICS = ("Piotroski F-Score", "Altman Z-Score", "Accruals Ratio")
+
+
+@st.cache_data(ttl=3600, max_entries=1)
+def compute_industry_benchmarks(metrics: pd.DataFrame, meta: dict) -> IndustryBenchmarks:
+    """Per-metric benchmark context for the company-page derived-metrics grid.
+
+    Two cached views over percent/ratio metrics (excluding MoS % and the score metrics):
+      * ``company_10y`` — each ticker's mean of its last 10 FY values per metric
+        (omitted when fewer than 2 points, so a single year isn't shown as an "average").
+      * ``industry_ly`` — across all tickers sharing a Yahoo ``industry``, each ticker's
+        latest-FY value per metric, then the MEDIAN (robust to outliers; omitted when
+        fewer than 3 tickers contribute).
+
+    Returned floats are plain Python ``float`` (Streamlit serialises the cache entry as JSON).
+    """
+    empty: IndustryBenchmarks = {"company_10y": {}, "industry_ly": {}}
+    if metrics is None or metrics.empty:
+        return empty
+
+    df = metrics[
+        (metrics["period_type"] == "FY") & (metrics["unit"].isin(["percent", "ratio"]))
+    ].copy()
+    # `metric` is category dtype after _optimize_dtypes — cast to str for the .str ops below.
+    df["metric"] = df["metric"].astype(str)
+    df = df[
+        ~df["metric"].str.startswith("MoS %") & ~df["metric"].isin(_BENCH_EXCLUDE_METRICS)
+    ]
+    df["fiscal_year"] = pd.to_numeric(df["fiscal_year"], errors="coerce")
+    df = df.dropna(subset=["fiscal_year", "value"])
+    if df.empty:
+        return empty
+
+    # ── company_10y: mean of each ticker's last 10 FY values per metric (count ≥ 2) ──
+    ordered = df.sort_values(["metric", "ticker", "fiscal_year"], ascending=[True, True, False])
+    ordered["_rn"] = ordered.groupby(["metric", "ticker"], observed=True).cumcount()
+    last10 = ordered[ordered["_rn"] < 10]
+    c_agg = (
+        last10.groupby(["metric", "ticker"], observed=True)["value"]
+        .agg(avg="mean", cnt="count").reset_index()
+    )
+    c_agg = c_agg[c_agg["cnt"] >= 2]
+    company_10y: dict[str, dict[str, float]] = {}
+    for r in c_agg.itertuples(index=False):
+        company_10y.setdefault(r.metric, {})[r.ticker] = float(r.avg)
+
+    # ── industry_ly: median of each ticker's latest-FY value, per industry (n ≥ 3) ──
+    industry_map = {
+        t["ticker"]: t["industry"]
+        for t in meta.get("tickers", [])
+        if t.get("ticker") and t.get("industry")
+    }
+    industry_ly: dict[str, dict[str, float]] = {}
+    if industry_map:
+        di = df.copy()
+        di["industry"] = di["ticker"].astype(str).map(industry_map)
+        di = di.dropna(subset=["industry"])
+        # One latest-FY row per (metric, industry, ticker) before taking the cross-sectional median.
+        di = di.sort_values("fiscal_year").drop_duplicates(
+            subset=["metric", "industry", "ticker"], keep="last"
+        )
+        i_agg = (
+            di.groupby(["metric", "industry"], observed=True)
+            .agg(med=("value", "median"), n=("ticker", "nunique")).reset_index()
+        )
+        i_agg = i_agg[i_agg["n"] >= 3]
+        for r in i_agg.itertuples(index=False):
+            industry_ly.setdefault(r.metric, {})[r.industry] = float(r.med)
+
+    return {"company_10y": company_10y, "industry_ly": industry_ly}
 
 
 @st.cache_data(ttl=3600, max_entries=1, show_spinner="Loading prices…")
