@@ -31,7 +31,8 @@ inject_css(Path(__file__).parent / "styles.css")
 screener = st.Page(
     "views/screener.py", title="Screener", icon="🔎", url_path="screener", default=True
 )
+compare = st.Page("views/compare.py", title="Sectors", icon="🧭", url_path="sectors")
 company = st.Page("views/company.py", title="Company", icon="📊", url_path="company")
 backtest = st.Page("views/backtest.py", title="Backtest", icon="📈", url_path="backtest")
 
-st.navigation([screener, company, backtest]).run()
+st.navigation([screener, compare, company, backtest]).run()

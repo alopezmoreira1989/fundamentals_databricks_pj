@@ -18,6 +18,7 @@ import pandas as pd
 import streamlit as st
 from lib.render import _logo_dev_key, logo_dev_url
 from lib.screener import (
+    ALL_INDUSTRIES,
     DEFAULT_COLUMNS,
     MARKET_CAP,
     SECTORS,
@@ -26,6 +27,8 @@ from lib.screener import (
     bucket_mask,
     buckets_for,
     build_screener_frame,
+    industry_mask,
+    industry_options,
     search_mask,
     sector_mask,
     universe_mask,
@@ -34,6 +37,7 @@ from lib.signals import signal_absolute
 
 COMPANY_PAGE = "views/company.py"
 SECTOR_KEY = "scr_sector"   # selectbox key the sector strip drives via callback
+INDUSTRY_KEY = "scr_industry"   # Industry selectbox key (also seeded by the compare-page drill-through)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # URL = single source of truth for ALL filter state.
@@ -93,21 +97,23 @@ def _decode_buckets(raw: str, metrics: list[str]) -> dict[str, list[str]]:
 
 
 def _state_qs(
-    universe: str, sector: str, query: str, cols: list[str],
+    universe: str, sector: str, industry: str, query: str, cols: list[str],
     selections: dict[str, list[str]], sort_col: str | None, sort_dir: str,
 ) -> str:
     """Build the FULL query string (no leading "?") encoding all filter state + sort.
 
     Each value is percent-encoded via ``quote(..., safe="")``. A key is omitted
-    when its value is falsy/default (universe "All", sector "All sectors", empty
-    search, no columns, no buckets) to keep URLs short — but ``sort``/``dir`` are
-    ALWAYS emitted once a sort is active.
+    when its value is falsy/default (universe "All", sector "All sectors", industry
+    "All industries", empty search, no columns, no buckets) to keep URLs short — but
+    ``sort``/``dir`` are ALWAYS emitted once a sort is active.
     """
     parts: list[tuple[str, str]] = []
     if universe and universe != "All":
         parts.append(("u", universe))
     if sector and sector != SECTORS[0]:
         parts.append(("sec", sector))
+    if industry and industry != ALL_INDUSTRIES:
+        parts.append(("ind", industry))
     if query:
         parts.append(("q", query))
     if cols:
@@ -141,6 +147,17 @@ if SECTOR_KEY not in st.session_state:
 # Featured. It is the session key both the sector bars (_set_sector callback) and the filter
 # selectbox write; default "All sectors" (sector_mask is a no-op for that default).
 active_sector = st.session_state.get(SECTOR_KEY, SECTORS[0])
+
+# Industry filter — data-driven options. Seeded from ?ind on a hard reload; the compare-page
+# drill-through instead writes INDUSTRY_KEY into session_state before switching here (so seeding
+# is skipped). A handed value absent from this artifact's option list falls back to the default.
+_industry_opts = industry_options(wide)
+if INDUSTRY_KEY not in st.session_state:
+    _ind_qp = st.query_params.get("ind")
+    st.session_state[INDUSTRY_KEY] = _ind_qp if _ind_qp in _industry_opts else ALL_INDUSTRIES
+if st.session_state.get(INDUSTRY_KEY) not in _industry_opts:
+    st.session_state[INDUSTRY_KEY] = ALL_INDUSTRIES
+active_industry = st.session_state.get(INDUSTRY_KEY, ALL_INDUSTRIES)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -247,7 +264,7 @@ _PE_TAPE_BANDS: list[tuple[str, float, float, str, str]] = [
 ]
 
 
-def _valuation_tape(src: pd.DataFrame, active_sector: str) -> str:
+def _valuation_tape(src: pd.DataFrame, active_sector: str, active_industry: str) -> str:
     """Hero ribbon — the (sector-filtered) universe binned into Graham P/E bands.
 
     Each segment grows with its company count and is an anchor whose href carries
@@ -286,7 +303,8 @@ def _valuation_tape(src: pd.DataFrame, active_sector: str) -> str:
         toggled = {k: v for k, v in sel_top.items() if k != "P/E"}
         toggled["P/E"] = cur
         href = html.escape("?" + _state_qs(
-            universe_top, active_sector, query_top, cols_href, toggled, sort_col, sort_dir))
+            universe_top, active_sector, active_industry, query_top, cols_href, toggled,
+            sort_col, sort_dir))
         is_active = " is-active" if label in active_pe else ""
         segs.append(
             f'<a class="scr-band {cls}{is_active}" href="{href}" '
@@ -328,9 +346,9 @@ def _medians_line(src: pd.DataFrame, active_sector: str) -> str:
 
 # Hero: the valuation tape (signature) + the slim medians line. Falls back to the
 # legacy 4-card stat band only when P/E is absent from the published artifacts.
-_src = wide[sector_mask(wide, active_sector)]
+_src = wide[sector_mask(wide, active_sector) & industry_mask(wide, active_industry)]
 if "P/E" in wide.columns:
-    st.markdown(_valuation_tape(_src, active_sector), unsafe_allow_html=True)
+    st.markdown(_valuation_tape(_src, active_sector, active_industry), unsafe_allow_html=True)
     st.markdown(_medians_line(_src, active_sector), unsafe_allow_html=True)
 else:
     st.markdown(_stat_band(_src, active_sector), unsafe_allow_html=True)
@@ -489,7 +507,7 @@ with feat_col, st.container(key="scr_featured"):
 # Filters (top)
 # ──────────────────────────────────────────────────────────────────────────────
 with st.container(border=True):
-    c1, c2, c3, c4 = st.columns([1.1, 1.4, 1.6, 3])
+    c1, c2, c3, c4, c5 = st.columns([1.0, 1.3, 1.3, 1.4, 2.6])
     with c1:
         # Seed the universe from the URL (first instantiation only) — falls back to index 0.
         _univ_list = list(UNIVERSE_FLAGS)
@@ -501,8 +519,12 @@ with st.container(border=True):
         # the URL above, so default = that value on a fresh load, else "All sectors".
         sector = st.selectbox("Sector", SECTORS, key=SECTOR_KEY)
     with c3:
-        query = st.text_input("Search (ticker or name)", st.query_params.get("q", ""))
+        # Keyed + pre-seeded above (from ?ind or the compare-page drill-through); options are
+        # data-driven. The Sectors page links here with ?ind=<industry> to land pre-filtered.
+        industry = st.selectbox("Industry", _industry_opts, key=INDUSTRY_KEY)
     with c4:
+        query = st.text_input("Search (ticker or name)", st.query_params.get("q", ""))
+    with c5:
         # Seed columns from the URL (filtered to ones that still exist), else today's defaults.
         _cols_qp = [c for c in st.query_params.get("cols", "").split("|") if c in metric_order]
         default_cols = _cols_qp or [c for c in DEFAULT_COLUMNS if c in metric_order]
@@ -539,7 +561,8 @@ with st.container(border=True):
 # ──────────────────────────────────────────────────────────────────────────────
 # Apply filters
 # ──────────────────────────────────────────────────────────────────────────────
-mask = universe_mask(wide, universe) & sector_mask(wide, sector) & search_mask(wide, query)
+mask = (universe_mask(wide, universe) & sector_mask(wide, sector)
+        & industry_mask(wide, industry) & search_mask(wide, query))
 for metric, sel in selections.items():
     mask &= bucket_mask(wide[metric], sel, bucket_specs[metric])
 fdf = wide[mask].reset_index(drop=True)
@@ -623,7 +646,7 @@ def _table_html() -> str:
 
     def _sort_href(col: str) -> str:
         """Full href carrying ALL filter state + the requested sort (HTML-attribute safe)."""
-        qs = _state_qs(universe, sector, query, cols, selections, col, _next_dir(col))
+        qs = _state_qs(universe, sector, industry, query, cols, selections, col, _next_dir(col))
         return html.escape("?" + qs)
 
     head = [
