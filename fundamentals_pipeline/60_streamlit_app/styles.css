@@ -1161,14 +1161,19 @@ div[data-baseweb="popover"] div[role="option"]:hover {
 
 /* ── Benchmark sub-rows (company 10y avg + industry median) ── */
 .metric-bench {
-    display: flex;
-    gap: 12px;
-    padding: 1px 8px 4px 8px;
-    font-size: 0.72rem;
-    color: var(--ink-3);
+    display: grid;
+    grid-template-columns: 1fr 130px;
+    padding: 0 8px 5px 8px;
     border-bottom: 1px solid var(--rule-soft);
 }
-.bench-item strong {
+.metric-bench .bench-values {
+    display: flex;
+    gap: 10px;
+    font-size: 0.71rem;
+    color: var(--ink-3);
+    white-space: nowrap;
+}
+.metric-bench .bench-values strong {
     color: var(--ink-2);
     font-family: var(--mono);
     font-weight: 500;

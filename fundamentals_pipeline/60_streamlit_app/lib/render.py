@@ -560,11 +560,18 @@ def _render_benchmark_subrow(benchmarks, metric_name: str, ticker: str,
         industry_avg = benchmarks.get("industry_ly", {}).get(metric_name, {}).get(ticker_industry)
         if not is_missing(industry_avg):
             items.append(
-                f'<span class="bench-item">Industry <strong>{fmt_metric(industry_avg, unit)}</strong></span>'
+                f'<span class="bench-item">Ind <strong>{fmt_metric(industry_avg, unit)}</strong></span>'
             )
     if not items:
         return ""
-    return f'<div class="metric-bench">{"".join(items)}</div>'
+    # Grid: empty spacer (1fr) + right-side bench-values block, so values line up under the
+    # metric's value/sparkline columns instead of left under the label.
+    return (
+        '<div class="metric-bench">'
+        '  <span></span>'
+        f'  <div class="bench-values">{"".join(items)}</div>'
+        '</div>'
+    )
 
 
 def render_metrics_grid(metrics: pd.DataFrame, ticker: str, iv_period: str = "FY",
