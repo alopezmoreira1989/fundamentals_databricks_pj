@@ -39,6 +39,8 @@ _FLAG_COLS = ("is_favorite", "in_sp500", "in_r3000")
 UNKNOWN_SECTOR = "Unknown"
 # Same "Unknown" bucket for the Yahoo `industry` sub-sector key (NULL / pre-v8 artifacts).
 UNKNOWN_INDUSTRY = "Unknown"
+# No-op default for the (data-driven) industry filter — mirrors SECTORS[0] "All sectors".
+ALL_INDUSTRIES = "All industries"
 # 11 canonical GICS sectors (sorted) + a no-op default. Mirrors the hardcoded
 # UNIVERSE_FLAGS pattern; "All sectors" is the no-op default.
 SECTORS = ["All sectors"] + sorted([
@@ -148,6 +150,96 @@ def sector_mask(df: pd.DataFrame, sector: str) -> pd.Series:
     if not sector or sector == SECTORS[0] or "sector" not in df.columns:
         return pd.Series(True, index=df.index)
     return df["sector"].astype(str) == sector
+
+
+def industry_options(df: pd.DataFrame) -> list[str]:
+    """Sorted industry choices for the screener filter: ``"All industries"`` (no-op default)
+    + the distinct non-Unknown industries actually present in the frame. Data-driven (unlike the
+    hardcoded 11 GICS ``SECTORS``) because Yahoo carries ~145 industries and the published set
+    varies; an artifact with no ``industry`` column yields just the default."""
+    if "industry" not in df.columns:
+        return [ALL_INDUSTRIES]
+    vals = sorted({
+        str(x) for x in df["industry"].dropna().unique()
+        if str(x).strip() and str(x) != UNKNOWN_INDUSTRY
+    })
+    return [ALL_INDUSTRIES] + vals
+
+
+def industry_mask(df: pd.DataFrame, industry: str) -> pd.Series:
+    """Boolean mask for one Yahoo industry. ``"All industries"`` (the default) is a no-op."""
+    if not industry or industry == ALL_INDUSTRIES or "industry" not in df.columns:
+        return pd.Series(True, index=df.index)
+    return df["industry"].astype(str) == industry
+
+
+# Comparison-page metric sets. Valuation multiples take their median EX-NEGATIVES (a negative
+# multiple isn't a meaningful "cheapness" reading — matches the screener's ``pe[pe>0]``); the
+# quality columns use a plain median (they are legitimately signed).
+VALUATION_COLS = ("P/E", "P/FCF", "EV/EBITDA", "P/S", "P/B")
+QUALITY_COLS = ("ROE %", "Revenue YoY %")
+
+
+def industry_summary(
+    wide: pd.DataFrame,
+    *,
+    value_cols: tuple[str, ...] = VALUATION_COLS,
+    quality_cols: tuple[str, ...] = QUALITY_COLS,
+    min_count: int = 3,
+) -> tuple[pd.DataFrame, dict]:
+    """Per-industry median valuation multiples for the comparison page.
+
+    Returns ``(summary, info)``:
+
+    * ``summary`` — one row per qualifying industry: ``industry``, ``sector`` (the MODAL GICS
+      sector within the group — Yahoo industry does NOT strictly nest under GICS sector, so this
+      label is approximate), ``n`` (company count), the median of each present ``value_col`` taken
+      EX-NEGATIVES, and the plain median of each present ``quality_col``. Sorted by name.
+    * ``info`` — ``{"hidden_small", "min_count", "unknown", "n_industries"}`` so the view can
+      report what was dropped (no silent truncation).
+
+    The ``"Unknown"`` industry is excluded from ``summary`` (counted in ``info["unknown"]``);
+    groups with ``n < min_count`` are excluded (counted in ``info["hidden_small"]``). NaN-tolerant;
+    when there is no usable ``industry`` column it returns an empty frame and zeroed info.
+    """
+    present_val = [c for c in value_cols if c in wide.columns]
+    present_qual = [c for c in quality_cols if c in wide.columns]
+    empty_cols = ["industry", "sector", "n", *present_val, *present_qual]
+    base_info = {"hidden_small": 0, "min_count": min_count, "unknown": 0, "n_industries": 0}
+
+    if "industry" not in wide.columns:
+        return pd.DataFrame(columns=empty_cols), base_info
+
+    df = wide.copy()
+    df["industry"] = df["industry"].astype(str)
+    unknown = int((df["industry"] == UNKNOWN_INDUSTRY).sum())
+    df = df[df["industry"] != UNKNOWN_INDUSTRY]
+
+    rows, hidden_small = [], 0
+    for industry, g in df.groupby("industry", sort=True):
+        n = len(g)
+        if n < min_count:
+            hidden_small += 1
+            continue
+        rec: dict = {"industry": industry, "n": n}
+        if "sector" in g.columns:
+            modes = g["sector"].mode()
+            rec["sector"] = str(modes.iloc[0]) if not modes.empty else UNKNOWN_SECTOR
+        else:
+            rec["sector"] = UNKNOWN_SECTOR
+        for c in present_val:
+            s = pd.to_numeric(g[c], errors="coerce")
+            s = s[s > 0]                       # ex-negatives: a negative multiple isn't "cheap"
+            rec[c] = float(s.median()) if not s.empty else float("nan")
+        for c in present_qual:
+            s = pd.to_numeric(g[c], errors="coerce").dropna()
+            rec[c] = float(s.median()) if not s.empty else float("nan")
+        rows.append(rec)
+
+    summary = pd.DataFrame(rows, columns=empty_cols)
+    info = {"hidden_small": hidden_small, "min_count": min_count,
+            "unknown": unknown, "n_industries": len(summary)}
+    return summary, info
 
 
 def search_mask(df: pd.DataFrame, query: str) -> pd.Series:

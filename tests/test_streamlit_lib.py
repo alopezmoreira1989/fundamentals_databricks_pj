@@ -203,3 +203,47 @@ def test_build_screener_frame_industry_column_absent_defaults(monkeypatch):
     wide, _unit_map, _order = screener.build_screener_frame()
     assert "industry" in wide.columns
     assert (wide["industry"] == screener.UNKNOWN_INDUSTRY).all()
+
+
+# ── industry filter + comparison aggregation (Phase 2) ─────────────────────────
+def test_industry_mask_default_and_specific():
+    df = pd.DataFrame(
+        {"ticker": ["A", "B", "C"], "industry": ["Semis", "Banks", "Semis"]}
+    )
+    assert screener.industry_mask(df, screener.ALL_INDUSTRIES).all()
+    assert list(screener.industry_mask(df, "Semis")) == [True, False, True]
+    # missing column → no-op
+    assert screener.industry_mask(pd.DataFrame({"ticker": ["A"]}), "Semis").all()
+
+
+def test_industry_options_excludes_unknown_and_sorts():
+    df = pd.DataFrame({"industry": ["Semis", "Banks", screener.UNKNOWN_INDUSTRY, "Semis", None]})
+    assert screener.industry_options(df) == [screener.ALL_INDUSTRIES, "Banks", "Semis"]
+    # no column → just the no-op default
+    assert screener.industry_options(pd.DataFrame({"ticker": ["A"]})) == [screener.ALL_INDUSTRIES]
+
+
+def test_industry_summary_medians_filters_and_info():
+    wide = pd.DataFrame({
+        "ticker": ["A", "B", "C", "D", "E", "F"],
+        "industry": ["Semis", "Semis", "Semis", "Banks", "Banks", screener.UNKNOWN_INDUSTRY],
+        "sector": ["Information Technology", "Information Technology", "Energy",
+                   "Financials", "Financials", "Energy"],
+        "P/E": [10.0, 20.0, -5.0, 8.0, 12.0, 99.0],   # Semis ex-neg median of [10, 20] = 15
+        "ROE %": [30.0, 10.0, 20.0, 5.0, 15.0, 1.0],  # Semis plain median [30, 10, 20] = 20
+    })
+    summary, info = screener.industry_summary(wide, min_count=3)
+    # Banks (n=2) hidden; Unknown excluded → only Semis qualifies.
+    assert list(summary["industry"]) == ["Semis"]
+    row = summary.set_index("industry").loc["Semis"]
+    assert row["n"] == 3
+    assert row["sector"] == "Information Technology"   # modal GICS sector in the group
+    assert row["P/E"] == 15.0                          # ex-negatives median
+    assert row["ROE %"] == 20.0
+    assert info == {"hidden_small": 1, "min_count": 3, "unknown": 1, "n_industries": 1}
+
+
+def test_industry_summary_no_industry_column():
+    summary, info = screener.industry_summary(pd.DataFrame({"ticker": ["A"], "P/E": [10.0]}))
+    assert summary.empty
+    assert info["n_industries"] == 0 and info["unknown"] == 0
