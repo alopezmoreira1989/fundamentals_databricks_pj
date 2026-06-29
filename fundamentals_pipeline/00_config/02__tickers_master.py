@@ -31,6 +31,7 @@
 
 import json
 import os
+import re
 from concurrent.futures import ThreadPoolExecutor
 
 import pandas as pd
@@ -363,6 +364,121 @@ def resolve_company_info(tickers: list, known: dict) -> dict:
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ## 0d. Founded probe (`founded`, Wikidata inception)
+# MAGIC
+# MAGIC yfinance never exposes a founding year (`info["founded"]` is essentially always absent —
+# MAGIC see `_probe_company_info`), so `founded` is sourced from **Wikidata**: the `inception`
+# MAGIC property (`P571`) of the entity carrying the `ticker symbol` (`P249`). One batched SPARQL
+# MAGIC call per ~300 tickers (POST, no API key). Best-effort: Wikidata's ticker coverage is
+# MAGIC partial (~50–70%), so unmatched tickers stay NULL — never fabricated. When a ticker maps
+# MAGIC to multiple entities (reused symbols / ADRs), the **earliest** inception year wins.
+# MAGIC Cache-aware: only tickers without a cached `founded` are queried unless `force_full_refresh`.
+
+# COMMAND ----------
+
+_WIKIDATA_SPARQL_URL = "https://query.wikidata.org/sparql"
+_WIKIDATA_BATCH      = 300
+# Wikidata blocks generic/empty User-Agents — identify the project + a contact per their policy.
+_WIKIDATA_UA = (
+    "fundamentals-databricks-pj/1.0 "
+    "(https://github.com/alopezmoreira1989/fundamentals_databricks_pj; al.lopez.moreira@gmail.com)"
+)
+
+
+def _founded_year_from_inception(value: str) -> int | None:
+    """Parse a Wikidata inception literal (e.g. '1976-04-01T00:00:00Z') → 4-digit year, or None.
+
+    Guards BCE/garbage values: only plausible CE company years (1..2100) pass.
+    """
+    m = re.match(r"^(-?\d{1,4})", value or "")
+    if not m:
+        return None
+    yr = int(m.group(1))
+    return yr if 0 < yr <= 2100 else None
+
+
+def _wikidata_founded_batch(tickers: list, session: requests.Session) -> dict:
+    """One SPARQL call → {ticker_variant: earliest_year}. Returns {} on any failure (best-effort).
+
+    Queries both the canonical (dash) and dotted forms of class-share tickers (BRK-B / BRK.B),
+    since Wikidata stores `P249` in either style; the caller maps variants back to our ticker.
+    """
+    variants = set()
+    for t in tickers:
+        variants.add(t)
+        if "-" in t:
+            variants.add(t.replace("-", "."))
+    values = " ".join(f'"{v}"' for v in sorted(variants))
+    # The ticker symbol (P249) lives as a QUALIFIER on the company's stock-exchange statement
+    # (P414), NOT as a top-level property — direct `wdt:P249` is deprecated (~37 entities total).
+    # `inception` (P571) is a normal truthy statement.
+    query = (
+        "SELECT ?ticker ?inception WHERE { "
+        f"VALUES ?ticker {{ {values} }} "
+        "?company p:P414 ?stmt . ?stmt pq:P249 ?ticker . "
+        "?company wdt:P571 ?inception . }"
+    )
+    try:
+        resp = session.post(
+            _WIKIDATA_SPARQL_URL,
+            data={"query": query, "format": "json"},
+            headers={"Accept": "application/sparql-results+json", "User-Agent": _WIKIDATA_UA},
+            timeout=90,
+        )
+        resp.raise_for_status()
+        rows = resp.json()["results"]["bindings"]
+    except Exception:
+        return {}
+    out: dict = {}
+    for row in rows:
+        tk = row["ticker"]["value"]
+        yr = _founded_year_from_inception(row["inception"]["value"])
+        if yr is None:
+            continue
+        if tk not in out or yr < out[tk]:   # earliest inception wins
+            out[tk] = yr
+    return out
+
+
+def resolve_founded(tickers: list, known: dict) -> dict:
+    """Map each ticker → founding year (int) from Wikidata inception (P571), earliest match.
+
+    CACHE-AWARE: only tickers without a cached `founded` are queried (unless FORCE_FULL_REFRESH);
+    `known` is the {ticker: {field: value}} dict already read for the industry probe. Best-effort —
+    Wikidata's ticker coverage is partial, so unmatched tickers stay None (never fabricated).
+    """
+    to_fetch = (
+        list(tickers) if FORCE_FULL_REFRESH
+        else [t for t in tickers if known.get(t, {}).get("founded") is None]
+    )
+    carried = len(tickers) - len(to_fetch)
+    print(f"  Founded probe (Wikidata): {len(to_fetch):,} to query, {carried:,} carried forward"
+          f"{' (force refresh — all re-queried)' if FORCE_FULL_REFRESH else ''}")
+
+    raw: dict = {}
+    if to_fetch:
+        session = requests.Session()
+        for i in range(0, len(to_fetch), _WIKIDATA_BATCH):
+            raw.update(_wikidata_founded_batch(to_fetch[i:i + _WIKIDATA_BATCH], session))
+
+    # Map results (which may be in dotted form) back to our canonical ticker; earliest year wins.
+    fetched: dict = {}
+    for t in to_fetch:
+        cands = [raw.get(t)]
+        if "-" in t:
+            cands.append(raw.get(t.replace("-", ".")))
+        yrs = [y for y in cands if y is not None]
+        if yrs:
+            fetched[t] = min(yrs)
+
+    out = {t: fetched.get(t, known.get(t, {}).get("founded")) for t in tickers}
+    hits = sum(1 for v in out.values() if v is not None)
+    print(f"  Founded: {hits:,}/{len(out):,} resolved ({hits / max(len(out), 1):.1%})")
+    return out
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## 1. Pull index constituents + favorites
 
 # COMMAND ----------
@@ -672,6 +788,20 @@ _known_company_info = _read_known_company_info()
 company_info_map    = resolve_company_info(_universe, _known_company_info)
 for _field in _COMPANY_INFO_FIELDS:
     master[_field] = master["ticker"].map(lambda t, f=_field: company_info_map[t][f]).astype("object")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 2d. Resolve `founded` (Wikidata inception, cache-aware)
+# MAGIC
+# MAGIC Overlay the founding year from Wikidata (yfinance can't supply it). Reuses the same
+# MAGIC `_known_company_info` cache read in 2c, so only tickers without a cached `founded`
+# MAGIC are queried. This OVERRIDES the always-NULL `founded` that 2c set from the yfinance probe.
+
+# COMMAND ----------
+
+founded_map       = resolve_founded(_universe, _known_company_info)
+master["founded"] = master["ticker"].map(founded_map).astype("object")
 
 # COMMAND ----------
 
