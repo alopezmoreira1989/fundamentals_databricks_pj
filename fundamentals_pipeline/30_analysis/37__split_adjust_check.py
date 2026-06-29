@@ -102,7 +102,7 @@ if splits_present and n_splits:
     matched = (
         known.join(splits, on="ticker", how="left")
         .withColumn("date_ok", F.abs(F.datediff("split_date", "ex_date")) <= 3)
-        .withColumn("ratio_ok", F.abs(F.col("ratio") - known["ratio"]) / known["ratio"] <= 0.01)
+        .withColumn("ratio_ok", F.abs(splits["ratio"] - known["ratio"]) / known["ratio"] <= 0.01)
         .groupBy(known["ticker"], known["ex_date"], known["ratio"].alias("expected_ratio"))
         .agg(F.max(F.when(F.col("date_ok") & F.col("ratio_ok"), 1).otherwise(0)).alias("found"))
         .orderBy("ticker", "ex_date")
