@@ -5,8 +5,8 @@ mirroring ``lib/kpis.py`` / ``lib/render.py``. Imported by ``views/company.py`` 
 rendered as the first tab on the company page.
 
 Data contract (already sliced to the selected ticker by company.py):
-  * tdata    — long-format financials (cols: ticker, period_type, fiscal_year, concept, stmt, value)
-  * tmetrics — derived metrics       (cols: ticker, period_type, fiscal_year, metric, unit, value)
+  * tmetrics — derived metrics (cols: ticker, period_type, fiscal_year, metric, unit, value)
+  * prices   — daily price frame (cols: ticker, date, close, adj_close)
   * meta     — full meta artifact; this ticker's profile dict lives in meta["tickers"].
 """
 
@@ -16,79 +16,139 @@ import html
 import re
 
 import pandas as pd
-from lib.format import EM_DASH, fmt_delta, fmt_kpi, fmt_metric, is_missing
+from lib.format import EM_DASH, fmt_delta, fmt_kpi, is_missing
 from lib.news import fetch_yahoo_news
+from lib.prices import _price_delta, _px, prices_for
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Series helpers — latest-FY value + the prior FY (for YoY), graceful on missing
+# Section 1 — KPI strip (Market Cap · Price · Employees · P/E Ratio)
+#
+# The richer market/profile KPIs live here in the Overview tab; the top-of-page
+# strip (lib/kpis.py) carries the financial headlines (Revenue / Net Income / …).
 # ──────────────────────────────────────────────────────────────────────────────
 
 
-def _fy_values(df: pd.DataFrame, mask: pd.Series) -> list:
-    """Ordered FY value series for the masked rows (oldest → newest). [] when empty."""
-    sub = df[mask].sort_values("fiscal_year")
-    return sub["value"].tolist() if not sub.empty else []
+def render_kpi_strip(ticker: str, tmetrics: pd.DataFrame, prices: pd.DataFrame, meta: dict) -> str:
+    """Four headline KPIs: Market Cap · Price · Employees · P/E Ratio."""
+    cards = [
+        _market_cap_card(ticker, tmetrics),
+        _price_card(ticker, prices),
+        _employees_card(ticker, meta),
+        _pe_card(ticker, tmetrics),
+    ]
+    return f'<div class="kpi-strip">{"".join(cards)}</div>'
 
 
-def _metric_values(tmetrics: pd.DataFrame, name: str) -> list:
+def _latest_fy_metric(ticker: str, tmetrics: pd.DataFrame, metric: str) -> pd.DataFrame:
+    """Latest-FY rows (desc by fiscal_year) for one ticker + metric. May be empty."""
     if tmetrics.empty:
-        return []
-    return _fy_values(
-        tmetrics,
-        (tmetrics["period_type"] == "FY") & (tmetrics["metric"] == name),
-    )
+        return tmetrics
+    sub = tmetrics[
+        (tmetrics["ticker"] == ticker)
+        & (tmetrics["period_type"] == "FY")
+        & (tmetrics["metric"] == metric)
+    ]
+    return sub.sort_values("fiscal_year", ascending=False)
 
 
-def _concept_values(tdata: pd.DataFrame, concept: str, stmt: str) -> list:
-    if tdata.empty:
-        return []
-    return _fy_values(
-        tdata,
-        (tdata["period_type"] == "FY") & (tdata["concept"] == concept) & (tdata["stmt"] == stmt),
-    )
+def _market_cap_card(ticker: str, tmetrics: pd.DataFrame) -> str:
+    series = _latest_fy_metric(ticker, tmetrics, "Market Cap")
+    if series.empty:
+        return _empty_card("MARKET CAP")
 
+    latest = series.iloc[0]
+    latest_val = latest["value"]
+    if is_missing(latest_val):
+        return _empty_card("MARKET CAP")
+    latest_fy = int(latest["fiscal_year"])
 
-def _yoy_pct(values: list):
-    """(latest − prior) / |prior| as a percent, or None when not computable."""
-    if len(values) < 2 or is_missing(values[-1]) or is_missing(values[-2]) or values[-2] == 0:
-        return None
-    return (values[-1] - values[-2]) / abs(values[-2]) * 100.0
+    yoy = None
+    if len(series) >= 2:
+        prior_val = series.iloc[1]["value"]
+        if not is_missing(prior_val) and prior_val != 0:
+            yoy = (latest_val - prior_val) / abs(prior_val) * 100
 
-
-def _latest(values: list):
-    return values[-1] if values and not is_missing(values[-1]) else None
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Section 1 — KPI strip (Market Cap · Revenue · Net Income · Net Margin %)
-# ──────────────────────────────────────────────────────────────────────────────
-
-
-def _kpi_card(label: str, value_str: str, yoy_pct) -> str:
-    delta_label, delta_cls = fmt_delta(yoy_pct)
+    delta_label, delta_cls = fmt_delta(yoy)
     return (
         '<div class="kpi">'
-        f'  <div class="label">{label}</div>'
-        f'  <div class="value">{value_str}</div>'
-        f'  <div class="delta {delta_cls}">{delta_label}</div>'
+        '<div class="label">MARKET CAP</div>'
+        f'<div class="value">{fmt_kpi(latest_val)}</div>'
+        f'<div class="delta {delta_cls}">{delta_label}  ·  FY {latest_fy}</div>'
         '</div>'
     )
 
 
-def render_kpi_strip(tdata: pd.DataFrame, tmetrics: pd.DataFrame) -> str:
-    """Four headline KPIs for the latest FY, each with its YoY delta."""
-    mcap = _metric_values(tmetrics, "Market Cap")
-    rev = _concept_values(tdata, "Revenue", "Income Statement")
-    ni = _concept_values(tdata, "Net Income", "Income Statement")
-    margin = _metric_values(tmetrics, "Net Margin %")
+def _price_card(ticker: str, prices: pd.DataFrame) -> str:
+    pdf = prices_for(prices, ticker)
+    if pdf is None or pdf.empty:
+        return _empty_card("PRICE")
 
-    cards = [
-        _kpi_card("MARKET CAP", fmt_kpi(_latest(mcap)), _yoy_pct(mcap)),
-        _kpi_card("REVENUE", fmt_kpi(_latest(rev)), _yoy_pct(rev)),
-        _kpi_card("NET INCOME", fmt_kpi(_latest(ni)), _yoy_pct(ni)),
-        _kpi_card("NET MARGIN", fmt_metric(_latest(margin), "percent"), _yoy_pct(margin)),
-    ]
-    return f'<div class="kpi-strip">{"".join(cards)}</div>'
+    last = pdf.iloc[-1]
+    price = last["close"]
+    if is_missing(price):
+        return _empty_card("PRICE")
+
+    chg_1d = None
+    if len(pdf) >= 2:
+        prev_close = pdf.iloc[-2]["close"]
+        if not is_missing(prev_close) and prev_close != 0:
+            chg_1d = (price - prev_close) / abs(prev_close) * 100
+
+    delta_label, delta_cls = _price_delta(chg_1d)
+    return (
+        '<div class="kpi">'
+        '<div class="label">PRICE</div>'
+        f'<div class="value">{_px(float(price))}</div>'
+        f'<div class="delta {delta_cls}">{delta_label}  ·  latest close</div>'
+        '</div>'
+    )
+
+
+def _employees_card(ticker: str, meta: dict) -> str:
+    employees = None
+    for t in meta.get("tickers", []):
+        if isinstance(t, dict) and t.get("ticker") == ticker:
+            employees = t.get("employees")
+            break
+
+    if employees is None or is_missing(employees) or int(employees) <= 0:
+        return _empty_card("EMPLOYEES")
+
+    return (
+        '<div class="kpi">'
+        '<div class="label">EMPLOYEES</div>'
+        f'<div class="value">{int(employees):,}</div>'
+        '<div class="delta flat">full-time · latest filing</div>'
+        '</div>'
+    )
+
+
+def _pe_card(ticker: str, tmetrics: pd.DataFrame) -> str:
+    series = _latest_fy_metric(ticker, tmetrics, "P/E")
+    if series.empty:
+        return _empty_card("P/E RATIO")
+
+    val = series.iloc[0]["value"]
+    if is_missing(val) or val <= 0:
+        return _empty_card("P/E RATIO")
+
+    return (
+        '<div class="kpi">'
+        '<div class="label">P/E RATIO</div>'
+        f'<div class="value">{val:.1f}×</div>'
+        '<div class="delta flat">trailing twelve months</div>'
+        '</div>'
+    )
+
+
+def _empty_card(label: str) -> str:
+    return (
+        '<div class="kpi">'
+        f'  <div class="label">{label}</div>'
+        '  <div class="value">—</div>'
+        '  <div class="delta flat">no data</div>'
+        '</div>'
+    )
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -200,11 +260,11 @@ def render_news(items: list[dict]) -> str:
 # ──────────────────────────────────────────────────────────────────────────────
 
 
-def render_overview(ticker: str, tdata: pd.DataFrame, tmetrics: pd.DataFrame, meta: dict) -> str:
+def render_overview(ticker: str, tmetrics: pd.DataFrame, prices: pd.DataFrame, meta: dict) -> str:
     """Full Overview tab as one HTML string (KPI strip + profile + recent news).
 
     The news fetch is a cached, fully-graceful network call (empty list on any failure),
     so a Yahoo outage degrades to a "no recent news" note rather than breaking the page.
     """
     news = fetch_yahoo_news(ticker)
-    return render_kpi_strip(tdata, tmetrics) + render_profile(ticker, meta) + render_news(news)
+    return render_kpi_strip(ticker, tmetrics, prices, meta) + render_profile(ticker, meta) + render_news(news)

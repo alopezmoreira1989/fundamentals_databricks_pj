@@ -98,7 +98,7 @@ for t_info in meta.get("tickers", []):
 
 # Masthead + KPI strip — single markdown block so the spacing matches the spec.
 st.markdown(render_masthead(ticker, tdata, meta), unsafe_allow_html=True)
-st.markdown(render_kpi_strip(ticker, tdata, tmetrics, prices, meta), unsafe_allow_html=True)
+st.markdown(render_kpi_strip(ticker, tdata, tmetrics), unsafe_allow_html=True)
 
 # Unit scale for the statement tables (IS / BS / CF / Quarterly). One control governs
 # all four. Billion = 1e9 (US short scale). Default "Units" → unchanged full-resolution USD.
@@ -123,7 +123,7 @@ tab_ov, tab_px, tab_is, tab_bs, tab_cf, tab_dm, tab_qt = st.tabs(
 )
 
 with tab_ov:
-    st.markdown(render_overview(ticker, tdata, tmetrics, meta), unsafe_allow_html=True)
+    st.markdown(render_overview(ticker, tmetrics, prices, meta), unsafe_allow_html=True)
 
 with tab_px:
     # Header text is window/frequency-aware, so reserve its slot now and fill it once both are
