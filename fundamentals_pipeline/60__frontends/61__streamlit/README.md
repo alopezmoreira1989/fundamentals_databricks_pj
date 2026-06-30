@@ -129,8 +129,22 @@ without it, it fetches from the `latest` GitHub Release (no Databricks credentia
    - **Main file path:** `fundamentals_pipeline/60__frontends/61__streamlit/app.py`
 4. Deploy. Streamlit Cloud auto-installs from `requirements.txt`.
 
-**No secrets are needed in Streamlit Cloud** — the app reads the public GitHub
-Release artifacts at runtime; no Databricks credentials and no committed data.
+**No Databricks credentials are needed** — the app reads the public GitHub
+Release artifacts at runtime; no committed data.
+
+**One optional secret: the Logo.dev publishable key.** Company logos hotlink the
+Logo.dev CDN; without the key the app still works but every company falls back to
+its editorial monogram. In **Settings → Secrets**, add:
+
+```toml
+[logo_dev]
+publishable_key = "pk_xxxxxxxxxxxxxxxx"
+```
+
+The `pk_…` value is safe to expose (it already appears in client-side hotlink
+URLs). ⚠️ **Secrets do not survive a delete + redeploy.** The Main file path is
+pinned at deploy time, so moving the app directory forces a delete + redeploy —
+copy this block out first and re-paste it, or logos silently revert to monograms.
 
 ---
 

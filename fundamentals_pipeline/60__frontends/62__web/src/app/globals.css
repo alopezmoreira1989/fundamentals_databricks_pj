@@ -1,0 +1,42 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================
+ * Design tokens — ported from 61__streamlit/styles.css (:root) and
+ * lib/colors.py. Keep in sync if those change. Every color in the app
+ * references a var here; no inline hex anywhere else (same discipline as
+ * the Streamlit app).
+ * ============================================================ */
+:root {
+  --bg: #FAF8F4;
+  --bg-card: #FFFFFF;
+  --bg-subtle: #F1EFE8;
+  --ink: #1C1B18;
+  --ink-2: #5F5E5A;
+  --ink-3: #888780;
+  --rule: #D3D1C7;
+  --rule-soft: #E8E5DC;
+  --accent: #185FA5;
+  --accent-soft: #E6F1FB;
+  --accent-ink: #0C447C;
+
+  /* Signal colors (good / warn / bad) — confirmed against lib/colors.py
+     (GREEN / AMBER / CORAL). */
+  --signal-good: #0F6E56;
+  --signal-warn: #BA7517;
+  --signal-bad: #993C1D;
+
+  /* Font stacks. next/font (layout.tsx) injects the actual webfonts via the
+     --font-fraunces / --font-inter / --font-jetbrains-mono variables; these
+     compose them with fallbacks, mirroring styles.css --display/--sans/--mono. */
+  --font-display: var(--font-fraunces), "Times New Roman", serif;
+  --font-sans: var(--font-inter), system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), "SF Mono", Menlo, monospace;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+}

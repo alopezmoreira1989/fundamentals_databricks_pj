@@ -1,0 +1,6 @@
+# Cloudflare Pages config for the @cloudflare/next-on-pages build output.
+# `pnpm pages:build` (→ next-on-pages) writes the adapted app to .vercel/output/static.
+name = "alm-equity-fundamentals-web"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+pages_build_output_dir = ".vercel/output/static"

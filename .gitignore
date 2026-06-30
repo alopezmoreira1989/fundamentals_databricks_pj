@@ -29,6 +29,11 @@ CLAUDE.local.md
 # Dashboards generados (HTML autocontenidos)
 fundamentals_pipeline/40_dashboards/output/
 
+# Node web frontend (fundamentals_pipeline/60__frontends/62__web)
+fundamentals_pipeline/60__frontends/62__web/node_modules/
+fundamentals_pipeline/60__frontends/62__web/.next/
+fundamentals_pipeline/60__frontends/62__web/.vercel/
+
 # Sistema
 Thumbs.db
 .DS_Store
