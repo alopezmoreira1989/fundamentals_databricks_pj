@@ -17,7 +17,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from fundamentals_pipeline._core import schemas
+from fundamentals_core import schemas
 
 FIXTURE_DIR = (
     Path(__file__).resolve().parent.parent

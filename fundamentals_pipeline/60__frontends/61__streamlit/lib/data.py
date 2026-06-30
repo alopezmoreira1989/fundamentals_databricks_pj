@@ -15,12 +15,14 @@ import requests
 import streamlit as st
 
 # Import the shared export↔app schema contract. Streamlit Cloud clones the whole repo, so
-# parents[4] of this file is the repo root (.../60__frontends/61__streamlit/lib/data.py → repo root).
-# _core is pure Python (no Spark/Databricks dep), so this keeps the app Databricks-free.
+# parents[4] of this file is the repo root (.../60__frontends/61__streamlit/lib/data.py → repo root),
+# where the shared `fundamentals_core` package now lives (top-level, no longer inside
+# fundamentals_pipeline/). fundamentals_core is pure Python (no Spark/Databricks dep), so this
+# keeps the app Databricks-free.
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
-from fundamentals_pipeline._core.schemas import (  # noqa: E402
+from fundamentals_core.schemas import (  # noqa: E402
     SchemaError,
     validate_artifact,
     validate_meta,

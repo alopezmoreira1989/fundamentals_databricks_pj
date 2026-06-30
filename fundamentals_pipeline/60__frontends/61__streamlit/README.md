@@ -204,9 +204,9 @@ lib/
 ```
 
 > The Backtest page's return statistics (CAGR / drawdown / vol / Sharpe) are computed by the
-> shared pure module `fundamentals_pipeline/_core/backtest.py` — the same code the pipeline
-> notebook uses, so the app and the pipeline reconcile by construction. `_core` carries no
-> Databricks dependency, so the app stays credential-free.
+> shared pure module `fundamentals_core/backtest.py` — the same code the pipeline
+> notebook uses, so the app and the pipeline reconcile by construction. `fundamentals_core`
+> carries no Databricks dependency, so the app stays credential-free.
 
 ---
 

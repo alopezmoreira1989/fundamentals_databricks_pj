@@ -1,5 +1,5 @@
 """Put the repo root and the Streamlit app dir on sys.path so the test modules can
-``import fundamentals_pipeline._core.*`` and ``import lib.*`` without an installed package.
+``import fundamentals_core.*`` and ``import lib.*`` without an installed package.
 """
 
 from __future__ import annotations

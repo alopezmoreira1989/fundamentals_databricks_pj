@@ -5,7 +5,7 @@ Degrades gracefully when the artifact is absent (backtester not run / not publis
 shows a notice and the rest of the app keeps working — `load_backtest()` never st.stop()s.
 
 The headline metrics (CAGR / max drawdown / volatility / Sharpe) are derived client-side
-from the published series via `fundamentals_pipeline._core.backtest` — the SAME pure helpers
+from the published series via `fundamentals_core.backtest` — the SAME pure helpers
 the pipeline notebook uses, so the numbers reconcile by construction.
 """
 
@@ -18,11 +18,12 @@ from lib.colors import BLUE, CREAM, GRAY
 from lib.data import load_backtest
 
 # Reuse the same pure backtest helpers as the pipeline. Put the repo root on sys.path (as
-# lib.data does) so _core is importable on Streamlit Cloud; keeps the app Databricks-free.
+# lib.data does) so fundamentals_core is importable on Streamlit Cloud; keeps the app
+# Databricks-free.
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
-from fundamentals_pipeline._core import backtest as bt  # noqa: E402
+from fundamentals_core import backtest as bt  # noqa: E402
 
 # Mirrors backtest_archetypes.json `config.risk_free_rate` (the app stays self-contained —
 # it does not read the pipeline config). Update both if you change the assumption.

@@ -520,7 +520,7 @@ print(f"✓ TTM pandas: {len(ttm_pdf):,} rows")
 # COMMAND ----------
 
 # CONTRACT: the scalar reference implementations of these four formulas live in
-# `fundamentals_pipeline/_core/valuation.py` (graham_number, graham_revised, dcf_value,
+# `fundamentals_core/valuation.py` (graham_number, graham_revised, dcf_value,
 # owner_earnings, eps_cagr). The numpy column algebra below MUST stay row-for-row
 # equivalent to those scalars — they are unit-tested in `tests/test_valuation.py`. If you
 # change a formula here, mirror it there (and vice versa).

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from fundamentals_pipeline._core import periods as p
+from fundamentals_core import periods as p
 
 
 def test_flow_additive_subtracts_ytd_from_fy():

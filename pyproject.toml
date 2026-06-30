@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fundamentals-core"
+version = "0.1.0"
+description = "Pure-Python financial domain library shared by the Databricks pipeline and the Django web app: the export/app schema contract, the scalar valuation/backtest reference formulas, and period (Q4) arithmetic. No Spark / Databricks / Streamlit / Django dependency."
+readme = "fundamentals_core/README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+# Only the shared library is an installable package. The pipeline stage dirs
+# (00__config, 10__ingestion, …) are Databricks notebook sources, not importable
+# packages, so setuptools must NOT auto-discover them — pin the package list explicitly.
+[tool.setuptools]
+packages = ["fundamentals_core"]

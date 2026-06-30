@@ -1,6 +1,12 @@
 # Development-only dependencies (tests/tooling). NOT read by Streamlit Cloud —
 # that runtime manifest is requirements.txt, which must stay minimal. Install with:
 #   pip install -r requirements-dev.txt
+#
+# `-e .` installs the shared `fundamentals_core` library (pyproject at repo root) in
+# editable mode so `import fundamentals_core` resolves in tests/CI without relying on the
+# conftest sys.path shim. The Streamlit Cloud manifest (requirements.txt) deliberately does
+# NOT install it — that app resolves fundamentals_core via its own repo-root sys.path insert.
+-e .
 pytest>=8,<9
 pandas>=2.2,<3
 pyarrow>=14

@@ -32,24 +32,25 @@ from pathlib import Path
 import pandas as pd
 
 
-# Make the pure-Python schema contract importable (fundamentals_pipeline/_core/schemas.py).
+# Make the pure-Python schema contract importable (fundamentals_core/schemas.py — the
+# shared domain library now lives at the repo root, not inside fundamentals_pipeline/).
 # Databricks-only note: this is a notebook (no __file__), so we walk up from the working
 # directory to find the repo root. In a Databricks Repo the root is usually already on
 # sys.path (Files-in-Repos); this is a defensive fallback so the assert below also works
 # under a Job, %run, or Databricks Connect.
 def _ensure_core_on_path() -> None:
     for _cand in (Path.cwd(), *Path.cwd().parents):
-        if (_cand / "fundamentals_pipeline" / "_core" / "schemas.py").exists():
+        if (_cand / "fundamentals_core" / "schemas.py").exists():
             if str(_cand) not in sys.path:
                 sys.path.insert(0, str(_cand))
             return
 
 
 try:
-    from fundamentals_pipeline._core import schemas as _schemas
+    from fundamentals_core import schemas as _schemas
 except ModuleNotFoundError:
     _ensure_core_on_path()
-    from fundamentals_pipeline._core import schemas as _schemas
+    from fundamentals_core import schemas as _schemas
 
 SCHEMA_VERSION = 9   # +company-info (description/exchange/country/employees/website/founded) on ticker_meta
 FY_YEARS       = 10
