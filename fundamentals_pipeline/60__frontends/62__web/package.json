@@ -11,10 +11,14 @@
   },
   "dependencies": {
     "@duckdb/duckdb-wasm": "^1.29.0",
+    "@tanstack/react-table": "^8.21.3",
     "apache-arrow": "^17.0.0",
+    "idb-keyval": "^6.2.6",
     "next": "14.2.35",
+    "nuqs": "^2.8.9",
     "react": "^18",
-    "react-dom": "^18"
+    "react-dom": "^18",
+    "recharts": "^3.9.0"
   },
   "devDependencies": {
     "@cloudflare/next-on-pages": "^1.13.7",
