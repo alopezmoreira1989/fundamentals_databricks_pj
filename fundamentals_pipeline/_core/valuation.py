@@ -1,7 +1,7 @@
 """Scalar reference implementations of the intrinsic-value formulas.
 
 CONTRACT: the PySpark/numpy column algebra in
-``20_transformation/23__intrinsic_value.py`` (and ``safe_div`` in
+``20__transformation/23__intrinsic_value.py`` (and ``safe_div`` in
 ``22__derived_metrics.py``) must mirror these scalar definitions. If you change a
 formula in ``23``, change it here too and update ``tests/test_valuation.py``.
 
@@ -10,7 +10,7 @@ Conventions, matching the Spark code:
   * Division by zero / by a missing denominator yields ``None`` (mirrors the
     ``F.when(den != 0, ...).otherwise(lit(None))`` guard), never raises.
   * Growth / yield / discount rates are decimal fractions (0.08 = 8%), exactly as
-    stored in ``00_config/valuation_assumptions.json``.
+    stored in ``00__config/valuation_assumptions.json``.
 """
 
 from __future__ import annotations

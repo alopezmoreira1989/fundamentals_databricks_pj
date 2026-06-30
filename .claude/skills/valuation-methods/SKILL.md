@@ -1,6 +1,6 @@
 ---
 name: valuation-methods
-description: The four intrinsic-value methods computed in 20_transformation/23__intrinsic_value.py (Graham Number, Graham Revised, two-stage DCF, Owner Earnings) plus Margin of Safety, how each reads its assumptions from 00_config/valuation_assumptions.json, and the edge-case rules that return NULL instead of a misleading number. Use when asked to add or change a valuation method, adjust valuation assumptions (WACC, growth, multiple), explain how Graham Number, DCF, Owner Earnings, or intrinsic value is computed, or debug a NULL or absurd per-share value. Note: the formulas live in 23__intrinsic_value.py (pipeline), not lib/signals.py, which only does threshold color banding.
+description: The four intrinsic-value methods computed in 20__transformation/23__intrinsic_value.py (Graham Number, Graham Revised, two-stage DCF, Owner Earnings) plus Margin of Safety, how each reads its assumptions from 00__config/valuation_assumptions.json, and the edge-case rules that return NULL instead of a misleading number. Use when asked to add or change a valuation method, adjust valuation assumptions (WACC, growth, multiple), explain how Graham Number, DCF, Owner Earnings, or intrinsic value is computed, or debug a NULL or absurd per-share value. Note: the formulas live in 23__intrinsic_value.py (pipeline), not lib/signals.py, which only does threshold color banding.
 metadata:
   author: Alejandro López Moreira
   version: 1.0.0
@@ -10,8 +10,8 @@ metadata:
 
 ## CRITICAL
 
-- **Formulas live in `fundamentals_pipeline/20_transformation/23__intrinsic_value.py`** (NumPy-vectorized, computes FY and TTM variants, writes `main.financials.financials_intrinsic_value`). `fundamentals_pipeline/60_streamlit_app/lib/signals.py` does NOT compute valuations — it only bands MoS and other metrics into good/warn/bad colors for the dashboard. Edit formulas in 23; edit color thresholds in signals.py.
-- **Assumptions come from `00_config/valuation_assumptions.json`**, merged per ticker as `defaults` overlaid by `overrides[ticker]`. Validate the JSON shape with [[pipeline-preflight]] before a run — a bad `dcf` block crashes 23.
+- **Formulas live in `fundamentals_pipeline/20__transformation/23__intrinsic_value.py`** (NumPy-vectorized, computes FY and TTM variants, writes `main.financials.financials_intrinsic_value`). `fundamentals_pipeline/60__frontends/61__streamlit/lib/signals.py` does NOT compute valuations — it only bands MoS and other metrics into good/warn/bad colors for the dashboard. Edit formulas in 23; edit color thresholds in signals.py.
+- **Assumptions come from `00__config/valuation_assumptions.json`**, merged per ticker as `defaults` overlaid by `overrides[ticker]`. Validate the JSON shape with [[pipeline-preflight]] before a run — a bad `dcf` block crashes 23.
 - **Edge cases must return NULL, never a misleading number.** Negative/zero EPS or book value, distorted book (Retained Earnings negative or P/B over 10), `WACC <= growth_terminal`, non-positive starting cash flow, or non-positive shares all yield NULL. Preserve this when editing.
 - 23 is a stateful pipeline notebook (writes Delta). Plan the change, flag any `dbutils`/`%run`/`spark` dependency, then implement.
 

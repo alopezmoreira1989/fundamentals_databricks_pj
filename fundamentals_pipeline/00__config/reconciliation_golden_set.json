@@ -1,0 +1,36 @@
+{
+  "_comment": "Golden set for the Tier-A linkbase oracle (10__ingestion/14__fetch_oracle_statements.py). Deliberately tailed: GICS-sector anchors across fiscal-year ends to validate parser correctness, plus a tail where Class-A (wrong/missing-tag) bugs actually live. Edit this file (no code change) to grow/shrink Tier-A coverage. Each entry pulls the last n_10k 10-K(s) and n_10q 10-Q(s); FYE labels are approximate — the notebook confirms the real period_end. Tickers use SEC company_tickers.json symbology (e.g. BRK-B); the Tier-A join to main.financials.financials is by ticker+period_end, so a symbol the app stores differently simply yields no Tier-A rows (it never errors).",
+  "_note_combined_filers": "COMBINED_FILERS from 00__config/01__tickers.py (e.g. SKT) are unioned in dynamically by the notebook — do NOT list them here.",
+  "_validate_the_validator": "Tier A stays golden-set-only until its false-positive rate (measured via ORACLE_PARSE_FAIL count + manual review) drops below the agreed threshold. Do not scale Tier A to the universe until then.",
+  "tickers": [
+    { "ticker": "KO",    "n_10k": 1, "n_10q": 1, "_anchor": "Dec FYE — Consumer Staples" },
+    { "ticker": "JNJ",   "n_10k": 1, "n_10q": 1, "_anchor": "Dec FYE — Health Care" },
+    { "ticker": "XOM",   "n_10k": 1, "n_10q": 1, "_anchor": "Dec FYE — Energy" },
+    { "ticker": "JPM",   "n_10k": 1, "n_10q": 1, "_anchor": "Dec FYE — Financials" },
+    { "ticker": "CAT",   "n_10k": 1, "n_10q": 1, "_anchor": "Dec FYE — Industrials" },
+    { "ticker": "DIS",   "n_10k": 1, "n_10q": 1, "_anchor": "Dec FYE — Communication Services" },
+    { "ticker": "GOOGL", "n_10k": 1, "n_10q": 1, "_anchor": "Dec FYE — Communication Services" },
+    { "ticker": "AMZN",  "n_10k": 1, "n_10q": 1, "_anchor": "Dec FYE — Consumer Discretionary" },
+    { "ticker": "NEE",   "n_10k": 1, "n_10q": 1, "_anchor": "Dec FYE — Utilities" },
+    { "ticker": "LIN",   "n_10k": 1, "n_10q": 1, "_anchor": "Dec FYE — Materials" },
+    { "ticker": "AMT",   "n_10k": 1, "n_10q": 1, "_anchor": "Dec FYE — Real Estate (REIT)" },
+
+    { "ticker": "AAPL",  "n_10k": 1, "n_10q": 1, "_anchor": "Sep FYE — Information Technology" },
+    { "ticker": "MSFT",  "n_10k": 1, "n_10q": 1, "_anchor": "Jun FYE — Information Technology" },
+    { "ticker": "PG",    "n_10k": 1, "n_10q": 1, "_anchor": "Jun FYE — Consumer Staples" },
+    { "ticker": "WMT",   "n_10k": 1, "n_10q": 1, "_anchor": "Jan FYE — Consumer Staples" },
+    { "ticker": "CRM",   "n_10k": 1, "n_10q": 1, "_anchor": "Jan FYE — Information Technology" },
+    { "ticker": "NVDA",  "n_10k": 1, "n_10q": 1, "_anchor": "Jan FYE — Information Technology" },
+    { "ticker": "TGT",   "n_10k": 1, "n_10q": 1, "_anchor": "Jan FYE — Consumer Discretionary" },
+    { "ticker": "ORCL",  "n_10k": 1, "n_10q": 1, "_anchor": "May FYE — Information Technology" },
+    { "ticker": "CSCO",  "n_10k": 1, "n_10q": 1, "_anchor": "Jul FYE — Information Technology" },
+    { "ticker": "COST",  "n_10k": 1, "n_10q": 1, "_anchor": "Aug/Sep FYE — Consumer Staples" },
+
+    { "ticker": "T",     "n_10k": 1, "n_10q": 1, "_tail": "different-tagging classic — LongTermDebt vs LongTermDebtNoncurrent" },
+    { "ticker": "VZ",    "n_10k": 1, "n_10q": 1, "_tail": "different-tagging classic — InterestExpenseNonoperating, debt chain" },
+    { "ticker": "PLD",   "n_10k": 1, "n_10q": 1, "_tail": "REIT — unusual statement shapes" },
+    { "ticker": "O",     "n_10k": 1, "n_10q": 1, "_tail": "REIT — monthly-dividend, unusual statements" },
+    { "ticker": "BAC",   "n_10k": 1, "n_10q": 1, "_tail": "financial — non-standard statement shape" },
+    { "ticker": "BRK-B", "n_10k": 1, "n_10q": 1, "_tail": "financial conglomerate — non-standard statements (SEC symbol BRK-B)" }
+  ]
+}

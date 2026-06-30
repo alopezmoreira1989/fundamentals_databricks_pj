@@ -1,7 +1,7 @@
 """Scalar reference for the quarterly period arithmetic.
 
 CONTRACT: mirrors the ``Q4`` derivation in
-``20_transformation/21b__derive_quarterly.py``. ``Q4 = FY − YTD_Q3`` is intentional
+``20__transformation/21b__derive_quarterly.py``. ``Q4 = FY − YTD_Q3`` is intentional
 (it captures year-end audit adjustments) — see CLAUDE.md. This module owns ONLY the
 fallback arithmetic; the preferred path in ``21b`` is to use a reported Q4 standalone
 (the ~90d ``fp="FY"`` row whose ``period_end == fy_end``) when the issuer publishes one,

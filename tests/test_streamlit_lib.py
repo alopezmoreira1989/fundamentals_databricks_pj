@@ -1,4 +1,4 @@
-"""Unit tests for the pure Streamlit-app helpers in 60_streamlit_app/lib/.
+"""Unit tests for the pure Streamlit-app helpers in 60__frontends/61__streamlit/lib/.
 
 ``format`` and ``signals`` depend only on pandas, so they import unconditionally.
 ``screener`` transitively imports ``streamlit`` (via ``lib.data``); we ``importorskip``

@@ -104,7 +104,7 @@ flowchart TD
 ```
 fundamentals_databricks_pj/
 │
-├── 00_config/
+├── 00__config/
 │   ├── 01__tickers.py                       ← constants, table names, and XBRL maps (with kind per concept)
 │   ├── 02__tickers_master.py                ← builds main.config.tickers (S&P 500 + Russell 3000 + favorites)
 │   ├── 03__concept_hierarchy_master.py      ← builds main.config.concept_hierarchy from JSON
@@ -113,7 +113,7 @@ fundamentals_databricks_pj/
 │   ├── concept_hierarchy.json               ← accounting concept hierarchy
 │   ├── metrics_hierarchy.json               ← derived metrics hierarchy
 │   ├── valuation_assumptions.json           ← valuation assumptions (WACC, growth, per-ticker overrides)
-│   └── backtest_archetypes.json             ← investor-archetype screens for the backtester (70_backtest)
+│   └── backtest_archetypes.json             ← investor-archetype screens for the backtester (70__backtest)
 │
 ├── _core/                                   ← pure-Python library (no Spark/Streamlit dep), unit-tested
 │   ├── valuation.py                         ← scalar reference impls (Graham, DCF, Owner Earnings, EPS CAGR)
@@ -122,37 +122,37 @@ fundamentals_databricks_pj/
 │   ├── splits.py                            ← cumulative stock-split factor for cross-year per-share rescaling
 │   └── backtest.py                          ← as-of (no look-ahead), predicate eval, CAGR/drawdown/vol/Sharpe
 │
-├── 10_ingestion/
+├── 10__ingestion/
 │   ├── 11__fetch_sec_xbrl.py         ← SEC EDGAR XBRL API → financials_raw (parallel + Arrow + batched)
 │   └── 12__fetch_market_data.py      ← Yahoo Finance (yfinance) → market_data
 │
-├── 20_transformation/
+├── 20__transformation/
 │   ├── 21__clean_and_merge.py        ← MERGE FY rows into financials
 │   ├── 21b__derive_quarterly.py      ← derive standalone Q1..Q4 (with Q4 = FY − YTD_Q3) → MERGE into financials
 │   ├── 21c__prune_quarterly.py       ← enforce rolling window of QUARTERLY_WINDOW (=12) quarters per ticker
 │   ├── 22__derived_metrics.py        ← FCF, margins, YoY, leverage, valuation ratios (FY only)
 │   └── 23__intrinsic_value.py        ← Graham, Graham Revised, DCF, Owner Earnings (FY + TTM)
 │
-├── 30_analysis/
+├── 30__analysis/
 │   ├── 31__company_analysis.py       ← ad-hoc validation queries
 │   ├── 32__coverage_check.py         ← post-pipeline check: favorites coverage + ingestion failures
 │   ├── 37__split_adjust_check.py     ← post-pipeline check: stock_splits + split-adjusted cross-year metrics
 │   └── 36__run_log_report.py         ← read-only report over the pipeline_runs run-log (last N runs + trend)
 │
-├── 40_dashboards/
+├── 40__dashboards/
 │   ├── 41__dashboard_queries.py      ← SQL feeding the Databricks dashboard
 │   └── Main Dashboard.lvdash.json    ← dashboard definition (annual pages + quarterly page)
 │
-├── 50_publish/
+├── 50__publish/
 │   ├── 51__export_dashboard_data.py  ← slice financials + metrics + prices + backtest → /tmp/ parquet artifacts
 │   └── 52__publish_to_github.py      ← upload to GitHub Release (latest tag)
 │
-├── 60_streamlit_app/                 ← public Streamlit Cloud dashboard (see its own README)
+├── 60__frontends/61__streamlit/                 ← public Streamlit Cloud dashboard (see its own README)
 │
-├── 70_backtest/
+├── 70__backtest/
 │   └── 71__run_backtest.py           ← apply archetype screens to history → backtest_results + backtest_summary
 │
-├── 90_pipelines/
+├── 90__pipelines/
 │   ├── 91__full_pipeline.py          ← Job entry point — runs the pipeline in sequence
 │   └── 93__delta_maintenance.py      ← OPTIMIZE / VACUUM (gated on run_optimization)
 │
@@ -206,7 +206,7 @@ valuation_assumptions.json    edit valuation assumptions (WACC, growth, etc.)
 
 ## Favorites (`favorites.json`)
 
-Favorite tickers are managed by editing `00_config/favorites.json` directly in the Git repository. They are always included in ingestion and in the export to the public dashboard.
+Favorite tickers are managed by editing `00__config/favorites.json` directly in the Git repository. They are always included in ingestion and in the export to the public dashboard.
 
 ```json
 [
@@ -229,7 +229,7 @@ Favorite tickers are managed by editing `00_config/favorites.json` directly in t
 
 ## Hierarchies (`concept_hierarchy.json` and `metrics_hierarchy.json`)
 
-Both hierarchies are JSON files in `00_config/` editable from the repo. The pipeline flattens them into Delta tables on every run.
+Both hierarchies are JSON files in `00__config/` editable from the repo. The pipeline flattens them into Delta tables on every run.
 
 **`concept_hierarchy.json`** — accounting tree (Income Statement, Balance Sheet, Cash Flow): which concepts go under which group and in what order they appear in the dashboard.
 
@@ -283,7 +283,7 @@ ORDER BY error_type, ticker;
 
 ## Coverage check — `32__coverage_check`
 
-Post-pipeline notebook (`30_analysis/32__coverage_check.py`) that verifies all favorite tickers made it through the full pipeline. Checks:
+Post-pipeline notebook (`30__analysis/32__coverage_check.py`) that verifies all favorite tickers made it through the full pipeline. Checks:
 
 1. Favorites present in `config.tickers` but missing from `financials`
 2. Favorites present in `financials` but missing from `financials_metrics`
@@ -295,7 +295,7 @@ Post-pipeline notebook (`30_analysis/32__coverage_check.py`) that verifies all f
 
 ## Split-adjust check — `37__split_adjust_check`
 
-Post-pipeline notebook (`30_analysis/37__split_adjust_check.py`) that validates the split-adjust handling for cross-year per-share computations. Per-share concepts (EPS, Shares Diluted) are stored on the **as-originally-filed** split basis per fiscal year, so a stock split (e.g. NVDA 4:1 in 2021, 10:1 in 2024) creates a basis discontinuity that, left uncorrected, reads as a ~−75% / −90% collapse across the split year — corrupting trailing EPS-CAGR (→ Graham Revised), Net Buyback Yield %, and the Piotroski no-dilution signal. `_core/splits.py` rescales **only** those cross-year inputs to a consistent current basis (`factor(period_end) = ∏ ratio for split_date > period_end`); per-row IVs, price comparisons, market cap, and the P/E / Earnings Yield multiples are untouched. Checks:
+Post-pipeline notebook (`30__analysis/37__split_adjust_check.py`) that validates the split-adjust handling for cross-year per-share computations. Per-share concepts (EPS, Shares Diluted) are stored on the **as-originally-filed** split basis per fiscal year, so a stock split (e.g. NVDA 4:1 in 2021, 10:1 in 2024) creates a basis discontinuity that, left uncorrected, reads as a ~−75% / −90% collapse across the split year — corrupting trailing EPS-CAGR (→ Graham Revised), Net Buyback Yield %, and the Piotroski no-dilution signal. `_core/splits.py` rescales **only** those cross-year inputs to a consistent current basis (`factor(period_end) = ∏ ratio for split_date > period_end`); per-row IVs, price comparisons, market cap, and the P/E / Earnings Yield multiples are untouched. Checks:
 
 1. `stock_splits` landed, is non-empty, and has no malformed rows (NULL key / ratio ≤ 0)
 2. Known recent splits (NVDA, AAPL, TSLA, AMZN, GOOGL) are present (±3-day window, ratio within 1%) — advisory
@@ -404,7 +404,7 @@ Year-end adjusted closing prices fetched from Yahoo Finance via `yfinance`, join
 
 ## Metrics hierarchy — `main.config.metrics_hierarchy`
 
-Lookup table organising derived metrics into categories. Rebuilt every run from `00_config/metrics_hierarchy.json`. Join with `financials_metrics` by `metric` to add `category` / `subcategory` filters to the dashboard and get stable row ordering via `sort_order`.
+Lookup table organising derived metrics into categories. Rebuilt every run from `00__config/metrics_hierarchy.json`. Join with `financials_metrics` by `metric` to add `category` / `subcategory` filters to the dashboard and get stable row ordering via `sort_order`.
 
 | Column | Type | Description |
 |---|---|---|
@@ -430,7 +430,7 @@ AAPL   | Apple   | 2023        | P/E             |     28.74
 ```
 
 The metrics are organized into 8 categories. The full hierarchy lives in
-`00_config/metrics_hierarchy.json` and is materialized into `main.config.metrics_hierarchy`.
+`00__config/metrics_hierarchy.json` and is materialized into `main.config.metrics_hierarchy`.
 
 ### Profitability — Margins
 
@@ -638,15 +638,15 @@ Per-ticker `overrides` are **scenario-aware**: a lever that varies by scenario m
 `{bull, mid, bear}` object so the override doesn't collapse that name's spread; structural flags
 (`skip`, `horizon_years`) stay flat scalars.
 
-> Valuation metrics are only populated for `ticker / fiscal_year` combinations where `market_data` has a valid `market_cap`. Assumptions (WACC, growth, multiples, per-ticker and per-sector skips, per-scenario profiles) are configured in `00_config/valuation_assumptions.json` — editing it requires no code change.
+> Valuation metrics are only populated for `ticker / fiscal_year` combinations where `market_data` has a valid `market_cap`. Assumptions (WACC, growth, multiples, per-ticker and per-sector skips, per-scenario profiles) are configured in `00__config/valuation_assumptions.json` — editing it requires no code change.
 
 ---
 
-## Backtester — `70_backtest/71__run_backtest`
+## Backtester — `70__backtest/71__run_backtest`
 
 Applies named **investor-archetype** screens to historical fundamentals and reports forward
 returns, **with no look-ahead bias**. Archetypes are declared in
-`00_config/backtest_archetypes.json` — each is a list of `[metric, op, threshold]` predicates
+`00__config/backtest_archetypes.json` — each is a list of `[metric, op, threshold]` predicates
 (matching `financials_metrics` labels) plus a holdings cap and a ranking rule. Ships with
 `graham_defensive` (cheap + liquid + profitable), `lynch_garp` (GARP — PEG is not a stored
 metric, so it's approximated via a modest P/E + earnings growth), and `quality_compounder`
@@ -681,11 +681,11 @@ time, not just printed once. At the end of each run it writes:
 
 `run_id` = the run's start stamped `YYYYMMDDThhmmssZ`, tying both tables together. Telemetry is
 wrapped in try/except — a logging failure never aborts an otherwise-successful run. Read it with
-`30_analysis/36__run_log_report` (last N runs, latest-run step breakdown, coverage/freshness trend).
+`30__analysis/36__run_log_report` (last N runs, latest-run step breakdown, coverage/freshness trend).
 
 ---
 
-## Delta maintenance — `90_pipelines/93__delta_maintenance`
+## Delta maintenance — `90__pipelines/93__delta_maintenance`
 
 Idempotent `OPTIMIZE` (file compaction) + `VACUUM` (`RETAIN 168 HOURS`, never lowering the
 retention safety check) over `financials_raw`, `financials`, `financials_metrics`,
@@ -701,7 +701,7 @@ is an opt-in block, **disabled** by design (the table is append-only).
 
 **Live app: https://alm-equity-fundamentals.streamlit.app/**
 
-A read-only dashboard at Streamlit Community Cloud renders the same data without Databricks credentials. Currently serves ~2,500 tickers (S&P 500 + Russell 2000 proxy) with synthetic data for preview; production data is published via GitHub Release. See [`60_streamlit_app/README.md`](fundamentals_pipeline/60_streamlit_app/README.md) for details.
+A read-only dashboard at Streamlit Community Cloud renders the same data without Databricks credentials. Currently serves ~2,500 tickers (S&P 500 + Russell 2000 proxy) with synthetic data for preview; production data is published via GitHub Release. See [`60__frontends/61__streamlit/README.md`](fundamentals_pipeline/60__frontends/61__streamlit/README.md) for details.
 
 The landing-page **screener** filters the universe by index membership (All / S&P 500 / Russell 3000 / Favorites) and by **GICS sector** — the 11 canonical sectors sourced from `config.tickers.sector`, with a no-op `All sectors` default. Tickers with no sector (NULL/legacy artifacts) fall into an **Unknown** bucket. Each company's sector is also shown as a chip on the detail-page masthead.
 
@@ -809,7 +809,7 @@ table is still written for back-compat but new readers should use `pipeline_runs
 
 ### Querying run history
 
-`30_analysis/36__run_log_report` is a read-only report (pure `SELECT`s + `display()`, Databricks-only)
+`30__analysis/36__run_log_report` is a read-only report (pure `SELECT`s + `display()`, Databricks-only)
 over `pipeline_runs` + `pipeline_run_coverage`. It shows the last `N_RUNS` (= 20) runs with total
 duration / step count / failures, the latest run's per-step breakdown (slowest first), and the
 coverage/freshness trend over time.
@@ -855,7 +855,7 @@ All monetary values are displayed in **millions or billions USD** in the dashboa
 
 **Favorites in JSON, not Delta.** An earlier iteration used a Delta table (`main.config.favorites`) managed via a notebook. Simplified to `favorites.json` so the favorites list can be edited from the editor or GitHub without opening Databricks.
 
-**Hierarchies in JSON, not code.** Both `concept_hierarchy.json` and `metrics_hierarchy.json` live as declarative JSON in `00_config/`. Each has a master notebook that flattens it into a Delta lookup table. This decouples structure (order, grouping, categories) from transformation logic.
+**Hierarchies in JSON, not code.** Both `concept_hierarchy.json` and `metrics_hierarchy.json` live as declarative JSON in `00__config/`. Each has a master notebook that flattens it into a Delta lookup table. This decouples structure (order, grouping, categories) from transformation logic.
 
 **Why `fiscal_year` everywhere.** Migrated from `year` to `fiscal_year` to be semantically correct: SEC reports against fiscal years (which differ from calendar years for ~30% of US issuers). The column name is consistent across `financials`, `financials_metrics`, and `market_data` for join convenience, even though `market_data` stores calendar-year-end prices.
 

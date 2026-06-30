@@ -1,8 +1,8 @@
 """Scalar reference for cumulative stock-split adjustment factors.
 
 CONTRACT: mirrors the per-period split factor computed in Spark by
-``20_transformation/22__derived_metrics.py`` (Net Buyback Yield % / Piotroski no-dilution)
-and ``20_transformation/23__intrinsic_value.py`` (the trailing EPS-CAGR growth input). Those
+``20__transformation/22__derived_metrics.py`` (Net Buyback Yield % / Piotroski no-dilution)
+and ``20__transformation/23__intrinsic_value.py`` (the trailing EPS-CAGR growth input). Those
 two notebooks must produce the SAME factor as this function for a given ``(period_end, splits)``.
 
 A per-share figure (EPS, weighted-average share count) reported for a fiscal period ending at

@@ -6,7 +6,7 @@ This is a **library**, not a pipeline step, so it is intentionally exempt from t
 (``import math`` only) so it can be imported and unit-tested in plain CPython.
 
 The functions here are the *reference* implementations: the PySpark/numpy column
-algebra in ``20_transformation/23__intrinsic_value.py`` and ``22__derived_metrics.py``
+algebra in ``20__transformation/23__intrinsic_value.py`` and ``22__derived_metrics.py``
 must mirror these scalar definitions bit-for-bit. The scalar versions exist so the
 formulas are testable in isolation and so the PART 5 backtester can reuse them.
 """

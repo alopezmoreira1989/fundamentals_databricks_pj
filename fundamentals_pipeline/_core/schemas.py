@@ -1,7 +1,7 @@
 """Schema contract on the export ↔ Streamlit boundary — the single source of truth.
 
-The publish layer (``50_publish/51__export_dashboard_data.py``) writes three parquet
-artifacts plus a meta JSON; the public Streamlit app (``60_streamlit_app/lib/data.py``)
+The publish layer (``50__publish/51__export_dashboard_data.py``) writes three parquet
+artifacts plus a meta JSON; the public Streamlit app (``60__frontends/61__streamlit/lib/data.py``)
 reads them. This module pins the column set + dtype *family* of each artifact and the
 required keys of the meta JSON, so a pipeline change to the export can never silently
 ship a shape the app can't read:

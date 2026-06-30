@@ -1,0 +1,49 @@
+{
+  "_comment": "Investment-philosophy archetypes for 70__backtest/71__run_backtest. Each archetype is a list of [metric, op, threshold] predicates evaluated point-in-time on a fiscal year's metrics (from financials_metrics), plus a holdings cap and a ranking rule used when more names pass than the cap. Metric names MUST match labels stored in financials_metrics / metrics_hierarchy.json. Editing this file does NOT require code changes. Ops: < <= > >= == !=.",
+
+  "config": {
+    "as_of_lag_days": 90,
+    "_as_of_lag_days_doc": "When the 10-K filing date is unavailable, a fiscal year's metrics are treated as knowable only from period_end + this many days (filing-lag proxy). Enforces no look-ahead.",
+    "risk_free_rate": 0.04,
+    "_risk_free_doc": "Annual risk-free rate for the Sharpe ratio (decimal, 0.04 = 4%).",
+    "benchmark": "SPY",
+    "_benchmark_doc": "Benchmark ticker priced from market_prices_daily. If absent there, benchmark columns are NULL and the run degrades gracefully.",
+    "rebalance": "annual",
+    "weighting": "equal"
+  },
+
+  "archetypes": {
+    "graham_defensive": {
+      "description": "Graham defensive value — cheap on earnings and book, liquid, profitable.",
+      "max_holdings": 30,
+      "rank_by": ["P/E", "asc"],
+      "predicates": [
+        ["P/E", "<", 15],
+        ["P/B", "<", 1.5],
+        ["Current Ratio", ">", 2.0],
+        ["Net Margin %", ">", 0]
+      ]
+    },
+    "lynch_garp": {
+      "description": "Growth at a reasonable price (Lynch-style). NOTE: PEG is not a stored metric — approximated via a modest P/E combined with strong earnings growth.",
+      "max_holdings": 30,
+      "rank_by": ["Net Income YoY %", "desc"],
+      "predicates": [
+        ["P/E", "<", 20],
+        ["Net Income YoY %", ">", 15],
+        ["Net Margin %", ">", 0]
+      ]
+    },
+    "quality_compounder": {
+      "description": "High-quality compounders — high returns on capital, healthy margins, modest leverage.",
+      "max_holdings": 30,
+      "rank_by": ["ROIC %", "desc"],
+      "predicates": [
+        ["ROE %", ">", 15],
+        ["ROIC %", ">", 12],
+        ["Net Margin %", ">", 10],
+        ["Debt / Equity", "<", 1.0]
+      ]
+    }
+  }
+}

@@ -19,7 +19,10 @@ import pytest
 
 from fundamentals_pipeline._core import schemas
 
-FIXTURE_DIR = Path(__file__).resolve().parent.parent / "fundamentals_pipeline" / "60_streamlit_app" / "fixtures"
+FIXTURE_DIR = (
+    Path(__file__).resolve().parent.parent
+    / "fundamentals_pipeline" / "60__frontends" / "61__streamlit" / "fixtures"
+)
 
 
 # ── synthetic builders (satisfy the contract; no file reads) ──────────────────────

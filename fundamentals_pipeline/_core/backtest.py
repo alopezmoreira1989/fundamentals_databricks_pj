@@ -1,6 +1,6 @@
 """Pure backtest helpers — as-of eligibility, predicate evaluation, portfolio stats.
 
-CONTRACT: reused by ``70_backtest/71__run_backtest.py`` (pipeline) AND by the Streamlit
+CONTRACT: reused by ``70__backtest/71__run_backtest.py`` (pipeline) AND by the Streamlit
 ``views/backtest.py`` (the equity-curve metrics are derived client-side from the published
 series, so the same code runs in both places). No Spark/pandas/streamlit dependency — plain
 Python on lists/scalars/``datetime.date`` so it is unit-testable in isolation.

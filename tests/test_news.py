@@ -1,4 +1,4 @@
-"""Unit tests for the pure RSS parser in 60_streamlit_app/lib/news.py.
+"""Unit tests for the pure RSS parser in 60__frontends/61__streamlit/lib/news.py.
 
 Only ``_parse_feed`` / ``_fmt_pubdate`` are exercised — no network, no Streamlit
 runtime. ``lib.news`` imports ``streamlit`` (for ``st.cache_data``), so the whole

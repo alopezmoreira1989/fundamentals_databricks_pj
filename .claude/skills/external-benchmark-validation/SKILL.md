@@ -13,7 +13,7 @@ metadata:
 - This is **external** cross-validation (our value vs an independent source). For **internal**
   self-consistency use [[financials-invariants]] (structural) and [[validate-quarters]] (numeric).
   Don't conflate a definitional gap with a pipeline bug.
-- The primary tool is the **linkbase oracle reconciliation job** (`90_pipelines/92__reconciliation_job`)
+- The primary tool is the **linkbase oracle reconciliation job** (`90__pipelines/92__reconciliation_job`)
   — an independent ground truth built from each filer's own XBRL **presentation linkbase**, so a
   discrepancy can never be blamed on the SEC renderer. It produces a findings table + clustered
   parquet that a **human reviews (yes/no)** before any fix is coded.
@@ -29,7 +29,7 @@ metadata:
 | **B/C — value / scale / sign / period** | Given the chosen tag, is the value mangled? | `financials_raw` (companyfacts proxy, already ingested) | **universe-wide** |
 
 - **Tier A** needs the per-filing linkbase, so it runs only on the golden set
-  (`00_config/reconciliation_golden_set.json` ∪ `COMBINED_FILERS`). `14__fetch_oracle_statements`
+  (`00__config/reconciliation_golden_set.json` ∪ `COMBINED_FILERS`). `14__fetch_oracle_statements`
   parses `FilingSummary.xml` (`MenuCategory="Statements"`, `Role`→presentation role) + `*_pre.xml`
   (line items + `preferredLabel`) + `*_lab.xml` (labels, `negatedLabel`) + the instance (`*_htm.xml`,
   consolidated context only). It stores the **natural-sign, raw (unscaled)** value and a `negated`
@@ -42,12 +42,12 @@ metadata:
 
 ## Files & tables
 
-- `10_ingestion/14__fetch_oracle_statements.py` → `main.config.reconciliation_oracle`
-- `30_analysis/35__reconcile_filings.py` → `main.config.reconciliation_findings`
+- `10__ingestion/14__fetch_oracle_statements.py` → `main.config.reconciliation_oracle`
+- `30__analysis/35__reconcile_filings.py` → `main.config.reconciliation_findings`
   (+ view `main.config.reconciliation_open`, + `/tmp/reconciliation_findings.parquet`)
-- `90_pipelines/92__reconciliation_job.py` — orchestrates 14 then 35 (standalone, monthly/on-demand;
+- `90__pipelines/92__reconciliation_job.py` — orchestrates 14 then 35 (standalone, monthly/on-demand;
   **not** wired into `91__full_pipeline`)
-- `00_config/reconciliation_golden_set.json` — editable Tier-A scope
+- `00__config/reconciliation_golden_set.json` — editable Tier-A scope
 
 ## issue_class → root cause → fix mechanism
 
@@ -68,7 +68,7 @@ non-valuation; `low` otherwise.
 
 ## Procedure — running the reconciliation
 
-1. **Run the job:** `90_pipelines/92__reconciliation_job` as a Databricks Job (or run `14` then `35`
+1. **Run the job:** `90__pipelines/92__reconciliation_job` as a Databricks Job (or run `14` then `35`
    individually). `14` respects the SEC rate limit + real `SEC_USER_AGENT`; `35` is read-only against
    `financials`/`financials_raw`.
 2. **Review the clusters** in `/tmp/reconciliation_findings.parquet` (or
