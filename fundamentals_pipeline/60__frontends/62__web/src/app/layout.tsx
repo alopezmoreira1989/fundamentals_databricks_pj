@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Fraunces, Inter, JetBrains_Mono } from "next/font/google";
+import { NuqsAdapter } from "nuqs/adapters/next/app";
 import Nav from "@/components/Nav";
 import "./globals.css";
 
@@ -26,8 +27,10 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       className={`${fraunces.variable} ${inter.variable} ${jetbrainsMono.variable}`}
     >
       <body className="min-h-screen bg-bg font-sans text-ink antialiased">
-        <Nav />
-        <main className="mx-auto max-w-[1280px] px-5">{children}</main>
+        <NuqsAdapter>
+          <Nav />
+          <main className="mx-auto max-w-[1280px] px-5">{children}</main>
+        </NuqsAdapter>
       </body>
     </html>
   );
