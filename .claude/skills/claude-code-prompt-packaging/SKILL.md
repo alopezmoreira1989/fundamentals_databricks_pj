@@ -14,7 +14,7 @@ metadata:
 - **No production writes during diagnosis.** Reads, dry runs, and read-only validators only until the change is agreed. Never have a diagnosis step mutate Delta tables, publish a Release, or run ingestion.
 - **Idempotent and re-runnable.** Every edit instruction must be safe to apply twice (anchored edits, "create if absent", re-run-safe on the latest `scraped_at`).
 - **Complete files, not diffs/fragments**, so the receiving agent has unambiguous targets.
-- **Separate pipeline and frontend prompts.** Pipeline (`fundamentals_pipeline/00..50, 90`) and Streamlit (`60_streamlit_app`) have different runtimes, conventions, and blast radius — package them as distinct prompts.
+- **Separate pipeline and frontend prompts.** Pipeline (`fundamentals_pipeline/00..50, 90`) and Streamlit (`60__frontends/61__streamlit`) have different runtimes, conventions, and blast radius — package them as distinct prompts.
 - **Workflow: branch, validate, then merge to `main`.** GitHub `main` is the single source of truth; the Databricks Repo is a read-only mirror synced from `main`. Work on a feature branch (e.g. `dev_alm`), validate, then merge to `main` via the normal flow. **Do not force-push to `main`** — it triggers the sync and is the production source.
 
 ## Anatomy of a good prompt

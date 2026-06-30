@@ -1,6 +1,6 @@
 ---
 name: validate-concept-hierarchy
-description: Cross-check that 00_config/concept_hierarchy.json (dashboard layout) and the STATEMENTS maps in 00_config/01__tickers.py (ingestion contract) stay in sync, with an optional live check against main.financials.financials for orphan concepts. Reports concepts present in one file but not the other, statement mismatches, and invalid kind values. Use to validate or audit the hierarchy, to confirm the two lists are in sync after editing concept_hierarchy.json, or before a pipeline run that adds concepts. To author a new concept, map an XBRL tag, or fix a NULL or zero metric, use xbrl-concept-mapping.
+description: Cross-check that 00__config/concept_hierarchy.json (dashboard layout) and the STATEMENTS maps in 00__config/01__tickers.py (ingestion contract) stay in sync, with an optional live check against main.financials.financials for orphan concepts. Reports concepts present in one file but not the other, statement mismatches, and invalid kind values. Use to validate or audit the hierarchy, to confirm the two lists are in sync after editing concept_hierarchy.json, or before a pipeline run that adds concepts. To author a new concept, map an XBRL tag, or fix a NULL or zero metric, use xbrl-concept-mapping.
 metadata:
   author: Alejandro López Moreira
   version: 1.1.0
@@ -12,14 +12,14 @@ metadata:
 
 - This skill **validates**; it does not author. To add/map a concept or fix a NULL/zero metric, use [[xbrl-concept-mapping]] (then run this to confirm the result is in sync).
 - `01__tickers.py` is the **ingestion contract** (what gets fetched + the `kind` that drives quarterly derivation). `concept_hierarchy.json` is **layout only** (it cannot create data). When they disagree, the JSON is usually the side to fix.
-- Don't translate Spanish `_comment` / `_doc` fields in the JSON — Spanish prose in `00_config/*.json` is intentional (CLAUDE.md).
+- Don't translate Spanish `_comment` / `_doc` fields in the JSON — Spanish prose in `00__config/*.json` is intentional (CLAUDE.md).
 
 ## Purpose
 
 The pipeline has **two parallel concept lists** that must stay in lockstep:
 
-1. `fundamentals_pipeline/00_config/01__tickers.py` — `STATEMENTS = {"Income Statement": INCOME_STATEMENT, "Balance Sheet": BALANCE_SHEET, "Cash Flow": CASH_FLOW}`. Each entry maps a display name to `(xbrl_tag, kind)` — where `xbrl_tag` is a string for single-tag concepts or a list of fallback tags for multi-tag concepts (debt). This drives **ingestion** and the `kind` drives **quarterly derivation** in `21b__derive_quarterly.py`.
-2. `fundamentals_pipeline/00_config/concept_hierarchy.json` — drives **dashboard layout**: which concepts appear under which statement, in what order, with what `display_name`.
+1. `fundamentals_pipeline/00__config/01__tickers.py` — `STATEMENTS = {"Income Statement": INCOME_STATEMENT, "Balance Sheet": BALANCE_SHEET, "Cash Flow": CASH_FLOW}`. Each entry maps a display name to `(xbrl_tag, kind)` — where `xbrl_tag` is a string for single-tag concepts or a list of fallback tags for multi-tag concepts (debt). This drives **ingestion** and the `kind` drives **quarterly derivation** in `21b__derive_quarterly.py`.
+2. `fundamentals_pipeline/00__config/concept_hierarchy.json` — drives **dashboard layout**: which concepts appear under which statement, in what order, with what `display_name`.
 
 When these drift:
 - A concept in `01__tickers.py` but **missing from concept_hierarchy.json** → ingested into `main.financials.financials` but invisible in the dashboard.
@@ -39,8 +39,8 @@ When these drift:
 
 Read both files and build two sets:
 
-- From `fundamentals_pipeline/00_config/01__tickers.py`: parse `INCOME_STATEMENT`, `BALANCE_SHEET`, `CASH_FLOW` (top-level dict literals). For each `{display_name: (xbrl_tag, kind)}` entry, record `(stmt, display_name, kind)`. Note `xbrl_tag` may be a `list` (debt fallback chain) — that's valid. Flag any entry where `kind` is not in `{"flow_additive", "flow_nonadditive", "stock"}`.
-- From `fundamentals_pipeline/00_config/concept_hierarchy.json`: walk each top-level statement (`"Income Statement"`, `"Balance Sheet"`, `"Cash Flow"`) and each group's `children`. Record every `"concept"` value under `(stmt, concept)`. Ignore `"group"` nodes — they're visual-only (the JSON's `_comment` documents this).
+- From `fundamentals_pipeline/00__config/01__tickers.py`: parse `INCOME_STATEMENT`, `BALANCE_SHEET`, `CASH_FLOW` (top-level dict literals). For each `{display_name: (xbrl_tag, kind)}` entry, record `(stmt, display_name, kind)`. Note `xbrl_tag` may be a `list` (debt fallback chain) — that's valid. Flag any entry where `kind` is not in `{"flow_additive", "flow_nonadditive", "stock"}`.
+- From `fundamentals_pipeline/00__config/concept_hierarchy.json`: walk each top-level statement (`"Income Statement"`, `"Balance Sheet"`, `"Cash Flow"`) and each group's `children`. Record every `"concept"` value under `(stmt, concept)`. Ignore `"group"` nodes — they're visual-only (the JSON's `_comment` documents this).
 
 Then compute and report:
 

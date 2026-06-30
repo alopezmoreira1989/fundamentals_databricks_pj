@@ -21,12 +21,12 @@ metadata:
 ```python
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # 20_transformation / 24__my_step
+# MAGIC # 20__transformation / 24__my_step
 # MAGIC One-line purpose. Reads X, writes Y.
 
 # COMMAND ----------
 
-# MAGIC %run "../00_config/01__tickers"
+# MAGIC %run "../00__config/01__tickers"
 
 # COMMAND ----------
 
@@ -52,7 +52,7 @@ full_tbl = f"{CATALOG}.{SCHEMA}.{TABLE}"   # constants come from the %run above
 ```
 
 - Constants (`CATALOG`, `SCHEMA`, `TABLE`, `QUARTERLY_WINDOW`, concept maps) come from
-  `%run "../00_config/01__tickers"` — don't redefine them.
+  `%run "../00__config/01__tickers"` — don't redefine them.
 - Keep prose, markdown headers, and comments in the repo's bilingual style (Spanish is intentional in
   config and most module docs).
 
@@ -66,7 +66,7 @@ full_tbl = f"{CATALOG}.{SCHEMA}.{TABLE}"   # constants come from the %run above
 
 ## Wiring into the pipeline
 
-`90_pipelines/91__full_pipeline.py` runs the steps in sequence and records per-step wall-clock
+`90__pipelines/91__full_pipeline.py` runs the steps in sequence and records per-step wall-clock
 timing. To add a step: insert it in the correct stage order, pass through the job parameters it
 needs (`tickers_override`, `run_optimization`, `force_full_refresh`), and keep it idempotent
 (re-runnable on the latest `scraped_at` without duplicating rows). After adding a step that creates

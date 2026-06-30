@@ -25,7 +25,7 @@ This skill is the **structural** gate. For the numeric "do the quarters add up t
 - After a full pipeline run that touched ingestion, merge, or quarterly derivation.
 - When a Balance Sheet number looks doubled, stale, or inconsistent with the latest filing.
 - When TTM-based valuations or fiscal-year alignment look wrong.
-- Before and after editing `20_transformation/21__clean_and_merge.py` or `21b__derive_quarterly.py`.
+- Before and after editing `20__transformation/21__clean_and_merge.py` or `21b__derive_quarterly.py`.
 
 ## How to run
 
@@ -43,7 +43,7 @@ Or from a Databricks notebook cell (the global `spark` is reused automatically):
 
 It prints PASS / FAIL / SKIP per invariant and exits non-zero if any hard invariant fails. It only issues SELECTs — no writes, no MERGE, no DELETE. See `scripts/check_invariants.py` for the exact queries. Hard checks: BS dedup uniqueness, Q-sum rate gate, market_data calendar-year. INFO: two-statement concepts. SKIP: TTM ordering (a code-level invariant in `23__intrinsic_value.py`, not observable from the published tables — verify by code review).
 
-This same gate also runs inside the pipeline as **STEP 10b** of `90_pipelines/91__full_pipeline.py` via the notebook twin `30_analysis/34__invariants_check.py` (same queries, notebook form, raises on hard fail; the orchestrator wraps it non-fatally so a red invariant is logged without blocking the dashboard refresh). Keep the two in sync if you change a threshold.
+This same gate also runs inside the pipeline as **STEP 10b** of `90__pipelines/91__full_pipeline.py` via the notebook twin `30__analysis/34__invariants_check.py` (same queries, notebook form, raises on hard fail; the orchestrator wraps it non-fatally so a red invariant is logged without blocking the dashboard refresh). Keep the two in sync if you change a threshold.
 
 For the full SQL of each check and how to read borderline results, see:
 

@@ -1,6 +1,6 @@
 ---
 name: xbrl-concept-mapping
-description: How to add or map an SEC XBRL concept in 00_config/01__tickers.py the right way, using priority-list coalescing wherever multiple tags can carry the same line item, never a bare single-tag lookup that silently returns NULL or zero. Covers the two coalescing mechanisms (debt tag-fallback lists at ingestion, and synonym plus CONCEPT_PRIORITY collapse at merge), the Revenue and Debt canonical patterns, and the debt fallback chain that fixes Debt to Equity reading 0.00x. Use when asked to add a concept, map an XBRL tag, fix a metric that returns NULL or zero, or fix debt to equity. Grounded in 11__fetch_sec_xbrl.py and concept_hierarchy.json. To validate the result is in sync, use validate-concept-hierarchy.
+description: How to add or map an SEC XBRL concept in 00__config/01__tickers.py the right way, using priority-list coalescing wherever multiple tags can carry the same line item, never a bare single-tag lookup that silently returns NULL or zero. Covers the two coalescing mechanisms (debt tag-fallback lists at ingestion, and synonym plus CONCEPT_PRIORITY collapse at merge), the Revenue and Debt canonical patterns, and the debt fallback chain that fixes Debt to Equity reading 0.00x. Use when asked to add a concept, map an XBRL tag, fix a metric that returns NULL or zero, or fix debt to equity. Grounded in 11__fetch_sec_xbrl.py and concept_hierarchy.json. To validate the result is in sync, use validate-concept-hierarchy.
 metadata:
   author: Alejandro López Moreira
   version: 1.0.0
@@ -19,7 +19,7 @@ metadata:
 
 ## The data model
 
-In `fundamentals_pipeline/00_config/01__tickers.py`, `STATEMENTS` maps each statement to a dict of
+In `fundamentals_pipeline/00__config/01__tickers.py`, `STATEMENTS` maps each statement to a dict of
 `display_name: (xbrl_tag, kind)`:
 
 - `xbrl_tag` is a **string** (single tag, the common case) or a **list of strings** (priority-ordered fallback chain, used for debt).

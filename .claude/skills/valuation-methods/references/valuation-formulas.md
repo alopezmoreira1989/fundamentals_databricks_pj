@@ -1,7 +1,7 @@
 # Valuation formulas (reference)
 
-Ground truth from `fundamentals_pipeline/20_transformation/23__intrinsic_value.py` and
-`fundamentals_pipeline/00_config/valuation_assumptions.json`. Re-read those before relying on this;
+Ground truth from `fundamentals_pipeline/20__transformation/23__intrinsic_value.py` and
+`fundamentals_pipeline/00__config/valuation_assumptions.json`. Re-read those before relying on this;
 values captured at skill-authoring time. All methods are NumPy-vectorized and computed for both FY
 and TTM bases.
 

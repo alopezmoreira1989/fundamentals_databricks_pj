@@ -1,6 +1,6 @@
 ---
 name: streamlit-dashboard
-description: Conventions for editing the public Streamlit dashboard under fundamentals_pipeline/60_streamlit_app — the editorial design tokens (cream background, Fraunces / Inter / JetBrains Mono fonts, accent blue), English-only UI strings, the st.pills logical-bucket screener pattern, and the regression guards already in the code (import BLUE before use in render.py, never downcast the value column to float32 in data.py, html.escape company names rendered under unsafe_allow_html). Use when asked to add a Streamlit component, edit the screener UI, change dashboard styling, render a metric card, or work on lib/render.py, lib/data.py, or views. The app must stay free of any Databricks dependency.
+description: Conventions for editing the public Streamlit dashboard under fundamentals_pipeline/60__frontends/61__streamlit — the editorial design tokens (cream background, Fraunces / Inter / JetBrains Mono fonts, accent blue), English-only UI strings, the st.pills logical-bucket screener pattern, and the regression guards already in the code (import BLUE before use in render.py, never downcast the value column to float32 in data.py, html.escape company names rendered under unsafe_allow_html). Use when asked to add a Streamlit component, edit the screener UI, change dashboard styling, render a metric card, or work on lib/render.py, lib/data.py, or views. The app must stay free of any Databricks dependency.
 metadata:
   author: Alejandro López Moreira
   version: 1.0.0
@@ -20,14 +20,14 @@ metadata:
 
 ## Design tokens (summary)
 
-Defined in `60_streamlit_app/styles.css` (CSS vars), `.streamlit/config.toml` (Streamlit theme),
+Defined in `60__frontends/61__streamlit/styles.css` (CSS vars), `.streamlit/config.toml` (Streamlit theme),
 and mirrored as Python constants in `lib/colors.py`. Full table in `references/design-tokens.md`.
 
 - Background: cream `#FAF8F4`.
 - Fonts: `Fraunces` (display/serif), `Inter` (body sans), `JetBrains Mono` (mono).
 - Accent blue: `#185FA5` (= `BLUE` in `lib/colors.py`, `--accent` in CSS).
 
-## File map (60_streamlit_app)
+## File map (60__frontends/61__streamlit)
 
 - `app.py` — entry point.
 - `styles.css` + `.streamlit/config.toml` — theme.

@@ -1,7 +1,7 @@
 # Concept tag priorities & synonyms (reference)
 
 Ground-truth snapshot of the coalescing config in
-`fundamentals_pipeline/00_config/01__tickers.py`. Re-read the file before relying on these — it
+`fundamentals_pipeline/00__config/01__tickers.py`. Re-read the file before relying on these — it
 evolves. Values below were captured against the file at skill-authoring time.
 
 ## `kind` taxonomy

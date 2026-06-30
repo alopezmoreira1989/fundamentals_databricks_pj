@@ -19,13 +19,13 @@ metadata:
 
 Sanity-check that the quarterly decomposition of FY values in `main.financials.financials` reconciles to within rounding error. This is the validation query the README documents but never automates.
 
-Recall the invariant from CLAUDE.md: **Q4 is intentionally derived as `FY − YTD_Q3`** to capture year-end audit adjustments. So `Q1+Q2+Q3+Q4` should equal FY by construction, modulo float rounding. Material divergence indicates either (a) a bug in `20_transformation/21b__derive_quarterly.py`, (b) a stale prune in `20_transformation/21c__prune_quarterly.py`, or (c) an SEC re-statement that didn't merge cleanly.
+Recall the invariant from CLAUDE.md: **Q4 is intentionally derived as `FY − YTD_Q3`** to capture year-end audit adjustments. So `Q1+Q2+Q3+Q4` should equal FY by construction, modulo float rounding. Material divergence indicates either (a) a bug in `20__transformation/21b__derive_quarterly.py`, (b) a stale prune in `20__transformation/21c__prune_quarterly.py`, or (c) an SEC re-statement that didn't merge cleanly.
 
 ## When to run
 
 - After a full pipeline run that modified ingestion or transformation.
 - When the user asks "is the quarterly data sane?" or names a suspect ticker.
-- Before making changes to `20_transformation/21b__derive_quarterly.py` or `21c__prune_quarterly.py` — to capture a baseline.
+- Before making changes to `20__transformation/21b__derive_quarterly.py` or `21c__prune_quarterly.py` — to capture a baseline.
 
 ## How to run
 
@@ -42,7 +42,7 @@ WITH q AS (
     WHERE stmt IN ('Income Statement', 'Cash Flow')
       -- Exclude flow_nonadditive concepts: per-share / share-count values DON'T sum across
       -- quarters (Q4 is NULL by design), so they'd show huge false rel_diff. Keep this list in
-      -- sync with kind='flow_nonadditive' in 00_config/01__tickers.py (STATEMENTS).
+      -- sync with kind='flow_nonadditive' in 00__config/01__tickers.py (STATEMENTS).
       AND concept NOT IN ('EPS Basic', 'EPS Diluted', 'Shares Diluted')
     -- GROUP BY includes `stmt` ON PURPOSE: Net Income (and D&A, SBC, …) appear in BOTH the
     -- Income Statement AND the Cash Flow statement with identical values. Grouping without
@@ -86,7 +86,7 @@ Interpret the **rate** (divergent / checked), not the raw count — the universe
   2. `21b__derive_quarterly.py` — `kind` mis-tagged (`flow_additive` vs `flow_nonadditive`), or the
      FY-tag pin drawing YTD from a different tag than FY.
   3. `21c__prune_quarterly.py` — pruned a quarter still load-bearing for an old fiscal_year. Check
-     `QUARTERLY_WINDOW` (= 12 in `00_config/01__tickers.py`) vs the row's `fiscal_year`.
+     `QUARTERLY_WINDOW` (= 12 in `00__config/01__tickers.py`) vs the row's `fiscal_year`.
 - **Concept appears at ~100% divergence** → you almost certainly dropped `stmt` from the GROUP BY
   (double-counting a two-statement concept like Net Income). Re-add it.
 

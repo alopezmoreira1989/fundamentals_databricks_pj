@@ -1,6 +1,6 @@
 # Design tokens (reference)
 
-Ground truth from `fundamentals_pipeline/60_streamlit_app/`. Re-read the files before relying on
+Ground truth from `fundamentals_pipeline/60__frontends/61__streamlit/`. Re-read the files before relying on
 these; captured at skill-authoring time.
 
 ## Colors

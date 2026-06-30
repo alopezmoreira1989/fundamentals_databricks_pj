@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-STREAMLIT_APP = ROOT / "fundamentals_pipeline" / "60_streamlit_app"
+STREAMLIT_APP = ROOT / "fundamentals_pipeline" / "60__frontends" / "61__streamlit"
 
 for _p in (ROOT, STREAMLIT_APP):
     _sp = str(_p)
