@@ -38,8 +38,9 @@ web (Django)  ──imports──▶  fundamentals_pipeline  ◀──imports─
 
 ## Data access architecture (locked)
 
-Every access to persistent data goes through a repository. The dependency flow is strict
-and one-directional — each tier calls only the one below it:
+Every access to persistent data goes through a repository — with one judgment-based
+exception for trivial Django-ORM CRUD (see *When a repository earns its place*, below). The
+dependency flow is strict and one-directional — each tier calls only the one below it:
 
 ```
 views  →  services  →  repositories  →  DuckDB / PostgreSQL  →  fundamentals_pipeline (when business logic is required)
@@ -55,9 +56,11 @@ engine + artifact store today, the Django ORM later. Repositories are its only c
 - **Services** (`services/`) — coordinate application use cases; call `fundamentals_pipeline`
   when business logic is required; coordinate one or more repositories; contain application
   workflow only. **Never execute SQL.**
-- **Repositories** (`repositories/`) — the *only* layer allowed to access DuckDB or
-  PostgreSQL; hide storage implementation details; return domain objects / DTOs. **Never
-  contain business rules or financial calculations.**
+- **Repositories** (`repositories/`) — the *only* layer allowed to access analytical
+  storage (DuckDB / Parquet / a future Databricks SQL backend) and the home for any
+  non-trivial ORM access; hide storage implementation details; return domain objects / DTOs.
+  **Never contain business rules or financial calculations.** (Trivial ORM CRUD may skip the
+  repository — see *When a repository earns its place*.)
 - **`fundamentals_pipeline`** — the single source of truth: owns all financial, valuation,
   screening, transformation, and business-rule logic.
 
@@ -78,17 +81,47 @@ change. This is the litmus test for whether a piece of code sits in the right ti
 storage swap would force an edit to a view or a service, that view/service is reaching past
 its layer.
 
+### When a repository earns its place (judgment over mechanism)
+
+The repository pattern must add architectural value, not boilerplate. Introduce a repository
+when it provides one or more of: **storage abstraction, complex queries, DTO mapping,
+aggregation, multiple data sources, caching, or infrastructure isolation.**
+
+- **Mandatory — always behind a repository:** DuckDB, Parquet artifacts, a future Databricks
+  SQL backend, and any external/analytical storage. These *are* the storage-abstraction /
+  replaceability cases the goal above protects, so the mandate is absolute regardless of how
+  simple the query looks.
+- **Exception — trivial Django-ORM CRUD** (e.g. `CustomUser`): simple create/read/update/
+  delete on ORM-backed application models may use the ORM **directly from the service layer**
+  when a repository would only duplicate the ORM API. Wrapping `User.objects.get(pk=...)` in
+  a pass-through repository adds indirection, not value. Promote to a repository the moment
+  the access earns one of the value bullets above — a non-trivial/composed query, DTO mapping
+  across models, aggregation, caching, or hiding a second data source.
+
+The exception is narrow: it covers ORM CRUD only. Analytical storage (DuckDB / Parquet /
+Databricks) is **never** touched from a view or service — always through a repository.
+
 ## Web layer layout
 
+Two placement axes: **domain-specific** code lives inside its Django app; **cross-cutting**
+code shared by several apps lives in the top-level tier packages.
+
 - `config/` — Django project (settings `base`/`dev`; `prod` added at deployment).
-- `apps/` — `users`, `companies`, `screener`, `valuation`, `watchlists`, `favorites`,
-  `history`, `api`. **Views/presentation + user-domain only** (top tier — call `services/`).
-- `services/` — application/use-case orchestration (the tier views call). Calls
-  `repositories/` for data and `fundamentals_pipeline` for business logic; no persistence.
-- `repositories/` — domain read/write repositories → DTOs. The **only** tier that touches
-  `infrastructure/` or the ORM. No business logic (delegates to `fundamentals_pipeline`).
-- `infrastructure/` — DuckDB/PostgreSQL access: `storage` (fetch/validate/cache the Release
-  artifacts) and `duckdb` (query engine over the cached parquet). No business logic.
+- `apps/<name>/` — one app per domain (`users`, `companies`, `screener`, `valuation`,
+  `watchlists`, `favorites`, `history`, `api`). Holds that app's `views.py`, `urls.py`, and
+  app-specific `services.py`; plus `models.py` **only if the app owns PostgreSQL application
+  data** (e.g. `users`, `favorites`). Purely analytical apps (`valuation`, `screener`) own no
+  Postgres data and have no `models.py` — they read pipeline artifacts through a repository.
+- `services/` — **cross-cutting** application services used by more than one app (single-app
+  workflow stays in `apps/<name>/services.py`). Coordinate repositories + `fundamentals_
+  pipeline`; no persistence, no raw SQL.
+- `repositories/` — **shared** repositories → DTOs (the DuckDB/artifact reads reused across
+  `companies`/`screener`/`valuation`). The only tier that touches analytical storage. No
+  business logic (delegates to `fundamentals_pipeline`); trivial ORM CRUD may bypass it.
+- `infrastructure/` — storage backends, **organized by backend so each is swappable in
+  isolation**: `duckdb/` (query engine over the cached parquet) and `storage/` (fetch/
+  validate/cache the Release Parquet/JSON artifacts) today; a `postgres/` / `databricks/`
+  adapter is added only when a backend actually needs one — not pre-stubbed. No business logic.
 - `templates/`, `static/`, `media/` — presentation assets (created as they gain content).
 
 ## Notes carried across phases
