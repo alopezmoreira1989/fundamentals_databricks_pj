@@ -21,7 +21,7 @@ from typing import Any
 
 import duckdb
 
-from services.storage import PARQUET_FILES, parquet_path
+from infrastructure.storage import PARQUET_FILES, parquet_path
 
 # view name → artifact key (into fundamentals_pipeline.schemas.ARTIFACT_NAMES).
 VIEWS: dict[str, str] = {

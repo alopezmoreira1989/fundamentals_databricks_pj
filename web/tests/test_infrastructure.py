@@ -1,4 +1,4 @@
-"""Tests for the read-only services layer (storage + duckdb) against fixture artifacts.
+"""Tests for the infrastructure tier (storage + duckdb) against fixture artifacts.
 
 No database and no network: the ``artifacts_from_fixtures`` fixture repoints the storage
 layer at the committed Streamlit fixtures, and DuckDB queries the parquet files directly.
@@ -7,8 +7,8 @@ layer at the committed Streamlit fixtures, and DuckDB queries the parquet files 
 from __future__ import annotations
 
 import pytest
-from services import duckdb as db
-from services import storage
+from infrastructure import duckdb as db
+from infrastructure import storage
 
 
 def test_meta_validates_and_lists_tickers(artifacts_from_fixtures):

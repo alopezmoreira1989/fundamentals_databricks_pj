@@ -28,18 +28,40 @@ web (Django)  ──imports──▶  fundamentals_pipeline  ◀──imports─
 3. **No `sys.path` manipulation.** Every environment installs the package the same way
    (`pip install -e .`): Django, tests, scripts, Streamlit, and Databricks (via the
    `91__full_pipeline` session-dependencies cell).
-4. **Django reads published Parquet artifacts via DuckDB** (`web/services/`), never runs
-   analytical queries against Databricks during user requests.
+4. **Django reads published Parquet artifacts via DuckDB** (`web/infrastructure/`), never
+   runs analytical queries against Databricks during user requests.
 5. **PostgreSQL stores only application data** (users, sessions, watchlists, favorites,
    history, preferences) — never financial data.
+6. **Every access to persistent data goes through the repository tier.** Views must never
+   query DuckDB or PostgreSQL directly, and neither must application services. The layering
+   is strict and one-directional — each tier calls only the one below it:
+
+   ```
+   views  →  services  →  repositories  →  infrastructure (DuckDB / PostgreSQL)  →  fundamentals_pipeline
+   ```
+
+   - **views** (`apps/*/views.py`) — HTTP + presentation only; call **services**.
+   - **services** (`services/`) — application/use-case orchestration; call **repositories**
+     (and `fundamentals_pipeline` for business logic). Never touch a storage engine/ORM.
+   - **repositories** (`repositories/`) — the *only* tier that reads/writes persistent data
+     (the DuckDB engine, the artifact store, and — later — the Django ORM); return DTOs.
+   - **infrastructure** (`infrastructure/`) — raw DuckDB/artifact + ORM access primitives.
+   - **fundamentals_pipeline** — the installed package; all financial logic (rule 2).
+
+   This keeps the presentation layer independent of storage details, so swapping DuckDB for
+   another engine (or the artifact source) touches only `infrastructure/` + `repositories/`.
 
 ## Web layer layout
 
 - `config/` — Django project (settings `base`/`dev`; `prod` added at deployment).
 - `apps/` — `users`, `companies`, `screener`, `valuation`, `watchlists`, `favorites`,
-  `history`, `api`. Presentation + user-domain only.
-- `services/` — `storage` (fetch/validate/cache artifacts), `duckdb` (query engine),
-  `repositories` (domain read-repositories → DTOs). Read-only; no business logic.
+  `history`, `api`. **Views/presentation + user-domain only** (top tier — call `services/`).
+- `services/` — application/use-case orchestration (the tier views call). Calls
+  `repositories/` for data and `fundamentals_pipeline` for business logic; no persistence.
+- `repositories/` — domain read/write repositories → DTOs. The **only** tier that touches
+  `infrastructure/` or the ORM. No business logic (delegates to `fundamentals_pipeline`).
+- `infrastructure/` — DuckDB/PostgreSQL access: `storage` (fetch/validate/cache the Release
+  artifacts) and `duckdb` (query engine over the cached parquet). No business logic.
 - `templates/`, `static/`, `media/` — presentation assets (created as they gain content).
 
 ## Notes carried across phases

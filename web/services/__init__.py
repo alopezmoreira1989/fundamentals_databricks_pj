@@ -1,5 +1,13 @@
-"""Read-only access layer to the published pipeline artifacts (DuckDB over Parquet).
+"""Services tier — application / use-case orchestration.
 
-Contains no business logic — financial calculations live exclusively in the
-`fundamentals_pipeline` package. Implemented in Phase 2.
+The layer views call. A service coordinates one use case: it invokes the ``repositories``
+tier for data (never a storage engine or the ORM directly) and calls
+``fundamentals_pipeline`` when business logic is required, then returns plain
+DTOs/primitives to the view. It holds orchestration, not persistence details and not
+financial formulas.
+
+Dependency rule (enforced project-wide — see ``docs/architecture.md``):
+    views → services → repositories → infrastructure (DuckDB / PostgreSQL) → fundamentals_pipeline
+
+Populated as endpoints are built; empty in the scaffold phase.
 """
