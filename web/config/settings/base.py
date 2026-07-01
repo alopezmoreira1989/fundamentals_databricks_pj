@@ -80,9 +80,10 @@ DATABASES = {
     ),
 }
 
-# NOTE (Phase 4): a custom user model — AUTH_USER_MODEL = "apps.users.User" — will be
-# introduced in the users app BEFORE the first `migrate`. No migration runs in Phase 1,
-# so this can still be set without the painful post-migrate swap.
+# Custom user model, set BEFORE the first migration (no migration ran in Phase 1/2), so the
+# project never touches Django's default User. `users` is the app *label* (the app's name is
+# `apps.users`; Django derives the label from the last component). See apps/users/models.py.
+AUTH_USER_MODEL = "users.User"
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
@@ -100,6 +101,9 @@ STATIC_URL = "static/"
 MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
+# Framework tables (auth/admin/sessions/contenttypes) keep BigAutoField. OUR application
+# models must instead declare an explicit UUID primary key (see docs/architecture.md → UUID
+# primary keys) — never AutoField/BigAutoField for application entities.
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # ── Published data artifacts (read-only analytical source) ───────────────────────────

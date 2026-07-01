@@ -124,11 +124,26 @@ code shared by several apps lives in the top-level tier packages.
   adapter is added only when a backend actually needs one — not pre-stubbed. No business logic.
 - `templates/`, `static/`, `media/` — presentation assets (created as they gain content).
 
+## Model conventions (locked)
+
+- **UUID primary keys for every application model, from the start.** Application entities
+  declare an explicit `id = models.UUIDField(primary_key=True, default=uuid.uuid4,
+  editable=False)` — never `AutoField`/`BigAutoField`. UUID keys avoid a later pk migration
+  and suit a distributed system (no central sequence; keys are safe to generate anywhere and
+  to expose in URLs). `DEFAULT_AUTO_FIELD` stays `BigAutoField` because it governs only the
+  framework's own tables (auth/admin/sessions/contenttypes), which are not our entities.
+- **Custom user model (`apps/users/models.py`):** `User(AbstractUser)` — keeps username
+  login and Django's permission/staff/superuser plumbing; adds a **UUID pk** and a
+  **unique, required email**. A small `UserManager` enforces the email invariant on
+  `create_user`/`create_superuser`. Intentionally minimal (YAGNI) — no profile fields yet.
+  `AUTH_USER_MODEL = "users.User"` was set **before the first migration**, so Django's
+  default User was never migrated. Users CRUD uses the ORM directly from the service layer
+  (no `UserRepository` — see *When a repository earns its place*).
+
 ## Notes carried across phases
 
-- **Custom user model:** introduced in the `users` app with `AUTH_USER_MODEL` set **before
-  the first `migrate`** (Phase 4). Phase 1 runs no migration, so this stays trap-free.
 - **Docker build context is the repo root**, so the web image can install the sibling
   `fundamentals_pipeline` package.
 - **Test suites are separate:** the root `pytest` (`testpaths=["tests"]`) covers the
-  pipeline library; the web layer gets its own `pytest-django` config when it has tests.
+  pipeline library; the web layer has its own `pytest-django` config (`web/pytest.ini`,
+  `DJANGO_SETTINGS_MODULE=config.settings.test` → SQLite in-memory, no Postgres needed).
