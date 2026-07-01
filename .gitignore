@@ -29,6 +29,12 @@ CLAUDE.local.md
 # Dashboards generados (HTML autocontenidos)
 fundamentals_pipeline/40_dashboards/output/
 
+# Django web layer (web/) — local secrets, DB, and collected assets
+web/.env
+web/db.sqlite3
+web/staticfiles/
+web/media/
+
 # Node web frontend (fundamentals_pipeline/60__frontends/62__web)
 fundamentals_pipeline/60__frontends/62__web/node_modules/
 fundamentals_pipeline/60__frontends/62__web/.next/
