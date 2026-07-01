@@ -3,15 +3,16 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "fundamentals-core"
+name = "fundamentals-pipeline"
 version = "0.1.0"
-description = "Pure-Python financial domain library shared by the Databricks pipeline and the Django web app: the export/app schema contract, the scalar valuation/backtest reference formulas, and period (Q4) arithmetic. No Spark / Databricks / Streamlit / Django dependency."
-readme = "fundamentals_core/README.md"
+description = "The project's pipeline package: the export/app schema contract and the pure-Python financial reference logic (valuation, backtest, period arithmetic, splits). Imported as a standard installable package by the Databricks pipeline, the tests, and the Django web app — no sys.path manipulation. No Spark / Databricks / Streamlit / Django dependency in the importable modules."
+readme = "fundamentals_pipeline/README.md"
 requires-python = ">=3.10"
 dependencies = []
 
-# Only the shared library is an installable package. The pipeline stage dirs
-# (00__config, 10__ingestion, …) are Databricks notebook sources, not importable
-# packages, so setuptools must NOT auto-discover them — pin the package list explicitly.
+# `fundamentals_pipeline` is the one importable package. Its NN__ subdirectories
+# (00__config, 10__ingestion, …, 60__frontends) are Databricks notebook sources, not
+# importable sub-packages (digit-prefixed names aren't valid module names), so setuptools
+# must NOT auto-discover — the package list is pinned explicitly.
 [tool.setuptools]
-packages = ["fundamentals_core"]
+packages = ["fundamentals_pipeline"]

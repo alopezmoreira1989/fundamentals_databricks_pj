@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from fundamentals_core import splits as s
+from fundamentals_pipeline import splits as s
 
 NVDA = [(date(2021, 7, 20), 4.0), (date(2024, 6, 10), 10.0)]
 

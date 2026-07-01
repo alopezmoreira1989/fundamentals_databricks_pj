@@ -1,6 +1,6 @@
 // Shared data-layer types — the contract between the published Release artifacts
 // (produced by 50__publish/51__export_dashboard_data.py, asserted against
-// fundamentals_core/schemas.py) and this web frontend.
+// fundamentals_pipeline/schemas.py) and this web frontend.
 //
 // This mirrors the Streamlit `lib/data.py` loaders 1:1; keep the two in sync when the
 // artifact contract changes. Required keys here track META_REQUIRED_KEYS / TICKER_REQUIRED_KEYS
