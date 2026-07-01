@@ -32,24 +32,51 @@ web (Django)  ──imports──▶  fundamentals_pipeline  ◀──imports─
    runs analytical queries against Databricks during user requests.
 5. **PostgreSQL stores only application data** (users, sessions, watchlists, favorites,
    history, preferences) — never financial data.
-6. **Every access to persistent data goes through the repository tier.** Views must never
-   query DuckDB or PostgreSQL directly, and neither must application services. The layering
-   is strict and one-directional — each tier calls only the one below it:
+6. **Every access to persistent data goes through the repository tier** — the full contract
+   is the **Data access architecture** section below (responsibilities, forbidden list, and
+   the replaceable-storage goal). Views and services never query DuckDB/PostgreSQL directly.
 
-   ```
-   views  →  services  →  repositories  →  infrastructure (DuckDB / PostgreSQL)  →  fundamentals_pipeline
-   ```
+## Data access architecture (locked)
 
-   - **views** (`apps/*/views.py`) — HTTP + presentation only; call **services**.
-   - **services** (`services/`) — application/use-case orchestration; call **repositories**
-     (and `fundamentals_pipeline` for business logic). Never touch a storage engine/ORM.
-   - **repositories** (`repositories/`) — the *only* tier that reads/writes persistent data
-     (the DuckDB engine, the artifact store, and — later — the Django ORM); return DTOs.
-   - **infrastructure** (`infrastructure/`) — raw DuckDB/artifact + ORM access primitives.
-   - **fundamentals_pipeline** — the installed package; all financial logic (rule 2).
+Every access to persistent data goes through a repository. The dependency flow is strict
+and one-directional — each tier calls only the one below it:
 
-   This keeps the presentation layer independent of storage details, so swapping DuckDB for
-   another engine (or the artifact source) touches only `infrastructure/` + `repositories/`.
+```
+views  →  services  →  repositories  →  DuckDB / PostgreSQL  →  fundamentals_pipeline (when business logic is required)
+```
+
+(In this repo the "DuckDB / PostgreSQL" tier is the `infrastructure/` package — the DuckDB
+engine + artifact store today, the Django ORM later. Repositories are its only caller.)
+
+### Responsibilities
+
+- **Views** (`apps/*/views.py`) — handle HTTP requests; validate input; call services;
+  return HTML or JSON. **Never access storage directly.**
+- **Services** (`services/`) — coordinate application use cases; call `fundamentals_pipeline`
+  when business logic is required; coordinate one or more repositories; contain application
+  workflow only. **Never execute SQL.**
+- **Repositories** (`repositories/`) — the *only* layer allowed to access DuckDB or
+  PostgreSQL; hide storage implementation details; return domain objects / DTOs. **Never
+  contain business rules or financial calculations.**
+- **`fundamentals_pipeline`** — the single source of truth: owns all financial, valuation,
+  screening, transformation, and business-rule logic.
+
+### Forbidden
+
+- **Views must never** execute SQL, query DuckDB, query PostgreSQL, read Parquet files, or
+  contain business logic.
+- **Services must never** execute raw SQL, or depend on Django models for business rules.
+- **Repositories must never** implement financial formulas, perform valuations, or contain
+  screening logic.
+
+### Goal — the storage layer must be replaceable
+
+Swapping the storage engine — e.g. **DuckDB → Databricks SQL / PostgreSQL / Snowflake /
+BigQuery** — must require changes **only inside the repository tier** (and the
+`infrastructure/` adapters it wraps). Views, services, and `fundamentals_pipeline` must not
+change. This is the litmus test for whether a piece of code sits in the right tier: if a
+storage swap would force an edit to a view or a service, that view/service is reaching past
+its layer.
 
 ## Web layer layout
 
