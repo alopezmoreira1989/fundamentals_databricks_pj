@@ -101,3 +101,20 @@ MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# ── Published data artifacts (read-only analytical source) ───────────────────────────
+# The web layer reads the same GitHub Release `latest` parquet/JSON artifacts as the
+# Streamlit app (published by 50__publish/51+52). It NEVER queries Databricks at request
+# time. `services/storage` fetches + caches these locally; `services/duckdb` queries the
+# cached files. The schema is validated against `fundamentals_pipeline.schemas`.
+ARTIFACTS_BASE_URL = env(
+    "ARTIFACTS_BASE_URL",
+    default="https://github.com/alopezmoreira1989/fundamentals_databricks_pj/releases/download/latest",
+)
+# Where fetched artifacts are cached on disk (gitignored). One copy shared by all workers.
+ARTIFACTS_CACHE_DIR = Path(env("ARTIFACTS_CACHE_DIR", default=str(BASE_DIR / ".artifact_cache")))
+# Re-download an artifact once its cached copy is older than this many seconds.
+ARTIFACTS_TTL = env.int("ARTIFACTS_TTL", default=600)
+# Dev/offline override: if set, artifacts are read straight from this local directory
+# (e.g. the Streamlit `fixtures/`) and the network is never touched. Empty ⇒ use the Release.
+ARTIFACTS_LOCAL_DIR = env("ARTIFACTS_LOCAL_DIR", default="")

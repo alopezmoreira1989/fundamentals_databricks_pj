@@ -34,6 +34,7 @@ web/.env
 web/db.sqlite3
 web/staticfiles/
 web/media/
+web/.artifact_cache/
 
 # Node web frontend (fundamentals_pipeline/60__frontends/62__web)
 fundamentals_pipeline/60__frontends/62__web/node_modules/

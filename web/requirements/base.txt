@@ -6,3 +6,11 @@
 Django>=5.0,<6
 django-environ>=0.11,<1
 psycopg[binary]>=3.1,<4
+
+# Read-only analytical stack over the published Release parquet artifacts (services/).
+requests>=2.31,<3
+duckdb>=1.0,<2
+# pandas + pyarrow are used only to validate a small head-slice of each parquet artifact
+# against fundamentals_pipeline.schemas (queries go through DuckDB, not pandas).
+pandas>=2.0,<3
+pyarrow>=15
