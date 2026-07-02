@@ -79,15 +79,25 @@ def test_company_service_composes_detail(artifacts_from_fixtures):
     assert company_services.get_company_detail("NOTAREALTICKER") is None
 
 
-# ── views (JSON) ─────────────────────────────────────────────────────────────────────
-def test_company_view_200_and_404(artifacts_from_fixtures, client):
+# ── views ────────────────────────────────────────────────────────────────────────────
+def test_company_page_html_200_and_404(artifacts_from_fixtures, client):
     resp = client.get(f"/companies/{TICKER.lower()}/")  # lower-case → view upper-cases it
+    assert resp.status_code == 200
+    assert resp["Content-Type"].startswith("text/html")
+    html = resp.content.decode()
+    assert TICKER in html and "Metrics" in html  # ticker badge + metrics table rendered
+
+    assert client.get("/companies/notareal/").status_code == 404
+
+
+def test_company_data_json_200_and_404(artifacts_from_fixtures, client):
+    resp = client.get(f"/companies/{TICKER.lower()}/data/")
     assert resp.status_code == 200
     body = resp.json()
     assert body["ticker"] == TICKER
     assert isinstance(body["metrics"], list) and body["metrics"]
 
-    assert client.get("/companies/notareal/").status_code == 404
+    assert client.get("/companies/notareal/data/").status_code == 404
 
 
 def test_screener_view_requires_metric(artifacts_from_fixtures, client):
