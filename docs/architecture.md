@@ -101,6 +101,28 @@ aggregation, multiple data sources, caching, or infrastructure isolation.**
 The exception is narrow: it covers ORM CRUD only. Analytical storage (DuckDB / Parquet /
 Databricks) is **never** touched from a view or service — always through a repository.
 
+### Read model & query strategy (locked)
+
+DuckDB is a **read-only analytical store**. The read path obeys:
+
+- **Repositories return immutable DTOs, not raw rows.** A repository maps query results to
+  frozen dataclasses (or domain objects) — never hands a `dict`, tuple, `Row`, or DataFrame
+  up to a service/view. **Views and services must not depend on SQL column names**; they
+  see typed DTO attributes, so a column rename lives and dies inside the repository.
+- **Repositories own all SQL. No SQL anywhere else.** Every query is **parameterized**
+  (bound `?` placeholders — never string-formatted values). **No `SELECT *`** — list exactly
+  the columns the DTO needs, so a schema change can't silently reshape a result.
+- **Push work into DuckDB; don't over-fetch.** Filter, aggregate, and `LIMIT` in SQL so the
+  parquet scan reads only the needed rows/columns (DuckDB does predicate + projection
+  pushdown). Never load an entire parquet artifact into memory to filter it in Python.
+  Avoid unnecessary copies; prefer streaming/lazy evaluation where a result set is large.
+- **Services stay storage-agnostic.** A service coordinates repositories and
+  `fundamentals_pipeline`; it does not know how (or that) DuckDB stores the data.
+
+**Goal:** replacing DuckDB with another analytical backend (Databricks SQL, Postgres,
+Snowflake, BigQuery) changes **only the repositories** (+ their `infrastructure/` adapters).
+The DTOs they return, and every view/service/pipeline above them, remain untouched.
+
 ## Web layer layout
 
 Two placement axes: **domain-specific** code lives inside its Django app; **cross-cutting**

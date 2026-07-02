@@ -2,3 +2,6 @@
 pytest>=8,<9
 pytest-django>=4.8,<5
 ruff>=0.6
+# Static type checking for the Django code (django-stubs pins a compatible mypy).
+mypy>=1.11,<2
+django-stubs[compatible-mypy]>=5.0,<6
