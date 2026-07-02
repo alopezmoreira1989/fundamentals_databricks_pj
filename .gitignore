@@ -35,7 +35,7 @@ web/db.sqlite3
 web/staticfiles/
 web/media/
 web/.artifact_cache/
-web/dev.sqlite3
+web/*.sqlite3
 
 # Sistema
 Thumbs.db

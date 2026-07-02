@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Log in — Fundamentals{% endblock %}
+{% block content %}
+  <div class="row justify-content-center">
+    <div class="col-12 col-md-6 col-lg-5">
+      <div class="bg-white rounded-3 shadow-sm p-4">
+        <h1 class="h4 mb-3">Log in</h1>
+        {% if form.non_field_errors %}
+          <div class="alert alert-warning">{{ form.non_field_errors }}</div>
+        {% endif %}
+        <form method="post">
+          {% csrf_token %}
+          {% for field in form %}
+            <div class="mb-3">
+              <label for="{{ field.id_for_label }}" class="form-label">{{ field.label }}</label>
+              <input type="{% if 'password' in field.name %}password{% else %}text{% endif %}"
+                     name="{{ field.name }}" id="{{ field.id_for_label }}"
+                     class="form-control" autocomplete="off" required>
+              {% if field.errors %}<div class="text-danger small mt-1">{{ field.errors }}</div>{% endif %}
+            </div>
+          {% endfor %}
+          <button type="submit" class="btn btn-dark w-100">Log in</button>
+        </form>
+        <p class="text-muted small mb-0 mt-3">
+          No account? <a href="{% url 'users:signup' %}">Sign up</a>.
+        </p>
+      </div>
+    </div>
+  </div>
+{% endblock %}
