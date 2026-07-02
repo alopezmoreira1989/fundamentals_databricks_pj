@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% load fmt %}
+{% block title %}{{ ticker }} — Valuation{% endblock %}
+{% block content %}
+  <div class="p-4 bg-white rounded-3 shadow-sm mb-4">
+    <div class="d-flex align-items-baseline gap-3 flex-wrap">
+      <h1 class="h3 mb-0">Valuation</h1>
+      <span class="badge text-bg-dark fs-6">{{ ticker }}</span>
+      <a class="ms-auto" href="{% url 'companies:detail' ticker %}">Company detail →</a>
+    </div>
+    <p class="text-muted mb-0 mt-2">
+      Margin of safety = intrinsic value vs. price. Green is undervalued, red overvalued.
+      Values are computed upstream by <code>fundamentals_pipeline</code>.
+    </p>
+  </div>
+
+  <div class="bg-white rounded-3 shadow-sm p-4">
+    <h2 class="h5 mb-3">Margin of Safety</h2>
+    {% if points %}
+      <div class="table-responsive">
+        <table class="table table-sm table-hover align-middle mb-0">
+          <thead>
+            <tr>
+              <th scope="col">Method</th>
+              <th scope="col">FY</th>
+              <th scope="col" class="text-end">Margin of Safety</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for m in points %}
+              <tr>
+                <td>{{ m.metric }}</td>
+                <td class="text-muted">{{ m.fiscal_year }}</td>
+                <td class="text-end font-monospace {{ m.value|sign_class }}">
+                  {{ m.value|metric_value:m.unit }}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="text-muted mb-0">No valuation data available for {{ ticker }}.</p>
+    {% endif %}
+  </div>
+{% endblock %}

@@ -21,8 +21,15 @@ _BASE_SQL = """
     WHERE TRUE
 """
 
+# Distinct FY metric names, for the screener's metric picker.
+_METRICS_SQL = "SELECT DISTINCT metric FROM metrics WHERE period_type = 'FY' ORDER BY metric"
+
 
 class ScreenerRepository(DuckDBRepository):
+    def available_metrics(self) -> tuple[str, ...]:
+        """Every metric name that can be screened (distinct, alphabetical)."""
+        return self._fetch_column(_METRICS_SQL)
+
     def screen(
         self,
         *,

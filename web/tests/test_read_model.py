@@ -64,6 +64,13 @@ def test_screener_respects_bounds_ordering_and_limit(artifacts_from_fixtures):
     assert all(r.value is not None and r.value >= floor for r in bounded)
 
 
+def test_screener_available_metrics(artifacts_from_fixtures):
+    metrics = ScreenerRepository().available_metrics()
+    assert metrics and all(isinstance(m, str) for m in metrics)
+    assert list(metrics) == sorted(metrics)  # distinct, alphabetical
+    assert len(set(metrics)) == len(metrics)
+
+
 def test_valuation_returns_only_mos_metrics(artifacts_from_fixtures):
     points = ValuationRepository().margin_of_safety(TICKER)
     assert points  # AAPL has MoS metrics in the fixtures
@@ -79,33 +86,67 @@ def test_company_service_composes_detail(artifacts_from_fixtures):
     assert company_services.get_company_detail("NOTAREALTICKER") is None
 
 
-# ── views (JSON) ─────────────────────────────────────────────────────────────────────
-def test_company_view_200_and_404(artifacts_from_fixtures, client):
+# ── views ────────────────────────────────────────────────────────────────────────────
+def test_company_page_html_200_and_404(artifacts_from_fixtures, client):
     resp = client.get(f"/companies/{TICKER.lower()}/")  # lower-case → view upper-cases it
+    assert resp.status_code == 200
+    assert resp["Content-Type"].startswith("text/html")
+    html = resp.content.decode()
+    assert TICKER in html and "Metrics" in html  # ticker badge + metrics table rendered
+
+    assert client.get("/companies/notareal/").status_code == 404
+
+
+def test_company_data_json_200_and_404(artifacts_from_fixtures, client):
+    resp = client.get(f"/companies/{TICKER.lower()}/data/")
     assert resp.status_code == 200
     body = resp.json()
     assert body["ticker"] == TICKER
     assert isinstance(body["metrics"], list) and body["metrics"]
 
-    assert client.get("/companies/notareal/").status_code == 404
+    assert client.get("/companies/notareal/data/").status_code == 404
 
 
-def test_screener_view_requires_metric(artifacts_from_fixtures, client):
-    assert client.get("/screener/").status_code == 400
-    assert client.get("/screener/?metric=X&min=abc").status_code == 400
+def test_screener_page_renders_form(artifacts_from_fixtures, client):
+    resp = client.get("/screener/")  # no metric ⇒ just the form, still 200
+    assert resp.status_code == 200
+    assert resp["Content-Type"].startswith("text/html")
+    assert "Screener" in resp.content.decode()
 
 
-def test_screener_view_returns_results(artifacts_from_fixtures, client):
+def test_screener_page_shows_results_and_links(artifacts_from_fixtures, client):
     metric = _a_metric_of(TICKER)
     resp = client.get("/screener/", {"metric": metric, "limit": 5})
+    assert resp.status_code == 200
+    html = resp.content.decode()
+    assert metric in html
+    assert 'href="/companies/' in html  # each hit links to its company page
+
+
+def test_screener_data_json_requires_metric(artifacts_from_fixtures, client):
+    assert client.get("/screener/data/").status_code == 400
+    assert client.get("/screener/data/?metric=X&min=abc").status_code == 400
+
+
+def test_screener_data_json_returns_results(artifacts_from_fixtures, client):
+    metric = _a_metric_of(TICKER)
+    resp = client.get("/screener/data/", {"metric": metric, "limit": 5})
     assert resp.status_code == 200
     body = resp.json()
     assert body["metric"] == metric
     assert body["count"] == len(body["results"]) <= 5
 
 
-def test_valuation_view_200(artifacts_from_fixtures, client):
-    resp = client.get(f"/valuation/{TICKER}/")
+def test_valuation_page_html_200(artifacts_from_fixtures, client):
+    resp = client.get(f"/valuation/{TICKER.lower()}/")  # lower-case → view upper-cases it
+    assert resp.status_code == 200
+    assert resp["Content-Type"].startswith("text/html")
+    html = resp.content.decode()
+    assert TICKER in html and "Margin of Safety" in html
+
+
+def test_valuation_data_json_200(artifacts_from_fixtures, client):
+    resp = client.get(f"/valuation/{TICKER}/data/")
     assert resp.status_code == 200
     body = resp.json()
     assert body["ticker"] == TICKER

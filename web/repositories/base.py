@@ -55,3 +55,13 @@ class DuckDBRepository:
             return tuple(
                 factory(**dict(zip(columns, row, strict=True))) for row in cursor.fetchall()
             )
+
+    def _fetch_column(self, sql: str, params: Sequence[Any] = ()) -> tuple[Any, ...]:
+        """Run a single-column query and return that column's values as a tuple.
+
+        For simple scalar lists (e.g. distinct metric names for a picker) where a DTO would
+        be overkill. The SELECT must project exactly one column.
+        """
+        with self._connection() as con:
+            cursor = con.execute(sql, list(params))
+            return tuple(row[0] for row in cursor.fetchall())
