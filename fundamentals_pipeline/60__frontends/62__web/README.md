@@ -41,7 +41,7 @@ pnpm build
 https://github.com/alopezmoreira1989/fundamentals_databricks_pj/releases/download/latest
 ```
 
-Assets (schemas pinned in `fundamentals_pipeline/_core/schemas.py`): `dashboard_data.parquet`,
+Assets (schemas pinned in `fundamentals_pipeline/schemas.py`): `dashboard_data.parquet`,
 `dashboard_metrics.parquet`, `dashboard_prices.parquet`, `dashboard_backtest.parquet`,
 `dashboard_meta.json`.
 

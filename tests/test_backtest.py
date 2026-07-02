@@ -6,7 +6,7 @@ from datetime import date, timedelta
 
 import pytest
 
-from fundamentals_pipeline._core import backtest as bt
+from fundamentals_pipeline import backtest as bt
 
 
 # ── as_of_date / as_of_eligible (no look-ahead) ──────────────────────────────────

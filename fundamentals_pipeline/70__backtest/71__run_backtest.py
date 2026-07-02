@@ -19,7 +19,7 @@
 # MAGIC is out of scope — results are biased **upward** (delisted losers never enter). The export
 # MAGIC and the Streamlit view print this caveat.
 # MAGIC
-# MAGIC **Reuses** `fundamentals_pipeline/_core/backtest.py` (as-of eligibility, predicate eval,
+# MAGIC **Reuses** `fundamentals_pipeline/backtest.py` (as-of eligibility, predicate eval,
 # MAGIC CAGR / max-drawdown / vol / Sharpe) — the SAME pure helpers the Streamlit view uses.
 # MAGIC
 # MAGIC **Primary output:** `{catalog}.{schema}.backtest_results` (equity-curve series) +
@@ -40,7 +40,6 @@
 # COMMAND ----------
 
 import json
-import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -50,20 +49,11 @@ import pyspark.sql.functions as F
 import pyspark.sql.types as T
 
 
-# Make the pure-Python _core helpers importable (see 51 for the rationale + Databricks note).
-def _ensure_core_on_path() -> None:
-    for _cand in (Path.cwd(), *Path.cwd().parents):
-        if (_cand / "fundamentals_pipeline" / "_core" / "backtest.py").exists():
-            if str(_cand) not in sys.path:
-                sys.path.insert(0, str(_cand))
-            return
-
-
-try:
-    from fundamentals_pipeline._core import backtest as bt
-except ModuleNotFoundError:
-    _ensure_core_on_path()
-    from fundamentals_pipeline._core import backtest as bt
+# The pure backtest helpers ship in the installable `fundamentals_pipeline` package
+# (fundamentals_pipeline/backtest.py). Installed once in 91__full_pipeline's session-
+# dependencies cell, so this %run-included notebook imports it directly — no sys.path
+# manipulation (see 51 for the same pattern).
+from fundamentals_pipeline import backtest as bt
 
 # ── Paths & table names ──────────────────────────────────────────────────────────
 ARCHETYPES_JSON_PATH = "../00__config/backtest_archetypes.json"

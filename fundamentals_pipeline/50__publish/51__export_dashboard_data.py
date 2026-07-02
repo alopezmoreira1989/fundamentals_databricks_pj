@@ -25,31 +25,18 @@
 # COMMAND ----------
 
 import json
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
 
 
-# Make the pure-Python schema contract importable (fundamentals_pipeline/_core/schemas.py).
-# Databricks-only note: this is a notebook (no __file__), so we walk up from the working
-# directory to find the repo root. In a Databricks Repo the root is usually already on
-# sys.path (Files-in-Repos); this is a defensive fallback so the assert below also works
-# under a Job, %run, or Databricks Connect.
-def _ensure_core_on_path() -> None:
-    for _cand in (Path.cwd(), *Path.cwd().parents):
-        if (_cand / "fundamentals_pipeline" / "_core" / "schemas.py").exists():
-            if str(_cand) not in sys.path:
-                sys.path.insert(0, str(_cand))
-            return
-
-
-try:
-    from fundamentals_pipeline._core import schemas as _schemas
-except ModuleNotFoundError:
-    _ensure_core_on_path()
-    from fundamentals_pipeline._core import schemas as _schemas
+# The schema contract ships in the installable `fundamentals_pipeline` package
+# (fundamentals_pipeline/schemas.py). Every environment installs it the same way
+# (`pip install -e .`); on Databricks that install happens once in 91__full_pipeline's
+# session-dependencies cell, so this %run-included notebook imports it directly — no
+# sys.path manipulation.
+from fundamentals_pipeline import schemas as _schemas
 
 SCHEMA_VERSION = 9   # +company-info (description/exchange/country/employees/website/founded) on ticker_meta
 FY_YEARS       = 10

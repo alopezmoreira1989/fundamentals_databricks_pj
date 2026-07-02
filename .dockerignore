@@ -1,0 +1,12 @@
+# Build context is the repo root (so the web image can install fundamentals_pipeline).
+# Keep the context small and reproducible.
+.git/
+.venv/
+**/__pycache__/
+*.pyc
+**/.pytest_cache/
+**/.ruff_cache/
+*.egg-info/
+web/.env
+**/node_modules/
+**/.next/

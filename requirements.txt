@@ -1,3 +1,7 @@
+# `-e .` installs the project's `fundamentals_pipeline` package (pyproject at repo root) so
+# Streamlit Cloud can `import fundamentals_pipeline.schemas / .backtest` — the same package
+# every other environment installs, with no sys.path manipulation in the app code.
+-e .
 streamlit>=1.50,<1.51
 pandas>=2.2,<3
 fastparquet>=2024.5

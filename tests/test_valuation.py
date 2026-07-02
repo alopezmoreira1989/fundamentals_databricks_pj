@@ -6,7 +6,7 @@ import math
 
 import pytest
 
-from fundamentals_pipeline._core import valuation as v
+from fundamentals_pipeline import valuation as v
 
 
 # ── safe_div ──────────────────────────────────────────────────────────────────
