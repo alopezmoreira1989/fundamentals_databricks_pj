@@ -35,11 +35,7 @@ web/db.sqlite3
 web/staticfiles/
 web/media/
 web/.artifact_cache/
-
-# Node web frontend (fundamentals_pipeline/60__frontends/62__web)
-fundamentals_pipeline/60__frontends/62__web/node_modules/
-fundamentals_pipeline/60__frontends/62__web/.next/
-fundamentals_pipeline/60__frontends/62__web/.vercel/
+web/dev.sqlite3
 
 # Sistema
 Thumbs.db
