@@ -10,15 +10,25 @@ from __future__ import annotations
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import render
 
+from apps.watchlists import services as watchlist_services
+
 from . import services
 
 
 def company_page(request: HttpRequest, ticker: str) -> HttpResponse:
     """Server-rendered company detail page (summary + latest-FY metrics)."""
-    detail = services.get_company_detail(ticker.upper())
+    ticker = ticker.upper()
+    detail = services.get_company_detail(ticker)
     if detail is None:
-        raise Http404(f"unknown ticker {ticker.upper()!r}")
-    return render(request, "companies/detail.html", {"detail": detail})
+        raise Http404(f"unknown ticker {ticker!r}")
+    in_watchlist = request.user.is_authenticated and watchlist_services.contains(
+        request.user, ticker
+    )
+    return render(
+        request,
+        "companies/detail.html",
+        {"detail": detail, "in_watchlist": in_watchlist},
+    )
 
 
 def company_data(request: HttpRequest, ticker: str) -> JsonResponse:
