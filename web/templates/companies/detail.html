@@ -7,7 +7,26 @@
     <div class="d-flex align-items-baseline gap-3 flex-wrap">
       <h1 class="h3 mb-0">{{ s.name }}</h1>
       <span class="badge text-bg-dark fs-6">{{ s.ticker }}</span>
-      <a class="ms-auto" href="{% url 'valuation:detail' s.ticker %}">Valuation →</a>
+      <div class="ms-auto d-flex align-items-center gap-3">
+        {% if user.is_authenticated %}
+          {% if in_watchlist %}
+            <form method="post" action="{% url 'watchlists:remove' %}" class="m-0">
+              {% csrf_token %}
+              <input type="hidden" name="ticker" value="{{ s.ticker }}">
+              <input type="hidden" name="next" value="{{ request.path }}">
+              <button type="submit" class="btn btn-sm btn-warning">★ On watchlist</button>
+            </form>
+          {% else %}
+            <form method="post" action="{% url 'watchlists:add' %}" class="m-0">
+              {% csrf_token %}
+              <input type="hidden" name="ticker" value="{{ s.ticker }}">
+              <input type="hidden" name="next" value="{{ request.path }}">
+              <button type="submit" class="btn btn-sm btn-outline-secondary">☆ Watchlist</button>
+            </form>
+          {% endif %}
+        {% endif %}
+        <a href="{% url 'valuation:detail' s.ticker %}">Valuation →</a>
+      </div>
     </div>
     <p class="text-muted mb-0 mt-2">
       {% if s.sector %}{{ s.sector }}{% endif %}

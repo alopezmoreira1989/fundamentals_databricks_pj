@@ -7,7 +7,7 @@ the data comes from DuckDB/parquet.
 from __future__ import annotations
 
 from repositories.companies import CompanyRepository
-from repositories.dtos import CompanyDetail
+from repositories.dtos import CompanyDetail, CompanySummary
 
 
 def get_company_detail(ticker: str) -> CompanyDetail | None:
@@ -17,3 +17,8 @@ def get_company_detail(ticker: str) -> CompanyDetail | None:
     if summary is None:
         return None
     return CompanyDetail(summary=summary, metrics=repo.latest_metrics(ticker))
+
+
+def get_company_summary(ticker: str) -> CompanySummary | None:
+    """Descriptive facts for a ticker, or ``None`` if unknown (no metrics fetch)."""
+    return CompanyRepository().get_summary(ticker)
