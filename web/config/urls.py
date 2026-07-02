@@ -14,6 +14,8 @@ urlpatterns = [
     path("accounts/", include("apps.users.urls")),
     # User-owned data (login-required).
     path("watchlist/", include("apps.watchlists.urls")),
+    path("favorites/", include("apps.favorites.urls")),
+    path("history/", include("apps.history.urls")),
     # Read-only analytical pages + JSON, served from the published artifacts via DuckDB.
     path("companies/", include("apps.companies.urls")),
     path("screener/", include("apps.screener.urls")),

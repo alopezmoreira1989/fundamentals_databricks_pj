@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}My Favorites — Fundamentals{% endblock %}
+{% block content %}
+  <div class="p-4 bg-white rounded-3 shadow-sm mb-4">
+    <h1 class="h3 mb-0">My Favorites</h1>
+    <p class="text-muted mb-0 mt-2">{{ items|length }} compan{{ items|length|pluralize:"y,ies" }} favorited.</p>
+  </div>
+
+  <div class="bg-white rounded-3 shadow-sm p-4">
+    {% if items %}
+      <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+          <thead>
+            <tr>
+              <th scope="col">Ticker</th>
+              <th scope="col">Company</th>
+              <th scope="col">Sector</th>
+              <th scope="col" class="text-end">Remove</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for ticker, summary in items %}
+              <tr>
+                <td><a href="{% url 'companies:detail' ticker %}">{{ ticker }}</a></td>
+                <td>{{ summary.name|default:"—" }}</td>
+                <td class="text-muted">{{ summary.sector|default:"—" }}</td>
+                <td class="text-end">
+                  <form method="post" action="{% url 'favorites:remove' %}" class="m-0">
+                    {% csrf_token %}
+                    <input type="hidden" name="ticker" value="{{ ticker }}">
+                    <input type="hidden" name="next" value="{{ request.path }}">
+                    <button type="submit" class="btn btn-sm btn-outline-danger">Remove</button>
+                  </form>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="text-muted mb-0">
+        You have no favorites yet. Star companies from the
+        <a href="{% url 'screener:screen' %}">screener</a> or any company page.
+      </p>
+    {% endif %}
+  </div>
+{% endblock %}
