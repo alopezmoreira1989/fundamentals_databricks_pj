@@ -60,6 +60,27 @@ class ScreenRow:
 
 
 @dataclass(frozen=True, slots=True)
+class CompanyListRow:
+    """One row of the paginated company table: descriptive facts (from the meta artifact) plus,
+    when a metric filter is active, that ticker's latest-FY value of the screened metric."""
+
+    ticker: str
+    name: str
+    sector: str | None = None
+    industry: str | None = None
+    metric_value: float | None = None
+    fiscal_year: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CompanyPage:
+    """A page of the company table plus the total match count (for pagination in the view)."""
+
+    rows: tuple[CompanyListRow, ...]
+    total: int
+
+
+@dataclass(frozen=True, slots=True)
 class FootballBar:
     """One intrinsic-value estimate as a bear→bull range with a mid point (per-share, USD)."""
 

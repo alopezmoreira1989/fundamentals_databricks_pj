@@ -5,10 +5,32 @@
   <div class="p-4 bg-white rounded-3 shadow-sm mb-4">
     <h1 class="h3 mb-3">Screener</h1>
     <form method="get" class="row g-3 align-items-end">
-      <div class="col-12 col-md-5">
-        <label for="metric" class="form-label">Metric</label>
-        <select id="metric" name="metric" class="form-select" required>
-          <option value="" {% if not selected %}selected{% endif %} disabled>Choose a metric…</option>
+      <div class="col-12 col-md-3">
+        <label for="q" class="form-label">Search</label>
+        <input type="text" id="q" name="q" value="{{ q }}" class="form-control"
+               placeholder="Ticker or company…">
+      </div>
+      <div class="col-6 col-md-3">
+        <label for="sector" class="form-label">Sector</label>
+        <select id="sector" name="sector" class="form-select">
+          <option value="">All sectors</option>
+          {% for s in sectors %}
+            <option value="{{ s }}" {% if s == sector %}selected{% endif %}>{{ s }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-6 col-md-2">
+        <label for="index" class="form-label">Index</label>
+        <select id="index" name="index" class="form-select">
+          <option value="">Any</option>
+          <option value="sp500" {% if index == "sp500" %}selected{% endif %}>S&amp;P 500</option>
+          <option value="r3000" {% if index == "r3000" %}selected{% endif %}>Russell 3000</option>
+        </select>
+      </div>
+      <div class="col-12 col-md-4">
+        <label for="metric" class="form-label">Metric filter <span class="text-muted small">(optional)</span></label>
+        <select id="metric" name="metric" class="form-select">
+          <option value="">— none —</option>
           {% for m in metrics %}
             <option value="{{ m }}" {% if m == selected %}selected{% endif %}>{{ m }}</option>
           {% endfor %}
@@ -17,20 +39,16 @@
       <div class="col-6 col-md-2">
         <label for="min" class="form-label">Min</label>
         <input type="text" inputmode="decimal" id="min" name="min" value="{{ min }}"
-               class="form-control" placeholder="—">
+               class="form-control" placeholder="—" {% if not selected %}disabled{% endif %}>
       </div>
       <div class="col-6 col-md-2">
         <label for="max" class="form-label">Max</label>
         <input type="text" inputmode="decimal" id="max" name="max" value="{{ max }}"
-               class="form-control" placeholder="—">
+               class="form-control" placeholder="—" {% if not selected %}disabled{% endif %}>
       </div>
-      <div class="col-6 col-md-2">
-        <label for="limit" class="form-label">Limit</label>
-        <input type="number" id="limit" name="limit" value="{{ limit }}" min="1" max="200"
-               class="form-control">
-      </div>
-      <div class="col-6 col-md-1">
-        <button type="submit" class="btn btn-dark w-100">Run</button>
+      <div class="col-12 col-md-4 d-flex gap-2">
+        <button type="submit" class="btn btn-dark flex-grow-1">Apply filters</button>
+        <a href="{% url 'screener:screen' %}" class="btn btn-outline-secondary">Reset</a>
       </div>
     </form>
   </div>
@@ -39,36 +57,66 @@
     <div class="alert alert-warning" role="alert">{{ error }}</div>
   {% endif %}
 
-  {% if selected and not error %}
-    <div class="bg-white rounded-3 shadow-sm p-4">
-      <div class="d-flex justify-content-between align-items-baseline mb-3">
-        <h2 class="h5 mb-0">{{ selected }}</h2>
-        <span class="text-muted small">{{ rows|length }} result{{ rows|length|pluralize }}</span>
-      </div>
-      {% if rows %}
-        <div class="table-responsive">
-          <table class="table table-sm table-hover align-middle mb-0">
-            <thead>
-              <tr>
-                <th scope="col">Ticker</th>
-                <th scope="col">FY</th>
-                <th scope="col" class="text-end">Value</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for r in rows %}
-                <tr>
-                  <td><a href="{% url 'companies:detail' r.ticker %}">{{ r.ticker }}</a></td>
-                  <td class="text-muted">{{ r.fiscal_year }}</td>
-                  <td class="text-end font-monospace">{{ r.value|metric_value }}</td>
-                </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-      {% else %}
-        <p class="text-muted mb-0">No tickers match this screen.</p>
-      {% endif %}
+  <div class="bg-white rounded-3 shadow-sm p-4">
+    <div class="d-flex justify-content-between align-items-baseline mb-3">
+      <h2 class="h5 mb-0">Companies</h2>
+      <span class="text-muted small">
+        {{ total }} match{{ total|pluralize:"es" }}{% if num_pages > 1 %} · page {{ page }} of {{ num_pages }}{% endif %}
+      </span>
     </div>
-  {% endif %}
+    {% if rows %}
+      <div class="table-responsive">
+        <table class="table table-sm table-hover align-middle mb-0">
+          <thead>
+            <tr>
+              <th scope="col">Ticker</th>
+              <th scope="col">Company</th>
+              <th scope="col">Sector</th>
+              <th scope="col">Industry</th>
+              {% if selected %}<th scope="col" class="text-end">{{ selected }}</th>{% endif %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in rows %}
+              <tr>
+                <td><a href="{% url 'companies:detail' r.ticker %}">{{ r.ticker }}</a></td>
+                <td>{{ r.name|default:"—" }}</td>
+                <td class="text-muted">{{ r.sector|default:"—" }}</td>
+                <td class="text-muted">{{ r.industry|default:"—" }}</td>
+                {% if selected %}<td class="text-end font-monospace">{{ r.metric_value|metric_value }}</td>{% endif %}
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      {% if num_pages > 1 %}
+        <nav class="mt-3" aria-label="Company table pages">
+          <ul class="pagination pagination-sm justify-content-center mb-0">
+            <li class="page-item {% if not has_prev %}disabled{% endif %}">
+              <a class="page-link" href="?{{ querystring }}{% if querystring %}&amp;{% endif %}page={{ page|add:'-1' }}">‹ Prev</a>
+            </li>
+            {% if page_range.0 > 1 %}
+              <li class="page-item"><a class="page-link" href="?{{ querystring }}{% if querystring %}&amp;{% endif %}page=1">1</a></li>
+              <li class="page-item disabled"><span class="page-link">…</span></li>
+            {% endif %}
+            {% for p in page_range %}
+              <li class="page-item {% if p == page %}active{% endif %}">
+                <a class="page-link" href="?{{ querystring }}{% if querystring %}&amp;{% endif %}page={{ p }}">{{ p }}</a>
+              </li>
+            {% endfor %}
+            {% if page_range|last < num_pages %}
+              <li class="page-item disabled"><span class="page-link">…</span></li>
+              <li class="page-item"><a class="page-link" href="?{{ querystring }}{% if querystring %}&amp;{% endif %}page={{ num_pages }}">{{ num_pages }}</a></li>
+            {% endif %}
+            <li class="page-item {% if not has_next %}disabled{% endif %}">
+              <a class="page-link" href="?{{ querystring }}{% if querystring %}&amp;{% endif %}page={{ page|add:'1' }}">Next ›</a>
+            </li>
+          </ul>
+        </nav>
+      {% endif %}
+    {% else %}
+      <p class="text-muted mb-0">No companies match these filters.</p>
+    {% endif %}
+  </div>
 {% endblock %}
