@@ -137,8 +137,16 @@ def test_screener_data_json_returns_results(artifacts_from_fixtures, client):
     assert body["count"] == len(body["results"]) <= 5
 
 
-def test_valuation_view_200(artifacts_from_fixtures, client):
-    resp = client.get(f"/valuation/{TICKER}/")
+def test_valuation_page_html_200(artifacts_from_fixtures, client):
+    resp = client.get(f"/valuation/{TICKER.lower()}/")  # lower-case → view upper-cases it
+    assert resp.status_code == 200
+    assert resp["Content-Type"].startswith("text/html")
+    html = resp.content.decode()
+    assert TICKER in html and "Margin of Safety" in html
+
+
+def test_valuation_data_json_200(artifacts_from_fixtures, client):
+    resp = client.get(f"/valuation/{TICKER}/data/")
     assert resp.status_code == 200
     body = resp.json()
     assert body["ticker"] == TICKER

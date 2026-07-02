@@ -29,3 +29,14 @@ def metric_value(value: float | None, unit: str | None = None) -> str:
     if u == "usd":
         return f"${value:,.2f}"
     return f"{value:,.2f}"
+
+
+@register.filter
+def sign_class(value: float | None) -> str:
+    """Bootstrap text colour for a signed value: green ≥ 0, red < 0, empty for missing.
+
+    On a Margin-of-Safety figure this reads as green = undervalued, red = overvalued.
+    """
+    if value is None:
+        return ""
+    return "text-success" if value >= 0 else "text-danger"
