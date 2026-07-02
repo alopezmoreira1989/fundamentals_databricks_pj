@@ -10,8 +10,18 @@
   <nav class="navbar navbar-dark bg-dark">
     <div class="container">
       <a class="navbar-brand" href="{% url 'home' %}">Fundamentals</a>
-      <div class="navbar-nav flex-row gap-3">
+      <div class="navbar-nav flex-row align-items-center gap-3">
         <a class="nav-link" href="{% url 'screener:screen' %}">Screener</a>
+        {% if user.is_authenticated %}
+          <span class="navbar-text">{{ user.username }}</span>
+          <form method="post" action="{% url 'users:logout' %}" class="m-0">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-sm btn-outline-light">Log out</button>
+          </form>
+        {% else %}
+          <a class="nav-link" href="{% url 'users:login' %}">Log in</a>
+          <a class="nav-link" href="{% url 'users:signup' %}">Sign up</a>
+        {% endif %}
       </div>
     </div>
   </nav>
