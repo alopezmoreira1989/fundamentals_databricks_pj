@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% load fmt %}
+{% block title %}Screener — Fundamentals{% endblock %}
+{% block content %}
+  <div class="p-4 bg-white rounded-3 shadow-sm mb-4">
+    <h1 class="h3 mb-3">Screener</h1>
+    <form method="get" class="row g-3 align-items-end">
+      <div class="col-12 col-md-5">
+        <label for="metric" class="form-label">Metric</label>
+        <select id="metric" name="metric" class="form-select" required>
+          <option value="" {% if not selected %}selected{% endif %} disabled>Choose a metric…</option>
+          {% for m in metrics %}
+            <option value="{{ m }}" {% if m == selected %}selected{% endif %}>{{ m }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-6 col-md-2">
+        <label for="min" class="form-label">Min</label>
+        <input type="text" inputmode="decimal" id="min" name="min" value="{{ min }}"
+               class="form-control" placeholder="—">
+      </div>
+      <div class="col-6 col-md-2">
+        <label for="max" class="form-label">Max</label>
+        <input type="text" inputmode="decimal" id="max" name="max" value="{{ max }}"
+               class="form-control" placeholder="—">
+      </div>
+      <div class="col-6 col-md-2">
+        <label for="limit" class="form-label">Limit</label>
+        <input type="number" id="limit" name="limit" value="{{ limit }}" min="1" max="200"
+               class="form-control">
+      </div>
+      <div class="col-6 col-md-1">
+        <button type="submit" class="btn btn-dark w-100">Run</button>
+      </div>
+    </form>
+  </div>
+
+  {% if error %}
+    <div class="alert alert-warning" role="alert">{{ error }}</div>
+  {% endif %}
+
+  {% if selected and not error %}
+    <div class="bg-white rounded-3 shadow-sm p-4">
+      <div class="d-flex justify-content-between align-items-baseline mb-3">
+        <h2 class="h5 mb-0">{{ selected }}</h2>
+        <span class="text-muted small">{{ rows|length }} result{{ rows|length|pluralize }}</span>
+      </div>
+      {% if rows %}
+        <div class="table-responsive">
+          <table class="table table-sm table-hover align-middle mb-0">
+            <thead>
+              <tr>
+                <th scope="col">Ticker</th>
+                <th scope="col">FY</th>
+                <th scope="col" class="text-end">Value</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for r in rows %}
+                <tr>
+                  <td><a href="{% url 'companies:detail' r.ticker %}">{{ r.ticker }}</a></td>
+                  <td class="text-muted">{{ r.fiscal_year }}</td>
+                  <td class="text-end font-monospace">{{ r.value|metric_value }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="text-muted mb-0">No tickers match this screen.</p>
+      {% endif %}
+    </div>
+  {% endif %}
+{% endblock %}

@@ -17,3 +17,8 @@ def run_screen(
     return ScreenerRepository().screen(
         metric=metric, min_value=min_value, max_value=max_value, limit=limit
     )
+
+
+def available_metrics() -> tuple[str, ...]:
+    """Metric names the user can screen on (for the picker)."""
+    return ScreenerRepository().available_metrics()
