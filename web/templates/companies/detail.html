@@ -24,6 +24,21 @@
               <button type="submit" class="btn btn-sm btn-outline-secondary">☆ Watchlist</button>
             </form>
           {% endif %}
+          {% if in_favorites %}
+            <form method="post" action="{% url 'favorites:remove' %}" class="m-0">
+              {% csrf_token %}
+              <input type="hidden" name="ticker" value="{{ s.ticker }}">
+              <input type="hidden" name="next" value="{{ request.path }}">
+              <button type="submit" class="btn btn-sm btn-danger">♥ Favorite</button>
+            </form>
+          {% else %}
+            <form method="post" action="{% url 'favorites:add' %}" class="m-0">
+              {% csrf_token %}
+              <input type="hidden" name="ticker" value="{{ s.ticker }}">
+              <input type="hidden" name="next" value="{{ request.path }}">
+              <button type="submit" class="btn btn-sm btn-outline-secondary">♡ Favorite</button>
+            </form>
+          {% endif %}
         {% endif %}
         <a href="{% url 'valuation:detail' s.ticker %}">Valuation →</a>
       </div>

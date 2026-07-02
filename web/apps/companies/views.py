@@ -10,24 +10,31 @@ from __future__ import annotations
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import render
 
+from apps.favorites import services as favorite_services
+from apps.history import services as history_services
 from apps.watchlists import services as watchlist_services
 
 from . import services
 
 
 def company_page(request: HttpRequest, ticker: str) -> HttpResponse:
-    """Server-rendered company detail page (summary + latest-FY metrics)."""
+    """Server-rendered company detail page (summary + latest-FY metrics).
+
+    Visiting a valid company page also records it in the (login-required) browsing history.
+    """
     ticker = ticker.upper()
     detail = services.get_company_detail(ticker)
     if detail is None:
         raise Http404(f"unknown ticker {ticker!r}")
-    in_watchlist = request.user.is_authenticated and watchlist_services.contains(
-        request.user, ticker
-    )
+    in_watchlist = in_favorites = False
+    if request.user.is_authenticated:
+        in_watchlist = watchlist_services.contains(request.user, ticker)
+        in_favorites = favorite_services.contains(request.user, ticker)
+        history_services.record(request.user, ticker)  # side effect: mark as recently viewed
     return render(
         request,
         "companies/detail.html",
-        {"detail": detail, "in_watchlist": in_watchlist},
+        {"detail": detail, "in_watchlist": in_watchlist, "in_favorites": in_favorites},
     )
 
 
