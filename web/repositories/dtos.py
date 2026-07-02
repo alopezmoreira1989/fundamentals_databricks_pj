@@ -57,3 +57,22 @@ class ScreenRow:
     ticker: str
     fiscal_year: int
     value: float | None
+
+
+@dataclass(frozen=True, slots=True)
+class FootballBar:
+    """One intrinsic-value estimate as a bear→bull range with a mid point (per-share, USD)."""
+
+    method: str
+    bear: float
+    mid: float
+    bull: float
+    fiscal_year: int
+
+
+@dataclass(frozen=True, slots=True)
+class FootballField:
+    """The valuation "football field": per-method IV ranges plus the current market price."""
+
+    bars: tuple[FootballBar, ...]
+    price: float | None

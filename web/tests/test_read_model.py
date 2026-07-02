@@ -10,6 +10,7 @@ import dataclasses
 
 import pytest
 from apps.companies import services as company_services
+from apps.valuation.football import build_chart
 from repositories.companies import CompanyRepository
 from repositories.dtos import CompanySummary, MetricPoint, ScreenRow
 from repositories.screener import ScreenerRepository
@@ -87,6 +88,29 @@ def test_valuation_returns_only_mos_metrics(artifacts_from_fixtures):
     assert all(p.metric.startswith("MoS ") for p in points)
 
 
+def test_intrinsic_value_field_pivots_scenarios(artifacts_from_fixtures):
+    field = ValuationRepository().intrinsic_value_field(TICKER)
+    assert field.bars  # AAPL has TTM IV methods
+    assert field.price is not None and field.price > 0
+    # every bar is a well-formed range and no total-dollar row leaked in (per-share values)
+    for b in field.bars:
+        assert b.bear <= b.mid <= b.bull
+        assert "(TTM)" in b.method and b.bull < 100_000
+    # sorted by mid descending
+    mids = [b.mid for b in field.bars]
+    assert mids == sorted(mids, reverse=True)
+
+
+def test_football_chart_geometry(artifacts_from_fixtures):
+    chart = build_chart(ValuationRepository().intrinsic_value_field(TICKER))
+    assert chart is not None
+    for b in chart.bars:
+        assert 0.0 <= b.left_pct <= 100.0
+        assert 0.0 <= b.left_pct + b.width_pct <= 100.0 + 1e-6
+        assert b.left_pct <= b.mid_pct <= b.left_pct + b.width_pct + 1e-6
+    assert chart.price_pct is not None and 0.0 <= chart.price_pct <= 100.0
+
+
 # ── service ──────────────────────────────────────────────────────────────────────────
 def test_company_service_composes_detail(artifacts_from_fixtures):
     detail = company_services.get_company_detail(TICKER)
@@ -154,6 +178,7 @@ def test_valuation_page_html_200(artifacts_from_fixtures, client):
     assert resp["Content-Type"].startswith("text/html")
     html = resp.content.decode()
     assert TICKER in html and "Margin of Safety" in html
+    assert "Intrinsic Value" in html  # football field rendered
 
 
 def test_valuation_data_json_200(artifacts_from_fixtures, client):

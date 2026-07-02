@@ -7,10 +7,15 @@ straight read; when a future use case needs live valuation math, it calls
 
 from __future__ import annotations
 
-from repositories.dtos import MetricPoint
+from repositories.dtos import FootballField, MetricPoint
 from repositories.valuation import ValuationRepository
 
 
 def get_margin_of_safety(ticker: str) -> tuple[MetricPoint, ...]:
     """Latest Margin-of-Safety metrics for the ticker (empty if none/unknown)."""
     return ValuationRepository().margin_of_safety(ticker)
+
+
+def get_intrinsic_value_field(ticker: str) -> FootballField:
+    """Per-method TTM intrinsic-value ranges + market price (the football field)."""
+    return ValuationRepository().intrinsic_value_field(ticker)
