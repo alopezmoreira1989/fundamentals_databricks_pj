@@ -35,12 +35,22 @@ def test_company_summary(artifacts_from_fixtures):
     assert CompanyRepository().get_summary("NOTAREALTICKER") is None
 
 
-def test_latest_metrics_are_single_year_dtos(artifacts_from_fixtures):
-    metrics = CompanyRepository().latest_metrics(TICKER, limit=25)
+def test_latest_metrics_grouped_and_ordered(artifacts_from_fixtures):
+    metrics = CompanyRepository().latest_metrics(TICKER)
     assert metrics and all(isinstance(m, MetricPoint) for m in metrics)
-    assert len(metrics) <= 25
-    # "latest FY" ⇒ every row shares the one most-recent fiscal year
-    assert len({m.fiscal_year for m in metrics}) == 1
+    # latest value per metric ⇒ each metric appears once
+    names = [m.metric for m in metrics]
+    assert len(names) == len(set(names))
+    # every row carries hierarchy fields (None-category rows are filtered out) and is
+    # ordered by sort_order so categories come out as contiguous blocks
+    assert all(m.category is not None and m.sort_order is not None for m in metrics)
+    orders = [m.sort_order for m in metrics]
+    assert orders == sorted(orders)
+    seen: list[str] = []
+    for m in metrics:
+        if not seen or seen[-1] != m.category:
+            assert m.category not in seen, "categories must be contiguous for regroup"
+            seen.append(m.category)
 
 
 def test_dtos_are_immutable(artifacts_from_fixtures):
@@ -92,7 +102,8 @@ def test_company_page_html_200_and_404(artifacts_from_fixtures, client):
     assert resp.status_code == 200
     assert resp["Content-Type"].startswith("text/html")
     html = resp.content.decode()
-    assert TICKER in html and "Metrics" in html  # ticker badge + metrics table rendered
+    # ticker badge + at least one grouped metric section (category heading) rendered
+    assert TICKER in html and "Intrinsic Value" in html
 
     assert client.get("/companies/notareal/").status_code == 404
 

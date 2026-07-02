@@ -18,36 +18,38 @@
   </div>
   {% endwith %}
 
-  <div class="bg-white rounded-3 shadow-sm p-4">
-    <div class="d-flex justify-content-between align-items-baseline mb-3">
-      <h2 class="h5 mb-0">Metrics</h2>
-      {% if detail.metrics %}
-        <span class="text-muted small">latest fiscal year · FY{{ detail.metrics.0.fiscal_year }}</span>
-      {% endif %}
-    </div>
-    {% if detail.metrics %}
-      <div class="table-responsive">
-        <table class="table table-sm table-hover align-middle mb-0">
-          <thead>
-            <tr>
-              <th scope="col">Metric</th>
-              <th scope="col" class="text-end">Value</th>
-              <th scope="col">Unit</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for m in detail.metrics %}
+  {% if detail.metrics %}
+    {% regroup detail.metrics by category as metric_groups %}
+    {% for group in metric_groups %}
+      <div class="bg-white rounded-3 shadow-sm p-4 mb-4">
+        <h2 class="h5 mb-3">{{ group.grouper }}</h2>
+        <div class="table-responsive">
+          <table class="table table-sm table-hover align-middle mb-0">
+            <thead>
               <tr>
-                <td>{{ m.metric }}</td>
-                <td class="text-end font-monospace">{{ m.value|metric_value:m.unit }}</td>
-                <td class="text-muted small">{{ m.unit|default:"" }}</td>
+                <th scope="col">Metric</th>
+                <th scope="col" class="text-end">Value</th>
+                <th scope="col">Unit</th>
+                <th scope="col" class="text-end">FY</th>
               </tr>
-            {% endfor %}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {% for m in group.list %}
+                <tr>
+                  <td>{{ m.metric }}</td>
+                  <td class="text-end font-monospace">{{ m.value|metric_value:m.unit }}</td>
+                  <td class="text-muted small">{{ m.unit|default:"" }}</td>
+                  <td class="text-end text-muted small">{{ m.fiscal_year }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
       </div>
-    {% else %}
+    {% endfor %}
+  {% else %}
+    <div class="bg-white rounded-3 shadow-sm p-4">
       <p class="text-muted mb-0">No metrics available for this company.</p>
-    {% endif %}
-  </div>
+    </div>
+  {% endif %}
 {% endblock %}

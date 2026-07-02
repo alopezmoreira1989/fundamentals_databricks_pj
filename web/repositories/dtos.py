@@ -25,13 +25,21 @@ class CompanySummary:
 
 @dataclass(frozen=True, slots=True)
 class MetricPoint:
-    """One derived-metric value for a ticker at a fiscal year."""
+    """One derived-metric value for a ticker at a fiscal year.
+
+    ``category``/``subcategory``/``sort_order`` come from the metrics hierarchy and drive the
+    grouped company view; they default to ``None`` for callers (e.g. valuation) that don't
+    select them.
+    """
 
     ticker: str
     metric: str
     unit: str | None
     fiscal_year: int
     value: float | None
+    category: str | None = None
+    subcategory: str | None = None
+    sort_order: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
