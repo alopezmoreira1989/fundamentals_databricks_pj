@@ -36,6 +36,7 @@ def company_data(request: HttpRequest, ticker: str) -> JsonResponse:
             "country": detail.summary.country,
             "metrics": [
                 {
+                    "category": m.category,
                     "metric": m.metric,
                     "unit": m.unit,
                     "fiscal_year": m.fiscal_year,

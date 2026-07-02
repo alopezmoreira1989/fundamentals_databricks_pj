@@ -25,13 +25,21 @@ class CompanySummary:
 
 @dataclass(frozen=True, slots=True)
 class MetricPoint:
-    """One derived-metric value for a ticker at a fiscal year."""
+    """One derived-metric value for a ticker at a fiscal year.
+
+    ``category``/``subcategory``/``sort_order`` come from the metrics hierarchy and drive the
+    grouped company view; they default to ``None`` for callers (e.g. valuation) that don't
+    select them.
+    """
 
     ticker: str
     metric: str
     unit: str | None
     fiscal_year: int
     value: float | None
+    category: str | None = None
+    subcategory: str | None = None
+    sort_order: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,3 +57,22 @@ class ScreenRow:
     ticker: str
     fiscal_year: int
     value: float | None
+
+
+@dataclass(frozen=True, slots=True)
+class FootballBar:
+    """One intrinsic-value estimate as a bear→bull range with a mid point (per-share, USD)."""
+
+    method: str
+    bear: float
+    mid: float
+    bull: float
+    fiscal_year: int
+
+
+@dataclass(frozen=True, slots=True)
+class FootballField:
+    """The valuation "football field": per-method IV ranges plus the current market price."""
+
+    bars: tuple[FootballBar, ...]
+    price: float | None

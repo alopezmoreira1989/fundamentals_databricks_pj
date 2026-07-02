@@ -9,17 +9,18 @@ from infrastructure.storage import meta as load_meta
 from .base import DuckDBRepository
 from .dtos import CompanySummary, MetricPoint
 
-# Latest fiscal year for a ticker, evaluated inside DuckDB (correlated subquery) so we never
-# pull more than the one year we return.
+# Latest available value per metric (the most recent FY is often a partial/TTM year that only
+# carries intrinsic-value metrics, so per-metric — not single-year — gives the full picture).
+# The QUALIFY picks each metric's newest FY inside DuckDB; ordered by the hierarchy's
+# sort_order so categories come out as contiguous blocks the template can regroup.
 _LATEST_METRICS_SQL = """
-    SELECT ticker, metric, unit, fiscal_year, value
+    SELECT ticker, metric, unit, fiscal_year, value, category, subcategory, sort_order
     FROM metrics
     WHERE ticker = ?
       AND period_type = 'FY'
-      AND fiscal_year = (
-          SELECT max(fiscal_year) FROM metrics WHERE ticker = ? AND period_type = 'FY'
-      )
-    ORDER BY metric
+      AND category IS NOT NULL
+    QUALIFY row_number() OVER (PARTITION BY metric ORDER BY fiscal_year DESC) = 1
+    ORDER BY sort_order, metric
     LIMIT ?
 """
 
@@ -40,6 +41,6 @@ class CompanyRepository(DuckDBRepository):
                 )
         return None
 
-    def latest_metrics(self, ticker: str, *, limit: int = 200) -> tuple[MetricPoint, ...]:
-        """The ticker's derived metrics for its most recent fiscal year."""
-        return self._fetch(_LATEST_METRICS_SQL, [ticker, ticker, limit], MetricPoint)
+    def latest_metrics(self, ticker: str, *, limit: int = 400) -> tuple[MetricPoint, ...]:
+        """The latest available value of each derived metric, ordered for grouped display."""
+        return self._fetch(_LATEST_METRICS_SQL, [ticker, limit], MetricPoint)

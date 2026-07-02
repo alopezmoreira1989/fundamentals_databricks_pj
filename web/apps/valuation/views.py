@@ -11,13 +11,19 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import render
 
 from . import services
+from .football import build_chart
 
 
 def valuation_page(request: HttpRequest, ticker: str) -> HttpResponse:
-    """Server-rendered Margin-of-Safety page (empty state if the ticker has none)."""
+    """Server-rendered valuation page: intrinsic-value football field + MoS table."""
     ticker = ticker.upper()
     points = services.get_margin_of_safety(ticker)
-    return render(request, "valuation/detail.html", {"ticker": ticker, "points": points})
+    chart = build_chart(services.get_intrinsic_value_field(ticker))
+    return render(
+        request,
+        "valuation/detail.html",
+        {"ticker": ticker, "points": points, "chart": chart},
+    )
 
 
 def valuation_data(request: HttpRequest, ticker: str) -> JsonResponse:
