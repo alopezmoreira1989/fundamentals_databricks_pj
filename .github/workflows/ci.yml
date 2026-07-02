@@ -1,0 +1,72 @@
+name: CI
+
+# Quality gate for the repo: the pure-Python pipeline suite, the Django web suite (pytest +
+# mypy), and ruff lint. Runs on PRs to main and on pushes to the integration branches.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main, dev_alm]
+
+# Cancel superseded runs on the same ref (e.g. rapid PR pushes).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  pipeline-tests:
+    name: pipeline tests (fundamentals_pipeline + streamlit lib)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dev dependencies (installs fundamentals_pipeline via -e .)
+        run: pip install -r requirements-dev.txt
+      # Only the root suite; web/tests need Django settings and run in the web job. Streamlit
+      # fixture-backed tests self-skip when the gitignored fixtures are absent.
+      - name: Run pytest
+        run: pytest tests -q
+
+  web:
+    name: web tests + mypy (Django)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install web dependencies (+ fundamentals_pipeline via -e .)
+        run: |
+          pip install -e .
+          pip install -r web/requirements/dev.txt
+      - name: pytest (SQLite in-memory, config.settings.test)
+        working-directory: web
+        run: pytest -q
+      - name: mypy + django-stubs
+        working-directory: web
+        run: mypy .
+
+  lint:
+    name: ruff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install ruff
+        run: pip install "ruff>=0.6"
+      # Scoped to the ruff-enforced surfaces: the web app, the test suite, and the importable
+      # fundamentals_pipeline modules. The NN__ Databricks notebook sources are deliberately
+      # excluded — they use notebook cell structure (imports after `# COMMAND`) and are not
+      # ruff-gated. (Linting those is tracked separately.)
+      - name: ruff check
+        run: ruff check web tests fundamentals_pipeline/*.py
