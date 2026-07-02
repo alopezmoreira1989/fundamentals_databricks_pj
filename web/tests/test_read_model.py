@@ -12,7 +12,8 @@ import pytest
 from apps.companies import services as company_services
 from apps.valuation.football import build_chart
 from repositories.companies import CompanyRepository
-from repositories.dtos import CompanySummary, MetricPoint, ScreenRow
+from repositories.company_listing import CompanyListingRepository
+from repositories.dtos import CompanyListRow, CompanySummary, MetricPoint, ScreenRow
 from repositories.screener import ScreenerRepository
 from repositories.valuation import ValuationRepository
 
@@ -187,3 +188,65 @@ def test_valuation_data_json_200(artifacts_from_fixtures, client):
     body = resp.json()
     assert body["ticker"] == TICKER
     assert all(row["metric"].startswith("MoS ") for row in body["margin_of_safety"])
+
+
+# ── company listing (screener table) ─────────────────────────────────────────────────
+def test_listing_default_is_whole_universe(artifacts_from_fixtures):
+    repo = CompanyListingRepository()
+    rows, total = repo.list_page(page=1, page_size=50)
+    assert total > 100  # the full universe, not a single-metric slice
+    assert len(rows) == 50 and all(isinstance(r, CompanyListRow) for r in rows)
+    assert all(r.name for r in rows) and all(r.metric_value is None for r in rows)
+    tickers = [r.ticker for r in rows]
+    assert tickers == sorted(tickers)  # ticker-ordered for stable paging
+
+
+def test_listing_pagination_is_disjoint_and_sized(artifacts_from_fixtures):
+    repo = CompanyListingRepository()
+    (p1, total), (p2, _) = repo.list_page(page=1, page_size=25), repo.list_page(page=2, page_size=25)
+    assert len(p1) == 25 and len(p2) == 25
+    assert not ({r.ticker for r in p1} & {r.ticker for r in p2})  # no overlap between pages
+    assert total > 50
+
+
+def test_listing_search_and_sector_and_index_narrow(artifacts_from_fixtures):
+    repo = CompanyListingRepository()
+    _, all_total = repo.list_page(page_size=1)
+    _, aapl_total = repo.list_page(search="aapl", page_size=1)
+    assert 0 < aapl_total < all_total
+    sectors = repo.available_sectors()
+    assert sectors  # non-empty picker
+    _, sector_total = repo.list_page(sector=sectors[0], page_size=1)
+    assert 0 < sector_total <= all_total
+    _, sp_total = repo.list_page(index="sp500", page_size=1)
+    _, r3_total = repo.list_page(index="r3000", page_size=1)
+    assert 0 < sp_total <= r3_total <= all_total
+
+
+def test_listing_metric_filter_bounds_and_orders(artifacts_from_fixtures):
+    metric = _a_metric_of(TICKER)
+    repo = CompanyListingRepository()
+    rows, total = repo.list_page(metric=metric, page_size=50)
+    assert rows and all(r.metric_value is not None for r in rows)
+    values = [r.metric_value for r in rows]
+    assert values == sorted(values, reverse=True)  # ordered by value desc
+
+    floor = min(v for v in values if v is not None)
+    bounded, bounded_total = repo.list_page(metric=metric, min_value=floor, page_size=50)
+    assert bounded_total <= total
+    assert all(r.metric_value is not None and r.metric_value >= floor for r in bounded)
+
+
+def test_screener_page_default_lists_companies(artifacts_from_fixtures, client):
+    resp = client.get("/screener/")  # no filters ⇒ the whole company table, page 1
+    assert resp.status_code == 200
+    html = resp.content.decode()
+    assert "match" in html  # the total-count line
+    assert 'href="/companies/' in html  # rows link to company pages
+
+
+def test_screener_page_metric_adds_value_column(artifacts_from_fixtures, client):
+    metric = _a_metric_of(TICKER)
+    html = client.get("/screener/", {"metric": metric}).content.decode()
+    assert metric in html  # metric column header
+    assert 'href="/companies/' in html
