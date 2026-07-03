@@ -44,10 +44,13 @@ LOCAL_APPS = [
     "apps.history",
     "apps.api",
     "apps.artifacts",
+    "apps.health",
 ]
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
 MIDDLEWARE = [
+    # Outermost: assign the request id + emit the structured access log around everything else.
+    "config.middleware.RequestLogMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",

@@ -14,6 +14,9 @@ from drf_spectacular.views import (
 
 urlpatterns = [
     path("admin/", admin.site.urls),
+    # Liveness/readiness probes at the site root (before content routes), for the platform
+    # health check and uptime monitor.
+    path("", include("apps.health.urls")),
     path("", TemplateView.as_view(template_name="home.html"), name="home"),
     # Session auth (login / logout / signup).
     path("accounts/", include("apps.users.urls")),

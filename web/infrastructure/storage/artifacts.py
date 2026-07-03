@@ -318,3 +318,26 @@ def warm(*, force: bool = True, validate: bool = True) -> dict[str, str]:
         ensure_valid()
     logger.info("artifact cache warm complete: %s", report)
     return report
+
+
+def cached_status() -> dict[str, dict[str, bool]]:
+    """Cheap, network-free snapshot of the local artifact cache — for readiness probes.
+
+    Reports, per core artifact, whether a local copy is ``present`` and whether it is ``fresh``
+    (younger than ``ARTIFACTS_TTL``). Never downloads: a readiness check must be O(stat), not
+    trigger a multi-megabyte fetch. With ``ARTIFACTS_LOCAL_DIR`` set, a served-from-disk file
+    is reported present and fresh (fixtures have no TTL). Only the hard-required core frames
+    (:data:`_HARD_ARTIFACTS`) are probed — prices/backtest degrade gracefully and never gate
+    readiness.
+    """
+    local = _local_dir()
+    status: dict[str, dict[str, bool]] = {}
+    for name in _HARD_ARTIFACTS:
+        filename = PARQUET_FILES[name]
+        if local is not None:
+            present = (local / filename).exists()
+            status[name] = {"present": present, "fresh": present}
+        else:
+            path = _cache_dir() / filename
+            status[name] = {"present": path.exists(), "fresh": _is_fresh(path)}
+    return status
