@@ -1,5 +1,9 @@
 # Architecture
 
+> This document is the always-current summary of *what* the architecture is. The *why* behind
+> each "locked" rule — the forces, alternatives, and trade-offs — lives in the
+> [Architecture Decision Records](adr/README.md) (`docs/adr/`), linked inline below.
+
 Two independent layers around one shared library.
 
 ```
@@ -10,6 +14,8 @@ web (Django)  ──imports──▶  fundamentals_pipeline  ◀──imports─
 ```
 
 ## Layers
+
+_Decisions: [ADR-0002](adr/0002-django-presentation-and-application-layer.md) (Django as the presentation + application layer), [ADR-0004](adr/0004-artifact-fed-read-model-via-duckdb.md) (artifact-fed read model)._
 
 - **`fundamentals_pipeline/`** — the installable package and the project's **single source
   of truth**: the export/app schema contract and the pure-Python financial reference logic
@@ -37,6 +43,8 @@ web (Django)  ──imports──▶  fundamentals_pipeline  ◀──imports─
    the replaceable-storage goal). Views and services never query DuckDB/PostgreSQL directly.
 
 ## Data access architecture (locked)
+
+_Decisions: [ADR-0003](adr/0003-strict-layering-with-repository-tier.md) (strict layering + repository tier), [ADR-0006](adr/0006-repositories-mandatory-for-analytical-storage.md) (repositories mandatory for analytical storage; ORM-CRUD exception)._
 
 Every access to persistent data goes through a repository — with one judgment-based
 exception for trivial Django-ORM CRUD (see *When a repository earns its place*, below). The
@@ -103,6 +111,8 @@ Databricks) is **never** touched from a view or service — always through a rep
 
 ### Read model & query strategy (locked)
 
+_Decision: [ADR-0004](adr/0004-artifact-fed-read-model-via-duckdb.md) (artifact-fed read model via DuckDB, no Databricks at request time)._
+
 DuckDB is a **read-only analytical store**. The read path obeys:
 
 - **Repositories return immutable DTOs, not raw rows.** A repository maps query results to
@@ -147,6 +157,8 @@ code shared by several apps lives in the top-level tier packages.
 - `templates/`, `static/`, `media/` — presentation assets (created as they gain content).
 
 ## Model conventions (locked)
+
+_Decisions: [ADR-0005](adr/0005-uuid-primary-keys-for-application-models.md) (UUID primary keys), [ADR-0007](adr/0007-custom-user-model-from-first-migration.md) (custom user model from the first migration)._
 
 - **UUID primary keys for every application model, from the start.** Application entities
   declare an explicit `id = models.UUIDField(primary_key=True, default=uuid.uuid4,
