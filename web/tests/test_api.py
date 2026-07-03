@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import dataclasses
 
+from django.core.cache import cache
 from repositories.companies import CompanyRepository
 from repositories.dtos import CompanyListRow, CompanySummary, FootballBar, MetricPoint, ScreenRow
 
@@ -26,6 +27,22 @@ def _a_metric_of(ticker: str) -> str:
 
 def _fields(dto: type) -> set[str]:
     return {f.name for f in dataclasses.fields(dto)}
+
+
+# ── throttling ─────────────────────────────────────────────────────────────────────────
+def test_api_throttles_anonymous_traffic(artifacts_from_fixtures, client, monkeypatch):
+    # DRF freezes THROTTLE_RATES as a class attribute at import, and the test settings disable
+    # it (anon=None) so functional tests aren't rate-limited — so re-enable a tiny rate here by
+    # patching that dict directly (override_settings can't reach the frozen class attribute).
+    from rest_framework.throttling import AnonRateThrottle
+
+    monkeypatch.setitem(AnonRateThrottle.THROTTLE_RATES, "anon", "3/min")
+    cache.clear()  # throttle history lives in the cache; start clean
+    url = f"{V1}/companies/"
+    codes = [client.get(url, {"page_size": 1}).status_code for _ in range(5)]
+    assert 429 in codes, f"expected a 429 after the rate limit, got {codes}"
+    assert codes.count(200) <= 3  # rate is 3/min
+    cache.clear()
 
 
 # ── versioning ───────────────────────────────────────────────────────────────────────

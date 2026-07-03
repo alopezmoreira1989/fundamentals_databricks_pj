@@ -64,6 +64,27 @@ def test_readyz_is_uncached(client, cached_artifacts):
     assert "no-cache" in resp.get("Cache-Control", "")
 
 
+def test_readyz_hides_raw_db_error(client, cached_artifacts, monkeypatch):
+    # A DB outage must yield 503 with a generic detail — never the raw exception (which can leak
+    # host/driver/connection internals) — and the response must still get through (the access-log
+    # middleware, which lazily loads the session user from the now-dead DB, must not 500 it).
+    from django.db import connections
+    from django.db.utils import OperationalError
+
+    secret = "password=SUPERSECRET host=10.9.8.7"
+
+    def boom(*args, **kwargs):
+        raise OperationalError(f"could not connect to server: {secret}")
+
+    monkeypatch.setattr(connections["default"], "cursor", boom)
+    resp = client.get("/readyz")
+    assert resp.status_code == 503
+    db = next(c for c in resp.json()["checks"] if c["name"] == "database")
+    assert db["ok"] is False
+    assert db["detail"] == "unavailable"
+    assert "SUPERSECRET" not in resp.content.decode()
+
+
 # ── request id / access log ──────────────────────────────────────────────────────────────
 def test_request_id_honours_upstream_header(client, cached_artifacts):
     resp = client.get("/readyz", HTTP_X_REQUEST_ID="trace-abc-123")

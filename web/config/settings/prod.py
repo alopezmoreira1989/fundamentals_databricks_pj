@@ -34,6 +34,15 @@ SECURE_HSTS_INCLUDE_SUBDOMAINS = True
 SECURE_HSTS_PRELOAD = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
 
+# Behind the Fly proxy on a custom/https domain, Django 4+ requires the site's HTTPS origin(s)
+# to be trusted or the login/signup POST forms fail CSRF origin verification (403). Supply the
+# scheme-qualified origins (e.g. https://app.fly.dev, https://fundamentals.example.com).
+CSRF_TRUSTED_ORIGINS = env.list("DJANGO_CSRF_TRUSTED_ORIGINS", default=[])
+
+# Proxy hop count so REMOTE_ADDR-derived client IP (used by the API rate throttle) is read from
+# the correct X-Forwarded-For entry. Fly adds a single proxy hop; override if that changes.
+NUM_PROXIES = env.int("DJANGO_NUM_PROXIES", default=1)
+
 # ── cookies ───────────────────────────────────────────────────────────────────────────
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True

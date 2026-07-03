@@ -33,7 +33,8 @@ fly postgres attach fundamentals-db --app fundamentals-web
 # 3. App secrets (never put these in fly.toml — it is committed).
 fly secrets set \
   DJANGO_SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(64))')" \
-  DJANGO_ALLOWED_HOSTS="fundamentals-web.fly.dev"      # add your custom domain(s), comma-separated
+  DJANGO_ALLOWED_HOSTS="fundamentals-web.fly.dev" \
+  DJANGO_CSRF_TRUSTED_ORIGINS="https://fundamentals-web.fly.dev"   # add custom domains too
 
 # 4. (Optional) Error tracking — inert if omitted.
 fly secrets set SENTRY_DSN="https://<key>@<org>.ingest.sentry.io/<project>"
@@ -41,7 +42,13 @@ fly secrets set SENTRY_DSN="https://<key>@<org>.ingest.sentry.io/<project>"
 
 `DJANGO_ALLOWED_HOSTS` **must** include the host Fly serves the app under (e.g.
 `fundamentals-web.fly.dev`) or Django will reject every request (and the health check) with a
-400. Add any custom domain here too.
+400. Add any custom domain here too. `DJANGO_CSRF_TRUSTED_ORIGINS` must list the same host(s)
+**scheme-qualified** (`https://…`) or login/signup form POSTs fail CSRF origin checks with a 403.
+
+The public REST API is rate-limited per client IP (`API_THROTTLE_ANON`, default `120/min`);
+`DJANGO_NUM_PROXIES` (default `1`) tells Django how many proxy hops to trust so the throttle
+keys on the real client IP rather than Fly's proxy. Note the limit is **per gunicorn worker**
+(in-process counter) — for a hard global limit, rate-limit at the edge instead.
 
 ## Deploy
 
