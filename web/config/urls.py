@@ -20,4 +20,6 @@ urlpatterns = [
     path("companies/", include("apps.companies.urls")),
     path("screener/", include("apps.screener.urls")),
     path("valuation/", include("apps.valuation.urls")),
+    # REST API (DRF) over the same read model, for a decoupled frontend / third parties.
+    path("api/", include("apps.api.urls")),
 ]

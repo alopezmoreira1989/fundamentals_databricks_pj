@@ -28,6 +28,9 @@ DJANGO_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
 ]
+THIRD_PARTY_APPS = [
+    "rest_framework",
+]
 # Presentation + user-domain apps only. All financial logic lives in the installed
 # `fundamentals_pipeline` package; nothing here computes ratios, valuations, or metrics.
 LOCAL_APPS = [
@@ -40,7 +43,7 @@ LOCAL_APPS = [
     "apps.history",
     "apps.api",
 ]
-INSTALLED_APPS = DJANGO_APPS + LOCAL_APPS
+INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
@@ -128,3 +131,14 @@ ARTIFACTS_TTL = env.int("ARTIFACTS_TTL", default=600)
 # Dev/offline override: if set, artifacts are read straight from this local directory
 # (e.g. the Streamlit `fixtures/`) and the network is never touched. Empty ⇒ use the Release.
 ARTIFACTS_LOCAL_DIR = env("ARTIFACTS_LOCAL_DIR", default="")
+
+# ── REST API (apps/api) ──────────────────────────────────────────────────────────────
+# The API exposes the same public, read-only analytical read model the HTML pages render —
+# no user data, no writes. So: JSON only (no browsable API / templates), open access, and no
+# authentication/session coupling (nothing to protect, and it keeps the endpoints CSRF-free).
+REST_FRAMEWORK = {
+    "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
+    "DEFAULT_AUTHENTICATION_CLASSES": [],
+    "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.AllowAny"],
+    "UNAUTHENTICATED_USER": None,
+}
