@@ -62,3 +62,34 @@ class FootballBarSerializer(serializers.Serializer):
 class FootballFieldSerializer(serializers.Serializer):
     bars = FootballBarSerializer(many=True)
     price = serializers.FloatField(allow_null=True)
+
+
+# ── response envelopes (describe the viewset payloads for the OpenAPI schema) ───────────
+class CompanyListResponseSerializer(serializers.Serializer):
+    count = serializers.IntegerField()
+    page = serializers.IntegerField()
+    page_size = serializers.IntegerField()
+    results = CompanyListRowSerializer(many=True)
+
+
+class ScreenResponseSerializer(serializers.Serializer):
+    metric = serializers.CharField()
+    count = serializers.IntegerField()
+    results = ScreenRowSerializer(many=True)
+
+
+class ValuationResponseSerializer(serializers.Serializer):
+    ticker = serializers.CharField()
+    margin_of_safety = MetricPointSerializer(many=True)
+    football_field = FootballFieldSerializer()
+
+
+class ErrorBodySerializer(serializers.Serializer):
+    status = serializers.IntegerField()
+    message = serializers.CharField()
+
+
+class ErrorEnvelopeSerializer(serializers.Serializer):
+    """The single error shape: ``{"error": {"status", "message"}}`` (see apps.api.exceptions)."""
+
+    error = ErrorBodySerializer()

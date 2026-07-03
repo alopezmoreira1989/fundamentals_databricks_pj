@@ -1,0 +1,503 @@
+openapi: 3.0.3
+info:
+  title: Fundamentals API
+  version: 1.0.0 (v1)
+  description: Read-only REST API over the published fundamentals read model — company
+    summaries and derived metrics, the single-metric screener, and intrinsic-value
+    data. All data is public and precomputed by the pipeline; there are no write endpoints.
+paths:
+  /api/v1/companies/:
+    get:
+      operationId: v1_companies_list
+      description: |-
+        ``GET /api/v1/companies/`` — the paginated company table (optional filters narrow it);
+        ``GET /api/v1/companies/<ticker>/`` — a company's summary + latest-FY metrics.
+      summary: List companies (paginated table)
+      parameters:
+      - in: query
+        name: index
+        schema:
+          type: string
+        description: 'Index membership filter: ''sp500'' or ''r3000''.'
+      - in: query
+        name: max
+        schema:
+          type: string
+        description: Inclusive upper bound on the metric value (requires 'metric').
+      - in: query
+        name: metric
+        schema:
+          type: string
+        description: Add this metric's latest-FY value column and order rows by it
+          (desc).
+      - in: query
+        name: min
+        schema:
+          type: string
+        description: Inclusive lower bound on the metric value (requires 'metric').
+      - in: query
+        name: page
+        schema:
+          type: integer
+        description: 1-based page number (default 1).
+      - in: query
+        name: page_size
+        schema:
+          type: integer
+        description: Rows per page, 1–200 (default 50).
+      - in: query
+        name: q
+        schema:
+          type: string
+        description: Case-insensitive substring match on ticker or company name.
+      - in: query
+        name: sector
+        schema:
+          type: string
+        description: Exact sector filter.
+      tags:
+      - v1
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CompanyListResponse'
+              examples:
+                PageOfTheUniverse:
+                  value:
+                  - count: 2987
+                    page: 1
+                    page_size: 2
+                    results:
+                    - ticker: A
+                      name: Agilent Technologies
+                      sector: Healthcare
+                      industry: Diagnostics & Research
+                      metric_value: null
+                      fiscal_year: null
+                    - ticker: AAPL
+                      name: Apple Inc.
+                      sector: Technology
+                      industry: Consumer Electronics
+                      metric_value: null
+                      fiscal_year: null
+                  summary: Page of the universe
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/companies/{id}/:
+    get:
+      operationId: v1_companies_retrieve
+      description: |-
+        ``GET /api/v1/companies/`` — the paginated company table (optional filters narrow it);
+        ``GET /api/v1/companies/<ticker>/`` — a company's summary + latest-FY metrics.
+      summary: Retrieve a company (summary + latest-FY metrics)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      tags:
+      - v1
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompanyDetail'
+              examples:
+                AAPL:
+                  value:
+                    summary:
+                      ticker: AAPL
+                      name: Apple Inc.
+                      sector: Technology
+                      industry: Consumer Electronics
+                      exchange: NMS
+                      country: United States
+                    metrics:
+                    - ticker: AAPL
+                      metric: Revenue
+                      unit: USD
+                      fiscal_year: 2024
+                      value: 391035000000.0
+                      category: Income Statement
+                      subcategory: null
+                      sort_order: 1.0
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/screener/:
+    get:
+      operationId: v1_screener_list
+      description: |-
+        ``GET /api/v1/screener/?metric=<name>&min=&max=&limit=`` — the single-metric screen,
+        latest FY, ordered by value descending.
+      summary: Screen on a single metric
+      parameters:
+      - in: query
+        name: limit
+        schema:
+          type: integer
+        description: Max rows, 1–200 (default 50).
+      - in: query
+        name: max
+        schema:
+          type: string
+        description: Inclusive upper bound on the metric value.
+      - in: query
+        name: metric
+        schema:
+          type: string
+        description: Metric name to screen on.
+        required: true
+      - in: query
+        name: min
+        schema:
+          type: string
+        description: Inclusive lower bound on the metric value.
+      tags:
+      - v1
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ScreenResponse'
+              examples:
+                TopROE:
+                  value:
+                  - metric: Return on Equity %
+                    count: 2
+                    results:
+                    - ticker: AAPL
+                      fiscal_year: 2024
+                      value: 164.6
+                    - ticker: MCD
+                      fiscal_year: 2024
+                      value: 90.1
+                  summary: Top ROE
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/valuation/{id}/:
+    get:
+      operationId: v1_valuation_retrieve
+      description: |-
+        ``GET /api/v1/valuation/<ticker>/`` — a ticker's Margin-of-Safety metrics plus the
+        intrinsic-value football field (per-method TTM ranges + market price).
+      summary: Retrieve valuation (Margin of Safety + football field)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      tags:
+      - v1
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValuationResponse'
+              examples:
+                AAPL:
+                  value:
+                    ticker: AAPL
+                    margin_of_safety:
+                    - ticker: AAPL
+                      metric: MoS Graham (TTM)
+                      unit: '%'
+                      fiscal_year: 2024
+                      value: -35.2
+                      category: null
+                      subcategory: null
+                      sort_order: null
+                    football_field:
+                      bars:
+                      - method: DCF (TTM)
+                        bear: 120.0
+                        mid: 165.0
+                        bull: 210.0
+                        fiscal_year: 2024
+                      price: 229.0
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+components:
+  schemas:
+    CompanyDetail:
+      type: object
+      properties:
+        summary:
+          $ref: '#/components/schemas/CompanySummary'
+        metrics:
+          type: array
+          items:
+            $ref: '#/components/schemas/MetricPoint'
+      required:
+      - metrics
+      - summary
+    CompanyListResponse:
+      type: object
+      properties:
+        count:
+          type: integer
+        page:
+          type: integer
+        page_size:
+          type: integer
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/CompanyListRow'
+      required:
+      - count
+      - page
+      - page_size
+      - results
+    CompanyListRow:
+      type: object
+      properties:
+        ticker:
+          type: string
+        name:
+          type: string
+        sector:
+          type: string
+          nullable: true
+        industry:
+          type: string
+          nullable: true
+        metric_value:
+          type: number
+          format: double
+          nullable: true
+        fiscal_year:
+          type: integer
+          nullable: true
+      required:
+      - fiscal_year
+      - industry
+      - metric_value
+      - name
+      - sector
+      - ticker
+    CompanySummary:
+      type: object
+      properties:
+        ticker:
+          type: string
+        name:
+          type: string
+        sector:
+          type: string
+          nullable: true
+        industry:
+          type: string
+          nullable: true
+        exchange:
+          type: string
+          nullable: true
+        country:
+          type: string
+          nullable: true
+      required:
+      - country
+      - exchange
+      - industry
+      - name
+      - sector
+      - ticker
+    ErrorBody:
+      type: object
+      properties:
+        status:
+          type: integer
+        message:
+          type: string
+      required:
+      - message
+      - status
+    ErrorEnvelope:
+      type: object
+      description: 'The single error shape: ``{"error": {"status", "message"}}`` (see
+        apps.api.exceptions).'
+      properties:
+        error:
+          $ref: '#/components/schemas/ErrorBody'
+      required:
+      - error
+    FootballBar:
+      type: object
+      properties:
+        method:
+          type: string
+        bear:
+          type: number
+          format: double
+        mid:
+          type: number
+          format: double
+        bull:
+          type: number
+          format: double
+        fiscal_year:
+          type: integer
+      required:
+      - bear
+      - bull
+      - fiscal_year
+      - method
+      - mid
+    FootballField:
+      type: object
+      properties:
+        bars:
+          type: array
+          items:
+            $ref: '#/components/schemas/FootballBar'
+        price:
+          type: number
+          format: double
+          nullable: true
+      required:
+      - bars
+      - price
+    MetricPoint:
+      type: object
+      properties:
+        ticker:
+          type: string
+        metric:
+          type: string
+        unit:
+          type: string
+          nullable: true
+        fiscal_year:
+          type: integer
+        value:
+          type: number
+          format: double
+          nullable: true
+        category:
+          type: string
+          nullable: true
+        subcategory:
+          type: string
+          nullable: true
+        sort_order:
+          type: number
+          format: double
+          nullable: true
+      required:
+      - category
+      - fiscal_year
+      - metric
+      - sort_order
+      - subcategory
+      - ticker
+      - unit
+      - value
+    ScreenResponse:
+      type: object
+      properties:
+        metric:
+          type: string
+        count:
+          type: integer
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ScreenRow'
+      required:
+      - count
+      - metric
+      - results
+    ScreenRow:
+      type: object
+      properties:
+        ticker:
+          type: string
+        fiscal_year:
+          type: integer
+        value:
+          type: number
+          format: double
+          nullable: true
+      required:
+      - fiscal_year
+      - ticker
+      - value
+    ValuationResponse:
+      type: object
+      properties:
+        ticker:
+          type: string
+        margin_of_safety:
+          type: array
+          items:
+            $ref: '#/components/schemas/MetricPoint'
+        football_field:
+          $ref: '#/components/schemas/FootballField'
+      required:
+      - football_field
+      - margin_of_safety
+      - ticker
