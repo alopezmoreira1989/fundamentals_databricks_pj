@@ -8,5 +8,15 @@
 **/.ruff_cache/
 *.egg-info/
 web/.env
+**/.env.local
 **/node_modules/
 **/.next/
+**/.mypy_cache/
+.claude/
+.idea/
+.vscode/
+# Rebuilt at image build / runtime — never ship local copies into the prod image.
+web/staticfiles/
+**/.artifact_cache/
+# Gitignored local fixtures not needed to run the web app.
+fundamentals_pipeline/60__frontends/61__streamlit/fixtures/

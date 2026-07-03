@@ -1,0 +1,48 @@
+# Fly.io deployment for the Django web layer. Lives at the REPO ROOT so `flyctl deploy` uses
+# the repo root as the Docker build context (the image installs the sibling
+# `fundamentals_pipeline` package). Runbook: docs/deploy-fly.md.
+#
+# Adjust `app` and `primary_region`, then set secrets and deploy (see the runbook):
+#   fly secrets set DJANGO_SECRET_KEY=... DJANGO_ALLOWED_HOSTS=<app>.fly.dev
+#   fly deploy
+
+app = "fundamentals-web"          # <-- set to your Fly app name
+primary_region = "iad"            # <-- set to your closest region (`fly platform regions`)
+
+[build]
+  dockerfile = "web/docker/Dockerfile.prod"
+
+# Migrations run once per deploy on a temporary release machine, before the new version takes
+# traffic. Idempotent and safe to re-run; keeps app machines free of migration races.
+[deploy]
+  release_command = "python manage.py migrate --noinput"
+
+[env]
+  DJANGO_SETTINGS_MODULE = "config.settings.prod"
+  PORT = "8080"
+  # Non-blocking background revalidation of stale artifacts (reads never wait on a refresh).
+  ARTIFACTS_REFRESH_ASYNC = "true"
+
+[http_service]
+  internal_port = 8080
+  force_https = true              # redirect http→https at the Fly edge
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  # Readiness gate: Fly routes traffic to a machine only while /readyz is 200 (DB reachable +
+  # core artifacts cached). grace_period covers the boot-time cache warm. Stale-but-present
+  # artifacts still read as ready, so this does not flap on the TTL.
+  [[http_service.checks]]
+    interval = "15s"
+    timeout = "5s"
+    grace_period = "30s"
+    method = "GET"
+    path = "/readyz"
+
+[[vm]]
+  # DuckDB + pandas/pyarrow over the parquet artifacts want headroom; scale via `fly scale`.
+  cpu_kind = "shared"
+  cpus = 1
+  memory = "1gb"
