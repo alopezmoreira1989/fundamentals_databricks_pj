@@ -6,6 +6,9 @@
 Django>=5.0,<6
 django-environ>=0.11,<1
 psycopg[binary]>=3.1,<4
+# Static-file serving in production (compressed + manifest). In base (not prod-only) so the
+# prod settings module imports cleanly wherever only base/dev deps are installed (e.g. CI).
+whitenoise>=6.6,<7
 # REST API surface (apps/api) over the read-model services — serializers + read-only viewsets.
 djangorestframework>=3.15,<4
 # OpenAPI 3 schema generation + Swagger/Redoc docs for the API.

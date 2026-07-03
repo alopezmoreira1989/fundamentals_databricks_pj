@@ -1,0 +1,7 @@
+# Production runtime dependencies. Install with:  pip install -r web/requirements/prod.txt
+# (the shared fundamentals_pipeline package is installed separately from the repo root, `-e .`).
+-r base.txt
+
+# WSGI server. Not imported by the settings module (it's the server binary that imports
+# config.wsgi:application), so it lives here rather than in base.
+gunicorn>=22,<24

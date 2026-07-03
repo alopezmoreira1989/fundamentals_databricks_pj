@@ -74,8 +74,7 @@ TEMPLATES = [
     },
 ]
 
-# WSGI_APPLICATION is intentionally unset in Phase 1 (runserver uses the default); the
-# wsgi.py entry point is added with Gunicorn in the deployment phase.
+WSGI_APPLICATION = "config.wsgi.application"
 
 DATABASES = {
     "default": env.db(
@@ -108,6 +107,8 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = "static/"
+# Collected static root (populated by `collectstatic`); WhiteNoise serves it in prod.
+STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
