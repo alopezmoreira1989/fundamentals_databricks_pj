@@ -52,9 +52,12 @@ def _check_database() -> Check:
         with connections["default"].cursor() as cursor:
             cursor.execute("SELECT 1")
             cursor.fetchone()
-    except DatabaseError as exc:  # pragma: no cover - exercised via a patched connection in tests
+    except DatabaseError as exc:
+        # /readyz is unauthenticated (the platform health checker hits it), so the public body
+        # must not carry the raw exception — it can leak DB host/driver/connection internals.
+        # The full detail goes to the server log for operators; the response stays generic.
         logger.warning("readiness: database check failed: %s", exc)
-        return Check(name="database", ok=False, detail=str(exc))
+        return Check(name="database", ok=False, detail="unavailable")
     return Check(name="database", ok=True)
 
 

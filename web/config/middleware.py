@@ -42,9 +42,22 @@ class RequestLogMiddleware:
         response["X-Request-ID"] = rid
 
         if request.path not in _QUIET_PATHS:
+            self._log_access(request, response, start, rid)
+        return response
+
+    @staticmethod
+    def _log_access(request: HttpRequest, response: HttpResponse, start: float, rid: str) -> None:
+        # Access logging must never turn a good response into a 500. Resolving request.user
+        # lazily loads the session user from the DB, so if the database is down this raises —
+        # exactly when a /readyz 503 must still get through. Guard the whole block.
+        try:
             duration_ms = round((time.monotonic() - start) * 1000, 1)
             user = getattr(request, "user", None)
-            user_id = str(user.pk) if user is not None and user.is_authenticated else "anon"
+            try:
+                authed = user is not None and user.is_authenticated
+            except Exception:
+                authed = False
+            user_id = str(user.pk) if authed and user is not None else "anon"
             logger.info(
                 "%s %s %s",
                 request.method,
@@ -59,4 +72,5 @@ class RequestLogMiddleware:
                     "user": user_id,
                 },
             )
-        return response
+        except Exception:  # pragma: no cover - defensive; logging must not break the request
+            logger.warning("access-log emission failed", exc_info=True)

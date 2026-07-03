@@ -150,6 +150,13 @@ REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [],
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.AllowAny"],
     "UNAUTHENTICATED_USER": None,
+    # Rate-limit the public API: every call runs a DuckDB query over the parquet artifacts, so
+    # unbounded anonymous traffic is an abuse/DoS vector. All requests are anonymous (no auth
+    # classes), so AnonRateThrottle keys them by client IP. Behind a proxy the real IP comes
+    # from X-Forwarded-For — set NUM_PROXIES to the proxy hop count (see prod.py) or every
+    # client collapses onto the proxy's IP and shares one bucket. Rate is env-tunable.
+    "DEFAULT_THROTTLE_CLASSES": ["rest_framework.throttling.AnonRateThrottle"],
+    "DEFAULT_THROTTLE_RATES": {"anon": env("API_THROTTLE_ANON", default="120/min")},
     # URL-path versioning: routes live under /api/<version>/ (only v1 today). request.version
     # is populated, so a future v2 is an additive route + serializer, not a breaking move.
     "DEFAULT_VERSIONING_CLASS": "rest_framework.versioning.URLPathVersioning",

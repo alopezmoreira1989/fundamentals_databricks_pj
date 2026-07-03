@@ -6,6 +6,12 @@ hashing, authentication — behave identically on SQLite, so this keeps the test
 dependency-free. Postgres-specific behaviour, if any is ever added, gets its own marked tests.
 """
 from .dev import *  # noqa: F401,F403
+from .dev import REST_FRAMEWORK
+
+# Disable API throttling by default so the functional API tests aren't rate-limited by
+# accumulated per-IP request history; the dedicated throttle test re-enables it via
+# override_settings with a tiny rate.
+REST_FRAMEWORK = {**REST_FRAMEWORK, "DEFAULT_THROTTLE_RATES": {"anon": None}}
 
 DATABASES = {
     "default": {
