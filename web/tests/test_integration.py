@@ -116,6 +116,7 @@ def test_company_page_has_statement_tabs(artifacts_from_fixtures, client):
     # Statement grids carry the fiscal-year columns, the Revenue line, and per-row sparklines.
     assert "Line item" in body and "Revenue" in body
     assert 'class="sparkline"' in body
+    assert 'class="tab-chart"' in body  # per-tab headline bar/combo chart
 
 
 def test_company_page_has_price_and_quarterly_tabs(artifacts_from_fixtures, client):

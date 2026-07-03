@@ -149,6 +149,20 @@ def test_sparkline_svg_geometry():
     assert sparkline_svg([1.0, None, 3.0]).startswith("<svg")  # skips the gap, still draws
 
 
+def test_tab_charts_build_from_statements(artifacts_from_fixtures):
+    from apps.companies import charts
+
+    repo = CompanyRepository()
+    by_name = {s.name: s for s in repo.get_statements(TICKER).statements}
+    income = charts.income_statement_chart(by_name["Income Statement"])
+    assert income and "<rect" in income.svg and "polyline" in income.svg  # revenue bars + NI line
+    assert dict(income.legend).get("Revenue")
+    cash = charts.cash_flow_chart(by_name["Cash Flow"])
+    assert cash and {n for n, _ in cash.legend} == {"Operating", "Investing", "Financing"}
+    quarterly = charts.quarterly_chart(repo.get_quarterly(TICKER))
+    assert quarterly and "<rect" in quarterly.svg
+
+
 def test_mos_scenarios_pivot_by_method_and_basis(artifacts_from_fixtures):
     scenarios = ValuationRepository().margin_of_safety_scenarios(TICKER)
     assert scenarios  # AAPL has MoS scenarios

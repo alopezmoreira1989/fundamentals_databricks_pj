@@ -16,7 +16,7 @@ from apps.valuation import services as valuation_services
 from apps.valuation.football import build_chart
 from apps.watchlists import services as watchlist_services
 
-from . import pricechart, services
+from . import charts, pricechart, services
 
 
 def company_page(request: HttpRequest, ticker: str) -> HttpResponse:
@@ -32,6 +32,17 @@ def company_page(request: HttpRequest, ticker: str) -> HttpResponse:
     headline = services.headline_kpis(statements)
     price_chart = pricechart.build_price_chart(services.get_price_series(ticker))
     quarterly = services.get_quarterly(ticker)
+    # Pair each statement with its headline chart (revenue combo / composition / cash-flow bars).
+    _chart_for = {
+        "Income Statement": charts.income_statement_chart,
+        "Balance Sheet": charts.balance_sheet_chart,
+        "Cash Flow": charts.cash_flow_chart,
+    }
+    statement_panes = [
+        (st, _chart_for[st.name](st) if st.name in _chart_for else None)
+        for st in statements.statements
+    ]
+    quarterly_chart = charts.quarterly_chart(quarterly) if quarterly.lines else None
     # Valuation tab: intrinsic-value football field + MoS + price multiples. Intrinsic-value
     # metrics are dropped from the derived-metrics list to avoid duplicating the football field.
     derived_metrics, valuation_metrics = services.split_metrics(detail.metrics)
@@ -51,9 +62,11 @@ def company_page(request: HttpRequest, ticker: str) -> HttpResponse:
         {
             "detail": detail,
             "statements": statements.statements,
+            "statement_panes": statement_panes,
             "headline": headline,
             "price_chart": price_chart,
             "quarterly": quarterly,
+            "quarterly_chart": quarterly_chart,
             "derived_metrics": derived_metrics,
             "valuation_metrics": valuation_metrics,
             "iv_chart": iv_chart,

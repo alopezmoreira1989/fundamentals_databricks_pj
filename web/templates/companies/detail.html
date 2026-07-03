@@ -28,6 +28,11 @@
       text-transform: uppercase; color: var(--accent-ink); background: var(--bg-subtle); padding-top: 12px; }
   table.fs-web th.spark, table.fs-web td.spark { width: 96px; text-align: center; }
   .sparkline { vertical-align: middle; display: inline-block; }
+  /* Tab headline charts */
+  .tab-chart { display: block; width: 100%; height: auto; }
+  .chart-legend { display: flex; flex-wrap: wrap; gap: 16px; font-family: var(--mono);
+    font-size: .68rem; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2); }
+  .chart-legend .dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
   /* Price chart */
   .price-svg { width: 100%; height: 260px; display: block; }
   .price-svg .line { stroke: var(--accent); stroke-width: 2; vector-effect: non-scaling-stroke; }
@@ -191,8 +196,16 @@
     {% endif %}
 
     <!-- Statement tabs -->
-    {% for st in statements %}
+    {% for st, chart in statement_panes %}
       <div class="tab-pane fade" id="pane-{{ st.name|slugify }}" role="tabpanel" aria-labelledby="tab-{{ st.name|slugify }}" tabindex="0">
+        {% if chart %}
+          <div class="card p-4 mb-3">
+            <div class="chart-legend mb-2">
+              {% for name, color in chart.legend %}<span><span class="dot" style="background:{{ color }}"></span>{{ name }}</span>{% endfor %}
+            </div>
+            {{ chart.svg|safe }}
+          </div>
+        {% endif %}
         <div class="card p-0 table-responsive">
           <table class="table table-hover fs-web align-middle mb-0">
             <thead>
@@ -225,6 +238,14 @@
     <!-- Quarterly (Income Statement by fiscal quarter) -->
     {% if quarterly.lines %}
       <div class="tab-pane fade" id="pane-quarterly" role="tabpanel" aria-labelledby="tab-quarterly" tabindex="0">
+        {% if quarterly_chart %}
+          <div class="card p-4 mb-3">
+            <div class="chart-legend mb-2">
+              {% for name, color in quarterly_chart.legend %}<span><span class="dot" style="background:{{ color }}"></span>{{ name }}</span>{% endfor %}
+            </div>
+            {{ quarterly_chart.svg|safe }}
+          </div>
+        {% endif %}
         <div class="eyebrow mb-2">{{ quarterly.name }} · by fiscal quarter</div>
         <div class="card p-0 table-responsive">
           <table class="table table-hover fs-web align-middle mb-0">
