@@ -8,6 +8,11 @@ per-user state, so the ORM is used straight from the service (see ``docs/archite
 
 from __future__ import annotations
 
+from datetime import timedelta
+
+from django.db.models import Max
+from django.utils import timezone
+
 from apps.users.models import User
 
 from .models import HistoryItem
@@ -18,8 +23,14 @@ CAP = 50  # keep at most this many recently-viewed companies per user
 def record(user: User, ticker: str) -> None:
     """Mark ``ticker`` as just viewed by ``user``, then trim to the ``CAP`` most recent."""
     ticker = ticker.upper()
-    # update_or_create bumps viewed_at (auto_now) on an existing row, or inserts a new one.
-    HistoryItem.objects.update_or_create(user=user, ticker=ticker)
+    # Stamp with a viewed_at that strictly exceeds this user's current max, so ordering by
+    # -viewed_at is deterministic even when two records land in the same wall-clock tick
+    # (coarse on Windows). update_or_create bumps an existing row or inserts a new one.
+    now = timezone.now()
+    latest = HistoryItem.objects.filter(user=user).aggregate(m=Max("viewed_at"))["m"]
+    if latest is not None and latest >= now:
+        now = latest + timedelta(microseconds=1)
+    HistoryItem.objects.update_or_create(user=user, ticker=ticker, defaults={"viewed_at": now})
     keep = list(
         HistoryItem.objects.filter(user=user)
         .order_by("-viewed_at")

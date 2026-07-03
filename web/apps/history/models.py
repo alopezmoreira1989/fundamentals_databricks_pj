@@ -3,6 +3,11 @@
 Re-viewing a company updates its ``viewed_at`` in place (unique per user+ticker), so the row
 count per user is bounded by the number of *distinct* companies viewed; the service trims that
 to the most-recent ``CAP`` (see ``services.record``). Application entity → explicit UUID pk.
+
+``viewed_at`` is set by the service (not ``auto_now``) so it can be kept strictly increasing per
+user — wall-clock resolution is coarse on some platforms (~15ms on Windows), and equal timestamps
+would make ``-viewed_at`` ordering non-deterministic. The service guarantees each record advances
+the user's max ``viewed_at``, so ordering is exact.
 """
 
 from __future__ import annotations
@@ -21,7 +26,7 @@ class HistoryItem(models.Model):
         related_name="history_items",
     )
     ticker = models.CharField(max_length=16)
-    viewed_at = models.DateTimeField(auto_now=True)  # re-stamped on every re-view
+    viewed_at = models.DateTimeField()  # set by the service, kept strictly increasing per user
 
     class Meta:
         ordering = ["-viewed_at"]  # most-recently viewed first
