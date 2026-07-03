@@ -46,9 +46,9 @@ jobs:
         run: |
           pip install -e .
           pip install -r web/requirements/dev.txt
-      - name: pytest (SQLite in-memory, config.settings.test)
+      - name: pytest + coverage floor (SQLite in-memory, config.settings.test)
         working-directory: web
-        run: pytest -q
+        run: pytest -q --cov --cov-report=term-missing --cov-report=xml --cov-fail-under=90
       - name: mypy + django-stubs
         working-directory: web
         run: mypy .

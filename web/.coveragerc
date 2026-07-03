@@ -1,0 +1,31 @@
+# Coverage config for the web layer. Run from web/ via the CI command (or locally):
+#   pytest --cov --cov-report=term-missing
+# The floor is enforced in CI (see .github/workflows/ci.yml: --cov-fail-under).
+
+[run]
+# The application code we hold to a coverage floor. Settings modules, the WSGI entrypoint,
+# and generated migrations are configuration/plumbing, not logic — excluded so the number
+# reflects tested behaviour rather than being diluted (or inflated) by them.
+source =
+    apps
+    services
+    repositories
+    infrastructure
+    config
+omit =
+    */migrations/*
+    */tests/*
+    config/settings/*
+    config/wsgi.py
+    config/asgi.py
+    manage.py
+
+[report]
+show_missing = True
+skip_covered = True
+# Lines that never run at "normal" runtime and shouldn't count against coverage.
+exclude_also =
+    if TYPE_CHECKING:
+    raise NotImplementedError
+    if __name__ == .__main__.:
+    \.\.\.

@@ -138,3 +138,28 @@ def test_json_formatter_serialises_exception():
 def test_init_sentry_noop_without_dsn():
     # No DSN → returns False and never imports sentry_sdk (prod-only dependency).
     assert init_sentry(dsn="", environment="test") is False
+
+
+def test_init_sentry_initialises_with_dsn(monkeypatch):
+    # With a DSN, init_sentry lazily imports sentry_sdk and calls init with release/env tags.
+    # Inject fake modules so the prod-only dependency needn't be installed in the test env.
+    import sys
+    import types
+
+    calls: dict = {}
+    fake_sdk = types.ModuleType("sentry_sdk")
+    fake_sdk.init = lambda **kw: calls.update(kw)  # type: ignore[attr-defined]
+    fake_integrations = types.ModuleType("sentry_sdk.integrations")
+    fake_django = types.ModuleType("sentry_sdk.integrations.django")
+    fake_django.DjangoIntegration = type("DjangoIntegration", (), {})  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "sentry_sdk", fake_sdk)
+    monkeypatch.setitem(sys.modules, "sentry_sdk.integrations", fake_integrations)
+    monkeypatch.setitem(sys.modules, "sentry_sdk.integrations.django", fake_django)
+
+    ok = init_sentry(
+        dsn="https://key@o0.ingest.sentry.io/1", environment="production", release="abc123"
+    )
+    assert ok is True
+    assert calls["environment"] == "production"
+    assert calls["release"] == "abc123"
+    assert calls["send_default_pii"] is False

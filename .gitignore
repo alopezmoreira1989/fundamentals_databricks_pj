@@ -36,6 +36,10 @@ web/staticfiles/
 web/media/
 web/.artifact_cache/
 web/*.sqlite3
+# Coverage outputs (pytest-cov)
+web/.coverage
+web/coverage.xml
+web/htmlcov/
 
 # Sistema
 Thumbs.db
