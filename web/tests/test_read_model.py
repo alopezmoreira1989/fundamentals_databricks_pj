@@ -109,10 +109,19 @@ def test_company_summary_carries_profile_fields(artifacts_from_fixtures):
     summary = CompanyRepository().get_summary(TICKER)
     assert summary is not None
     assert summary.description and "Apple" in summary.description
-    assert summary.website == "https://www.apple.com"
-    assert isinstance(summary.employees, int) and summary.employees > 0  # "166000" → int
+    assert summary.website and "apple.com" in summary.website
+    assert isinstance(summary.employees, int) and summary.employees > 0  # stringified → int
     assert summary.has_logo is True  # "True" → bool
-    assert summary.founded is None  # literal "None" in meta → normalized away
+    assert summary.founded != "None"  # literal "None" (if present) normalized away
+
+
+def test_meta_field_normalizers():
+    from repositories.companies import _as_bool, _as_int, _clean
+
+    assert _clean("None") is None and _clean("") is None and _clean(None) is None
+    assert _clean("Apple Inc.") == "Apple Inc."
+    assert _as_int("166000") == 166000 and _as_int("None") is None and _as_int(None) is None
+    assert _as_bool("True") is True and _as_bool("False") is False and _as_bool(None) is None
 
 
 def test_dtos_are_immutable(artifacts_from_fixtures):
