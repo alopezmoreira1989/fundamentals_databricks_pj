@@ -36,7 +36,7 @@ _LATEST_METRICS_SQL = """
 # Reported financial-statement line items across fiscal years (the raw statements, not the
 # derived metrics). Ordered by the reporting hierarchy so the pivot below preserves line order.
 _STATEMENTS_SQL = """
-    SELECT stmt, section, display_name, sort_order, fiscal_year, value
+    SELECT stmt, section, "group", display_name, sort_order, fiscal_year, value
     FROM financials
     WHERE ticker = ?
       AND period_type = 'FY'
@@ -96,14 +96,15 @@ class CompanyRepository(DuckDBRepository):
             return CompanyStatements(statements=())
 
         # Most recent `max_years` fiscal years, newest first → the display columns.
-        years = sorted({int(r[4]) for r in rows}, reverse=True)[:max_years]
+        years = sorted({int(r[5]) for r in rows}, reverse=True)[:max_years]
         col = {year: i for i, year in enumerate(years)}
 
         statements: list[Statement] = []
         for stmt in _STATEMENT_ORDER:
             values: dict[str, list[float | None]] = {}
             sections: dict[str, str | None] = {}
-            for _stmt, section, name, _sort, fiscal_year, value in rows:
+            groups: dict[str, str | None] = {}
+            for _stmt, section, group, name, _sort, fiscal_year, value in rows:
                 if _stmt != stmt or int(fiscal_year) not in col:
                     continue
                 line = values.get(name)
@@ -111,11 +112,12 @@ class CompanyRepository(DuckDBRepository):
                     line = [None] * len(years)
                     values[name] = line
                     sections[name] = section
+                    groups[name] = group
                 line[col[int(fiscal_year)]] = value
             if not values:
                 continue
             lines = tuple(
-                StatementLine(display_name=name, section=sections[name], values=tuple(vals))
+                StatementLine(display_name=name, section=sections[name], values=tuple(vals), group=groups[name])
                 for name, vals in values.items()
             )
             statements.append(Statement(name=stmt, years=tuple(years), lines=lines))

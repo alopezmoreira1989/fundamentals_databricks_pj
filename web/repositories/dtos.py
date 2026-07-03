@@ -58,6 +58,7 @@ class StatementLine:
     display_name: str
     section: str | None
     values: tuple[float | None, ...]
+    group: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

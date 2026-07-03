@@ -32,16 +32,18 @@ def company_page(request: HttpRequest, ticker: str) -> HttpResponse:
     headline = services.headline_kpis(statements)
     price_chart = pricechart.build_price_chart(services.get_price_series(ticker))
     quarterly = services.get_quarterly(ticker)
-    # Pair each statement with its headline chart (revenue combo / composition / cash-flow bars).
+    # Income/Cash-flow get a headline bar chart; the Balance Sheet gets a single-year
+    # composition (rendered below), so it's excluded from the per-statement bar-chart map.
     _chart_for = {
         "Income Statement": charts.income_statement_chart,
-        "Balance Sheet": charts.balance_sheet_chart,
         "Cash Flow": charts.cash_flow_chart,
     }
     statement_panes = [
         (st, _chart_for[st.name](st) if st.name in _chart_for else None)
         for st in statements.statements
     ]
+    balance_sheet = next((s for s in statements.statements if s.name == "Balance Sheet"), None)
+    bs_compositions = charts.balance_sheet_compositions(balance_sheet) if balance_sheet else ()
     quarterly_chart = charts.quarterly_chart(quarterly) if quarterly.lines else None
     # Valuation tab: intrinsic-value football field + MoS + price multiples. Intrinsic-value
     # metrics are dropped from the derived-metrics list to avoid duplicating the football field.
@@ -67,6 +69,7 @@ def company_page(request: HttpRequest, ticker: str) -> HttpResponse:
             "price_chart": price_chart,
             "quarterly": quarterly,
             "quarterly_chart": quarterly_chart,
+            "bs_compositions": bs_compositions,
             "derived_metrics": derived_metrics,
             "valuation_metrics": valuation_metrics,
             "iv_chart": iv_chart,

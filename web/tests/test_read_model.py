@@ -163,6 +163,21 @@ def test_tab_charts_build_from_statements(artifacts_from_fixtures):
     assert quarterly and "<rect" in quarterly.svg
 
 
+def test_balance_sheet_compositions(artifacts_from_fixtures):
+    from apps.companies import charts
+
+    balance = next(s for s in CompanyRepository().get_statements(TICKER).statements if s.name == "Balance Sheet")
+    comps = charts.balance_sheet_compositions(balance)
+    assert comps  # one per fiscal year
+    latest = comps[0]
+    assert latest.year == max(balance.years)  # newest first
+    for stack in (latest.assets, latest.liabilities_equity):
+        assert stack.segments
+        assert abs(sum(s.pct for s in stack.segments) - 100) < 0.5  # segments fill the bar
+    # assets == liabilities + equity (the accounting identity)
+    assert abs(latest.assets.total - latest.liabilities_equity.total) < 1
+
+
 def test_mos_scenarios_pivot_by_method_and_basis(artifacts_from_fixtures):
     scenarios = ValuationRepository().margin_of_safety_scenarios(TICKER)
     assert scenarios  # AAPL has MoS scenarios

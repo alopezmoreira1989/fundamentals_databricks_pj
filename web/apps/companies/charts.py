@@ -157,20 +157,6 @@ def income_statement_chart(statement: Statement) -> TabChart | None:
     return TabChart(_bar_chart_svg(labels, series, line=line), legend)
 
 
-def balance_sheet_chart(statement: Statement) -> TabChart | None:
-    """Total Assets / Total Liabilities / Total Equity grouped bars, across fiscal years."""
-    specs = (
-        ("Total Assets", "Total Assets", _ACCENT),
-        ("Total Liabilities", "Total Liabilities", _NEGATIVE),
-        ("Total Equity", "Total Stockholders Equity", _POSITIVE),
-    )
-    series = [(label, vals, color) for label, name, color in specs if (vals := _line_of(statement.lines, name))]
-    if not series:
-        return None
-    legend = tuple((label, color) for label, vals, color in series)
-    return TabChart(_bar_chart_svg(_year_labels(statement.years), series), legend)
-
-
 def cash_flow_chart(statement: Statement) -> TabChart | None:
     """Operating / Investing / Financing cash-flow grouped bars, across fiscal years."""
     specs = (
@@ -192,3 +178,86 @@ def quarterly_chart(grid: QuarterGrid) -> TabChart | None:
         return None
     labels = tuple(reversed(grid.columns))
     return TabChart(_bar_chart_svg(labels, [("Revenue", revenue, _ACCENT)]), (("Revenue", _ACCENT),))
+
+
+# ── balance-sheet composition (single year, stacked twin bars) ───────────────────────────
+
+# Distinct segment colors (editorial family), assigned in stack order.
+_SEG_PALETTE = ("#185FA5", "#0F6E56", "#BA7517", "#534AB7", "#993C1D", "#5E8CA8", "#8A7B3F", "#888780")
+_LIABILITY_GROUPS = ("Current Liabilities", "Non-Current Liabilities")
+
+
+@dataclass(frozen=True, slots=True)
+class Segment:
+    name: str
+    value: float
+    pct: float  # share of the stack total, 0–100
+    color: str
+
+
+@dataclass(frozen=True, slots=True)
+class Stack:
+    title: str
+    total: float
+    segments: tuple[Segment, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class Composition:
+    """One fiscal year's balance sheet as two stacked bars (Assets | Liabilities & Equity)."""
+
+    year: int
+    assets: Stack
+    liabilities_equity: Stack
+
+
+def _with_other(leaves: list[tuple[str, float | None]], total: float | None, other_label: str) -> list[tuple[str, float]]:
+    """Positive leaf segments, plus an ``other`` remainder so the stack sums to ``total``."""
+    segs = [(name, value) for name, value in leaves if value is not None and value > 0]
+    if total is not None and total > 0:
+        remainder = total - sum(value for _, value in segs)
+        if remainder > total * 0.01:  # ignore tiny / negative remainders
+            segs.append((other_label, remainder))
+    return segs
+
+
+def _stack(title: str, total: float | None, raw: list[tuple[str, float]]) -> Stack | None:
+    if total is None or total <= 0 or not raw:
+        return None
+    segments = tuple(
+        Segment(name=name, value=value, pct=value / total * 100, color=_SEG_PALETTE[i % len(_SEG_PALETTE)])
+        for i, (name, value) in enumerate(raw)
+    )
+    return Stack(title=title, total=total, segments=segments)
+
+
+def balance_sheet_compositions(statement: Statement) -> tuple[Composition, ...]:
+    """One :class:`Composition` per fiscal year (newest first) — assets and liabilities+equity
+    each broken into their line items (plus an ``Other`` remainder), sized by dollar value."""
+    lines = statement.lines
+    compositions: list[Composition] = []
+    for yi, year in enumerate(statement.years):
+        def value_of(name: str, _yi: int = yi) -> float | None:
+            return next((ln.values[_yi] for ln in lines if ln.display_name == name), None)
+
+        asset_leaves = [
+            (ln.display_name, ln.values[yi])
+            for ln in lines
+            if ln.section == "Assets" and ln.group and not ln.display_name.startswith("Total")
+        ]
+        assets = _stack("Assets", value_of("Total Assets"), _with_other(asset_leaves, value_of("Total Assets"), "Other assets"))
+
+        liab_leaves = [
+            (ln.display_name, ln.values[yi])
+            for ln in lines
+            if ln.group in _LIABILITY_GROUPS and not ln.display_name.startswith("Total")
+        ]
+        le_raw = _with_other(liab_leaves, value_of("Total Liabilities"), "Other liabilities")
+        equity = value_of("Total Stockholders Equity")
+        if equity is not None and equity > 0:
+            le_raw.append(("Equity", equity))
+        le = _stack("Liabilities & Equity", value_of("Total Liabilities & Equity"), le_raw)
+
+        if assets and le:
+            compositions.append(Composition(year=year, assets=assets, liabilities_equity=le))
+    return tuple(compositions)

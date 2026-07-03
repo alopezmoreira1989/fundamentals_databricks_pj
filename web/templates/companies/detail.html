@@ -46,7 +46,28 @@
   .ff-range.covers { background: var(--bg-hover); border-color: var(--ink-3); }
   .ff-mid { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--ink); }
   .ff-price { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--negative); }
+  /* Balance-sheet composition — twin stacked bars + legend */
+  .bs-comp { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
+  .bs-col-head { display: flex; justify-content: space-between; align-items: baseline;
+    font-family: var(--mono); font-size: .66rem; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--ink-3); padding-bottom: 8px; border-bottom: 1px solid var(--ink); margin-bottom: 10px; }
+  .bs-stack { height: 300px; display: flex; flex-direction: column; border: 1px solid var(--rule); border-radius: 4px; overflow: hidden; }
+  .bs-seg { min-height: 1px; }
+  .bs-legend { margin-top: 12px; }
+  .bs-leg-item { display: flex; justify-content: space-between; align-items: center; gap: 12px;
+    padding: 5px 0; font-size: .82rem; border-bottom: 1px solid var(--rule-soft); }
+  .bs-leg-item:last-child { border-bottom: none; }
+  .bs-leg-dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 8px; vertical-align: -1px; }
+  @media (max-width: 640px) { .bs-comp { grid-template-columns: 1fr; } }
 </style>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+  function bsShowYear(year) {
+    document.querySelectorAll('.bs-year').forEach(function (el) { el.hidden = el.dataset.year !== year; });
+  }
+</script>
 {% endblock %}
 
 {% block content %}
@@ -198,7 +219,44 @@
     <!-- Statement tabs -->
     {% for st, chart in statement_panes %}
       <div class="tab-pane fade" id="pane-{{ st.name|slugify }}" role="tabpanel" aria-labelledby="tab-{{ st.name|slugify }}" tabindex="0">
-        {% if chart %}
+        {% if st.name == "Balance Sheet" and bs_compositions %}
+          <div class="card p-4 mb-3">
+            <div class="d-flex justify-content-between align-items-baseline mb-3 flex-wrap gap-2">
+              <div class="eyebrow">Balance sheet composition</div>
+              <select class="form-select form-select-sm w-auto" aria-label="Fiscal year" onchange="bsShowYear(this.value)">
+                {% for c in bs_compositions %}<option value="{{ c.year }}">FY {{ c.year }}</option>{% endfor %}
+              </select>
+            </div>
+            {% for c in bs_compositions %}
+              <div class="bs-year" data-year="{{ c.year }}" {% if not forloop.first %}hidden{% endif %}>
+                <div class="bs-comp">
+                  <div class="bs-col">
+                    <div class="bs-col-head"><span>{{ c.assets.title }}</span><span class="mono">${{ c.assets.total|compact_money }}</span></div>
+                    <div class="bs-stack">
+                      {% for s in c.assets.segments %}<div class="bs-seg" style="height:{{ s.pct|floatformat:3 }}%; background:{{ s.color }}" title="{{ s.name }}"></div>{% endfor %}
+                    </div>
+                    <div class="bs-legend">
+                      {% for s in c.assets.segments %}
+                        <div class="bs-leg-item"><span><span class="bs-leg-dot" style="background:{{ s.color }}"></span>{{ s.name }}</span><span class="mono">${{ s.value|compact_money }}</span></div>
+                      {% endfor %}
+                    </div>
+                  </div>
+                  <div class="bs-col">
+                    <div class="bs-col-head"><span>{{ c.liabilities_equity.title }}</span><span class="mono">${{ c.liabilities_equity.total|compact_money }}</span></div>
+                    <div class="bs-stack">
+                      {% for s in c.liabilities_equity.segments %}<div class="bs-seg" style="height:{{ s.pct|floatformat:3 }}%; background:{{ s.color }}" title="{{ s.name }}"></div>{% endfor %}
+                    </div>
+                    <div class="bs-legend">
+                      {% for s in c.liabilities_equity.segments %}
+                        <div class="bs-leg-item"><span><span class="bs-leg-dot" style="background:{{ s.color }}"></span>{{ s.name }}</span><span class="mono">${{ s.value|compact_money }}</span></div>
+                      {% endfor %}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+        {% elif chart %}
           <div class="card p-4 mb-3">
             <div class="chart-legend mb-2">
               {% for name, color in chart.legend %}<span><span class="dot" style="background:{{ color }}"></span>{{ name }}</span>{% endfor %}

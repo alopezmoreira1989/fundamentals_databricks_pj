@@ -117,6 +117,9 @@ def test_company_page_has_statement_tabs(artifacts_from_fixtures, client):
     assert "Line item" in body and "Revenue" in body
     assert 'class="sparkline"' in body
     assert 'class="tab-chart"' in body  # per-tab headline bar/combo chart
+    # Balance sheet is a single-year composition (default latest) with a year selector + legend.
+    assert "Balance sheet composition" in body and 'class="bs-comp"' in body
+    assert 'class="bs-year"' in body and "bsShowYear" in body
 
 
 def test_company_page_has_price_and_quarterly_tabs(artifacts_from_fixtures, client):
