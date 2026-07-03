@@ -55,8 +55,11 @@ jobs:
           dir="fundamentals_pipeline/60__frontends/61__streamlit/fixtures"
           base="https://github.com/${{ github.repository }}/releases/download/latest"
           mkdir -p "$dir"
+          # Mirror the local fixture set exactly: data + metrics + prices + meta, but NOT
+          # backtest — test_infrastructure asserts the optional backtest artifact is absent
+          # (graceful-degradation path), so fetching it would break that test.
           for f in dashboard_data.parquet dashboard_metrics.parquet dashboard_prices.parquet \
-                   dashboard_backtest.parquet dashboard_meta.json; do
+                   dashboard_meta.json; do
             curl -fsSL --retry 3 --retry-delay 2 "$base/$f" -o "$dir/$f"
           done
       - name: pytest + coverage floor (SQLite in-memory, config.settings.test)
