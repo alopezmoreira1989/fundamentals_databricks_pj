@@ -1,8 +1,11 @@
 {% extends "base.html" %}
-{% block title %}My Watchlist — Fundamentals{% endblock %}
+{% block title %}{{ watchlist.name }} — Fundamentals{% endblock %}
 {% block content %}
   <div class="p-4 bg-white rounded-3 shadow-sm mb-4">
-    <h1 class="h3 mb-0">My Watchlist</h1>
+    <div class="d-flex align-items-baseline gap-3 flex-wrap">
+      <a href="{% url 'watchlists:overview' %}" class="text-muted small">← All watchlists</a>
+      <h1 class="h3 mb-0">{{ watchlist.name }}</h1>
+    </div>
     <p class="text-muted mb-0 mt-2">{{ items|length }} compan{{ items|length|pluralize:"y,ies" }} tracked.</p>
   </div>
 
@@ -28,6 +31,7 @@
                   <form method="post" action="{% url 'watchlists:remove' %}" class="m-0">
                     {% csrf_token %}
                     <input type="hidden" name="ticker" value="{{ ticker }}">
+                    <input type="hidden" name="watchlist" value="{{ watchlist.id }}">
                     <input type="hidden" name="next" value="{{ request.path }}">
                     <button type="submit" class="btn btn-sm btn-outline-danger">Remove</button>
                   </form>
@@ -39,7 +43,7 @@
       </div>
     {% else %}
       <p class="text-muted mb-0">
-        Your watchlist is empty. Add companies from the
+        This list is empty. Add companies from the
         <a href="{% url 'screener:screen' %}">screener</a> or any company page.
       </p>
     {% endif %}

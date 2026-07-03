@@ -26,15 +26,23 @@ def company_page(request: HttpRequest, ticker: str) -> HttpResponse:
     detail = services.get_company_detail(ticker)
     if detail is None:
         raise Http404(f"unknown ticker {ticker!r}")
-    in_watchlist = in_favorites = False
+    in_favorites = False
+    watchlists: list = []
+    ticker_watchlist_ids: set = set()
     if request.user.is_authenticated:
-        in_watchlist = watchlist_services.contains(request.user, ticker)
+        watchlists = watchlist_services.list_watchlists(request.user)
+        ticker_watchlist_ids = watchlist_services.lists_for_ticker(request.user, ticker)
         in_favorites = favorite_services.contains(request.user, ticker)
         history_services.record(request.user, ticker)  # side effect: mark as recently viewed
     return render(
         request,
         "companies/detail.html",
-        {"detail": detail, "in_watchlist": in_watchlist, "in_favorites": in_favorites},
+        {
+            "detail": detail,
+            "watchlists": watchlists,
+            "ticker_watchlist_ids": ticker_watchlist_ids,
+            "in_favorites": in_favorites,
+        },
     )
 
 

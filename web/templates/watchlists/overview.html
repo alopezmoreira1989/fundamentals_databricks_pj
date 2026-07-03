@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}My Watchlists — Fundamentals{% endblock %}
+{% block content %}
+  <div class="p-4 bg-white rounded-3 shadow-sm mb-4 d-flex align-items-baseline flex-wrap gap-3">
+    <h1 class="h3 mb-0">My Watchlists</h1>
+    <p class="text-muted mb-0">{{ watchlists|length }} list{{ watchlists|length|pluralize }}.</p>
+    <form method="post" action="{% url 'watchlists:create' %}" class="ms-auto d-flex gap-2 m-0">
+      {% csrf_token %}
+      <input type="text" name="name" maxlength="64" required class="form-control form-control-sm"
+             placeholder="New list name" aria-label="New list name">
+      <button type="submit" class="btn btn-sm btn-primary">Create list</button>
+    </form>
+  </div>
+
+  <div class="bg-white rounded-3 shadow-sm p-4">
+    {% if watchlists %}
+      <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+          <thead>
+            <tr>
+              <th scope="col">List</th>
+              <th scope="col" class="text-end">Companies</th>
+              <th scope="col" class="text-end">Manage</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for wl in watchlists %}
+              <tr>
+                <td><a href="{% url 'watchlists:detail' wl.id %}">{{ wl.name }}</a></td>
+                <td class="text-end">{{ wl.item_count }}</td>
+                <td class="text-end">
+                  <div class="d-inline-flex gap-2">
+                    <form method="post" action="{% url 'watchlists:rename' wl.id %}"
+                          class="d-inline-flex gap-1 m-0">
+                      {% csrf_token %}
+                      <input type="text" name="name" maxlength="64" required
+                             class="form-control form-control-sm" style="width:10rem"
+                             value="{{ wl.name }}" aria-label="Rename list">
+                      <button type="submit" class="btn btn-sm btn-outline-secondary">Rename</button>
+                    </form>
+                    <form method="post" action="{% url 'watchlists:delete' wl.id %}" class="m-0"
+                          onsubmit="return confirm('Delete this list and its tickers?');">
+                      {% csrf_token %}
+                      <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="text-muted mb-0">
+        You have no watchlists yet. Create one above, or add a company from the
+        <a href="{% url 'screener:screen' %}">screener</a> or any company page.
+      </p>
+    {% endif %}
+  </div>
+{% endblock %}
