@@ -5,3 +5,7 @@
 # WSGI server. Not imported by the settings module (it's the server binary that imports
 # config.wsgi:application), so it lives here rather than in base.
 gunicorn>=22,<24
+
+# Error tracking. Initialised only when SENTRY_DSN is set (config.observability.init_sentry),
+# so it is a production-only dependency — dev/CI never import it.
+sentry-sdk[django]>=2.8,<3

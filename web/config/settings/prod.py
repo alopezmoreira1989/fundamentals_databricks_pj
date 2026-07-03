@@ -7,6 +7,8 @@ enforcement (SSL redirect, HSTS, secure cookies), and WhiteNoise static serving.
 WARNING). Nothing here is environment-specific beyond what the env provides.
 """
 
+from config.observability import init_sentry
+
 from .base import *  # noqa: F403
 from .base import MIDDLEWARE, env
 
@@ -36,8 +38,14 @@ X_FRAME_OPTIONS = "DENY"
 
 # ── static files (WhiteNoise) ─────────────────────────────────────────────────────────
 # Insert WhiteNoise directly after SecurityMiddleware so it serves collected static files
-# (compressed + hashed manifest) without a separate web server.
-MIDDLEWARE = [MIDDLEWARE[0], "whitenoise.middleware.WhiteNoiseMiddleware", *MIDDLEWARE[1:]]
+# (compressed + hashed manifest) without a separate web server. Locate SecurityMiddleware by
+# name rather than position, so prepending observability middleware in base doesn't misplace it.
+_security = MIDDLEWARE.index("django.middleware.security.SecurityMiddleware")
+MIDDLEWARE = [
+    *MIDDLEWARE[: _security + 1],
+    "whitenoise.middleware.WhiteNoiseMiddleware",
+    *MIDDLEWARE[_security + 1 :],
+]
 STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
     "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
@@ -47,13 +55,27 @@ STORAGES = {
 EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
 
 # ── logging ───────────────────────────────────────────────────────────────────────────
-# Minimal, stdout-only so the platform's log collector captures it. Richer error tracking
-# (Sentry etc.) is a separate observability task.
+# Structured JSON to stdout so the platform's log collector indexes fields (level, logger,
+# request_id, status, duration_ms) instead of grepping free text. Each request emits one access
+# log via ``config.middleware.RequestLogMiddleware``; every record carries the request id.
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
-    "formatters": {"simple": {"format": "%(asctime)s %(levelname)s %(name)s %(message)s"}},
-    "handlers": {"console": {"class": "logging.StreamHandler", "formatter": "simple"}},
+    "formatters": {"json": {"()": "config.log.JSONFormatter"}},
+    "handlers": {"console": {"class": "logging.StreamHandler", "formatter": "json"}},
     "root": {"handlers": ["console"], "level": "INFO"},
-    "loggers": {"django.request": {"handlers": ["console"], "level": "WARNING", "propagate": False}},
+    "loggers": {
+        "django.request": {"handlers": ["console"], "level": "WARNING", "propagate": False},
+        "web.request": {"handlers": ["console"], "level": "INFO", "propagate": False},
+    },
 }
+
+# ── error tracking (Sentry) ───────────────────────────────────────────────────────────
+# Inert unless SENTRY_DSN is provided. APP_RELEASE (the deployed git SHA) tags events so a
+# regression can be pinned to the deploy that shipped it.
+init_sentry(
+    dsn=env("SENTRY_DSN", default=""),
+    environment=env("SENTRY_ENVIRONMENT", default="production"),
+    release=env("APP_RELEASE", default=""),
+    traces_sample_rate=env.float("SENTRY_TRACES_SAMPLE_RATE", default=0.0),
+)
