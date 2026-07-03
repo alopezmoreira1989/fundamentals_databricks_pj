@@ -25,6 +25,10 @@ DATABASES["default"]["CONN_MAX_AGE"] = env.int("DJANGO_CONN_MAX_AGE", default=60
 # Behind a TLS-terminating proxy (nginx / load balancer) that sets X-Forwarded-Proto.
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SECURE_SSL_REDIRECT = True
+# The platform's health checks hit the internal port over plain HTTP; without this they'd get a
+# 301 to https and be marked unhealthy. Exempt the probe paths only (matched without the leading
+# slash) — all real traffic is still force-redirected to HTTPS.
+SECURE_REDIRECT_EXEMPT = [r"^healthz$", r"^readyz$"]
 SECURE_HSTS_SECONDS = 31_536_000  # 1 year
 SECURE_HSTS_INCLUDE_SUBDOMAINS = True
 SECURE_HSTS_PRELOAD = True
