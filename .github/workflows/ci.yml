@@ -46,6 +46,19 @@ jobs:
         run: |
           pip install -e .
           pip install -r web/requirements/dev.txt
+      # Fetch the published Release artifacts as the offline test fixtures (they're gitignored,
+      # so absent in a fresh checkout). The read-model tests point ARTIFACTS_LOCAL_DIR here and
+      # otherwise self-skip — which would drop coverage below the floor. This is the same
+      # `latest` Release the live app reads, so a 404 here means a real publish outage.
+      - name: Fetch published artifacts as test fixtures
+        run: |
+          dir="fundamentals_pipeline/60__frontends/61__streamlit/fixtures"
+          base="https://github.com/${{ github.repository }}/releases/download/latest"
+          mkdir -p "$dir"
+          for f in dashboard_data.parquet dashboard_metrics.parquet dashboard_prices.parquet \
+                   dashboard_backtest.parquet dashboard_meta.json; do
+            curl -fsSL --retry 3 --retry-delay 2 "$base/$f" -o "$dir/$f"
+          done
       - name: pytest + coverage floor (SQLite in-memory, config.settings.test)
         working-directory: web
         run: pytest -q --cov --cov-report=term-missing --cov-report=xml --cov-fail-under=90
