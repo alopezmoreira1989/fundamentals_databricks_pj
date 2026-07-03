@@ -182,19 +182,20 @@ def quarterly_chart(grid: QuarterGrid) -> TabChart | None:
 
 # ── balance-sheet composition (single year, stacked twin bars) ───────────────────────────
 
-# Semantic color families for the composition: assets = blue, liabilities = red, equity = green.
-# Within assets and liabilities the shade ramps light→dark with *decreasing liquidity* (the
-# statement lines are already ordered most-liquid first, and the "Other" remainder lands last).
-_BLUE_LIGHT, _BLUE_DARK = (157, 195, 230), (12, 68, 124)      # #9DC3E6 → #0C447C
-_RED_LIGHT, _RED_DARK = (222, 163, 148), (122, 45, 22)        # #DEA394 → #7A2D16
+# Semantic color families: assets = blue, liabilities = red, equity = green. Within assets and
+# liabilities the shade ramps DARK (most liquid / current, listed first) → LIGHT (least liquid /
+# non-current). A black rule divides the current from the non-current block on each side.
+_BLUE_LIGHT, _BLUE_DARK = (157, 195, 230), (12, 68, 124)      # #9DC3E6 (illiquid) … #0C447C (liquid)
+_RED_LIGHT, _RED_DARK = (222, 163, 148), (122, 45, 22)        # #DEA394 (non-current) … #7A2D16 (current)
 _EQUITY_GREEN = "#0F6E56"
+_CURRENT_GROUPS = ("Current Assets", "Current Liabilities")
 _LIABILITY_GROUPS = ("Current Liabilities", "Non-Current Liabilities")
 
 
-def _ramp(light: tuple[int, int, int], dark: tuple[int, int, int], rank: int, count: int) -> str:
-    """A hex shade between ``light`` (rank 0) and ``dark`` (rank count-1) — the liquidity ramp."""
-    t = rank / (count - 1) if count > 1 else 0.4
-    r, g, b = (round(light[i] + (dark[i] - light[i]) * t) for i in range(3))
+def _ramp(start: tuple[int, int, int], end: tuple[int, int, int], rank: int, count: int) -> str:
+    """A hex shade between ``start`` (rank 0) and ``end`` (rank count-1)."""
+    t = rank / (count - 1) if count > 1 else 0.0
+    r, g, b = (round(start[i] + (end[i] - start[i]) * t) for i in range(3))
     return f"#{r:02X}{g:02X}{b:02X}"
 
 
@@ -204,6 +205,7 @@ class Segment:
     value: float
     pct: float  # share of the stack total, 0–100
     color: str
+    boundary: bool = False  # first non-current segment → draw the current/non-current divider
 
 
 @dataclass(frozen=True, slots=True)
@@ -222,24 +224,26 @@ class Composition:
     liabilities_equity: Stack
 
 
-def _with_other(leaves: list[tuple[str, float | None]], total: float | None, other_label: str) -> list[tuple[str, float]]:
-    """Positive leaf segments, plus an ``other`` remainder so the stack sums to ``total``."""
-    segs = [(name, value) for name, value in leaves if value is not None and value > 0]
+def _with_other(leaves: list[tuple[str, float | None, bool]], total: float | None, other_label: str) -> list[tuple[str, float, bool]]:
+    """Positive leaf segments (name, value, is_current), plus a non-current ``other`` remainder
+    so the stack sums to ``total``."""
+    segs = [(name, value, is_current) for name, value, is_current in leaves if value is not None and value > 0]
     if total is not None and total > 0:
-        remainder = total - sum(value for _, value in segs)
+        remainder = total - sum(value for _, value, _ in segs)
         if remainder > total * 0.01:  # ignore tiny / negative remainders
-            segs.append((other_label, remainder))
+            segs.append((other_label, remainder, False))
     return segs
 
 
-def _stack(title: str, total: float | None, raw: list[tuple[str, float]], colors: list[str]) -> Stack | None:
-    if total is None or total <= 0 or not raw:
-        return None
-    segments = tuple(
-        Segment(name=name, value=value, pct=value / total * 100, color=color)
-        for (name, value), color in zip(raw, colors, strict=True)
-    )
-    return Stack(title=title, total=total, segments=segments)
+def _ramped(raw: list[tuple[str, float, bool]], total: float, start: tuple[int, int, int], end: tuple[int, int, int]) -> list[Segment]:
+    """Dark→light ramped segments, flagging the first non-current one as the divider boundary."""
+    out: list[Segment] = []
+    previous_current: bool | None = None
+    for i, (name, value, is_current) in enumerate(raw):
+        boundary = previous_current is True and not is_current
+        out.append(Segment(name=name, value=value, pct=value / total * 100, color=_ramp(start, end, i, len(raw)), boundary=boundary))
+        previous_current = is_current
+    return out
 
 
 def balance_sheet_compositions(statement: Statement) -> tuple[Composition, ...]:
@@ -251,30 +255,33 @@ def balance_sheet_compositions(statement: Statement) -> tuple[Composition, ...]:
         def value_of(name: str, _yi: int = yi) -> float | None:
             return next((ln.values[_yi] for ln in lines if ln.display_name == name), None)
 
-        # Assets → blue, shaded light→dark as liquidity decreases (Cash first … "Other" last).
+        # Assets → blue, dark (Cash, current) → light (PP&E / Other, non-current).
         asset_leaves = [
-            (ln.display_name, ln.values[yi])
+            (ln.display_name, ln.values[yi], ln.group in _CURRENT_GROUPS)
             for ln in lines
             if ln.section == "Assets" and ln.group and not ln.display_name.startswith("Total")
         ]
-        asset_raw = _with_other(asset_leaves, value_of("Total Assets"), "Other assets")
-        asset_colors = [_ramp(_BLUE_LIGHT, _BLUE_DARK, i, len(asset_raw)) for i in range(len(asset_raw))]
-        assets = _stack("Assets", value_of("Total Assets"), asset_raw, asset_colors)
+        total_assets = value_of("Total Assets")
+        asset_raw = _with_other(asset_leaves, total_assets, "Other assets")
+        assets = (
+            Stack("Assets", total_assets, tuple(_ramped(asset_raw, total_assets, _BLUE_DARK, _BLUE_LIGHT)))
+            if total_assets and total_assets > 0 and asset_raw
+            else None
+        )
 
-        # Liabilities → red (current before non-current = light→dark); equity → green.
+        # Liabilities → red, dark (current) → light (non-current); equity → green (after).
         liab_leaves = [
-            (ln.display_name, ln.values[yi])
+            (ln.display_name, ln.values[yi], ln.group in _CURRENT_GROUPS)
             for ln in lines
             if ln.group in _LIABILITY_GROUPS and not ln.display_name.startswith("Total")
         ]
         liab_raw = _with_other(liab_leaves, value_of("Total Liabilities"), "Other liabilities")
-        le_raw = list(liab_raw)
-        le_colors = [_ramp(_RED_LIGHT, _RED_DARK, i, len(liab_raw)) for i in range(len(liab_raw))]
+        le_total = value_of("Total Liabilities & Equity")
+        le_segments = _ramped(liab_raw, le_total, _RED_DARK, _RED_LIGHT) if le_total and le_total > 0 else []
         equity = value_of("Total Stockholders Equity")
-        if equity is not None and equity > 0:
-            le_raw.append(("Equity", equity))
-            le_colors.append(_EQUITY_GREEN)
-        le = _stack("Liabilities & Equity", value_of("Total Liabilities & Equity"), le_raw, le_colors)
+        if equity is not None and equity > 0 and le_total:
+            le_segments.append(Segment("Equity", equity, equity / le_total * 100, _EQUITY_GREEN))
+        le = Stack("Liabilities & Equity", le_total, tuple(le_segments)) if le_total and le_segments else None
 
         if assets and le:
             compositions.append(Composition(year=year, assets=assets, liabilities_equity=le))

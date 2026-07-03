@@ -53,6 +53,7 @@
     color: var(--ink-3); padding-bottom: 8px; border-bottom: 1px solid var(--ink); margin-bottom: 10px; }
   .bs-stack { height: 300px; display: flex; flex-direction: column; border: 1px solid var(--rule); border-radius: 4px; overflow: hidden; }
   .bs-seg { min-height: 1px; }
+  .bs-seg.bs-boundary { border-top: 2px solid var(--ink); }  /* current / non-current divider */
   .bs-legend { margin-top: 12px; }
   .bs-leg-item { display: flex; justify-content: space-between; align-items: center; gap: 12px;
     padding: 5px 0; font-size: .82rem; border-bottom: 1px solid var(--rule-soft); }
@@ -233,7 +234,7 @@
                   <div class="bs-col">
                     <div class="bs-col-head"><span>{{ c.assets.title }}</span><span class="mono">${{ c.assets.total|compact_money }}</span></div>
                     <div class="bs-stack">
-                      {% for s in c.assets.segments %}<div class="bs-seg" style="height:{{ s.pct|floatformat:3 }}%; background:{{ s.color }}" title="{{ s.name }}"></div>{% endfor %}
+                      {% for s in c.assets.segments %}<div class="bs-seg{% if s.boundary %} bs-boundary{% endif %}" style="height:{{ s.pct|floatformat:3 }}%; background:{{ s.color }}" title="{{ s.name }}"></div>{% endfor %}
                     </div>
                     <div class="bs-legend">
                       {% for s in c.assets.segments %}
@@ -244,7 +245,7 @@
                   <div class="bs-col">
                     <div class="bs-col-head"><span>{{ c.liabilities_equity.title }}</span><span class="mono">${{ c.liabilities_equity.total|compact_money }}</span></div>
                     <div class="bs-stack">
-                      {% for s in c.liabilities_equity.segments %}<div class="bs-seg" style="height:{{ s.pct|floatformat:3 }}%; background:{{ s.color }}" title="{{ s.name }}"></div>{% endfor %}
+                      {% for s in c.liabilities_equity.segments %}<div class="bs-seg{% if s.boundary %} bs-boundary{% endif %}" style="height:{{ s.pct|floatformat:3 }}%; background:{{ s.color }}" title="{{ s.name }}"></div>{% endfor %}
                     </div>
                     <div class="bs-legend">
                       {% for s in c.liabilities_equity.segments %}
