@@ -2,46 +2,38 @@
 {% block title %}Fundamentals — screen, value, and backtest US companies{% endblock %}
 
 {% block extra_head %}
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
-  .lander { --ink: #0b1f3a; --accent: #2563eb; --pos: #15803d; --neg: #b91c1c; }
-  .lander h1, .lander h2, .lander .display-face {
-    font-family: "Space Grotesk", system-ui, sans-serif; letter-spacing: -0.02em;
+  .lander .eyebrow-hr { display: flex; align-items: center; gap: 14px; }
+  .lander .eyebrow-hr .hair { flex: 1; height: 1px; background: var(--rule); max-width: 4rem; }
+  .lander .hero-title {
+    font-size: clamp(2.1rem, 5vw, 3.4rem); line-height: 1.02; letter-spacing: -0.025em;
+    font-variation-settings: "opsz" 144; margin: .5rem 0 1rem;
   }
-  .lander .eyebrow {
-    font-family: "JetBrains Mono", ui-monospace, monospace; font-size: .72rem;
-    letter-spacing: .18em; text-transform: uppercase; color: var(--accent);
+  .lander .lede { color: var(--ink-2); font-size: 1.05rem; line-height: 1.6; max-width: 34rem; }
+
+  /* Signature: an editorial "company readout" — the product's own visual language */
+  .readout { background: var(--bg-card); border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; }
+  .readout .r-head {
+    display: flex; justify-content: space-between; align-items: baseline;
+    padding: 15px 20px; border-bottom: 1px solid var(--ink);
   }
-  /* Hero panel */
-  .lander .hero {
-    background: radial-gradient(120% 140% at 0% 0%, #12305a 0%, var(--ink) 55%);
-    color: #eef2f8; border-radius: 1.25rem; overflow: hidden;
-  }
-  .lander .hero h1 { font-size: clamp(2rem, 4.5vw, 3.25rem); line-height: 1.04; }
-  .lander .hero .lede { color: #b8c6dd; max-width: 34rem; }
-  /* Signature: the fundamentals "tape" — a terminal-style readout */
-  .lander .tape {
-    font-family: "JetBrains Mono", ui-monospace, monospace; font-size: .9rem;
-    background: #06152b; border: 1px solid #1e3a63; border-radius: .9rem;
-    color: #cfe0f7; box-shadow: 0 12px 40px -12px rgba(0,0,0,.6);
-  }
-  .lander .tape .row-line { display: flex; justify-content: space-between; gap: 1rem; padding: .18rem 0; }
-  .lander .tape .k { color: #7f98bd; }
-  .lander .tape .v { color: #eef2f8; font-weight: 500; }
-  .lander .tape .pos { color: #4ade80; } .lander .tape .neg { color: #f87171; }
-  .lander .tape .rule { border-top: 1px dashed #24406b; margin: .5rem 0; }
-  .lander .tape .cursor { animation: blink 1.1s steps(1) infinite; }
-  @keyframes blink { 50% { opacity: 0; } }
-  @media (prefers-reduced-motion: reduce) { .lander .tape .cursor { animation: none; } }
-  /* Feature + step cards reuse the app's card language, with a mono index */
-  .lander .feature { height: 100%; }
-  .lander .feature .ic { font-size: 1.4rem; }
-  .lander .step-num {
-    font-family: "JetBrains Mono", ui-monospace, monospace; color: var(--accent);
-    font-weight: 700; font-size: .8rem;
-  }
+  .readout .r-name { font-family: var(--display); font-size: 1.15rem; font-weight: 600; font-variation-settings: "opsz" 144; }
+  .readout .r-fy { font-family: var(--mono); font-size: .68rem; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); }
+  .readout .r-body { padding: 4px 20px 12px; }
+  .readout .r-row { display: flex; justify-content: space-between; align-items: baseline; padding: 8px 0; border-bottom: 1px solid var(--rule-soft); }
+  .readout .r-row:last-child { border-bottom: none; }
+  .readout .r-k { font-family: var(--mono); font-size: .64rem; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); }
+  .readout .r-v { font-family: var(--mono); font-size: .9rem; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .readout .r-kpis { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--rule); border-top: 1px solid var(--ink); }
+  .readout .r-kpi { background: var(--bg-card); padding: 13px 20px; }
+  .readout .r-kpi .k { font-family: var(--mono); font-size: .58rem; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); }
+  .readout .r-kpi .v { font-family: var(--display); font-size: 1.55rem; font-weight: 500; font-variation-settings: "opsz" 144; line-height: 1; margin-top: 5px; }
+  .readout .pos { color: var(--positive); } .readout .neg { color: var(--negative); }
+  .sample-note { font-family: var(--mono); font-size: .6rem; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); }
+
+  .lander .feature { height: 100%; } .lander .feature .ic { font-size: 1.35rem; }
+  .lander .step-num { font-family: var(--mono); color: var(--accent-ink); font-weight: 500; font-size: .72rem; letter-spacing: .08em; }
+  .lander .panel-eyebrow { border-bottom: 1px solid var(--rule); padding-bottom: .5rem; margin-bottom: 1.25rem; }
 </style>
 {% endblock %}
 
@@ -49,119 +41,110 @@
 <div class="lander">
 
   <!-- Hero -->
-  <section class="hero p-4 p-lg-5 mb-5" aria-labelledby="hero-title">
-    <div class="row g-4 g-lg-5 align-items-center">
-      <div class="col-lg-6">
-        <p class="eyebrow mb-2">SEC-filed fundamentals · ~3,000 US tickers</p>
-        <h1 id="hero-title" class="mb-3">Screen, value, and backtest companies on the numbers they actually report.</h1>
-        <p class="lede mb-4">
-          Every figure is derived from SEC EDGAR filings and market prices — normalized into
-          comparable metrics, run through four intrinsic-value methods, and tested against
-          investment archetypes across history. No hand-curation, no black boxes.
-        </p>
-        <div class="d-flex flex-wrap gap-2">
-          <a class="btn btn-primary btn-lg px-4" href="{% url 'screener:screen' %}">Open the screener</a>
-          {% if user.is_authenticated %}
-            <a class="btn btn-outline-light btn-lg px-4" href="{% url 'watchlists:overview' %}">Your watchlists</a>
-          {% else %}
-            <a class="btn btn-outline-light btn-lg px-4" href="{% url 'users:signup' %}">Create a free account</a>
-          {% endif %}
-        </div>
+  <section class="row g-4 g-lg-5 align-items-center mb-5 pb-2" aria-labelledby="hero-title">
+    <div class="col-lg-6">
+      <div class="eyebrow-hr mb-2">
+        <span class="eyebrow accent">SEC-filed fundamentals</span>
+        <span class="hair"></span>
+        <span class="eyebrow">~3,000 US tickers</span>
       </div>
+      <h1 id="hero-title" class="hero-title">Screen, value, and backtest companies on the numbers they actually report.</h1>
+      <p class="lede mb-4">
+        Every figure is derived from SEC EDGAR filings and market prices — normalized into
+        comparable metrics, run through four intrinsic-value methods, and tested against investment
+        archetypes across history. No hand-curation, no black boxes.
+      </p>
+      <div class="d-flex flex-wrap gap-2">
+        <a class="btn btn-primary btn-lg px-4" href="{% url 'screener:screen' %}">Open the screener</a>
+        {% if user.is_authenticated %}
+          <a class="btn btn-outline-secondary btn-lg px-4" href="{% url 'watchlists:overview' %}">Your watchlists</a>
+        {% else %}
+          <a class="btn btn-outline-secondary btn-lg px-4" href="{% url 'users:signup' %}">Create a free account</a>
+        {% endif %}
+      </div>
+    </div>
 
-      <!-- Signature: sample fundamentals tape -->
-      <div class="col-lg-6">
-        <figure class="tape p-3 p-sm-4 m-0" aria-label="Sample company fundamentals readout">
-          <div class="row-line">
-            <span class="v display-face">EXMPL · Example Corp.</span>
-            <span class="k">FY&nbsp;2024</span>
-          </div>
-          <div class="rule"></div>
-          <div class="row-line"><span class="k">Revenue</span><span class="v">$391.0B <span class="pos">▲</span></span></div>
-          <div class="row-line"><span class="k">Net income</span><span class="v">$93.7B</span></div>
-          <div class="row-line"><span class="k">Free cash flow</span><span class="v">$108.8B</span></div>
-          <div class="row-line"><span class="k">Debt / equity</span><span class="v">1.87×</span></div>
-          <div class="row-line"><span class="k">P / E (TTM)</span><span class="v">29.4×</span></div>
-          <div class="rule"></div>
-          <div class="row-line"><span class="k">Intrinsic value (DCF, mid)</span><span class="v">$180</span></div>
-          <div class="row-line"><span class="k">Margin of safety</span><span class="v">−18% <span class="neg">▼</span></span></div>
-          <figcaption class="k mt-2" style="font-size:.72rem">
-            Illustrative example<span class="cursor">▋</span>
-          </figcaption>
-        </figure>
-      </div>
+    <div class="col-lg-6">
+      <figure class="readout m-0" aria-label="Sample company readout">
+        <div class="r-head">
+          <span class="r-name">Example Corp.</span>
+          <span class="r-fy">EXMPL · FY 2024</span>
+        </div>
+        <div class="r-body">
+          <div class="r-row"><span class="r-k">Revenue</span><span class="r-v">$391.0B</span></div>
+          <div class="r-row"><span class="r-k">Net income</span><span class="r-v">$93.7B</span></div>
+          <div class="r-row"><span class="r-k">Free cash flow</span><span class="r-v">$108.8B</span></div>
+          <div class="r-row"><span class="r-k">Debt / equity</span><span class="r-v">1.87×</span></div>
+          <div class="r-row"><span class="r-k">P / E (TTM)</span><span class="r-v">29.4×</span></div>
+        </div>
+        <div class="r-kpis">
+          <div class="r-kpi"><div class="k">Intrinsic value · DCF mid</div><div class="v">$180</div></div>
+          <div class="r-kpi"><div class="k">Margin of safety</div><div class="v neg">−18%</div></div>
+        </div>
+        <figcaption class="sample-note px-3 py-2 border-top" style="border-color:var(--rule-soft)!important">Illustrative example</figcaption>
+      </figure>
     </div>
   </section>
 
   <!-- What you can do -->
   <section class="mb-5" aria-labelledby="do-title">
-    <p class="eyebrow mb-1">What you can do</p>
+    <div class="panel-eyebrow d-flex align-items-baseline justify-content-between">
+      <span class="eyebrow accent">What you can do</span>
+    </div>
     <h2 id="do-title" class="h3 mb-4">One dataset, four ways in.</h2>
     <div class="row g-3 row-cols-1 row-cols-sm-2 row-cols-lg-4">
-      <div class="col">
-        <div class="feature p-4 bg-white rounded-3 shadow-sm">
-          <div class="ic mb-2" aria-hidden="true">🔎</div>
-          <h3 class="h6">Screen the universe</h3>
-          <p class="text-muted small mb-0">Filter ~3,000 tickers by sector, index, or any metric's latest-fiscal-year value.</p>
-        </div>
-      </div>
-      <div class="col">
-        <div class="feature p-4 bg-white rounded-3 shadow-sm">
-          <div class="ic mb-2" aria-hidden="true">📄</div>
-          <h3 class="h6">Read a company</h3>
-          <p class="text-muted small mb-0">Income, balance sheet, and cash-flow lines with margins, leverage, and FCF derived for you.</p>
-        </div>
-      </div>
-      <div class="col">
-        <div class="feature p-4 bg-white rounded-3 shadow-sm">
-          <div class="ic mb-2" aria-hidden="true">⚖️</div>
-          <h3 class="h6">Value it</h3>
-          <p class="text-muted small mb-0">Graham, DCF, Owner Earnings, and EPS-CAGR estimates with bull / mid / bear margins of safety.</p>
-        </div>
-      </div>
-      <div class="col">
-        <div class="feature p-4 bg-white rounded-3 shadow-sm">
-          <div class="ic mb-2" aria-hidden="true">📈</div>
-          <h3 class="h6">Backtest an idea</h3>
-          <p class="text-muted small mb-0">See how investment archetypes would have selected companies through history — with no look-ahead.</p>
-        </div>
-      </div>
+      <div class="col"><div class="feature p-4 bg-white rounded shadow-sm">
+        <div class="ic mb-2" aria-hidden="true">🔎</div>
+        <h3 class="h6">Screen the universe</h3>
+        <p class="text-muted small mb-0">Filter ~3,000 tickers by sector, index, or any metric's latest-fiscal-year value.</p>
+      </div></div>
+      <div class="col"><div class="feature p-4 bg-white rounded shadow-sm">
+        <div class="ic mb-2" aria-hidden="true">📄</div>
+        <h3 class="h6">Read a company</h3>
+        <p class="text-muted small mb-0">Income, balance sheet, and cash-flow lines with margins, leverage, and FCF derived for you.</p>
+      </div></div>
+      <div class="col"><div class="feature p-4 bg-white rounded shadow-sm">
+        <div class="ic mb-2" aria-hidden="true">⚖️</div>
+        <h3 class="h6">Value it</h3>
+        <p class="text-muted small mb-0">Graham, DCF, Owner Earnings, and EPS-CAGR estimates with bull / mid / bear margins of safety.</p>
+      </div></div>
+      <div class="col"><div class="feature p-4 bg-white rounded shadow-sm">
+        <div class="ic mb-2" aria-hidden="true">📈</div>
+        <h3 class="h6">Backtest an idea</h3>
+        <p class="text-muted small mb-0">See how investment archetypes would have selected companies through history — with no look-ahead.</p>
+      </div></div>
     </div>
   </section>
 
-  <!-- Where the numbers come from (a real pipeline, so the steps are ordered) -->
+  <!-- Where the numbers come from (a real, ordered pipeline) -->
   <section class="mb-5" aria-labelledby="prov-title">
-    <p class="eyebrow mb-1">Where the numbers come from</p>
+    <div class="panel-eyebrow"><span class="eyebrow accent">Where the numbers come from</span></div>
     <h2 id="prov-title" class="h3 mb-4">A transparent pipeline, filing to figure.</h2>
     <div class="row g-3 row-cols-1 row-cols-md-2 row-cols-lg-4">
-      <div class="col"><div class="p-4 bg-white rounded-3 shadow-sm h-100">
-        <div class="step-num mb-1">01 · SOURCE</div>
-        <h3 class="h6">SEC EDGAR XBRL</h3>
+      <div class="col"><div class="p-4 bg-white rounded shadow-sm h-100">
+        <div class="step-num mb-1">01 · SOURCE</div><h3 class="h6">SEC EDGAR XBRL</h3>
         <p class="text-muted small mb-0">10-K / 10-Q filings ingested straight from each company's own XBRL, joined to market prices.</p>
       </div></div>
-      <div class="col"><div class="p-4 bg-white rounded-3 shadow-sm h-100">
-        <div class="step-num mb-1">02 · NORMALIZE</div>
-        <h3 class="h6">Comparable metrics</h3>
-        <p class="text-muted small mb-0">Quarters reconciled to annuals, then margins, leverage, FCF, and valuation multiples computed uniformly.</p>
+      <div class="col"><div class="p-4 bg-white rounded shadow-sm h-100">
+        <div class="step-num mb-1">02 · NORMALIZE</div><h3 class="h6">Comparable metrics</h3>
+        <p class="text-muted small mb-0">Quarters reconciled to annuals, then margins, leverage, FCF, and multiples computed uniformly.</p>
       </div></div>
-      <div class="col"><div class="p-4 bg-white rounded-3 shadow-sm h-100">
-        <div class="step-num mb-1">03 · VALUE</div>
-        <h3 class="h6">Intrinsic value</h3>
+      <div class="col"><div class="p-4 bg-white rounded shadow-sm h-100">
+        <div class="step-num mb-1">03 · VALUE</div><h3 class="h6">Intrinsic value</h3>
         <p class="text-muted small mb-0">Four methods priced at each fiscal close, with a margin of safety versus the market.</p>
       </div></div>
-      <div class="col"><div class="p-4 bg-white rounded-3 shadow-sm h-100">
-        <div class="step-num mb-1">04 · TEST</div>
-        <h3 class="h6">Backtest</h3>
+      <div class="col"><div class="p-4 bg-white rounded shadow-sm h-100">
+        <div class="step-num mb-1">04 · TEST</div><h3 class="h6">Backtest</h3>
         <p class="text-muted small mb-0">Archetype screens replayed across history as of each date only — never with hindsight.</p>
       </div></div>
     </div>
   </section>
 
   <!-- Final CTA -->
-  <section class="p-4 p-lg-5 bg-white rounded-3 shadow-sm d-flex flex-wrap justify-content-between align-items-center gap-3">
+  <section class="p-4 p-lg-5 bg-white rounded shadow-sm d-flex flex-wrap justify-content-between align-items-center gap-3">
     <div>
       <h2 class="h4 mb-1">Start with the screener.</h2>
-      <p class="text-muted mb-0">Free account adds watchlists, favorites, and browsing history. New here? See the <a href="{% url 'help' %}">quick guide</a>.</p>
+      <p class="text-muted mb-0">A free account adds watchlists, favorites, and history. New here? See the <a href="{% url 'help' %}">quick guide</a>.</p>
     </div>
     <a class="btn btn-primary btn-lg px-4" href="{% url 'screener:screen' %}">Browse companies</a>
   </section>

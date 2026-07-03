@@ -53,25 +53,25 @@
   {% endif %}
 
   <div class="bg-white rounded-3 shadow-sm p-4">
-    <h2 class="h5 mb-3">Margin of Safety</h2>
-    {% if points %}
+    <h2 class="h5 mb-3">Margin of Safety <span class="text-muted small fw-normal">· by scenario</span></h2>
+    {% if scenarios %}
       <div class="table-responsive">
         <table class="table table-sm table-hover align-middle mb-0">
           <thead>
             <tr>
               <th scope="col">Method</th>
-              <th scope="col">FY</th>
-              <th scope="col" class="text-end">Margin of Safety</th>
+              <th scope="col" class="text-end">Bear</th>
+              <th scope="col" class="text-end">Mid</th>
+              <th scope="col" class="text-end">Bull</th>
             </tr>
           </thead>
           <tbody>
-            {% for m in points %}
+            {% for r in scenarios %}
               <tr>
-                <td>{{ m.metric }}</td>
-                <td class="text-muted">{{ m.fiscal_year }}</td>
-                <td class="text-end font-monospace {{ m.value|sign_class }}">
-                  {{ m.value|metric_value:m.unit }}
-                </td>
+                <td>{{ r.method }} <span class="text-muted small">· {{ r.basis }}</span></td>
+                <td class="text-end font-monospace {{ r.bear|sign_class }}">{{ r.bear|metric_value:"percent" }}</td>
+                <td class="text-end font-monospace {{ r.mid|sign_class }}">{{ r.mid|metric_value:"percent" }}</td>
+                <td class="text-end font-monospace {{ r.bull|sign_class }}">{{ r.bull|metric_value:"percent" }}</td>
               </tr>
             {% endfor %}
           </tbody>

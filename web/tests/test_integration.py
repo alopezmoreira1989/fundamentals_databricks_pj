@@ -106,6 +106,34 @@ def test_company_page_renders_and_404s(artifacts_from_fixtures, client):
     assert client.get("/companies/notareal/").status_code == 404
 
 
+def test_company_page_has_statement_tabs(artifacts_from_fixtures, client):
+    body = client.get(f"/companies/{TICKER}/").content.decode()
+    # Tab nav + panes for each reported statement (Streamlit-style navigation).
+    for label in ("Overview", "Income Statement", "Balance Sheet", "Cash Flow"):
+        assert label in body
+    assert 'data-bs-target="#pane-income-statement"' in body
+    assert 'id="pane-balance-sheet"' in body
+    # Statement grids carry the fiscal-year columns, the Revenue line, and per-row sparklines.
+    assert "Line item" in body and "Revenue" in body
+    assert 'class="sparkline"' in body
+
+
+def test_company_page_has_price_and_quarterly_tabs(artifacts_from_fixtures, client):
+    body = client.get(f"/companies/{TICKER}/").content.decode()
+    assert "Price" in body and 'id="pane-price"' in body
+    assert "<svg" in body and "polyline" in body  # inline price chart
+    assert "Quarterly" in body and 'id="pane-quarterly"' in body
+
+
+def test_company_page_valuation_tab_and_no_iv_in_derived(artifacts_from_fixtures, client):
+    body = client.get(f"/companies/{TICKER}/").content.decode()
+    # Valuation is its own tab (football field + MoS + multiples)...
+    assert 'id="pane-valuation"' in body and "Margin of safety" in body
+    assert "Multiples" in body and "P/E" in body  # valuation multiples moved here
+    # ...and intrinsic-value metrics no longer duplicated in the Derived-metrics tab.
+    assert "Intrinsic Value" not in body
+
+
 def test_valuation_page_renders_with_data_and_empty_for_unknown(artifacts_from_fixtures, client):
     resp = client.get(f"/valuation/{TICKER}/")
     assert resp.status_code == 200

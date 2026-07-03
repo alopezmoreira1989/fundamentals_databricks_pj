@@ -111,6 +111,8 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = "static/"
+# Project-level source assets (the editorial theme); collected into STATIC_ROOT for prod.
+STATICFILES_DIRS = [BASE_DIR / "static"]
 # Collected static root (populated by `collectstatic`); WhiteNoise serves it in prod.
 STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "media/"

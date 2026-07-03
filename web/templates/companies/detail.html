@@ -1,109 +1,352 @@
 {% extends "base.html" %}
 {% load fmt %}
 {% block title %}{{ detail.summary.ticker }} — {{ detail.summary.name }}{% endblock %}
+
+{% block extra_head %}
+<style>
+  .co-masthead { border-bottom: 1px solid var(--ink); padding-bottom: 18px; margin-bottom: 4px; }
+  .co-masthead h1 { font-size: clamp(1.8rem, 4vw, 2.6rem); line-height: 1; }
+  .co-chip { font-family: var(--mono); font-size: .8rem; letter-spacing: .04em; padding: 3px 10px;
+             background: var(--ink); color: var(--bg); border-radius: 3px; }
+  /* KPI strip (overview) — hairline grid, Fraunces values */
+  .kpi-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px;
+               background: var(--rule); border: 1px solid var(--rule); border-radius: 4px; overflow: hidden; }
+  .kpi-cell { background: var(--bg-card); padding: 16px 18px; }
+  .kpi-cell .k { font-family: var(--mono); font-size: .6rem; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); }
+  .kpi-cell .v { font-family: var(--display); font-size: 1.5rem; font-weight: 500; font-variation-settings: "opsz" 144; line-height: 1; margin-top: 6px; }
+  .kpi-cell .fy { font-family: var(--mono); font-size: .62rem; color: var(--ink-3); margin-top: 5px; }
+  @media (max-width: 640px) { .kpi-strip { grid-template-columns: repeat(2, 1fr); } }
+  /* Info rows */
+  .info-row { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--rule-soft); }
+  .info-row:last-child { border-bottom: none; }
+  .info-row .k { font-family: var(--mono); font-size: .64rem; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); }
+  /* Statement table */
+  table.fs-web { font-variant-numeric: tabular-nums; }
+  table.fs-web thead th { position: sticky; top: 0; background: var(--bg-card); }
+  table.fs-web td.num, table.fs-web th.num { font-family: var(--mono); text-align: right; white-space: nowrap; }
+  table.fs-web tr.section-head td { font-family: var(--mono); font-size: .62rem; letter-spacing: .12em;
+      text-transform: uppercase; color: var(--accent-ink); background: var(--bg-subtle); padding-top: 12px; }
+  table.fs-web th.spark, table.fs-web td.spark { width: 96px; text-align: center; }
+  .sparkline { vertical-align: middle; display: inline-block; }
+  /* Price chart */
+  .price-svg { width: 100%; height: 260px; display: block; }
+  .price-svg .line { stroke: var(--accent); stroke-width: 2; vector-effect: non-scaling-stroke; }
+  .price-svg.up .line { stroke: var(--positive); } .price-svg.down .line { stroke: var(--negative); }
+  .price-svg .area { fill: var(--accent-soft); opacity: .5; }
+  .price-svg.up .area { fill: var(--positive-soft); } .price-svg.down .area { fill: var(--negative-soft); }
+  .price-last { font-family: var(--display); font-size: 1.8rem; font-weight: 500; font-variation-settings: "opsz" 144; line-height: 1; }
+  /* Valuation football field */
+  .ff-track { position: relative; height: 1.6rem; background: var(--bg-subtle); border-radius: 3px; }
+  .ff-range { position: absolute; top: 0; bottom: 0; background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 3px; }
+  .ff-range.covers { background: var(--bg-hover); border-color: var(--ink-3); }
+  .ff-mid { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--ink); }
+  .ff-price { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--negative); }
+</style>
+{% endblock %}
+
 {% block content %}
   {% with s=detail.summary %}
-  <div class="p-4 bg-white rounded-3 shadow-sm mb-4">
-    <div class="d-flex align-items-baseline gap-3 flex-wrap">
-      <h1 class="h3 mb-0">{{ s.name }}</h1>
-      <span class="badge text-bg-dark fs-6">{{ s.ticker }}</span>
-      <div class="ms-auto d-flex align-items-center gap-3">
-        {% if user.is_authenticated %}
-          <details class="watchlist-picker position-relative m-0">
-            <summary class="btn btn-sm {% if ticker_watchlist_ids %}btn-warning{% else %}btn-outline-secondary{% endif %}" style="list-style:none">
-              {% if ticker_watchlist_ids %}★{% else %}☆{% endif %} Watchlists
-            </summary>
-            <div class="position-absolute end-0 mt-1 p-2 bg-white border rounded-3 shadow-sm"
-                 style="z-index:1000; min-width:14rem">
-              {% for wl in watchlists %}
-                {% if wl.id in ticker_watchlist_ids %}
-                  <form method="post" action="{% url 'watchlists:remove' %}" class="m-0 mb-1">
-                    {% csrf_token %}
-                    <input type="hidden" name="ticker" value="{{ s.ticker }}">
-                    <input type="hidden" name="watchlist" value="{{ wl.id }}">
-                    <input type="hidden" name="next" value="{{ request.path }}">
-                    <button type="submit" class="btn btn-sm btn-warning w-100 text-start">★ {{ wl.name }}</button>
-                  </form>
-                {% else %}
-                  <form method="post" action="{% url 'watchlists:add' %}" class="m-0 mb-1">
-                    {% csrf_token %}
-                    <input type="hidden" name="ticker" value="{{ s.ticker }}">
-                    <input type="hidden" name="watchlist" value="{{ wl.id }}">
-                    <input type="hidden" name="next" value="{{ request.path }}">
-                    <button type="submit" class="btn btn-sm btn-outline-secondary w-100 text-start">☆ {{ wl.name }}</button>
-                  </form>
-                {% endif %}
-              {% endfor %}
-              <form method="post" action="{% url 'watchlists:add' %}" class="m-0 mt-2 d-flex gap-1 border-top pt-2">
-                {% csrf_token %}
-                <input type="hidden" name="ticker" value="{{ s.ticker }}">
-                <input type="hidden" name="next" value="{{ request.path }}">
-                <input type="text" name="watchlist_name" class="form-control form-control-sm"
-                       placeholder="New list…" aria-label="New list name" maxlength="64">
-                <button type="submit" class="btn btn-sm btn-primary">Add</button>
-              </form>
-            </div>
-          </details>
-          {% if in_favorites %}
-            <form method="post" action="{% url 'favorites:remove' %}" class="m-0">
+  <div class="co-masthead d-flex align-items-end justify-content-between flex-wrap gap-3">
+    <div class="d-flex align-items-center gap-3 flex-wrap">
+      <h1 class="mb-0">{{ s.name }}</h1>
+      <span class="co-chip">{{ s.ticker }}</span>
+    </div>
+    <div class="d-flex align-items-center gap-2 flex-wrap">
+      {% if user.is_authenticated %}
+        <details class="watchlist-picker position-relative m-0">
+          <summary class="btn btn-sm {% if ticker_watchlist_ids %}btn-warning{% else %}btn-outline-secondary{% endif %}" style="list-style:none">
+            {% if ticker_watchlist_ids %}★{% else %}☆{% endif %} Watchlists
+          </summary>
+          <div class="position-absolute end-0 mt-1 p-2 bg-white border rounded-3 shadow-sm" style="z-index:1000; min-width:14rem">
+            {% for wl in watchlists %}
+              {% if wl.id in ticker_watchlist_ids %}
+                <form method="post" action="{% url 'watchlists:remove' %}" class="m-0 mb-1">
+                  {% csrf_token %}
+                  <input type="hidden" name="ticker" value="{{ s.ticker }}">
+                  <input type="hidden" name="watchlist" value="{{ wl.id }}">
+                  <input type="hidden" name="next" value="{{ request.path }}">
+                  <button type="submit" class="btn btn-sm btn-warning w-100 text-start">★ {{ wl.name }}</button>
+                </form>
+              {% else %}
+                <form method="post" action="{% url 'watchlists:add' %}" class="m-0 mb-1">
+                  {% csrf_token %}
+                  <input type="hidden" name="ticker" value="{{ s.ticker }}">
+                  <input type="hidden" name="watchlist" value="{{ wl.id }}">
+                  <input type="hidden" name="next" value="{{ request.path }}">
+                  <button type="submit" class="btn btn-sm btn-outline-secondary w-100 text-start">☆ {{ wl.name }}</button>
+                </form>
+              {% endif %}
+            {% endfor %}
+            <form method="post" action="{% url 'watchlists:add' %}" class="m-0 d-flex gap-1 mt-2">
               {% csrf_token %}
               <input type="hidden" name="ticker" value="{{ s.ticker }}">
               <input type="hidden" name="next" value="{{ request.path }}">
-              <button type="submit" class="btn btn-sm btn-danger">♥ Favorite</button>
+              <input type="text" name="watchlist_name" class="form-control form-control-sm"
+                     placeholder="New list…" aria-label="New list name" maxlength="64">
+              <button type="submit" class="btn btn-sm btn-primary">Add</button>
             </form>
-          {% else %}
-            <form method="post" action="{% url 'favorites:add' %}" class="m-0">
-              {% csrf_token %}
-              <input type="hidden" name="ticker" value="{{ s.ticker }}">
-              <input type="hidden" name="next" value="{{ request.path }}">
-              <button type="submit" class="btn btn-sm btn-outline-secondary">♡ Favorite</button>
-            </form>
-          {% endif %}
+          </div>
+        </details>
+        {% if in_favorites %}
+          <form method="post" action="{% url 'favorites:remove' %}" class="m-0">
+            {% csrf_token %}
+            <input type="hidden" name="ticker" value="{{ s.ticker }}">
+            <input type="hidden" name="next" value="{{ request.path }}">
+            <button type="submit" class="btn btn-sm btn-danger">♥ Favorite</button>
+          </form>
+        {% else %}
+          <form method="post" action="{% url 'favorites:add' %}" class="m-0">
+            {% csrf_token %}
+            <input type="hidden" name="ticker" value="{{ s.ticker }}">
+            <input type="hidden" name="next" value="{{ request.path }}">
+            <button type="submit" class="btn btn-sm btn-outline-secondary">♡ Favorite</button>
+          </form>
         {% endif %}
-        <a href="{% url 'valuation:detail' s.ticker %}">Valuation →</a>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Tab navigation -->
+  <ul class="nav nav-tabs company-tabs mb-4" role="tablist">
+    <li class="nav-item" role="presentation">
+      <button class="nav-link active" id="tab-overview" data-bs-toggle="tab" data-bs-target="#pane-overview"
+              type="button" role="tab" aria-controls="pane-overview" aria-selected="true">Overview</button>
+    </li>
+    {% if price_chart %}
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="tab-price" data-bs-toggle="tab" data-bs-target="#pane-price"
+                type="button" role="tab" aria-controls="pane-price" aria-selected="false">Price</button>
+      </li>
+    {% endif %}
+    {% for st in statements %}
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="tab-{{ st.name|slugify }}" data-bs-toggle="tab" data-bs-target="#pane-{{ st.name|slugify }}"
+                type="button" role="tab" aria-controls="pane-{{ st.name|slugify }}" aria-selected="false">{{ st.name }}</button>
+      </li>
+    {% endfor %}
+    {% if quarterly.lines %}
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="tab-quarterly" data-bs-toggle="tab" data-bs-target="#pane-quarterly"
+                type="button" role="tab" aria-controls="pane-quarterly" aria-selected="false">Quarterly</button>
+      </li>
+    {% endif %}
+    {% if iv_chart or mos_scenarios or valuation_metrics %}
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="tab-valuation" data-bs-toggle="tab" data-bs-target="#pane-valuation"
+                type="button" role="tab" aria-controls="pane-valuation" aria-selected="false">Valuation</button>
+      </li>
+    {% endif %}
+    {% if derived_metrics %}
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="tab-metrics" data-bs-toggle="tab" data-bs-target="#pane-metrics"
+                type="button" role="tab" aria-controls="pane-metrics" aria-selected="false">Derived metrics</button>
+      </li>
+    {% endif %}
+  </ul>
+
+  <div class="tab-content">
+    <!-- Overview -->
+    <div class="tab-pane fade show active" id="pane-overview" role="tabpanel" aria-labelledby="tab-overview" tabindex="0">
+      <div class="kpi-strip mb-4">
+        {% for k in headline %}
+          <div class="kpi-cell">
+            <div class="k">{{ k.label }}</div>
+            <div class="v">{% if k.value is not None %}${{ k.value|compact_money }}{% else %}—{% endif %}</div>
+            <div class="fy">{% if k.fiscal_year %}FY {{ k.fiscal_year }}{% endif %}</div>
+          </div>
+        {% endfor %}
+      </div>
+      <div class="card p-4">
+        <div class="eyebrow mb-2">Company</div>
+        <div class="info-row"><span class="k">Sector</span><span>{{ s.sector|default:"—" }}</span></div>
+        <div class="info-row"><span class="k">Industry</span><span>{{ s.industry|default:"—" }}</span></div>
+        <div class="info-row"><span class="k">Exchange</span><span>{{ s.exchange|default:"—" }}</span></div>
+        <div class="info-row"><span class="k">Country</span><span>{{ s.country|default:"—" }}</span></div>
       </div>
     </div>
-    <p class="text-muted mb-0 mt-2">
-      {% if s.sector %}{{ s.sector }}{% endif %}
-      {% if s.industry %}· {{ s.industry }}{% endif %}
-      {% if s.exchange %}· {{ s.exchange }}{% endif %}
-      {% if s.country %}· {{ s.country }}{% endif %}
-    </p>
-  </div>
-  {% endwith %}
 
-  {% if detail.metrics %}
-    {% regroup detail.metrics by category as metric_groups %}
-    {% for group in metric_groups %}
-      <div class="bg-white rounded-3 shadow-sm p-4 mb-4">
-        <h2 class="h5 mb-3">{{ group.grouper }}</h2>
-        <div class="table-responsive">
-          <table class="table table-sm table-hover align-middle mb-0">
+    <!-- Price -->
+    {% if price_chart %}
+      <div class="tab-pane fade" id="pane-price" role="tabpanel" aria-labelledby="tab-price" tabindex="0">
+        <div class="card p-4">
+          <div class="d-flex justify-content-between align-items-baseline mb-3 flex-wrap gap-2">
+            <div>
+              <div class="eyebrow">Close price</div>
+              <div class="price-last">${{ price_chart.last_close|floatformat:2 }}</div>
+            </div>
+            <div class="eyebrow">{{ price_chart.first_date }} → {{ price_chart.last_date }}</div>
+          </div>
+          <svg class="price-svg {% if price_chart.up %}up{% else %}down{% endif %}"
+               viewBox="0 0 {{ price_chart.width }} {{ price_chart.height }}" preserveAspectRatio="none"
+               role="img" aria-label="Daily close price history">
+            <path d="{{ price_chart.area }}" class="area"/>
+            <polyline points="{{ price_chart.polyline }}" class="line" fill="none"/>
+          </svg>
+          <div class="d-flex justify-content-between eyebrow mt-2">
+            <span>Low ${{ price_chart.min_close|floatformat:2 }}</span>
+            <span>High ${{ price_chart.max_close|floatformat:2 }}</span>
+          </div>
+        </div>
+      </div>
+    {% endif %}
+
+    <!-- Statement tabs -->
+    {% for st in statements %}
+      <div class="tab-pane fade" id="pane-{{ st.name|slugify }}" role="tabpanel" aria-labelledby="tab-{{ st.name|slugify }}" tabindex="0">
+        <div class="card p-0 table-responsive">
+          <table class="table table-hover fs-web align-middle mb-0">
             <thead>
               <tr>
-                <th scope="col">Metric</th>
-                <th scope="col" class="text-end">Value</th>
-                <th scope="col">Unit</th>
-                <th scope="col" class="text-end">FY</th>
+                <th scope="col">Line item</th>
+                {% for y in st.years %}<th scope="col" class="num">FY {{ y }}</th>{% endfor %}
+                <th scope="col" class="spark">Trend</th>
               </tr>
             </thead>
             <tbody>
-              {% for m in group.list %}
-                <tr>
-                  <td>{{ m.metric }}</td>
-                  <td class="text-end font-monospace">{{ m.value|metric_value:m.unit }}</td>
-                  <td class="text-muted small">{{ m.unit|default:"" }}</td>
-                  <td class="text-end text-muted small">{{ m.fiscal_year }}</td>
-                </tr>
+              {% regroup st.lines by section as sections %}
+              {% for sec in sections %}
+                {% if sec.grouper %}
+                  <tr class="section-head"><td colspan="{{ st.years|length|add:2 }}">{{ sec.grouper }}</td></tr>
+                {% endif %}
+                {% for line in sec.list %}
+                  <tr>
+                    <td>{{ line.display_name }}</td>
+                    {% for v in line.values %}<td class="num">{{ v|compact_money }}</td>{% endfor %}
+                    <td class="spark">{{ line.values|sparkline }}</td>
+                  </tr>
+                {% endfor %}
               {% endfor %}
             </tbody>
           </table>
         </div>
       </div>
     {% endfor %}
-  {% else %}
-    <div class="bg-white rounded-3 shadow-sm p-4">
-      <p class="text-muted mb-0">No metrics available for this company.</p>
-    </div>
-  {% endif %}
+
+    <!-- Quarterly (Income Statement by fiscal quarter) -->
+    {% if quarterly.lines %}
+      <div class="tab-pane fade" id="pane-quarterly" role="tabpanel" aria-labelledby="tab-quarterly" tabindex="0">
+        <div class="eyebrow mb-2">{{ quarterly.name }} · by fiscal quarter</div>
+        <div class="card p-0 table-responsive">
+          <table class="table table-hover fs-web align-middle mb-0">
+            <thead>
+              <tr>
+                <th scope="col">Line item</th>
+                {% for c in quarterly.columns %}<th scope="col" class="num">{{ c }}</th>{% endfor %}
+                <th scope="col" class="spark">Trend</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for line in quarterly.lines %}
+                <tr>
+                  <td>{{ line.display_name }}</td>
+                  {% for v in line.values %}<td class="num">{{ v|compact_money }}</td>{% endfor %}
+                  <td class="spark">{{ line.values|sparkline }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    {% endif %}
+
+    <!-- Valuation (intrinsic-value football field + MoS + multiples) -->
+    {% if iv_chart or mos_scenarios or valuation_metrics %}
+      <div class="tab-pane fade" id="pane-valuation" role="tabpanel" aria-labelledby="tab-valuation" tabindex="0">
+        {% if iv_chart %}
+          <div class="card p-4 mb-4">
+            <div class="d-flex justify-content-between align-items-baseline mb-3 flex-wrap gap-2">
+              <div>
+                <div class="eyebrow">Intrinsic value</div>
+                <h2 class="h6 mb-0 mt-1">Per share · bear – mid – bull</h2>
+              </div>
+              {% if iv_chart.price is not None %}<span class="mono small">Price {{ iv_chart.price|metric_value:"usd" }}</span>{% endif %}
+            </div>
+            {% for b in iv_chart.bars %}
+              <div class="mb-3">
+                <div class="d-flex justify-content-between small mb-1">
+                  <span>{{ b.method }} <span class="text-muted">· FY{{ b.fiscal_year }}</span></span>
+                  <span class="mono">{{ b.bear|metric_value:"usd" }} – {{ b.mid|metric_value:"usd" }} – {{ b.bull|metric_value:"usd" }}</span>
+                </div>
+                <div class="ff-track">
+                  <div class="ff-range {% if b.covers_price %}covers{% endif %}" style="left:{{ b.left_pct }}%; width:{{ b.width_pct }}%"></div>
+                  <div class="ff-mid" style="left:{{ b.mid_pct }}%"></div>
+                  {% if iv_chart.price_pct is not None %}<div class="ff-price" style="left:{{ iv_chart.price_pct }}%"></div>{% endif %}
+                </div>
+              </div>
+            {% endfor %}
+            <p class="text-muted small mb-0 mt-2">Shaded = intrinsic-value range (bear–mid–bull);
+              <span style="color:var(--negative)">red line</span> = market price. A price left of the range implies undervaluation.</p>
+          </div>
+        {% endif %}
+        <div class="row g-3 row-cols-1 row-cols-lg-2">
+          {% if mos_scenarios %}
+            <div class="col"><div class="card p-4 h-100">
+              <h2 class="h6 mb-3">Margin of safety <span class="text-muted small fw-normal">· by scenario</span></h2>
+              <table class="table table-sm table-hover align-middle mb-0">
+                <thead><tr>
+                  <th scope="col">Method</th>
+                  <th scope="col" class="num">Bear</th>
+                  <th scope="col" class="num">Mid</th>
+                  <th scope="col" class="num">Bull</th>
+                </tr></thead>
+                <tbody>
+                  {% for r in mos_scenarios %}
+                    <tr>
+                      <td>{{ r.method }} <span class="text-muted small">· {{ r.basis }}</span></td>
+                      <td class="num {{ r.bear|sign_class }}">{{ r.bear|metric_value:"percent" }}</td>
+                      <td class="num {{ r.mid|sign_class }}">{{ r.mid|metric_value:"percent" }}</td>
+                      <td class="num {{ r.bull|sign_class }}">{{ r.bull|metric_value:"percent" }}</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+              <p class="text-muted small mb-0 mt-2">Positive = intrinsic value above price (a discount); negative = market pays more.</p>
+            </div></div>
+          {% endif %}
+          {% if valuation_metrics %}
+            <div class="col"><div class="card p-4 h-100">
+              <h2 class="h6 mb-3">Multiples &amp; yields</h2>
+              <table class="table table-sm table-hover align-middle mb-0"><tbody>
+                {% for m in valuation_metrics %}
+                  <tr>
+                    <td>{{ m.metric }}</td>
+                    <td class="num">{{ m.value|metric_value:m.unit }}</td>
+                    <td class="text-muted small text-end">FY {{ m.fiscal_year }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody></table>
+            </div></div>
+          {% endif %}
+        </div>
+      </div>
+    {% endif %}
+
+    <!-- Derived metrics (valuation categories excluded — see the Valuation tab) -->
+    {% if derived_metrics %}
+      <div class="tab-pane fade" id="pane-metrics" role="tabpanel" aria-labelledby="tab-metrics" tabindex="0">
+        {% regroup derived_metrics by category as metric_groups %}
+        <div class="row g-3 row-cols-1 row-cols-lg-2">
+          {% for group in metric_groups %}
+            <div class="col">
+              <div class="card p-4 h-100">
+                <h2 class="h6 mb-3">{{ group.grouper }}</h2>
+                <table class="table table-sm table-hover align-middle mb-0">
+                  <tbody>
+                    {% for m in group.list %}
+                      <tr>
+                        <td>{{ m.metric }}</td>
+                        <td class="num">{{ m.value|metric_value:m.unit }}</td>
+                        <td class="text-muted small text-end">FY {{ m.fiscal_year }}</td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+    {% endif %}
+  </div>
+  {% endwith %}
 {% endblock %}

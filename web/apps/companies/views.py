@@ -12,9 +12,11 @@ from django.shortcuts import render
 
 from apps.favorites import services as favorite_services
 from apps.history import services as history_services
+from apps.valuation import services as valuation_services
+from apps.valuation.football import build_chart
 from apps.watchlists import services as watchlist_services
 
-from . import services
+from . import pricechart, services
 
 
 def company_page(request: HttpRequest, ticker: str) -> HttpResponse:
@@ -26,6 +28,15 @@ def company_page(request: HttpRequest, ticker: str) -> HttpResponse:
     detail = services.get_company_detail(ticker)
     if detail is None:
         raise Http404(f"unknown ticker {ticker!r}")
+    statements = services.get_company_statements(ticker)
+    headline = services.headline_kpis(statements)
+    price_chart = pricechart.build_price_chart(services.get_price_series(ticker))
+    quarterly = services.get_quarterly(ticker)
+    # Valuation tab: intrinsic-value football field + MoS + price multiples. Intrinsic-value
+    # metrics are dropped from the derived-metrics list to avoid duplicating the football field.
+    derived_metrics, valuation_metrics = services.split_metrics(detail.metrics)
+    iv_chart = build_chart(valuation_services.get_intrinsic_value_field(ticker))
+    mos_scenarios = valuation_services.get_margin_of_safety_scenarios(ticker)
     in_favorites = False
     watchlists: list = []
     ticker_watchlist_ids: set = set()
@@ -39,6 +50,14 @@ def company_page(request: HttpRequest, ticker: str) -> HttpResponse:
         "companies/detail.html",
         {
             "detail": detail,
+            "statements": statements.statements,
+            "headline": headline,
+            "price_chart": price_chart,
+            "quarterly": quarterly,
+            "derived_metrics": derived_metrics,
+            "valuation_metrics": valuation_metrics,
+            "iv_chart": iv_chart,
+            "mos_scenarios": mos_scenarios,
             "watchlists": watchlists,
             "ticker_watchlist_ids": ticker_watchlist_ids,
             "in_favorites": in_favorites,

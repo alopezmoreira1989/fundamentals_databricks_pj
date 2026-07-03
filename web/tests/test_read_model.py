@@ -55,6 +55,56 @@ def test_latest_metrics_grouped_and_ordered(artifacts_from_fixtures):
             seen.append(m.category)
 
 
+def test_get_statements_pivots_line_items_by_year(artifacts_from_fixtures):
+    result = CompanyRepository().get_statements(TICKER, max_years=6)
+    names = [s.name for s in result.statements]
+    assert names == ["Income Statement", "Balance Sheet", "Cash Flow"]  # fixed reporting order
+    income = result.statements[0]
+    assert 1 <= len(income.years) <= 6
+    assert income.years == tuple(sorted(income.years, reverse=True))  # newest first
+    # Every line's values align to the year columns; Revenue is present and positive.
+    assert all(len(line.values) == len(income.years) for line in income.lines)
+    revenue = next(line for line in income.lines if line.display_name == "Revenue")
+    assert revenue.values[0] and revenue.values[0] > 0
+
+
+def test_get_statements_unknown_ticker_is_empty(artifacts_from_fixtures):
+    assert CompanyRepository().get_statements("NOTAREALTICKER").statements == ()
+
+
+def test_get_quarterly_pivots_income_statement(artifacts_from_fixtures):
+    grid = CompanyRepository().get_quarterly(TICKER, max_quarters=6)
+    assert grid.name == "Income Statement"
+    assert 1 <= len(grid.columns) <= 6
+    assert all(c[0] == "Q" for c in grid.columns)  # labels like "Q2 2026"
+    revenue = next(line for line in grid.lines if line.display_name == "Revenue")
+    assert len(revenue.values) == len(grid.columns)
+    assert revenue.values[0] and revenue.values[0] > 0
+
+
+def test_price_series_downsampled_and_chart_geometry(artifacts_from_fixtures):
+    from apps.companies.pricechart import build_price_chart
+
+    series = CompanyRepository().price_series(TICKER, max_points=120)
+    assert 2 <= len(series) <= 121  # downsampled (+ the always-kept latest close)
+    dates = [p.date for p in series]
+    assert dates == sorted(dates)  # ascending
+    chart = build_price_chart(series)
+    assert chart is not None
+    assert chart.min_close <= chart.last_close <= chart.max_close
+    assert chart.polyline and chart.area.endswith("Z")
+    assert build_price_chart(()) is None  # empty series → no chart
+
+
+def test_headline_kpis_from_statements(artifacts_from_fixtures):
+    from apps.companies import services
+
+    kpis = services.headline_kpis(CompanyRepository().get_statements(TICKER))
+    labels = [k.label for k in kpis]
+    assert labels == ["Revenue", "Net income", "Total assets", "Operating cash flow"]
+    assert all(k.value is not None for k in kpis)  # AAPL reports all four
+
+
 def test_dtos_are_immutable(artifacts_from_fixtures):
     summary = CompanyRepository().get_summary(TICKER)
     assert summary is not None
@@ -87,6 +137,30 @@ def test_valuation_returns_only_mos_metrics(artifacts_from_fixtures):
     points = ValuationRepository().margin_of_safety(TICKER)
     assert points  # AAPL has MoS metrics in the fixtures
     assert all(p.metric.startswith("MoS ") for p in points)
+
+
+def test_sparkline_svg_geometry():
+    from apps.companies.charts import sparkline_svg
+
+    svg = sparkline_svg([1.0, 2.0, 1.5, 3.0])
+    assert svg.startswith("<svg") and "<polyline" in svg
+    assert sparkline_svg([1.0]) == ""  # fewer than 2 points → no sparkline
+    assert sparkline_svg([]) == ""
+    assert sparkline_svg([1.0, None, 3.0]).startswith("<svg")  # skips the gap, still draws
+
+
+def test_mos_scenarios_pivot_by_method_and_basis(artifacts_from_fixtures):
+    scenarios = ValuationRepository().margin_of_safety_scenarios(TICKER)
+    assert scenarios  # AAPL has MoS scenarios
+    # Each row collapses one method+basis into Bear/Mid/Bull; each key appears once.
+    keys = [(s.method, s.basis) for s in scenarios]
+    assert len(keys) == len(set(keys))
+    # Ordered: grouped by method, TTM basis before FY within a method.
+    dcf = [s for s in scenarios if s.method == "DCF"]
+    assert [s.basis for s in dcf] == ["TTM", "FY"]
+    # Bear <= Mid <= Bull for a populated row (MoS rises from bear to bull scenario).
+    populated = next(s for s in scenarios if None not in (s.bear, s.mid, s.bull))
+    assert populated.bear <= populated.mid <= populated.bull
 
 
 def test_intrinsic_value_field_pivots_scenarios(artifacts_from_fixtures):
@@ -127,8 +201,10 @@ def test_company_page_html_200_and_404(artifacts_from_fixtures, client):
     assert resp.status_code == 200
     assert resp["Content-Type"].startswith("text/html")
     html = resp.content.decode()
-    # ticker badge + at least one grouped metric section (category heading) rendered
-    assert TICKER in html and "Intrinsic Value" in html
+    # ticker + a fundamentals category heading in the Derived-metrics tab. Intrinsic-value
+    # metrics are intentionally NOT here — they live in the Valuation tab (no redundancy).
+    assert TICKER in html and "Profitability" in html
+    assert "Intrinsic Value" not in html  # dropped from Derived metrics
 
     assert client.get("/companies/notareal/").status_code == 404
 

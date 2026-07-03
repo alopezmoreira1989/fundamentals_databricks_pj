@@ -11,7 +11,7 @@ from __future__ import annotations
 import duckdb
 
 from .base import DuckDBRepository
-from .dtos import FootballBar, FootballField, MetricPoint
+from .dtos import FootballBar, FootballField, MetricPoint, MosScenario
 
 # All "MoS % (...)" metrics for the ticker, latest FY per metric (picked inside DuckDB).
 _MOS_SQL = """
@@ -45,11 +45,53 @@ _LATEST_PRICE_SQL = "SELECT arg_max(close, date) AS price FROM prices WHERE tick
 
 _SCENARIO_SEP = " — "  # " — " (em dash) separates a method from its Bear/Bull scenario
 
+# Display order for the pivoted MoS scenarios: group by method, TTM basis before FY.
+_METHOD_ORDER = ("Graham Revised", "Graham Number", "DCF", "Owner Earnings")
+_BASIS_ORDER = ("TTM", "FY")
+
 
 class ValuationRepository(DuckDBRepository):
     def margin_of_safety(self, ticker: str, *, limit: int = 100) -> tuple[MetricPoint, ...]:
         """Latest Margin-of-Safety metrics for the ticker (empty if none/unknown)."""
         return self._fetch(_MOS_SQL, [ticker, limit], MetricPoint)
+
+    def margin_of_safety_scenarios(self, ticker: str) -> tuple[MosScenario, ...]:
+        """MoS pivoted to one row per (method, basis) with Bear / Mid / Bull columns, ordered by
+        method then basis — so the scattered ``MoS % (…)``/``… — Bear``/``… — Bull`` metrics read
+        as an organized scenario table. Purely a reshape of the precomputed values."""
+        rows = self._fetch(_MOS_SQL, [ticker, 100], MetricPoint)
+        scenarios: dict[tuple[str, str], dict[str, float | None]] = {}
+        fiscal_years: dict[tuple[str, str], int] = {}
+        for m in rows:
+            head, sep, tail = m.metric.rpartition(_SCENARIO_SEP)
+            base, scenario = (head, tail.lower()) if sep and tail in ("Bear", "Bull") else (m.metric, "mid")
+            lo, hi = base.find("("), base.rfind(")")
+            if lo < 0 or hi <= lo:
+                continue
+            method, _, basis = base[lo + 1 : hi].partition(", ")
+            key = (method.strip(), basis.strip())
+            scenarios.setdefault(key, {"bear": None, "mid": None, "bull": None})[scenario] = m.value
+            if scenario == "mid":
+                fiscal_years[key] = m.fiscal_year
+
+        def rank(key: tuple[str, str]) -> tuple[int, int, str]:
+            method, basis = key
+            method_rank = _METHOD_ORDER.index(method) if method in _METHOD_ORDER else len(_METHOD_ORDER)
+            basis_rank = _BASIS_ORDER.index(basis) if basis in _BASIS_ORDER else len(_BASIS_ORDER)
+            return (method_rank, basis_rank, method)
+
+        return tuple(
+            MosScenario(
+                method=method,
+                basis=basis,
+                bear=scenarios[key]["bear"],
+                mid=scenarios[key]["mid"],
+                bull=scenarios[key]["bull"],
+                fiscal_year=fiscal_years.get(key),
+            )
+            for key in sorted(scenarios, key=rank)
+            for method, basis in [key]
+        )
 
     def intrinsic_value_field(self, ticker: str) -> FootballField:
         """Per-method TTM IV ranges (bear/mid/bull) plus the latest market price."""

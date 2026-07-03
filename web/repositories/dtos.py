@@ -51,6 +51,60 @@ class CompanyDetail:
 
 
 @dataclass(frozen=True, slots=True)
+class StatementLine:
+    """One financial-statement line item: its value across the displayed fiscal years, aligned
+    to :attr:`Statement.years` (``None`` where a year has no reported value)."""
+
+    display_name: str
+    section: str | None
+    values: tuple[float | None, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class Statement:
+    """One financial statement (Income Statement / Balance Sheet / Cash Flow) as a line-item ×
+    fiscal-year grid, ordered by the reporting hierarchy."""
+
+    name: str
+    years: tuple[int, ...]
+    lines: tuple[StatementLine, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class CompanyStatements:
+    """A ticker's financial statements, ready for tabbed display."""
+
+    statements: tuple[Statement, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class QuarterGrid:
+    """A statement's line items across recent fiscal quarters (newest first). Like
+    :class:`Statement` but the columns are quarter labels (e.g. ``"Q2 2026"``), not years."""
+
+    name: str
+    columns: tuple[str, ...]
+    lines: tuple[StatementLine, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class PricePoint:
+    """One point on the price series: an ISO date and its close."""
+
+    date: str
+    close: float
+
+
+@dataclass(frozen=True, slots=True)
+class HeadlineKpi:
+    """A single headline figure (latest fiscal year) for the company overview strip."""
+
+    label: str
+    value: float | None
+    fiscal_year: int | None
+
+
+@dataclass(frozen=True, slots=True)
 class ScreenRow:
     """One screener hit: a ticker's latest-FY value for the screened metric."""
 
@@ -89,6 +143,21 @@ class FootballBar:
     mid: float
     bull: float
     fiscal_year: int
+
+
+@dataclass(frozen=True, slots=True)
+class MosScenario:
+    """A method's Margin-of-Safety across the three scenarios, on one basis (TTM or FY).
+
+    Collapses the flat ``MoS % (<method>, <basis>)`` / ``… — Bear`` / ``… — Bull`` metrics into a
+    single row so the view can render aligned Bear / Mid / Bull columns."""
+
+    method: str  # "Graham Revised", "DCF", "Owner Earnings", "Graham Number"
+    basis: str   # "TTM" or "FY"
+    bear: float | None
+    mid: float | None
+    bull: float | None
+    fiscal_year: int | None
 
 
 @dataclass(frozen=True, slots=True)
