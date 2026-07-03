@@ -38,7 +38,8 @@
 # COMMAND ----------
 
 import json
-from pyspark.sql.types import StructType, StructField, StringType, IntegerType
+
+from pyspark.sql.types import IntegerType, StringType, StructField, StructType
 
 HIERARCHY_JSON_PATH = "../00__config/concept_hierarchy.json"
 TARGET_TABLE        = f"{CATALOG}.config.concept_hierarchy"
@@ -53,7 +54,7 @@ print(f"Target : {TARGET_TABLE}")
 
 # COMMAND ----------
 
-with open(HIERARCHY_JSON_PATH, "r", encoding="utf-8") as f:
+with open(HIERARCHY_JSON_PATH, encoding="utf-8") as f:
     tree = json.load(f)
 
 # Keys starting with '_' are metadata/comments — discard them

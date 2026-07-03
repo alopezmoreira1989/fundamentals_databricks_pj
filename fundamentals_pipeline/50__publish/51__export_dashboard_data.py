@@ -30,7 +30,6 @@ from pathlib import Path
 
 import pandas as pd
 
-
 # The schema contract ships in the installable `fundamentals_pipeline` package
 # (fundamentals_pipeline/schemas.py). Every environment installs it the same way
 # (`pip install -e .`); on Databricks that install happens once in 91__full_pipeline's

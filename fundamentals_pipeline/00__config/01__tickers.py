@@ -40,7 +40,7 @@ QUARTERLY_WINDOW = 12
 spark.sql(f"USE CATALOG {CATALOG}")
 spark.sql(f"USE SCHEMA  {SCHEMA}")
 
-print(f"Config loaded:")
+print("Config loaded:")
 print(f"  Target            : {DB}.{TABLE}")
 print(f"  Raw table         : {DB}.{RAW_TABLE}")
 print(f"  Tickers table     : {TICKERS_TABLE}")

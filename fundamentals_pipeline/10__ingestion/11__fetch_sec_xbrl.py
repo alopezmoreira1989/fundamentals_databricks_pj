@@ -35,16 +35,22 @@ else:
 # COMMAND ----------
 
 import json
-import requests
 import time
-import pandas as pd
-from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timedelta
 from threading import Lock
+
+import pandas as pd
+import requests
 from pyspark.sql import functions as F
 from pyspark.sql.types import (
-    StructType, StructField,
-    StringType, IntegerType, DoubleType, TimestampType, DateType,
+    DateType,
+    DoubleType,
+    IntegerType,
+    StringType,
+    StructField,
+    StructType,
+    TimestampType,
 )
 
 # Enable Arrow for fast pandas↔Spark conversion (10–30x speedup)
@@ -106,7 +112,7 @@ if FORCE_FULL_REFRESH:
 else:
     RUN_TICKERS = [t for t in ACTIVE_TICKERS if t not in recently_scraped]
     skipped = len(ACTIVE_TICKERS) - len(RUN_TICKERS)
-    print(f"Incremental run:")
+    print("Incremental run:")
     print(f"  Total universe : {len(ACTIVE_TICKERS):,} tickers")
     print(f"  Already fresh  : {skipped:,} tickers (last {STALENESS_DAYS}d)")
     print(f"  To fetch       : {len(RUN_TICKERS):,} tickers")
@@ -155,7 +161,7 @@ _FAV_CIK_OVERRIDES = {}   # ticker → (cik_padded, company)
 _FAV_CIK_ALIASES   = {}   # ticker → [cik_padded, ...]  (predecesores tras fusiones/reorgs)
 _ALIAS_MAP = {}            # alias → canonical_ticker
 try:
-    with open(FAVORITES_JSON_PATH, "r", encoding="utf-8") as f:
+    with open(FAVORITES_JSON_PATH, encoding="utf-8") as f:
         _fav_raw = f.read()
     _fav_lines = [l for l in _fav_raw.splitlines() if not l.strip().startswith("/")]
     for _entry in json.loads("\n".join(_fav_lines)):
@@ -707,7 +713,8 @@ spark.sql(f"""
 """)
 
 if RUN_TICKERS and failed:
-    from pyspark.sql.types import StructType, StructField, StringType, TimestampType as _TS
+    from pyspark.sql.types import StringType, StructField, StructType
+    from pyspark.sql.types import TimestampType as _TS
 
     _fail_schema = StructType([
         StructField("ticker",        StringType(), False),
@@ -729,7 +736,7 @@ if RUN_TICKERS and failed:
          .write.mode("append").saveAsTable(_failures_tbl)
     print(f"✓ {len(_fail_records)} failure(s) written → {_failures_tbl}")
 else:
-    print(f"✓ No ingestion failures to record")
+    print("✓ No ingestion failures to record")
 
 # COMMAND ----------
 

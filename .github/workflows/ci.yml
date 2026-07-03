@@ -80,9 +80,7 @@ jobs:
           cache: pip
       - name: Install ruff
         run: pip install "ruff>=0.6"
-      # Scoped to the ruff-enforced surfaces: the web app, the test suite, and the importable
-      # fundamentals_pipeline modules. The NN__ Databricks notebook sources are deliberately
-      # excluded — they use notebook cell structure (imports after `# COMMAND`) and are not
-      # ruff-gated. (Linting those is tracked separately.)
+      # Repo-wide: the NN__ Databricks notebook sources are now linted too (mechanical rules
+      # fixed; cell-idiom rules ignored per-stage-dir in ruff.toml). See #167.
       - name: ruff check
-        run: ruff check web tests fundamentals_pipeline/*.py
+        run: ruff check .

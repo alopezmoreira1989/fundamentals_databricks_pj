@@ -79,7 +79,7 @@ total_favorites = spark.sql(f"""
 
 if n_issues == 0 and n_failures == 0:
     print(f"✓ All {total_favorites} favorite(s) present in financials and financials_metrics")
-    print(f"✓ No ingestion failures in latest run")
+    print("✓ No ingestion failures in latest run")
 else:
     if n_issues > 0:
         print(f"\n⚠ {n_issues} coverage issue(s) found for favorites:")
@@ -98,4 +98,4 @@ else:
             f"exceeds 5% threshold. Check ingestion_failures for details."
         )
     else:
-        print(f"\n⊘ Coverage gaps within tolerance — pipeline continues")
+        print("\n⊘ Coverage gaps within tolerance — pipeline continues")

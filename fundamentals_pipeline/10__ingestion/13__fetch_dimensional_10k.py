@@ -32,14 +32,20 @@
 # COMMAND ----------
 
 import re
-import requests
 from datetime import date
 
 import pandas as pd
+import requests
 from lxml import etree
 from pyspark.sql import functions as F
 from pyspark.sql.types import (
-    StructType, StructField, StringType, IntegerType, DoubleType, DateType, TimestampType,
+    DateType,
+    DoubleType,
+    IntegerType,
+    StringType,
+    StructField,
+    StructType,
+    TimestampType,
 )
 
 HEADERS  = {"User-Agent": SEC_USER_AGENT}
@@ -96,7 +102,7 @@ def _recent_10k_instances(cik: str, n: int) -> list[str]:
     subs = requests.get(f"https://data.sec.gov/submissions/CIK{cik}.json", headers=HEADERS, timeout=60).json()
     rec = subs["filings"]["recent"]
     urls = []
-    for form, acc, doc in zip(rec["form"], rec["accessionNumber"], rec["primaryDocument"]):
+    for form, acc, doc in zip(rec["form"], rec["accessionNumber"], rec["primaryDocument"], strict=False):
         if form not in ("10-K", "10-K/A"):
             continue
         acc_nodash = acc.replace("-", "")

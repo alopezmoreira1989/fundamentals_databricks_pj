@@ -30,6 +30,22 @@ ignore = [
 [lint.per-file-ignores]
 # Notebook .py source files use Databricks `# MAGIC` / `# COMMAND ----------` markers that linters treat oddly.
 "fundamentals_pipeline/**/*.py" = ["E265"]
+# Databricks notebook-source STAGE files and ad-hoc analysis scripts are cell-structured, so a
+# handful of style rules that are noise in that context are ignored *only there*:
+#   E701/E702 — aligned `if …: return` shape-classifiers + terse `for …: print` validation cells
+#   E731      — throwaway lambdas in exploratory cells
+#   E741      — `l` and friends as short-lived locals
+#   B007      — unused tuple-unpacking loop vars in probe/audit loops
+# Everything mechanical (f-strings, import order, typing, EOF newlines, zip strict=…) is fixed,
+# not ignored. Scoped to the numbered pipeline stage dirs — the importable frontends lib
+# (60__frontends/61__streamlit/lib) is deliberately NOT listed and stays fully strict.
+"fundamentals_pipeline/00__config/**/*.py" = ["E701", "E702", "E731", "E741", "B007"]
+"fundamentals_pipeline/10__ingestion/**/*.py" = ["E701", "E702", "E731", "E741", "B007"]
+"fundamentals_pipeline/20__transformation/**/*.py" = ["E701", "E702", "E731", "E741", "B007"]
+"fundamentals_pipeline/30__analysis/**/*.py" = ["E701", "E702", "E731", "E741", "B007"]
+"fundamentals_pipeline/50__publish/**/*.py" = ["E701", "E702", "E731", "E741", "B007"]
+"fundamentals_pipeline/70__backtest/**/*.py" = ["E701", "E702", "E731", "E741", "B007"]
+"fundamentals_pipeline/90__pipelines/**/*.py" = ["E701", "E702", "E731", "E741", "B007"]
 
 [format]
 quote-style = "double"
