@@ -10,6 +10,18 @@ pytestmark = pytest.mark.django_db
 User = get_user_model()
 
 
+def test_signup_get_renders_form_for_anonymous(client):
+    resp = client.get("/accounts/signup/")
+    assert resp.status_code == 200
+    assert "form" in resp.context
+
+
+def test_signup_get_redirects_already_authenticated_user(client):
+    client.force_login(User.objects.create_user(username="already", email="a@example.com", password="pw-123456!"))
+    resp = client.get("/accounts/signup/")
+    assert resp.status_code == 302 and resp.headers["Location"] == "/"
+
+
 def test_signup_creates_user_logs_in_and_redirects(client):
     resp = client.post(
         "/accounts/signup/",
