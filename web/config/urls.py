@@ -18,6 +18,8 @@ urlpatterns = [
     # health check and uptime monitor.
     path("", include("apps.health.urls")),
     path("", TemplateView.as_view(template_name="home.html"), name="home"),
+    # User-facing usage guide (static content).
+    path("help/", TemplateView.as_view(template_name="help.html"), name="help"),
     # Session auth (login / logout / signup).
     path("accounts/", include("apps.users.urls")),
     # User-owned data (login-required).

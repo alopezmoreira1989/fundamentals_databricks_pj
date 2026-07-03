@@ -22,6 +22,7 @@ from apps.favorites import services as favorite_services
 from apps.history import services as history_services
 from apps.watchlists import services as watchlist_services
 from django.contrib.auth import get_user_model
+from django.urls import reverse
 
 pytestmark = pytest.mark.django_db
 
@@ -30,9 +31,38 @@ TICKER = "AAPL"
 PW = "integration-pw-123!"
 
 
-# ── each public page renders end-to-end from the fixtures ────────────────────────────────
-def test_home_page_renders(client):
-    assert client.get("/").status_code == 200
+# ── landing page + help (static, no fixtures needed) ─────────────────────────────────────
+def test_home_page_renders_product_intro_and_entry_points(client):
+    resp = client.get("/")
+    assert resp.status_code == 200
+    body = resp.content.decode()
+    # Real product intro (not the old "Phase 1 skeleton" placeholder) with entry points.
+    assert "Phase 1" not in body
+    assert "Open the screener" in body
+    assert f'href="{reverse("screener:screen")}"' in body
+    assert f'href="{reverse("help")}"' in body
+
+
+def test_home_cta_is_auth_aware(client):
+    assert "Create a free account" in client.get("/").content.decode()  # anonymous
+    user = User.objects.create_user(username="cta", email="cta@example.com", password=PW)
+    client.force_login(user)
+    body = client.get("/").content.decode()
+    assert "Your watchlists" in body and "Create a free account" not in body
+
+
+def test_help_page_renders_usage_docs(client):
+    resp = client.get(reverse("help"))
+    assert resp.status_code == 200
+    body = resp.content.decode()
+    for anchor in ("#screening", "#company", "#valuation", "#watchlists"):
+        assert anchor in body
+
+
+def test_nav_links_to_help_on_interior_page(artifacts_from_fixtures, client):
+    # Consistent nav: Help is reachable from an interior (screener) page too.
+    body = client.get(reverse("screener:screen")).content.decode()
+    assert f'href="{reverse("help")}"' in body
 
 
 def test_screener_page_renders_universe(artifacts_from_fixtures, client):

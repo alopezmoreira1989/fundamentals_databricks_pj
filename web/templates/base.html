@@ -4,18 +4,27 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Fundamentals{% endblock %}</title>
+  <meta name="description" content="{% block meta_description %}Fundamentals — screen ~3,000 US companies on SEC-filed financials, read derived metrics and intrinsic value, and backtest investment archetypes.{% endblock %}">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <style>
+    :root { --accent: #2563eb; }
     .watchlist-picker > summary { cursor: pointer; }
     .watchlist-picker > summary::-webkit-details-marker { display: none; }
+    /* Visible keyboard focus everywhere (accessibility floor). */
+    a:focus-visible, button:focus-visible, .form-control:focus-visible,
+    .form-select:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+    .navbar-brand { font-weight: 700; letter-spacing: .01em; }
   </style>
+  {% block extra_head %}{% endblock %}
 </head>
-<body class="bg-light">
-  <nav class="navbar navbar-dark bg-dark">
+<body class="bg-light d-flex flex-column min-vh-100">
+  <a class="visually-hidden-focusable position-absolute top-0 start-0 m-2 btn btn-primary btn-sm" href="#main">Skip to main content</a>
+  <nav class="navbar navbar-dark bg-dark" aria-label="Primary">
     <div class="container">
       <a class="navbar-brand" href="{% url 'home' %}">Fundamentals</a>
       <div class="navbar-nav flex-row align-items-center gap-3">
         <a class="nav-link" href="{% url 'screener:screen' %}">Screener</a>
+        <a class="nav-link" href="{% url 'help' %}">Help</a>
         {% if user.is_authenticated %}
           <a class="nav-link" href="{% url 'watchlists:overview' %}">Watchlists</a>
           <a class="nav-link" href="{% url 'favorites:list' %}">Favorites</a>
@@ -32,8 +41,18 @@
       </div>
     </div>
   </nav>
-  <main class="container py-5">
+  <main id="main" class="container py-5 flex-grow-1">
     {% block content %}{% endblock %}
   </main>
+  <footer class="border-top bg-white py-4 mt-auto">
+    <div class="container d-flex flex-wrap justify-content-between align-items-center gap-2 small text-muted">
+      <span>Financial data derived from SEC EDGAR filings &amp; market prices — informational use only, not investment advice.</span>
+      <span class="d-flex gap-3">
+        <a class="link-secondary text-decoration-none" href="{% url 'screener:screen' %}">Screener</a>
+        <a class="link-secondary text-decoration-none" href="{% url 'help' %}">Help</a>
+        <a class="link-secondary text-decoration-none" href="{% url 'swagger-ui' %}">API</a>
+      </span>
+    </div>
+  </footer>
 </body>
 </html>

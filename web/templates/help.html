@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block title %}Help — using Fundamentals{% endblock %}
+{% block meta_description %}How to screen companies, read a company page, understand intrinsic value, and use watchlists in Fundamentals.{% endblock %}
+
+{% block extra_head %}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
+<style>
+  .docs h1, .docs h2 { font-family: "Space Grotesk", system-ui, sans-serif; letter-spacing: -0.02em; }
+  .docs .toc { position: sticky; top: 1.5rem; }
+  .docs .toc a { display: block; padding: .2rem 0; color: #495057; text-decoration: none; }
+  .docs .toc a:hover, .docs .toc a:focus-visible { color: #2563eb; }
+  .docs section { scroll-margin-top: 1.5rem; }
+  .docs section + section { margin-top: 2.5rem; }
+  .docs dt { font-weight: 600; }
+  .docs dd { margin-bottom: .75rem; color: #495057; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="docs">
+  <header class="mb-5">
+    <h1 class="mb-2">How to use Fundamentals</h1>
+    <p class="text-muted mb-0" style="max-width:42rem">
+      A quick guide to screening companies, reading a company page, understanding the
+      intrinsic-value estimates, and keeping track of what you're watching.
+    </p>
+  </header>
+
+  <div class="row g-4">
+    <!-- Contents -->
+    <nav class="col-lg-3 order-lg-2" aria-label="On this page">
+      <div class="toc small">
+        <p class="text-uppercase text-muted fw-semibold mb-2" style="letter-spacing:.08em">On this page</p>
+        <a href="#screening">Screening</a>
+        <a href="#company">Reading a company</a>
+        <a href="#valuation">Intrinsic value &amp; margin of safety</a>
+        <a href="#watchlists">Watchlists, favorites &amp; history</a>
+        <a href="#account">Accounts</a>
+        <a href="#data">Data &amp; disclaimer</a>
+      </div>
+    </nav>
+
+    <div class="col-lg-9 order-lg-1">
+      <section id="screening">
+        <h2 class="h4 mb-3">Screening</h2>
+        <p>The <a href="{% url 'screener:screen' %}">Screener</a> is the way in. It lists the whole
+          universe of ~3,000 US companies; the filters narrow it:</p>
+        <ul>
+          <li><strong>Search</strong> — match a ticker or company name.</li>
+          <li><strong>Sector</strong> and <strong>Index</strong> — restrict to a sector, or to S&amp;P 500 / Russell 3000 members.</li>
+          <li><strong>Metric filter</strong> — pick any metric and an optional min/max on its
+            latest reported fiscal-year value. Results are ranked by that metric, high to low.</li>
+        </ul>
+        <p class="text-muted small mb-0">Every filter lives in the URL, so a screen is a link you
+          can bookmark or share.</p>
+      </section>
+
+      <section id="company">
+        <h2 class="h4 mb-3">Reading a company</h2>
+        <p>A company page shows the reported statements — income, balance sheet, and cash flow —
+          alongside metrics derived uniformly across every company:</p>
+        <dl>
+          <dt>Profitability &amp; margins</dt><dd>Gross, operating, and net margins; return measures.</dd>
+          <dt>Leverage &amp; liquidity</dt><dd>Debt-to-equity and related balance-sheet ratios.</dd>
+          <dt>Cash generation</dt><dd>Free cash flow and its components.</dd>
+          <dt>Valuation multiples</dt><dd>P/E and peers, priced at the company's real fiscal close
+            (so non-December filers aren't mispriced against a calendar year-end).</dd>
+        </dl>
+        <p class="text-muted small mb-0">Quarterly figures are reconciled back to the annual filing,
+          so a fiscal-year total always ties out to what the company actually reported.</p>
+      </section>
+
+      <section id="valuation">
+        <h2 class="h4 mb-3">Intrinsic value &amp; margin of safety</h2>
+        <p>Each company is valued four independent ways, so you can compare methods rather than
+          trust one number:</p>
+        <ul>
+          <li><strong>Graham</strong> — a defensive earnings-and-growth formula.</li>
+          <li><strong>Discounted cash flow (DCF)</strong> — future cash flows discounted to today.</li>
+          <li><strong>Owner Earnings</strong> — Buffett-style cash earnings.</li>
+          <li><strong>EPS-CAGR</strong> — forward earnings projected from the trailing growth rate.</li>
+        </ul>
+        <p>Each is estimated under <strong>bull, mid, and bear</strong> assumptions. The
+          <strong>margin of safety</strong> is the gap between an estimate and the current price:
+          positive means the estimate sits above the market (a discount), negative means the market
+          is already paying more than the estimate.</p>
+        <p class="text-muted small mb-0">These are model outputs, not price targets — treat them as
+          a starting point for your own judgment.</p>
+      </section>
+
+      <section id="watchlists">
+        <h2 class="h4 mb-3">Watchlists, favorites &amp; history</h2>
+        <p>With an account you can keep track of what you're researching:</p>
+        <dl>
+          <dt>Watchlists</dt><dd>Group companies into named lists; add or remove a ticker from its
+            company page. Everyone gets a default list to start.</dd>
+          <dt>Favorites</dt><dd>A one-click star for companies you want at hand.</dd>
+          <dt>History</dt><dd>The companies you've viewed recently, most recent first — a trail back
+            to where you were.</dd>
+        </dl>
+      </section>
+
+      <section id="account">
+        <h2 class="h4 mb-3">Accounts</h2>
+        <p>Screening and company pages are open to everyone. Watchlists, favorites, and history need
+          a free account. <a href="{% url 'users:signup' %}">Sign up</a> or
+          <a href="{% url 'users:login' %}">log in</a> — it takes an email and a password.</p>
+      </section>
+
+      <section id="data">
+        <h2 class="h4 mb-3">Data &amp; disclaimer</h2>
+        <p>Figures are derived from SEC EDGAR filings and market prices and refresh each time the
+          data pipeline runs, so they lag the very latest filing. For programmatic access, the same
+          read model is available as a JSON <a href="{% url 'swagger-ui' %}">API</a>.</p>
+        <p class="text-muted small mb-0">This is an informational research tool, not investment
+          advice, and may contain errors — verify anything you'd act on against primary sources.</p>
+      </section>
+    </div>
+  </div>
+</div>
+{% endblock %}
