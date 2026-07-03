@@ -19,8 +19,10 @@ No Databricks dependency and no financial logic — this is read-only plumbing.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -34,6 +36,8 @@ from fundamentals_pipeline.schemas import (
     validate_artifact,
     validate_meta,
 )
+
+logger = logging.getLogger(__name__)
 
 # artifact key (matches fundamentals_pipeline.schemas.ARTIFACT_NAMES) → published filename.
 PARQUET_FILES: dict[str, str] = {
@@ -51,6 +55,83 @@ _HARD_ARTIFACTS = frozenset({"dashboard_data", "dashboard_metrics"})
 
 class ArtifactError(RuntimeError):
     """A published artifact could not be fetched (network/404) or read."""
+
+
+class _CacheMetrics:
+    """Process-local artifact-cache counters (thread-safe).
+
+    In-memory and per-process — with multiple gunicorn workers each keeps its own tally; a
+    cross-process metrics backend is the observability task (#157). Enough to answer "are reads
+    mostly cache hits?" and to alarm on a spike in misses/errors.
+
+    - ``hits``       fresh cached copy served with no I/O
+    - ``stale_hits`` stale copy served immediately while a background refresh runs (SWR)
+    - ``misses``     no cached copy → blocking download on the request path (cold start)
+    - ``refreshes``  a background/warm re-download completed
+    - ``errors``     a download failed
+    """
+
+    _KIND_TO_KEY = {
+        "hit": "hits",
+        "stale": "stale_hits",
+        "miss": "misses",
+        "refresh": "refreshes",
+        "error": "errors",
+    }
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._counts: dict[str, int] = dict.fromkeys(self._KIND_TO_KEY.values(), 0)
+
+    def record(self, kind: str) -> None:
+        key = self._KIND_TO_KEY[kind]
+        with self._lock:
+            self._counts[key] += 1
+
+    def snapshot(self) -> dict[str, int]:
+        with self._lock:
+            return dict(self._counts)
+
+    def reset(self) -> None:
+        with self._lock:
+            self._counts = dict.fromkeys(self._KIND_TO_KEY.values(), 0)
+
+
+METRICS = _CacheMetrics()
+
+# In-flight background refreshes, so a burst of readers triggers at most one download per file.
+_inflight_lock = threading.Lock()
+_inflight: set[str] = set()
+
+
+def _refresh_in_background(filename: str, url: str, dest: Path) -> None:
+    """Re-download ``filename`` off the request path (stale-while-revalidate).
+
+    De-duped via ``_inflight``. Runs on a daemon thread unless ``ARTIFACTS_REFRESH_ASYNC`` is
+    False (tests set it False for deterministic assertions). A failed refresh is logged, never
+    raised — the caller has already been handed the stale copy.
+    """
+    with _inflight_lock:
+        if filename in _inflight:
+            return
+        _inflight.add(filename)
+
+    def _work() -> None:
+        try:
+            _download(url, dest)
+            METRICS.record("refresh")
+            logger.info("artifact cache refreshed: %s", filename)
+        except requests.RequestException as exc:
+            METRICS.record("error")
+            logger.warning("artifact cache refresh failed for %s: %s", filename, exc)
+        finally:
+            with _inflight_lock:
+                _inflight.discard(filename)
+
+    if getattr(settings, "ARTIFACTS_REFRESH_ASYNC", True):
+        threading.Thread(target=_work, name=f"artifact-refresh-{filename}", daemon=True).start()
+    else:
+        _work()
 
 
 def _cache_dir() -> Path:
@@ -110,15 +191,22 @@ def parquet_path(name: str) -> Path:
         return path
 
     dest = _cache_dir() / filename
-    if not _is_fresh(dest):
-        url = f"{settings.ARTIFACTS_BASE_URL}/{filename}"
-        try:
-            _download(url, dest)
-        except requests.RequestException as exc:
-            if dest.exists():
-                # Serve the stale cached copy rather than failing if the network blips.
-                return dest
-            raise ArtifactError(f"could not fetch {url}: {exc}") from exc
+    url = f"{settings.ARTIFACTS_BASE_URL}/{filename}"
+    if dest.exists():
+        if _is_fresh(dest):
+            METRICS.record("hit")
+        else:
+            # Stale-while-revalidate: hand back the stale copy now, refresh off the request path.
+            METRICS.record("stale")
+            _refresh_in_background(filename, url, dest)
+        return dest
+    # Cold miss: nothing cached, so this request must block on the download.
+    METRICS.record("miss")
+    try:
+        _download(url, dest)
+    except requests.RequestException as exc:
+        METRICS.record("error")
+        raise ArtifactError(f"could not fetch {url}: {exc}") from exc
     return dest
 
 
@@ -136,13 +224,20 @@ def meta() -> dict[str, Any]:
         data = json.loads(path.read_text(encoding="utf-8"))
     else:
         dest = _cache_dir() / META_FILE
-        if not _is_fresh(dest):
-            url = f"{settings.ARTIFACTS_BASE_URL}/{META_FILE}"
+        url = f"{settings.ARTIFACTS_BASE_URL}/{META_FILE}"
+        if dest.exists():
+            if _is_fresh(dest):
+                METRICS.record("hit")
+            else:
+                METRICS.record("stale")
+                _refresh_in_background(META_FILE, url, dest)
+        else:
+            METRICS.record("miss")
             try:
                 _download(url, dest)
             except requests.RequestException as exc:
-                if not dest.exists():
-                    raise ArtifactError(f"could not fetch {url}: {exc}") from exc
+                METRICS.record("error")
+                raise ArtifactError(f"could not fetch {url}: {exc}") from exc
         data = json.loads(dest.read_text(encoding="utf-8"))
 
     violations = validate_meta(data)
@@ -186,3 +281,40 @@ def ensure_valid(names: tuple[str, ...] = ARTIFACT_NAMES) -> None:
             problems.extend(violations)
     if problems:
         raise SchemaError("Published artifacts are incompatible:\n  - " + "\n  - ".join(problems))
+
+
+def _warm_one(filename: str) -> str:
+    """Download ``filename`` into the cache (blocking). Returns a per-file status string."""
+    dest = _cache_dir() / filename
+    url = f"{settings.ARTIFACTS_BASE_URL}/{filename}"
+    try:
+        _download(url, dest)
+        METRICS.record("refresh")
+        return "downloaded"
+    except requests.RequestException as exc:
+        METRICS.record("error")
+        return f"error: {exc}"
+
+
+def warm(*, force: bool = True, validate: bool = True) -> dict[str, str]:
+    """Fetch a fresh local copy of every published artifact (blocking) — pre-warm on deploy and
+    on the publish cadence, so request-path reads are cache hits, not cold downloads.
+
+    ``force`` (default) re-downloads even within TTL, to align the cache with a just-published
+    Release; ``force=False`` skips artifacts still fresh. ``validate`` schema-checks the core
+    frames afterwards (raises :class:`SchemaError` on drift). With ``ARTIFACTS_LOCAL_DIR`` set
+    there is nothing to fetch. Returns a per-artifact status report.
+    """
+    if _local_dir() is not None:
+        report = {name: "local" for name in (*PARQUET_FILES, "meta")}
+    else:
+        report = {}
+        for name, filename in PARQUET_FILES.items():
+            report[name] = "fresh" if (not force and _is_fresh(_cache_dir() / filename)) else _warm_one(filename)
+        report["meta"] = (
+            "fresh" if (not force and _is_fresh(_cache_dir() / META_FILE)) else _warm_one(META_FILE)
+        )
+    if validate:
+        ensure_valid()
+    logger.info("artifact cache warm complete: %s", report)
+    return report

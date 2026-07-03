@@ -43,6 +43,7 @@ LOCAL_APPS = [
     "apps.favorites",
     "apps.history",
     "apps.api",
+    "apps.artifacts",
 ]
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
@@ -133,6 +134,9 @@ ARTIFACTS_TTL = env.int("ARTIFACTS_TTL", default=600)
 # Dev/offline override: if set, artifacts are read straight from this local directory
 # (e.g. the Streamlit `fixtures/`) and the network is never touched. Empty ⇒ use the Release.
 ARTIFACTS_LOCAL_DIR = env("ARTIFACTS_LOCAL_DIR", default="")
+# Stale-while-revalidate: refresh a stale cached artifact on a background daemon thread so no
+# request pays the download latency. False forces the refresh inline (deterministic tests).
+ARTIFACTS_REFRESH_ASYNC = env.bool("ARTIFACTS_REFRESH_ASYNC", default=True)
 
 # ── REST API (apps/api) ──────────────────────────────────────────────────────────────
 # The API exposes the same public, read-only analytical read model the HTML pages render —
