@@ -40,12 +40,12 @@ def render_quarterly_combo(df_q: pd.DataFrame) -> str:
 
     # Build a lookup: (year, quarter) → revenue value.
     rev_lookup: dict[tuple[int, str], float] = {}
-    for (yr, qt), val in zip(q_meta, rev_values):
+    for (yr, qt), val in zip(q_meta, rev_values, strict=False):
         if not is_missing(val):
             rev_lookup[(yr, qt)] = val
 
     yoy_values: list[float | None] = []
-    for (yr, qt), val in zip(q_meta, rev_values):
+    for (yr, qt), val in zip(q_meta, rev_values, strict=False):
         prior = rev_lookup.get((yr - 1, qt))
         if not is_missing(val) and prior is not None and prior != 0:
             yoy_values.append((val - prior) / abs(prior) * 100)
@@ -106,7 +106,7 @@ def render_quarterly_combo(df_q: pd.DataFrame) -> str:
     parts.append(f'<svg viewBox="0 0 {W} {H}" width="100%" style="display:block;" preserveAspectRatio="none">')
 
     # Gridlines.
-    parts.append(f'<g stroke="#E8E5DC" stroke-width="1">')
+    parts.append('<g stroke="#E8E5DC" stroke-width="1">')
     for tick in rev_ticks[1:]:
         y = baseline_y - (tick / rev_axis_max) * plot_h
         parts.append(f'<line x1="{margin_l}" y1="{y:.0f}" x2="{W - margin_r}" y2="{y:.0f}"/>')
@@ -122,7 +122,7 @@ def render_quarterly_combo(df_q: pd.DataFrame) -> str:
 
     # Right axis labels (YoY %).
     yoy_ticks = _nice_ticks(yoy_lo, yoy_hi, n_ticks=5)
-    parts.append(f'<g font-family="JetBrains Mono, monospace" font-size="10" fill="#0F6E56" text-anchor="start">')
+    parts.append('<g font-family="JetBrains Mono, monospace" font-size="10" fill="#0F6E56" text-anchor="start">')
     for tick in yoy_ticks:
         y = yoy_y(tick)
         sign = "+" if tick > 0 else ("−" if tick < 0 else "")
@@ -181,7 +181,7 @@ def render_quarterly_combo(df_q: pd.DataFrame) -> str:
         )
 
     # X-axis labels.
-    parts.append(f'<g font-family="JetBrains Mono, monospace" font-size="10" fill="#5F5E5A" text-anchor="middle">')
+    parts.append('<g font-family="JetBrains Mono, monospace" font-size="10" fill="#5F5E5A" text-anchor="middle">')
     for i, lbl in enumerate(q_cols):
         cx = x_center(i)
         extra = ' font-weight="500" fill="#1C1B18"' if i == n - 1 else ""

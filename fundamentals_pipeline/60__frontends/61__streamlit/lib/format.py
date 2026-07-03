@@ -67,7 +67,7 @@ def fmt_kpi(v) -> str:
     return f"{sign}${a:,.0f}"
 
 
-def fmt_metric(v, unit: Optional[str], signed: bool = False) -> str:
+def fmt_metric(v, unit: str | None, signed: bool = False) -> str:
     """Derived metrics: format depending on unit (percent / ratio / usd).
 
     `signed=True` forces a leading "+" on positive percents — only for metrics
@@ -101,7 +101,7 @@ def fmt_mos(v) -> str:
     return f"{v:+.1f}%"
 
 
-def fmt_delta(yoy_pct: Optional[float]) -> tuple[str, str]:
+def fmt_delta(yoy_pct: float | None) -> tuple[str, str]:
     """Returns (label_html, css_class) for a YoY delta in the KPI strip."""
     if is_missing(yoy_pct):
         return ("· no prior year", "flat")
@@ -134,7 +134,7 @@ def fmt_cagr(start, end, years: int) -> tuple[str, str]:
     return (label, cls)
 
 
-def trend_growth(values) -> tuple[Optional[float], Optional[float]]:
+def trend_growth(values) -> tuple[float | None, float | None]:
     """Robust annual growth over the whole series via log-linear regression.
     Fits OLS to ln(value) vs. year offset, annualizes the slope:
         growth% = (exp(slope) - 1) * 100
@@ -160,13 +160,13 @@ def trend_growth(values) -> tuple[Optional[float], Optional[float]]:
     sxx = sum((x - x_bar) ** 2 for x in xs)
     if sxx == 0:
         return (None, None)
-    slope = sum((x - x_bar) * (y - y_bar) for x, y in zip(xs, ys)) / sxx
+    slope = sum((x - x_bar) * (y - y_bar) for x, y in zip(xs, ys, strict=False)) / sxx
     growth = (math.exp(slope) - 1) * 100.0
     if all_neg:
         growth = -growth
     intercept = y_bar - slope * x_bar
     ss_tot = sum((y - y_bar) ** 2 for y in ys)
-    ss_res = sum((y - (slope * x + intercept)) ** 2 for x, y in zip(xs, ys))
+    ss_res = sum((y - (slope * x + intercept)) ** 2 for x, y in zip(xs, ys, strict=False))
     r2 = (1.0 - ss_res / ss_tot) if ss_tot > 0 else None
     return (growth, r2)
 

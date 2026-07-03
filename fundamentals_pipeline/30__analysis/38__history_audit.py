@@ -52,17 +52,18 @@ AUDIT_TABLE = f"{CATALOG}.{SCHEMA}.history_audit"
 
 # COMMAND ----------
 
-import sys
 import json
+import sys
 import time
 import urllib.parse
-import requests
-import pandas as pd
 from collections import deque
-from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from requests.adapters import HTTPAdapter
+from datetime import datetime
 from threading import Lock
+
+import pandas as pd
+import requests
+from requests.adapters import HTTPAdapter
 
 # Windows console (cp1252) chokes on → ✓ ✗ ⚠ — force UTF-8 if the stream supports it.
 # No-op in Databricks.
@@ -188,7 +189,7 @@ print(f"✓ Ticker index loaded — {len(TICKER_MAP):,} tickers known to SEC")
 # the current SEC CIK only has recent filings (e.g. VNOM).
 _FAV_CIK_ALIASES = {}
 try:
-    with open(FAVORITES_JSON_PATH, "r", encoding="utf-8") as f:
+    with open(FAVORITES_JSON_PATH, encoding="utf-8") as f:
         _fav_raw = f.read()
     _fav_lines = [l for l in _fav_raw.splitlines() if not l.strip().startswith("/")]
     for _entry in json.loads("\n".join(_fav_lines)):
@@ -306,8 +307,8 @@ def derive_10k_stats(facts: dict) -> "tuple[int|None, int|None, int]":
     For normal issuers this doesn't happen (all report Revenue/NetIncome/Assets).
     n_10k is now "number of 10-K accessions observed in probed concepts".
     """
-    fys: "set[int]" = set()
-    accns: "set[str]" = set()
+    fys: set[int] = set()
+    accns: set[str] = set()
     ns_bucket = facts.get("facts", {}).get("us-gaap", {})
     for concept in ALL_PROBES:
         units = ns_bucket.get(concept, {}).get("units", {})
@@ -369,7 +370,7 @@ def fetch_former_names(current_cik: str, aliased_ciks: "list[str]") -> "list[str
     tickers with flag_short_history in the second pass (post-parallel). Errors
     on aliases are silent; an error on the primary CIK returns [].
     """
-    names: "set[str]" = set()
+    names: set[str] = set()
     for c in [current_cik] + list(aliased_ciks or []):
         if not c:
             continue
@@ -447,7 +448,7 @@ def _substantive_tokens(name: str) -> "set[str]":
     Tokens >=3 chars, alphanumeric, excluding generic stopwords. Used to
     filter EDGAR FTS hits by overlap with the issuer name.
     """
-    out: "set[str]" = set()
+    out: set[str] = set()
     for tok in (name or "").upper().split():
         cleaned = "".join(c for c in tok if c.isalnum())
         if len(cleaned) >= 3 and cleaned not in _NAME_STOPWORDS:
@@ -518,7 +519,7 @@ def _rank_predecessor_candidates(
     Deliberate: we do NOT fetch the candidate's SIC. That would be an extra GET
     per candidate and the token filter already eliminates most cross-industry noise.
     """
-    agg: "dict[str, dict]" = {}
+    agg: dict[str, dict] = {}
     for h in hits:
         src = h.get("_source", {}) or {}
         ciks = src.get("ciks", []) or []
@@ -535,7 +536,7 @@ def _rank_predecessor_candidates(
                 entry["latest_date"] = date
             if not entry["display_name"] and display:
                 entry["display_name"] = display
-    out: "list[tuple[str, int, str]]" = []
+    out: list[tuple[str, int, str]] = []
     for cik, info in agg.items():
         cand_tokens = _substantive_tokens(_normalize_company_name(info["display_name"]))
         if not (cand_tokens & issuer_tokens):
@@ -569,7 +570,7 @@ def find_predecessor_candidates(
     exclude = {str(c).zfill(10) for c in (aliased_ciks or []) if c}
     ranked = _rank_predecessor_candidates(hits, current_cik, exclude, issuer_tokens)
     had_raw = bool(ranked)
-    out: "list[str]" = []
+    out: list[str] = []
     for cik, _count, _date in ranked:
         if len(out) >= max_results:
             break
@@ -868,8 +869,13 @@ for col in ("first_10k_year", "last_10k_year", "n_10k", "n_flags"):
 
 # Explicit schema (order and nullability to match the table exactly)
 from pyspark.sql.types import (
-    StructType, StructField,
-    StringType, IntegerType, BooleanType, TimestampType, ArrayType,
+    ArrayType,
+    BooleanType,
+    IntegerType,
+    StringType,
+    StructField,
+    StructType,
+    TimestampType,
 )
 
 schema = StructType([
@@ -949,7 +955,7 @@ print(f"  With at least 1 flag     : {n_flagged:,}")
 print(f"    - 3 flags (critical)   : {n_3flags:,}")
 print(f"    - 2 flags              : {n_2flags:,}")
 print(f"    - 1 flag               : {n_1flag:,}")
-print(f"  Breakdown by flag:")
+print("  Breakdown by flag:")
 print(f"    flag_short_history     : {n_short:,}")
 print(f"    flag_concept_gap       : {n_gap:,}")
 print(f"    flag_stub_years        : {n_stub:,}")

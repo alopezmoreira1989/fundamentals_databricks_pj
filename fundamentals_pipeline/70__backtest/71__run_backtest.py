@@ -48,7 +48,6 @@ import pandas as pd
 import pyspark.sql.functions as F
 import pyspark.sql.types as T
 
-
 # The pure backtest helpers ship in the installable `fundamentals_pipeline` package
 # (fundamentals_pipeline/backtest.py). Installed once in 91__full_pipeline's session-
 # dependencies cell, so this %run-included notebook imports it directly — no sys.path

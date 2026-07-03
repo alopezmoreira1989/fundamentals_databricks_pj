@@ -23,10 +23,11 @@
 
 # COMMAND ----------
 
-import requests
-import pandas as pd
 import time
 from collections import defaultdict
+
+import pandas as pd
+import requests
 
 HEADERS = {"User-Agent": "POC quarterly research"}  # ← change this to your real User-Agent
 
@@ -305,16 +306,16 @@ def reconcile(ticker: str, concept: str):
         base    = q4_via_fy_minus_ytd if q4_via_fy_minus_ytd else 1
         pct_q4  = (diff_q4 / base * 100) if base else 0
         print(f"  {'─'*64}")
-        print(f"  Q4 cross-check:")
+        print("  Q4 cross-check:")
         print(f"    via FY−YTD_Q3        =  {q4_via_fy_minus_ytd:>20,.0f}")
         print(f"    via Q4 standalone    =  {q4_standalone:>20,.0f}")
         print(f"    Diff:                   {diff_q4:>+20,.0f}  ({pct_q4:+.4f}%)")
         if abs(pct_q4) < 0.01:
-            print(f"    ✓ Both paths agree")
+            print("    ✓ Both paths agree")
         else:
-            print(f"    ✗ Discrepancy between paths — investigate")
+            print("    ✗ Discrepancy between paths — investigate")
     elif q4_standalone is None and q4_via_fy_minus_ytd is not None:
-        print(f"  (Q4 standalone not reported — only available via FY−YTD_Q3)")
+        print("  (Q4 standalone not reported — only available via FY−YTD_Q3)")
 
     # ── Σ Q1..Q4 == FY reconciliation ──
     if None not in (q1_a, q2_a, q3_a, q4_a):
@@ -325,9 +326,9 @@ def reconcile(ticker: str, concept: str):
         print(f"  Σ Q1..Q4 =  {total:>20,.0f}")
         print(f"  Diff vs FY: {diff:>+20,.0f}  ({pct:+.4f}%)")
         if abs(pct) < 0.01:
-            print(f"  ✓ RECONCILES")
+            print("  ✓ RECONCILES")
         else:
-            print(f"  ✗ DOES NOT RECONCILE — investigate")
+            print("  ✗ DOES NOT RECONCILE — investigate")
 
 # COMMAND ----------
 
