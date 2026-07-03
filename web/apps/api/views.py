@@ -1,15 +1,15 @@
 """Read-only DRF viewsets over the read-model services.
 
-Thin HTTP surface: parse/validate query params, call the existing application services, serialize
-the returned DTOs. No SQL and no financial logic here — the services (→ repositories → DuckDB /
-fundamentals_pipeline) own all of that. Mirrors the hand-rolled ``*_data`` JSON views, but as a
-routed, serializer-backed API for a decoupled frontend or third parties.
+Thin HTTP surface: validate query params, call the existing application services, serialize the
+returned DTOs. No SQL and no financial logic here — the services (→ repositories → DuckDB /
+fundamentals_pipeline) own all of that. Bad params raise DRF exceptions so every error goes out
+through the one envelope (``apps.api.exceptions``); responses mirror ``repositories.dtos``.
 """
 
 from __future__ import annotations
 
-from rest_framework import status, viewsets
-from rest_framework.exceptions import NotFound
+from rest_framework import viewsets
+from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.request import Request
 from rest_framework.response import Response
 
@@ -26,49 +26,44 @@ from .serializers import (
 )
 
 
-def _parse_float(raw: str | None) -> tuple[float | None, bool]:
-    """(value, ok). Absent/empty → (None, True); unparseable → (None, False)."""
+def _float_param(raw: str | None, name: str) -> float | None:
+    """Optional float query param; ``None`` when absent, 400 when present but unparseable."""
     if not raw:
-        return None, True
+        return None
     try:
-        return float(raw), True
+        return float(raw)
     except ValueError:
-        return None, False
+        raise ValidationError(f"'{name}' must be a number.") from None
 
 
-def _parse_int(raw: str | None, *, default: int, lo: int, hi: int) -> int:
-    """Clamped int parse; falls back to ``default`` on absent/unparseable input."""
-    try:
-        value = int(raw) if raw else default
-    except (TypeError, ValueError):
+def _int_param(raw: str | None, *, name: str, default: int, lo: int, hi: int) -> int:
+    """Bounded int query param: absent → ``default``, non-integer → 400, else clamped to [lo, hi]."""
+    if not raw:
         return default
+    try:
+        value = int(raw)
+    except ValueError:
+        raise ValidationError(f"'{name}' must be an integer.") from None
     return max(lo, min(hi, value))
 
 
 class CompanyViewSet(viewsets.ViewSet):
-    """``GET /api/companies/`` — the paginated company table (optional filters narrow it);
-    ``GET /api/companies/<ticker>/`` — a company's summary + latest-FY metrics."""
+    """``GET /api/v1/companies/`` — the paginated company table (optional filters narrow it);
+    ``GET /api/v1/companies/<ticker>/`` — a company's summary + latest-FY metrics."""
 
     lookup_value_regex = "[^/]+"  # tickers carry '.'/'-' (e.g. BRK-B), not just word chars
 
-    def list(self, request: Request) -> Response:
+    def list(self, request: Request, version: str | None = None) -> Response:
         params = request.query_params
-        min_value, ok_min = _parse_float(params.get("min"))
-        max_value, ok_max = _parse_float(params.get("max"))
-        if not (ok_min and ok_max):
-            return Response(
-                {"detail": "'min' and 'max' must be numbers."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        page = _parse_int(params.get("page"), default=1, lo=1, hi=1_000_000)
-        page_size = _parse_int(params.get("page_size"), default=50, lo=1, hi=200)
+        page = _int_param(params.get("page"), name="page", default=1, lo=1, hi=1_000_000)
+        page_size = _int_param(params.get("page_size"), name="page_size", default=50, lo=1, hi=200)
         result = screener_services.list_companies(
             search=params.get("q", "").strip(),
             sector=params.get("sector", "").strip(),
             index=params.get("index", "").strip(),
             metric=params.get("metric", "").strip(),
-            min_value=min_value,
-            max_value=max_value,
+            min_value=_float_param(params.get("min"), "min"),
+            max_value=_float_param(params.get("max"), "max"),
             page=page,
             page_size=page_size,
         )
@@ -81,7 +76,7 @@ class CompanyViewSet(viewsets.ViewSet):
             }
         )
 
-    def retrieve(self, request: Request, pk: str | None = None) -> Response:
+    def retrieve(self, request: Request, pk: str | None = None, version: str | None = None) -> Response:
         ticker = (pk or "").upper()
         detail = company_services.get_company_detail(ticker)
         if detail is None:
@@ -90,27 +85,19 @@ class CompanyViewSet(viewsets.ViewSet):
 
 
 class ScreenerViewSet(viewsets.ViewSet):
-    """``GET /api/screener/?metric=<name>&min=&max=&limit=`` — the single-metric screen,
+    """``GET /api/v1/screener/?metric=<name>&min=&max=&limit=`` — the single-metric screen,
     latest FY, ordered by value descending."""
 
-    def list(self, request: Request) -> Response:
+    def list(self, request: Request, version: str | None = None) -> Response:
         params = request.query_params
         metric = params.get("metric", "").strip()
         if not metric:
-            return Response(
-                {"detail": "query parameter 'metric' is required."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        min_value, ok_min = _parse_float(params.get("min"))
-        max_value, ok_max = _parse_float(params.get("max"))
-        if not (ok_min and ok_max):
-            return Response(
-                {"detail": "'min' and 'max' must be numbers."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        limit = _parse_int(params.get("limit"), default=50, lo=1, hi=200)
+            raise ValidationError("query parameter 'metric' is required.")
         rows = screener_services.run_screen(
-            metric=metric, min_value=min_value, max_value=max_value, limit=limit
+            metric=metric,
+            min_value=_float_param(params.get("min"), "min"),
+            max_value=_float_param(params.get("max"), "max"),
+            limit=_int_param(params.get("limit"), name="limit", default=50, lo=1, hi=200),
         )
         return Response(
             {
@@ -122,12 +109,12 @@ class ScreenerViewSet(viewsets.ViewSet):
 
 
 class ValuationViewSet(viewsets.ViewSet):
-    """``GET /api/valuation/<ticker>/`` — a ticker's Margin-of-Safety metrics plus the
+    """``GET /api/v1/valuation/<ticker>/`` — a ticker's Margin-of-Safety metrics plus the
     intrinsic-value football field (per-method TTM ranges + market price)."""
 
     lookup_value_regex = "[^/]+"
 
-    def retrieve(self, request: Request, pk: str | None = None) -> Response:
+    def retrieve(self, request: Request, pk: str | None = None, version: str | None = None) -> Response:
         ticker = (pk or "").upper()
         points = valuation_services.get_margin_of_safety(ticker)
         field = valuation_services.get_intrinsic_value_field(ticker)

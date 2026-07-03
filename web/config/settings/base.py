@@ -141,4 +141,11 @@ REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [],
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.AllowAny"],
     "UNAUTHENTICATED_USER": None,
+    # URL-path versioning: routes live under /api/<version>/ (only v1 today). request.version
+    # is populated, so a future v2 is an additive route + serializer, not a breaking move.
+    "DEFAULT_VERSIONING_CLASS": "rest_framework.versioning.URLPathVersioning",
+    "DEFAULT_VERSION": "v1",
+    "ALLOWED_VERSIONS": ["v1"],
+    # One error envelope for the whole API: {"error": {"status", "message"}}.
+    "EXCEPTION_HANDLER": "apps.api.exceptions.api_exception_handler",
 }
