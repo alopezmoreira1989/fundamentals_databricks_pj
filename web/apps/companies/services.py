@@ -6,6 +6,7 @@ the data comes from DuckDB/parquet.
 
 from __future__ import annotations
 
+from infrastructure.news import NewsItem, fetch_yahoo_news
 from repositories.companies import CompanyRepository
 from repositories.dtos import (
     CompanyDetail,
@@ -49,6 +50,11 @@ def get_quarterly(ticker: str) -> QuarterGrid:
 def get_price_series(ticker: str) -> tuple[PricePoint, ...]:
     """The ticker's daily close series (downsampled) for the price chart."""
     return CompanyRepository().price_series(ticker)
+
+
+def get_company_news(ticker: str) -> tuple[NewsItem, ...]:
+    """Latest Yahoo Finance headlines for the ticker (cached; empty on any error)."""
+    return fetch_yahoo_news(ticker)
 
 
 # Metric categories that belong to the Valuation tab, not the Derived-metrics tab:

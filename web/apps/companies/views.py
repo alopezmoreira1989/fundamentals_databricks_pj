@@ -106,3 +106,11 @@ def company_data(request: HttpRequest, ticker: str) -> JsonResponse:
             ],
         }
     )
+
+
+def company_news(request: HttpRequest, ticker: str) -> JsonResponse:
+    """Latest Yahoo Finance headlines for the ticker (JSON, fetched async by the Overview tab)."""
+    news = services.get_company_news(ticker.upper())
+    return JsonResponse(
+        {"news": [{"title": n.title, "link": n.link, "published": n.published} for n in news]}
+    )

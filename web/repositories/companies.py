@@ -48,6 +48,22 @@ _STATEMENTS_SQL = """
 # The three statements, in the order the tabs present them.
 _STATEMENT_ORDER = ("Income Statement", "Balance Sheet", "Cash Flow")
 
+
+def _clean(value: Any) -> str | None:
+    """Meta strings arrive stringified — treat empty / literal 'None' as missing."""
+    text = str(value).strip() if value is not None else ""
+    return text or None if text and text.lower() != "none" else None
+
+
+def _as_int(value: Any) -> int | None:
+    text = str(value).strip() if value is not None else ""
+    return int(text) if text.isdigit() else None
+
+
+def _as_bool(value: Any) -> bool | None:
+    text = str(value).strip().lower() if value is not None else ""
+    return True if text == "true" else False if text == "false" else None
+
 # Quarterly line items for one statement (newest quarter first is applied after the fetch).
 _QUARTERLY_SQL = """
     SELECT section, display_name, sort_order, period_type, period_end, fiscal_year, value
@@ -76,6 +92,11 @@ class CompanyRepository(DuckDBRepository):
                     industry=rec.get("industry"),
                     exchange=rec.get("exchange"),
                     country=rec.get("country"),
+                    description=rec.get("description"),
+                    website=_clean(rec.get("website")),
+                    employees=_as_int(rec.get("employees")),
+                    founded=_clean(rec.get("founded")),
+                    has_logo=_as_bool(rec.get("has_logo")),
                 )
         return None
 

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load fmt %}
+{% load fmt logos %}
 {% block title %}Screener — Fundamentals{% endblock %}
 {% block content %}
   <div class="p-4 bg-white rounded-3 shadow-sm mb-4">
@@ -79,7 +79,11 @@
           <tbody>
             {% for r in rows %}
               <tr>
-                <td><a href="{% url 'companies:detail' r.ticker %}">{{ r.ticker }}</a></td>
+                <td>
+                  <a class="d-inline-flex align-items-center gap-2 text-decoration-none" href="{% url 'companies:detail' r.ticker %}">
+                    {% company_logo r.ticker r.name r.has_logo 24 %}<span class="fw-semibold">{{ r.ticker }}</span>
+                  </a>
+                </td>
                 <td>{{ r.name|default:"—" }}</td>
                 <td class="text-muted">{{ r.sector|default:"—" }}</td>
                 <td class="text-muted">{{ r.industry|default:"—" }}</td>

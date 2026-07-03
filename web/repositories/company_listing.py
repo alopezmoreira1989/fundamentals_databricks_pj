@@ -45,6 +45,12 @@ def _index_flag(index: str) -> str | None:
     return {"sp500": "in_sp500", "r3000": "in_r3000"}.get(index)
 
 
+def _has_logo(rec: dict[str, Any]) -> bool | None:
+    """Normalize the (stringified) meta ``has_logo`` to a bool (None if unknown)."""
+    text = str(rec.get("has_logo", "")).strip().lower()
+    return True if text == "true" else False if text == "false" else None
+
+
 class CompanyListingRepository(DuckDBRepository):
     def available_sectors(self) -> tuple[str, ...]:
         """Distinct non-empty sector names in the universe, alphabetical (for the filter picker)."""
@@ -102,6 +108,7 @@ class CompanyListingRepository(DuckDBRepository):
                     name=rec.get("company", ""),
                     sector=rec.get("sector"),
                     industry=rec.get("industry"),
+                    has_logo=_has_logo(rec),
                 )
                 for rec in window
             )
@@ -157,6 +164,7 @@ class CompanyListingRepository(DuckDBRepository):
                 industry=by_ticker[ticker].get("industry"),
                 metric_value=value,
                 fiscal_year=fiscal_year,
+                has_logo=_has_logo(by_ticker[ticker]),
             )
             for ticker, fiscal_year, value in hits
         )

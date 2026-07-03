@@ -258,6 +258,21 @@ a:focus-visible, button:focus-visible, .btn:focus-visible,
   border-color: transparent transparent var(--accent);
 }
 
+/* ---------- Company logo (Logo.dev hotlink / monogram) ---------- */
+.co-logo {
+  display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto;
+  background: var(--bg-card); border: 1px solid var(--rule); border-radius: 12px;
+  overflow: hidden; padding: 8px;
+}
+.co-logo img { width: 100%; height: 100%; object-fit: contain; }
+.co-logo .co-logo-mono { display: none; font-family: var(--display); font-weight: 600;
+  color: var(--accent-ink); font-size: 1.4rem; line-height: 1; }
+.co-logo.is-monogram { background: var(--accent-soft); border-color: var(--accent-soft); }
+.co-logo.is-monogram img { display: none; }
+.co-logo.is-monogram .co-logo-mono { display: inline; }
+.co-logo-sm { border-radius: 8px; padding: 4px; }
+.co-logo-sm .co-logo-mono { font-size: .8rem; }
+
 /* ---------- Footer ---------- */
 .site-footer { background: var(--bg-card); border-top: 1px solid var(--rule); color: var(--ink-3); }
 .site-footer a { color: var(--ink-2); text-decoration: none; }

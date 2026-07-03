@@ -122,6 +122,13 @@ def test_company_page_has_statement_tabs(artifacts_from_fixtures, client):
     assert 'class="bs-year"' in body and "bsShowYear" in body
 
 
+def test_company_overview_has_profile_logo_and_news(artifacts_from_fixtures, client):
+    body = client.get(f"/companies/{TICKER}/").content.decode()
+    assert "About" in body and "Apple Inc." in body           # description
+    assert "co-logo" in body                                   # logo box (masthead + overview)
+    assert "Latest news" in body and "data-news-url" in body   # async news placeholder
+
+
 def test_company_page_has_price_and_quarterly_tabs(artifacts_from_fixtures, client):
     body = client.get(f"/companies/{TICKER}/").content.decode()
     assert "Price" in body and 'id="pane-price"' in body

@@ -21,6 +21,11 @@ class CompanySummary:
     industry: str | None = None
     exchange: str | None = None
     country: str | None = None
+    description: str | None = None
+    website: str | None = None
+    employees: int | None = None
+    founded: str | None = None
+    has_logo: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,6 +130,7 @@ class CompanyListRow:
     industry: str | None = None
     metric_value: float | None = None
     fiscal_year: int | None = None
+    has_logo: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -105,6 +105,16 @@ def test_headline_kpis_from_statements(artifacts_from_fixtures):
     assert all(k.value is not None for k in kpis)  # AAPL reports all four
 
 
+def test_company_summary_carries_profile_fields(artifacts_from_fixtures):
+    summary = CompanyRepository().get_summary(TICKER)
+    assert summary is not None
+    assert summary.description and "Apple" in summary.description
+    assert summary.website == "https://www.apple.com"
+    assert isinstance(summary.employees, int) and summary.employees > 0  # "166000" → int
+    assert summary.has_logo is True  # "True" → bool
+    assert summary.founded is None  # literal "None" in meta → normalized away
+
+
 def test_dtos_are_immutable(artifacts_from_fixtures):
     summary = CompanyRepository().get_summary(TICKER)
     assert summary is not None

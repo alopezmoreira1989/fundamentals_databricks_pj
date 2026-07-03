@@ -18,6 +18,11 @@ class CompanySummarySerializer(serializers.Serializer):
     industry = serializers.CharField(allow_null=True)
     exchange = serializers.CharField(allow_null=True)
     country = serializers.CharField(allow_null=True)
+    description = serializers.CharField(allow_null=True)
+    website = serializers.CharField(allow_null=True)
+    employees = serializers.IntegerField(allow_null=True)
+    founded = serializers.CharField(allow_null=True)
+    has_logo = serializers.BooleanField(allow_null=True)
 
 
 class MetricPointSerializer(serializers.Serializer):
@@ -49,6 +54,7 @@ class CompanyListRowSerializer(serializers.Serializer):
     industry = serializers.CharField(allow_null=True)
     metric_value = serializers.FloatField(allow_null=True)
     fiscal_year = serializers.IntegerField(allow_null=True)
+    has_logo = serializers.BooleanField(allow_null=True)
 
 
 class FootballBarSerializer(serializers.Serializer):

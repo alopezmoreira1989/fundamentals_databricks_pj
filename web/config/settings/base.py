@@ -27,6 +27,7 @@ DJANGO_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "django.contrib.humanize",
 ]
 THIRD_PARTY_APPS = [
     "rest_framework",
@@ -142,6 +143,10 @@ ARTIFACTS_LOCAL_DIR = env("ARTIFACTS_LOCAL_DIR", default="")
 # Stale-while-revalidate: refresh a stale cached artifact on a background daemon thread so no
 # request pays the download latency. False forces the refresh inline (deterministic tests).
 ARTIFACTS_REFRESH_ASYNC = env.bool("ARTIFACTS_REFRESH_ASYNC", default=True)
+
+# Logo.dev publishable key for company logos (hotlinked from their CDN). Empty ⇒ fall back to
+# an editorial monogram everywhere. The key is publishable (safe in the client-side image URL).
+LOGO_DEV_KEY = env("LOGO_DEV_KEY", default="")
 
 # ── REST API (apps/api) ──────────────────────────────────────────────────────────────
 # The API exposes the same public, read-only analytical read model the HTML pages render —

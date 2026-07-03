@@ -333,8 +333,12 @@ components:
         fiscal_year:
           type: integer
           nullable: true
+        has_logo:
+          type: boolean
+          nullable: true
       required:
       - fiscal_year
+      - has_logo
       - industry
       - metric_value
       - name
@@ -359,13 +363,33 @@ components:
         country:
           type: string
           nullable: true
+        description:
+          type: string
+          nullable: true
+        website:
+          type: string
+          nullable: true
+        employees:
+          type: integer
+          nullable: true
+        founded:
+          type: string
+          nullable: true
+        has_logo:
+          type: boolean
+          nullable: true
       required:
       - country
+      - description
+      - employees
       - exchange
+      - founded
+      - has_logo
       - industry
       - name
       - sector
       - ticker
+      - website
     ErrorBody:
       type: object
       properties:
