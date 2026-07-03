@@ -4,10 +4,16 @@ Thin HTTP surface: validate query params, call the existing application services
 returned DTOs. No SQL and no financial logic here — the services (→ repositories → DuckDB /
 fundamentals_pipeline) own all of that. Bad params raise DRF exceptions so every error goes out
 through the one envelope (``apps.api.exceptions``); responses mirror ``repositories.dtos``.
+
+Each action is annotated with ``@extend_schema`` so drf-spectacular emits an accurate OpenAPI 3
+schema (query params, response envelopes, examples). The committed ``web/api-schema.yml`` is
+drift-checked in the test suite.
 """
 
 from __future__ import annotations
 
+from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import OpenApiExample, OpenApiParameter, extend_schema
 from rest_framework import viewsets
 from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.request import Request
@@ -19,11 +25,18 @@ from apps.valuation import services as valuation_services
 
 from .serializers import (
     CompanyDetailSerializer,
+    CompanyListResponseSerializer,
     CompanyListRowSerializer,
+    ErrorEnvelopeSerializer,
     FootballFieldSerializer,
     MetricPointSerializer,
+    ScreenResponseSerializer,
     ScreenRowSerializer,
+    ValuationResponseSerializer,
 )
+
+# Errors everywhere share the one envelope; reuse the same 400/404 responses across actions.
+_ERRORS = {400: ErrorEnvelopeSerializer, 404: ErrorEnvelopeSerializer}
 
 
 def _float_param(raw: str | None, name: str) -> float | None:
@@ -47,12 +60,47 @@ def _int_param(raw: str | None, *, name: str, default: int, lo: int, hi: int) ->
     return max(lo, min(hi, value))
 
 
+def _q(name: str, description: str, *, required: bool = False) -> OpenApiParameter:
+    return OpenApiParameter(name, OpenApiTypes.STR, OpenApiParameter.QUERY, description=description, required=required)
+
+
 class CompanyViewSet(viewsets.ViewSet):
     """``GET /api/v1/companies/`` — the paginated company table (optional filters narrow it);
     ``GET /api/v1/companies/<ticker>/`` — a company's summary + latest-FY metrics."""
 
     lookup_value_regex = "[^/]+"  # tickers carry '.'/'-' (e.g. BRK-B), not just word chars
 
+    @extend_schema(
+        summary="List companies (paginated table)",
+        parameters=[
+            _q("q", "Case-insensitive substring match on ticker or company name."),
+            _q("sector", "Exact sector filter."),
+            _q("index", "Index membership filter: 'sp500' or 'r3000'."),
+            _q("metric", "Add this metric's latest-FY value column and order rows by it (desc)."),
+            _q("min", "Inclusive lower bound on the metric value (requires 'metric')."),
+            _q("max", "Inclusive upper bound on the metric value (requires 'metric')."),
+            OpenApiParameter("page", OpenApiTypes.INT, description="1-based page number (default 1)."),
+            OpenApiParameter("page_size", OpenApiTypes.INT, description="Rows per page, 1–200 (default 50)."),
+        ],
+        responses={200: CompanyListResponseSerializer, **_ERRORS},
+        examples=[
+            OpenApiExample(
+                "Page of the universe",
+                value={
+                    "count": 2987,
+                    "page": 1,
+                    "page_size": 2,
+                    "results": [
+                        {"ticker": "A", "name": "Agilent Technologies", "sector": "Healthcare",
+                         "industry": "Diagnostics & Research", "metric_value": None, "fiscal_year": None},
+                        {"ticker": "AAPL", "name": "Apple Inc.", "sector": "Technology",
+                         "industry": "Consumer Electronics", "metric_value": None, "fiscal_year": None},
+                    ],
+                },
+                response_only=True,
+            )
+        ],
+    )
     def list(self, request: Request, version: str | None = None) -> Response:
         params = request.query_params
         page = _int_param(params.get("page"), name="page", default=1, lo=1, hi=1_000_000)
@@ -76,6 +124,25 @@ class CompanyViewSet(viewsets.ViewSet):
             }
         )
 
+    @extend_schema(
+        summary="Retrieve a company (summary + latest-FY metrics)",
+        responses={200: CompanyDetailSerializer, **_ERRORS},
+        examples=[
+            OpenApiExample(
+                "AAPL",
+                value={
+                    "summary": {"ticker": "AAPL", "name": "Apple Inc.", "sector": "Technology",
+                                "industry": "Consumer Electronics", "exchange": "NMS", "country": "United States"},
+                    "metrics": [
+                        {"ticker": "AAPL", "metric": "Revenue", "unit": "USD", "fiscal_year": 2024,
+                         "value": 391035000000.0, "category": "Income Statement",
+                         "subcategory": None, "sort_order": 1.0}
+                    ],
+                },
+                response_only=True,
+            )
+        ],
+    )
     def retrieve(self, request: Request, pk: str | None = None, version: str | None = None) -> Response:
         ticker = (pk or "").upper()
         detail = company_services.get_company_detail(ticker)
@@ -88,6 +155,30 @@ class ScreenerViewSet(viewsets.ViewSet):
     """``GET /api/v1/screener/?metric=<name>&min=&max=&limit=`` — the single-metric screen,
     latest FY, ordered by value descending."""
 
+    @extend_schema(
+        summary="Screen on a single metric",
+        parameters=[
+            _q("metric", "Metric name to screen on.", required=True),
+            _q("min", "Inclusive lower bound on the metric value."),
+            _q("max", "Inclusive upper bound on the metric value."),
+            OpenApiParameter("limit", OpenApiTypes.INT, description="Max rows, 1–200 (default 50)."),
+        ],
+        responses={200: ScreenResponseSerializer, **_ERRORS},
+        examples=[
+            OpenApiExample(
+                "Top ROE",
+                value={
+                    "metric": "Return on Equity %",
+                    "count": 2,
+                    "results": [
+                        {"ticker": "AAPL", "fiscal_year": 2024, "value": 164.6},
+                        {"ticker": "MCD", "fiscal_year": 2024, "value": 90.1},
+                    ],
+                },
+                response_only=True,
+            )
+        ],
+    )
     def list(self, request: Request, version: str | None = None) -> Response:
         params = request.query_params
         metric = params.get("metric", "").strip()
@@ -114,6 +205,29 @@ class ValuationViewSet(viewsets.ViewSet):
 
     lookup_value_regex = "[^/]+"
 
+    @extend_schema(
+        summary="Retrieve valuation (Margin of Safety + football field)",
+        responses={200: ValuationResponseSerializer, **_ERRORS},
+        examples=[
+            OpenApiExample(
+                "AAPL",
+                value={
+                    "ticker": "AAPL",
+                    "margin_of_safety": [
+                        {"ticker": "AAPL", "metric": "MoS Graham (TTM)", "unit": "%", "fiscal_year": 2024,
+                         "value": -35.2, "category": None, "subcategory": None, "sort_order": None}
+                    ],
+                    "football_field": {
+                        "bars": [
+                            {"method": "DCF (TTM)", "bear": 120.0, "mid": 165.0, "bull": 210.0, "fiscal_year": 2024}
+                        ],
+                        "price": 229.0,
+                    },
+                },
+                response_only=True,
+            )
+        ],
+    )
     def retrieve(self, request: Request, pk: str | None = None, version: str | None = None) -> Response:
         ticker = (pk or "").upper()
         points = valuation_services.get_margin_of_safety(ticker)

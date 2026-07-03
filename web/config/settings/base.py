@@ -30,6 +30,7 @@ DJANGO_APPS = [
 ]
 THIRD_PARTY_APPS = [
     "rest_framework",
+    "drf_spectacular",
 ]
 # Presentation + user-domain apps only. All financial logic lives in the installed
 # `fundamentals_pipeline` package; nothing here computes ratios, valuations, or metrics.
@@ -148,4 +149,21 @@ REST_FRAMEWORK = {
     "ALLOWED_VERSIONS": ["v1"],
     # One error envelope for the whole API: {"error": {"status", "message"}}.
     "EXCEPTION_HANDLER": "apps.api.exceptions.api_exception_handler",
+    # OpenAPI 3 schema generation (drf-spectacular).
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+}
+
+# OpenAPI schema + Swagger/Redoc docs (drf-spectacular). The schema is generated from the
+# viewsets/serializers and pinned to v1; the committed web/api-schema.yml is drift-checked
+# by tests (regenerated in-process and compared).
+SPECTACULAR_SETTINGS = {
+    "TITLE": "Fundamentals API",
+    "DESCRIPTION": (
+        "Read-only REST API over the published fundamentals read model — company summaries "
+        "and derived metrics, the single-metric screener, and intrinsic-value data. All data "
+        "is public and precomputed by the pipeline; there are no write endpoints."
+    ),
+    "VERSION": "1.0.0",
+    # The schema view serves only the endpoints; the Swagger/Redoc HTML is served separately.
+    "SERVE_INCLUDE_SCHEMA": False,
 }
