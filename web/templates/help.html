@@ -3,18 +3,14 @@
 {% block meta_description %}How to screen companies, read a company page, understand intrinsic value, and use watchlists in Fundamentals.{% endblock %}
 
 {% block extra_head %}
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
 <style>
-  .docs h1, .docs h2 { font-family: "Space Grotesk", system-ui, sans-serif; letter-spacing: -0.02em; }
   .docs .toc { position: sticky; top: 1.5rem; }
-  .docs .toc a { display: block; padding: .2rem 0; color: #495057; text-decoration: none; }
-  .docs .toc a:hover, .docs .toc a:focus-visible { color: #2563eb; }
+  .docs .toc a { display: block; padding: .2rem 0; color: var(--ink-2); text-decoration: none; }
+  .docs .toc a:hover, .docs .toc a:focus-visible { color: var(--accent-ink); }
   .docs section { scroll-margin-top: 1.5rem; }
   .docs section + section { margin-top: 2.5rem; }
-  .docs dt { font-weight: 600; }
-  .docs dd { margin-bottom: .75rem; color: #495057; }
+  .docs dt { font-weight: 600; color: var(--ink); }
+  .docs dd { margin-bottom: .75rem; color: var(--ink-2); }
 </style>
 {% endblock %}
 

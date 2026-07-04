@@ -76,18 +76,20 @@ def test_screener_page_renders_universe(artifacts_from_fixtures, client):
 
 def test_screener_metric_filter_orders_and_paginates(artifacts_from_fixtures, client):
     metric = next(m for m in _client_metrics(client))
-    resp = client.get("/screener/", {"metric": metric, "page": "1"})
+    resp = client.get("/screener/", {"col": metric, "sort": metric, "dir": "desc", "page": "1"})
     assert resp.status_code == 200
-    assert resp.context["selected"] == metric
-    values = [r.metric_value for r in resp.context["rows"] if r.metric_value is not None]
-    assert values == sorted(values, reverse=True)  # ordered by the metric, desc
+    assert metric in {c["key"] for c in resp.context["metric_headers"]}
+    # Each row's single metric cell is (value, unit); ordered by that value, descending.
+    values = [item["cells"][0][0] for item in resp.context["rows"] if item["cells"][0][0] is not None]
+    assert values == sorted(values, reverse=True)
 
 
 def test_screener_bad_bounds_show_inline_error_but_still_render(artifacts_from_fixtures, client):
-    resp = client.get("/screener/", {"min": "abc"})
+    metric = next(m for m in _client_metrics(client))
+    resp = client.get("/screener/", {"fmetric": metric, "fmin": "abc"})
     assert resp.status_code == 200
     assert "must be numbers" in resp.context["error"]
-    assert len(resp.context["rows"]) > 0  # table still renders; bounds ignored
+    assert len(resp.context["rows"]) > 0  # table still renders; bad bound ignored
     # An unparseable page number falls back to page 1 rather than erroring.
     assert client.get("/screener/", {"page": "not-a-number"}).context["page"] == 1
 
@@ -104,6 +106,45 @@ def test_company_page_renders_and_404s(artifacts_from_fixtures, client):
     assert resp.status_code == 200
     assert resp.context["detail"].summary.ticker == TICKER
     assert client.get("/companies/notareal/").status_code == 404
+
+
+def test_company_page_has_statement_tabs(artifacts_from_fixtures, client):
+    body = client.get(f"/companies/{TICKER}/").content.decode()
+    # Tab nav + panes for each reported statement (Streamlit-style navigation).
+    for label in ("Overview", "Income Statement", "Balance Sheet", "Cash Flow"):
+        assert label in body
+    assert 'data-bs-target="#pane-income-statement"' in body
+    assert 'id="pane-balance-sheet"' in body
+    # Statement grids carry the fiscal-year columns, the Revenue line, and per-row sparklines.
+    assert "Line item" in body and "Revenue" in body
+    assert 'class="sparkline"' in body
+    assert 'class="tab-chart"' in body  # per-tab headline bar/combo chart
+    # Balance sheet is a single-year composition (default latest) with a year selector + legend.
+    assert "Balance sheet composition" in body and 'class="bs-comp"' in body
+    assert 'class="bs-year"' in body and "bsShowYear" in body
+
+
+def test_company_overview_has_profile_logo_and_news(artifacts_from_fixtures, client):
+    body = client.get(f"/companies/{TICKER}/").content.decode()
+    assert "About" in body and "Apple Inc." in body           # description
+    assert "co-logo" in body                                   # logo box (masthead + overview)
+    assert "Latest news" in body and "data-news-url" in body   # async news placeholder
+
+
+def test_company_page_has_price_and_quarterly_tabs(artifacts_from_fixtures, client):
+    body = client.get(f"/companies/{TICKER}/").content.decode()
+    assert "Price" in body and 'id="pane-price"' in body
+    assert "<svg" in body and "polyline" in body  # inline price chart
+    assert "Quarterly" in body and 'id="pane-quarterly"' in body
+
+
+def test_company_page_valuation_tab_and_no_iv_in_derived(artifacts_from_fixtures, client):
+    body = client.get(f"/companies/{TICKER}/").content.decode()
+    # Valuation is its own tab (football field + MoS + multiples)...
+    assert 'id="pane-valuation"' in body and "Margin of safety" in body
+    assert "Multiples" in body and "P/E" in body  # valuation multiples moved here
+    # ...and intrinsic-value metrics no longer duplicated in the Derived-metrics tab.
+    assert "Intrinsic Value" not in body
 
 
 def test_valuation_page_renders_with_data_and_empty_for_unknown(artifacts_from_fixtures, client):

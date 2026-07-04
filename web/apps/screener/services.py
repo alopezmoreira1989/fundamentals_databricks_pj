@@ -7,8 +7,10 @@ that optional filters narrow; ``run_screen`` remains the single-metric JSON read
 
 from __future__ import annotations
 
-from repositories.company_listing import CompanyListingRepository
-from repositories.dtos import CompanyPage, ScreenRow
+from collections.abc import Sequence
+
+from repositories.company_listing import CompanyListingRepository, MetricFilter, SortSpec
+from repositories.dtos import CompanyPage, ScreenRow, ScreenTablePage
 from repositories.screener import ScreenerRepository
 
 
@@ -35,6 +37,31 @@ def list_companies(
         page_size=page_size,
     )
     return CompanyPage(rows=rows, total=total)
+
+
+def screen_table(
+    *,
+    search: str = "",
+    sector: str = "",
+    index: str = "",
+    columns: Sequence[str] = (),
+    filters: Sequence[MetricFilter] = (),
+    sort: SortSpec | None = None,
+    page: int = 1,
+    page_size: int = 50,
+) -> ScreenTablePage:
+    """One page of the multi-metric screener table: the descriptive scope narrowed by the
+    metric ``filters``, each selected ``columns`` metric pivoted to its latest-FY value."""
+    return CompanyListingRepository().screen_table(
+        search=search,
+        sector=sector,
+        index=index,
+        columns=columns,
+        filters=filters,
+        sort=sort,
+        page=page,
+        page_size=page_size,
+    )
 
 
 def available_sectors() -> tuple[str, ...]:

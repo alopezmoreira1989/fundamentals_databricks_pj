@@ -18,11 +18,12 @@ def valuation_page(request: HttpRequest, ticker: str) -> HttpResponse:
     """Server-rendered valuation page: intrinsic-value football field + MoS table."""
     ticker = ticker.upper()
     points = services.get_margin_of_safety(ticker)
+    scenarios = services.get_margin_of_safety_scenarios(ticker)
     chart = build_chart(services.get_intrinsic_value_field(ticker))
     return render(
         request,
         "valuation/detail.html",
-        {"ticker": ticker, "points": points, "chart": chart},
+        {"ticker": ticker, "points": points, "scenarios": scenarios, "chart": chart},
     )
 
 

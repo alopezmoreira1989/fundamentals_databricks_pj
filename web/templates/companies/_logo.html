@@ -1,0 +1,11 @@
+{% if url %}
+  <span class="co-logo{% if small %} co-logo-sm{% endif %}" style="width:{{ size }}px;height:{{ size }}px">
+    <img src="{{ url }}" alt="" width="{{ size }}" height="{{ size }}" loading="lazy"
+         onerror="this.parentNode.classList.add('is-monogram');this.remove();">
+    <span class="co-logo-mono">{{ letter }}</span>
+  </span>
+{% else %}
+  <span class="co-logo is-monogram{% if small %} co-logo-sm{% endif %}" style="width:{{ size }}px;height:{{ size }}px">
+    <span class="co-logo-mono">{{ letter }}</span>
+  </span>
+{% endif %}

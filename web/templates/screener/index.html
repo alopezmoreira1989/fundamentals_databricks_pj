@@ -1,16 +1,19 @@
 {% extends "base.html" %}
-{% load fmt %}
+{% load fmt logos %}
 {% block title %}Screener — Fundamentals{% endblock %}
 {% block content %}
   <div class="p-4 bg-white rounded-3 shadow-sm mb-4">
     <h1 class="h3 mb-3">Screener</h1>
     <form method="get" class="row g-3 align-items-end">
-      <div class="col-12 col-md-3">
+      {# Keep the active sort when the filter form is re-submitted. #}
+      <input type="hidden" name="sort" value="{{ sort_key }}">
+      <input type="hidden" name="dir" value="{{ sort_dir }}">
+      <div class="col-12 col-md-4">
         <label for="q" class="form-label">Search</label>
         <input type="text" id="q" name="q" value="{{ q }}" class="form-control"
                placeholder="Ticker or company…">
       </div>
-      <div class="col-6 col-md-3">
+      <div class="col-6 col-md-4">
         <label for="sector" class="form-label">Sector</label>
         <select id="sector" name="sector" class="form-select">
           <option value="">All sectors</option>
@@ -19,7 +22,7 @@
           {% endfor %}
         </select>
       </div>
-      <div class="col-6 col-md-2">
+      <div class="col-6 col-md-4">
         <label for="index" class="form-label">Index</label>
         <select id="index" name="index" class="form-select">
           <option value="">Any</option>
@@ -27,27 +30,42 @@
           <option value="r3000" {% if index == "r3000" %}selected{% endif %}>Russell 3000</option>
         </select>
       </div>
-      <div class="col-12 col-md-4">
-        <label for="metric" class="form-label">Metric filter <span class="text-muted small">(optional)</span></label>
-        <select id="metric" name="metric" class="form-select">
-          <option value="">— none —</option>
+
+      <div class="col-12 col-lg-5">
+        <label for="col" class="form-label">Columns <span class="text-muted small">(ctrl/⌘-click for several)</span></label>
+        <select id="col" name="col" class="form-select" multiple size="6">
           {% for m in metrics %}
-            <option value="{{ m }}" {% if m == selected %}selected{% endif %}>{{ m }}</option>
+            <option value="{{ m }}" {% if m in cols %}selected{% endif %}>{{ m }}</option>
           {% endfor %}
         </select>
       </div>
-      <div class="col-6 col-md-2">
-        <label for="min" class="form-label">Min</label>
-        <input type="text" inputmode="decimal" id="min" name="min" value="{{ min }}"
-               class="form-control" placeholder="—" {% if not selected %}disabled{% endif %}>
+
+      <div class="col-12 col-lg-7">
+        <label class="form-label">Metric filters <span class="text-muted small">(leave blank to ignore)</span></label>
+        {% for f in filter_rows %}
+          <div class="row g-2 mb-2 align-items-center">
+            <div class="col-6">
+              <select name="fmetric" class="form-select form-select-sm" aria-label="Filter metric">
+                <option value="">— metric —</option>
+                {% for m in metrics %}
+                  <option value="{{ m }}" {% if m == f.metric %}selected{% endif %}>{{ m }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-3">
+              <input type="text" inputmode="decimal" name="fmin" value="{{ f.min }}"
+                     class="form-control form-control-sm" placeholder="min" aria-label="Minimum">
+            </div>
+            <div class="col-3">
+              <input type="text" inputmode="decimal" name="fmax" value="{{ f.max }}"
+                     class="form-control form-control-sm" placeholder="max" aria-label="Maximum">
+            </div>
+          </div>
+        {% endfor %}
       </div>
-      <div class="col-6 col-md-2">
-        <label for="max" class="form-label">Max</label>
-        <input type="text" inputmode="decimal" id="max" name="max" value="{{ max }}"
-               class="form-control" placeholder="—" {% if not selected %}disabled{% endif %}>
-      </div>
-      <div class="col-12 col-md-4 d-flex gap-2">
-        <button type="submit" class="btn btn-dark flex-grow-1">Apply filters</button>
+
+      <div class="col-12 d-flex gap-2">
+        <button type="submit" class="btn btn-dark">Apply filters</button>
         <a href="{% url 'screener:screen' %}" class="btn btn-outline-secondary">Reset</a>
       </div>
     </form>
@@ -69,21 +87,28 @@
         <table class="table table-sm table-hover align-middle mb-0">
           <thead>
             <tr>
-              <th scope="col">Ticker</th>
-              <th scope="col">Company</th>
-              <th scope="col">Sector</th>
-              <th scope="col">Industry</th>
-              {% if selected %}<th scope="col" class="text-end">{{ selected }}</th>{% endif %}
+              {% for h in desc_headers %}
+                <th scope="col"><a class="text-decoration-none text-reset" href="{{ h.sort_url }}">{{ h.label }} <span class="text-muted">{{ h.indicator }}</span></a></th>
+              {% endfor %}
+              {% for h in metric_headers %}
+                <th scope="col" class="text-end"><a class="text-decoration-none text-reset" href="{{ h.sort_url }}">{{ h.label }} <span class="text-muted">{{ h.indicator }}</span></a></th>
+              {% endfor %}
             </tr>
           </thead>
           <tbody>
-            {% for r in rows %}
+            {% for item in rows %}
               <tr>
-                <td><a href="{% url 'companies:detail' r.ticker %}">{{ r.ticker }}</a></td>
-                <td>{{ r.name|default:"—" }}</td>
-                <td class="text-muted">{{ r.sector|default:"—" }}</td>
-                <td class="text-muted">{{ r.industry|default:"—" }}</td>
-                {% if selected %}<td class="text-end font-monospace">{{ r.metric_value|metric_value }}</td>{% endif %}
+                <td>
+                  <a class="d-inline-flex align-items-center gap-2 text-decoration-none" href="{% url 'companies:detail' item.row.ticker %}">
+                    {% company_logo item.row.ticker item.row.name item.row.has_logo 24 %}<span class="fw-semibold">{{ item.row.ticker }}</span>
+                  </a>
+                </td>
+                <td>{{ item.row.name|default:"—" }}</td>
+                <td class="text-muted">{{ item.row.sector|default:"—" }}</td>
+                <td class="text-muted">{{ item.row.industry|default:"—" }}</td>
+                {% for cell in item.cells %}
+                  <td class="text-end font-monospace">{{ cell.0|metric_value:cell.1 }}</td>
+                {% endfor %}
               </tr>
             {% endfor %}
           </tbody>

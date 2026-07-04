@@ -8,6 +8,7 @@ above them.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 
@@ -21,6 +22,11 @@ class CompanySummary:
     industry: str | None = None
     exchange: str | None = None
     country: str | None = None
+    description: str | None = None
+    website: str | None = None
+    employees: int | None = None
+    founded: str | None = None
+    has_logo: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +57,61 @@ class CompanyDetail:
 
 
 @dataclass(frozen=True, slots=True)
+class StatementLine:
+    """One financial-statement line item: its value across the displayed fiscal years, aligned
+    to :attr:`Statement.years` (``None`` where a year has no reported value)."""
+
+    display_name: str
+    section: str | None
+    values: tuple[float | None, ...]
+    group: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Statement:
+    """One financial statement (Income Statement / Balance Sheet / Cash Flow) as a line-item ×
+    fiscal-year grid, ordered by the reporting hierarchy."""
+
+    name: str
+    years: tuple[int, ...]
+    lines: tuple[StatementLine, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class CompanyStatements:
+    """A ticker's financial statements, ready for tabbed display."""
+
+    statements: tuple[Statement, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class QuarterGrid:
+    """A statement's line items across recent fiscal quarters (newest first). Like
+    :class:`Statement` but the columns are quarter labels (e.g. ``"Q2 2026"``), not years."""
+
+    name: str
+    columns: tuple[str, ...]
+    lines: tuple[StatementLine, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class PricePoint:
+    """One point on the price series: an ISO date and its close."""
+
+    date: str
+    close: float
+
+
+@dataclass(frozen=True, slots=True)
+class HeadlineKpi:
+    """A single headline figure (latest fiscal year) for the company overview strip."""
+
+    label: str
+    value: float | None
+    fiscal_year: int | None
+
+
+@dataclass(frozen=True, slots=True)
 class ScreenRow:
     """One screener hit: a ticker's latest-FY value for the screened metric."""
 
@@ -70,6 +131,7 @@ class CompanyListRow:
     industry: str | None = None
     metric_value: float | None = None
     fiscal_year: int | None = None
+    has_logo: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,6 +143,46 @@ class CompanyPage:
 
 
 @dataclass(frozen=True, slots=True)
+class ScreenColumn:
+    """One selectable metric column of the multi-metric screener table.
+
+    ``key`` is the metric name (the DuckDB/​artifact identifier); ``unit`` drives display
+    formatting (``percent`` / ``usd`` / ``ratio`` …); ``category`` groups the metric in the
+    column picker (from the metrics hierarchy)."""
+
+    key: str
+    unit: str | None = None
+    category: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ScreenTableRow:
+    """One row of the multi-metric screener table: descriptive facts (from the meta artifact)
+    plus this ticker's latest-FY value of each selected metric column.
+
+    ``values`` maps a :class:`ScreenColumn` key → the ticker's latest-FY value (``None`` where
+    the ticker has no reported value for that metric), so the view renders cells by column key
+    without ever touching a SQL column name."""
+
+    ticker: str
+    name: str
+    sector: str | None
+    industry: str | None
+    has_logo: bool | None
+    values: Mapping[str, float | None]
+
+
+@dataclass(frozen=True, slots=True)
+class ScreenTablePage:
+    """A page of the multi-metric screener table: the rows, the total match count (for
+    pagination), and the ordered metric columns those rows carry values for."""
+
+    rows: tuple[ScreenTableRow, ...]
+    total: int
+    columns: tuple[ScreenColumn, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class FootballBar:
     """One intrinsic-value estimate as a bear→bull range with a mid point (per-share, USD)."""
 
@@ -89,6 +191,21 @@ class FootballBar:
     mid: float
     bull: float
     fiscal_year: int
+
+
+@dataclass(frozen=True, slots=True)
+class MosScenario:
+    """A method's Margin-of-Safety across the three scenarios, on one basis (TTM or FY).
+
+    Collapses the flat ``MoS % (<method>, <basis>)`` / ``… — Bear`` / ``… — Bull`` metrics into a
+    single row so the view can render aligned Bear / Mid / Bull columns."""
+
+    method: str  # "Graham Revised", "DCF", "Owner Earnings", "Graham Number"
+    basis: str   # "TTM" or "FY"
+    bear: float | None
+    mid: float | None
+    bull: float | None
+    fiscal_year: int | None
 
 
 @dataclass(frozen=True, slots=True)

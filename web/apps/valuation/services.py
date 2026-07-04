@@ -7,13 +7,18 @@ straight read; when a future use case needs live valuation math, it calls
 
 from __future__ import annotations
 
-from repositories.dtos import FootballField, MetricPoint
+from repositories.dtos import FootballField, MetricPoint, MosScenario
 from repositories.valuation import ValuationRepository
 
 
 def get_margin_of_safety(ticker: str) -> tuple[MetricPoint, ...]:
     """Latest Margin-of-Safety metrics for the ticker (empty if none/unknown)."""
     return ValuationRepository().margin_of_safety(ticker)
+
+
+def get_margin_of_safety_scenarios(ticker: str) -> tuple[MosScenario, ...]:
+    """MoS organized per (method, basis) with Bear / Mid / Bull columns (empty if none)."""
+    return ValuationRepository().margin_of_safety_scenarios(ticker)
 
 
 def get_intrinsic_value_field(ticker: str) -> FootballField:
