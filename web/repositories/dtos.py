@@ -8,6 +8,7 @@ above them.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 
@@ -139,6 +140,46 @@ class CompanyPage:
 
     rows: tuple[CompanyListRow, ...]
     total: int
+
+
+@dataclass(frozen=True, slots=True)
+class ScreenColumn:
+    """One selectable metric column of the multi-metric screener table.
+
+    ``key`` is the metric name (the DuckDB/​artifact identifier); ``unit`` drives display
+    formatting (``percent`` / ``usd`` / ``ratio`` …); ``category`` groups the metric in the
+    column picker (from the metrics hierarchy)."""
+
+    key: str
+    unit: str | None = None
+    category: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ScreenTableRow:
+    """One row of the multi-metric screener table: descriptive facts (from the meta artifact)
+    plus this ticker's latest-FY value of each selected metric column.
+
+    ``values`` maps a :class:`ScreenColumn` key → the ticker's latest-FY value (``None`` where
+    the ticker has no reported value for that metric), so the view renders cells by column key
+    without ever touching a SQL column name."""
+
+    ticker: str
+    name: str
+    sector: str | None
+    industry: str | None
+    has_logo: bool | None
+    values: Mapping[str, float | None]
+
+
+@dataclass(frozen=True, slots=True)
+class ScreenTablePage:
+    """A page of the multi-metric screener table: the rows, the total match count (for
+    pagination), and the ordered metric columns those rows carry values for."""
+
+    rows: tuple[ScreenTableRow, ...]
+    total: int
+    columns: tuple[ScreenColumn, ...]
 
 
 @dataclass(frozen=True, slots=True)

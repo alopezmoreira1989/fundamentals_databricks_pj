@@ -76,18 +76,20 @@ def test_screener_page_renders_universe(artifacts_from_fixtures, client):
 
 def test_screener_metric_filter_orders_and_paginates(artifacts_from_fixtures, client):
     metric = next(m for m in _client_metrics(client))
-    resp = client.get("/screener/", {"metric": metric, "page": "1"})
+    resp = client.get("/screener/", {"col": metric, "sort": metric, "dir": "desc", "page": "1"})
     assert resp.status_code == 200
-    assert resp.context["selected"] == metric
-    values = [r.metric_value for r in resp.context["rows"] if r.metric_value is not None]
-    assert values == sorted(values, reverse=True)  # ordered by the metric, desc
+    assert metric in {c["key"] for c in resp.context["metric_headers"]}
+    # Each row's single metric cell is (value, unit); ordered by that value, descending.
+    values = [item["cells"][0][0] for item in resp.context["rows"] if item["cells"][0][0] is not None]
+    assert values == sorted(values, reverse=True)
 
 
 def test_screener_bad_bounds_show_inline_error_but_still_render(artifacts_from_fixtures, client):
-    resp = client.get("/screener/", {"min": "abc"})
+    metric = next(m for m in _client_metrics(client))
+    resp = client.get("/screener/", {"fmetric": metric, "fmin": "abc"})
     assert resp.status_code == 200
     assert "must be numbers" in resp.context["error"]
-    assert len(resp.context["rows"]) > 0  # table still renders; bounds ignored
+    assert len(resp.context["rows"]) > 0  # table still renders; bad bound ignored
     # An unparseable page number falls back to page 1 rather than erroring.
     assert client.get("/screener/", {"page": "not-a-number"}).context["page"] == 1
 

@@ -12,8 +12,16 @@ import pytest
 from apps.companies import services as company_services
 from apps.valuation.football import build_chart
 from repositories.companies import CompanyRepository
-from repositories.company_listing import CompanyListingRepository
-from repositories.dtos import CompanyListRow, CompanySummary, MetricPoint, ScreenRow
+from repositories.company_listing import CompanyListingRepository, MetricFilter, SortSpec
+from repositories.dtos import (
+    CompanyListRow,
+    CompanySummary,
+    MetricPoint,
+    ScreenColumn,
+    ScreenRow,
+    ScreenTablePage,
+    ScreenTableRow,
+)
 from repositories.screener import ScreenerRepository
 from repositories.valuation import ValuationRepository
 
@@ -361,6 +369,54 @@ def test_listing_metric_filter_bounds_and_orders(artifacts_from_fixtures):
     assert all(r.metric_value is not None and r.metric_value >= floor for r in bounded)
 
 
+# ── multi-metric screener table ───────────────────────────────────────────────────────
+def _two_metrics_of(ticker: str) -> list[str]:
+    """Two metric names the ticker has non-null latest-FY values for."""
+    got = [m.metric for m in CompanyRepository().latest_metrics(ticker) if m.value is not None]
+    return got[:2]
+
+
+def test_screen_table_pivots_columns_over_the_universe(artifacts_from_fixtures):
+    cols = _two_metrics_of(TICKER)
+    page = CompanyListingRepository().screen_table(columns=cols, page=1, page_size=10)
+    assert isinstance(page, ScreenTablePage)
+    assert page.total > 100  # the whole universe, not a single-metric slice
+    assert len(page.rows) == 10 and all(isinstance(r, ScreenTableRow) for r in page.rows)
+    assert tuple(c.key for c in page.columns) == tuple(cols)
+    assert all(isinstance(c, ScreenColumn) for c in page.columns)
+    for r in page.rows:
+        assert set(r.values) == set(cols)  # every row carries a slot per column
+    tickers = [r.ticker for r in page.rows]
+    assert tickers == sorted(tickers)  # default sort: ticker asc
+
+
+def test_screen_table_filters_and_sorts_by_metric(artifacts_from_fixtures):
+    cols = _two_metrics_of(TICKER)
+    metric = cols[0]
+    repo = CompanyListingRepository()
+    full = repo.screen_table(columns=cols, page_size=500)
+    vals = sorted(v for r in full.rows for v in [r.values[metric]] if v is not None)
+    floor = vals[len(vals) // 2]  # median-ish bound
+
+    filtered = repo.screen_table(
+        columns=cols,
+        filters=[MetricFilter(metric=metric, min_value=floor)],
+        sort=SortSpec(key=metric, descending=True),
+        page_size=500,
+    )
+    assert filtered.total <= full.total
+    got = [r.values[metric] for r in filtered.rows]
+    assert all(v is not None and v >= floor for v in got)  # NULL/below-floor excluded
+    assert got == sorted(got, reverse=True)  # ordered by the metric, desc
+
+
+def test_screen_table_empty_scope_returns_no_rows(artifacts_from_fixtures):
+    page = CompanyListingRepository().screen_table(
+        columns=_two_metrics_of(TICKER), search="___no_such_ticker___"
+    )
+    assert page.total == 0 and page.rows == ()
+
+
 def test_screener_page_default_lists_companies(artifacts_from_fixtures, client):
     resp = client.get("/screener/")  # no filters ⇒ the whole company table, page 1
     assert resp.status_code == 200
@@ -374,3 +430,31 @@ def test_screener_page_metric_adds_value_column(artifacts_from_fixtures, client)
     html = client.get("/screener/", {"metric": metric}).content.decode()
     assert metric in html  # metric column header
     assert 'href="/companies/' in html
+
+
+def test_screener_page_multi_columns_and_sort(artifacts_from_fixtures, client):
+    a, b = _two_metrics_of(TICKER)
+    resp = client.get("/screener/", {"col": [a, b], "sort": a, "dir": "desc"})
+    assert resp.status_code == 200
+    html = resp.content.decode()
+    assert a in html and b in html  # both metric columns rendered
+    assert "sort=" in html and "dir=" in html  # sortable header links carry sort state
+    assert 'href="/companies/' in html
+
+
+def test_screener_page_metric_filter_narrows(artifacts_from_fixtures, client):
+    metric = _a_metric_of(TICKER)
+    unfiltered = client.get("/screener/", {"col": metric}).content.decode()
+    # An impossible lower bound must shrink the match count to zero.
+    filtered = client.get(
+        "/screener/", {"col": metric, "fmetric": metric, "fmin": "1e30"}
+    ).content.decode()
+    assert "No companies match" in filtered
+    assert "No companies match" not in unfiltered
+
+
+def test_screener_page_bad_bound_shows_error_not_500(artifacts_from_fixtures, client):
+    metric = _a_metric_of(TICKER)
+    resp = client.get("/screener/", {"fmetric": metric, "fmin": "abc"})
+    assert resp.status_code == 200
+    assert "must be numbers" in resp.content.decode()
