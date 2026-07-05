@@ -68,9 +68,16 @@
       { "metric": "P/FCF", "unit": "ratio", "requires_market_data": true },
       { "metric": "P/B",   "unit": "ratio", "requires_market_data": true }
     ],
+    "Price Multiples — Live (TTM)": [
+      { "metric": "P/E (TTM, live)", "unit": "ratio", "requires_market_data": true },
+      { "metric": "P/B (TTM, live)", "unit": "ratio", "requires_market_data": true }
+    ],
     "Enterprise Value": [
       { "metric": "EV",        "unit": "usd",   "requires_market_data": true },
       { "metric": "EV/EBITDA", "unit": "ratio", "requires_market_data": true }
+    ],
+    "Enterprise Value — Live (TTM)": [
+      { "metric": "EV/EBITDA (TTM, live)", "unit": "ratio", "requires_market_data": true }
     ],
     "Yields": [
       { "metric": "Earnings Yield %", "unit": "percent", "requires_market_data": true },
