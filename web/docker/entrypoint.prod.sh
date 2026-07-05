@@ -1,7 +1,14 @@
 #!/usr/bin/env sh
-# Production entrypoint. Database migrations are NOT run here — they run once per deploy via
-# fly.toml's `release_command` (a single release machine), avoiding a race across app machines.
+# Production entrypoint. Database migrations normally run once per deploy via a platform release
+# hook (e.g. Fly's `release_command`), a single machine, before any app instance takes traffic —
+# avoiding a migration race across multiple app machines. Set RUN_MIGRATIONS_ON_BOOT=true only on
+# platforms without such a hook AND that never run more than one instance of this service (e.g.
+# Render's free plan, which has no paid-only pre-deploy command) — see docs/deploy-render.md.
 set -e
+
+if [ "${RUN_MIGRATIONS_ON_BOOT:-false}" = "true" ]; then
+    python manage.py migrate --noinput
+fi
 
 # Warm the artifact cache so /readyz reports ready without a cold request-path download.
 # Non-fatal: a transient GitHub Release / network hiccup must not block boot — reads self-heal

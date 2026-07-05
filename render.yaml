@@ -1,0 +1,41 @@
+# Render Blueprint for the Django web layer — free-tier deploy. Builds web/docker/Dockerfile.prod
+# with the repo root as context (the image installs the sibling `fundamentals_pipeline` package).
+#
+# Postgres is intentionally NOT Render-managed — Render's free Postgres expires after 90 days.
+# Pair this service with a free Aiven for PostgreSQL instance instead (no card, no time limit) and
+# paste its connection string into the DATABASE_URL secret below. Full runbook: docs/deploy-render.md.
+#
+# Deploy: push this file, then in the Render dashboard "New +" -> "Blueprint", point it at this
+# repo, and fill in the `sync: false` env vars before the first deploy.
+
+services:
+  - type: web
+    name: fundamentals-web        # <-- set to your Render service name
+    runtime: docker
+    dockerfilePath: web/docker/Dockerfile.prod
+    dockerContext: .
+    region: oregon                 # <-- pick your closest Render region
+    plan: free
+    healthCheckPath: /readyz
+    envVars:
+      - key: DJANGO_SETTINGS_MODULE
+        value: config.settings.prod
+      # Non-blocking background revalidation of stale artifacts (reads never wait on a refresh).
+      - key: ARTIFACTS_REFRESH_ASYNC
+        value: "true"
+      # Free plan has no pre-deploy command (paid-only) and no release-machine concept, so
+      # migrations run at boot instead. Safe here because the free plan never runs more than one
+      # instance of this service — see web/docker/entrypoint.prod.sh.
+      - key: RUN_MIGRATIONS_ON_BOOT
+        value: "true"
+      # Secrets — set these in the Render dashboard (Environment tab), never committed here.
+      - key: DJANGO_SECRET_KEY
+        sync: false
+      - key: DJANGO_ALLOWED_HOSTS
+        sync: false
+      - key: DJANGO_CSRF_TRUSTED_ORIGINS
+        sync: false
+      - key: DATABASE_URL          # Aiven for PostgreSQL connection string (?sslmode=require)
+        sync: false
+      - key: SENTRY_DSN            # optional; inert if omitted
+        sync: false
