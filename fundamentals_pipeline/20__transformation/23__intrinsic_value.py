@@ -57,8 +57,11 @@ ASSUMPTIONS_JSON_PATH = "../00__config/valuation_assumptions.json"
 full_table  = f"{CATALOG}.{SCHEMA}.{TABLE}"
 # Period_end-aligned price + market cap written by 22 (replaces legacy calendar-aligned
 # market_data). Keyed by (ticker, fiscal_year); `price_close` is the as-of fiscal-close price,
-# so Margin of Safety is now consistent with every multiple in financials_metrics.
+# used for the FY basis so Margin of Safety (FY) stays consistent with every FY multiple in
+# financials_metrics. The TTM basis prices off `market_prices_daily` directly (see §5) — a
+# genuinely live, non-fiscal-year-gated price — not this table.
 market_tbl  = f"{CATALOG}.{SCHEMA}.market_cap_asof"
+prices_daily_tbl = f"{CATALOG}.{SCHEMA}.market_prices_daily"   # live price source for the TTM basis
 iv_tbl      = f"{CATALOG}.{SCHEMA}.financials_intrinsic_value"
 metrics_tbl = f"{CATALOG}.{SCHEMA}.financials_metrics"
 splits_table = f"{CATALOG}.{SCHEMA}.stock_splits"   # for split-adjusting the EPS-CAGR growth input
@@ -69,7 +72,8 @@ splits_table = f"{CATALOG}.{SCHEMA}.stock_splits"   # for split-adjusting the EP
 EMIT_ASSUMPTIONS = False
 
 print(f"Source        : {full_table}")
-print(f"Price source  : {market_tbl}")
+print(f"Price source (FY)  : {market_tbl}")
+print(f"Price source (TTM) : {prices_daily_tbl} (live, latest close)")
 print(f"Target IV     : {iv_tbl}")
 print(f"Metrics table : {metrics_tbl}")
 
@@ -414,10 +418,15 @@ print(f"✓ TTM wide: {ttm_wide.count():,} ticker rows")
 
 # COMMAND ----------
 
-# MAGIC %md ## 5. Join with the period_end price source and collect to Pandas
+# MAGIC %md ## 5. Join with the price source and collect to Pandas
 # MAGIC
-# MAGIC For **FY**: price from the same `fiscal_year`.
-# MAGIC For **TTM**: price from the most recent `fiscal_year` available in market_cap_asof.
+# MAGIC For **FY**: price from `market_cap_asof`, as-of that `fiscal_year`'s own `period_end`.
+# MAGIC For **TTM**: price is the **latest available close in `market_prices_daily`** — genuinely
+# MAGIC live, not gated by any `fiscal_year` row. This is what "current" valuation should mean: the
+# MAGIC old behaviour (most recent `fiscal_year` row in `market_cap_asof`) could lag the real market
+# MAGIC price by up to ~12–15 months, since that table only updates when a new FY's `period_end`
+# MAGIC price gets backfilled. `market_cap` (TTM) = live price × the most recent quarter's diluted
+# MAGIC shares (`ttm_wide.shares`, already ticker-level and non-fiscal-year-gated).
 
 # COMMAND ----------
 
@@ -447,26 +456,42 @@ else:
         .withColumn("market_cap",  F.lit(None).cast("double"))
     )
 
-# TTM: use the most recent price_close available in market_cap_asof per ticker
-# (may be the current year without shares yet, or the previous year).
-if has_market_data:
-    w_latest_price = Window.partitionBy("ticker").orderBy(F.col("year").desc())
-    latest_price = (
-        mkt
-        .filter(F.col("price_close").isNotNull())
-        .withColumn("rn", F.row_number().over(w_latest_price))
-        .filter(F.col("rn") == 1)
-        .select("ticker", F.col("price_close"), F.col("year").alias("price_year"))
+# TTM: live price — the latest close in market_prices_daily per ticker, independent of any
+# fiscal_year row (unlike the FY join above, which is deliberately period_end-aligned).
+try:
+    _daily_prices = (
+        spark.table(prices_daily_tbl)
+        .select("ticker", "date", "close")
+        .filter(F.col("close").isNotNull())
     )
-    ttm_with_price = ttm_wide.join(latest_price, on="ticker", how="left")
-    # current market_cap (for future metrics — not strictly needed here)
-    ttm_with_price = ttm_with_price.withColumn("market_cap", F.lit(None).cast("double"))
+    has_live_price = _daily_prices.limit(1).count() > 0
+except Exception:
+    print("⚠ market_prices_daily not available — TTM price/market_cap will be NULL.")
+    has_live_price = False
+
+if has_live_price:
+    w_live_price = Window.partitionBy("ticker").orderBy(F.col("date").desc())
+    live_price = (
+        _daily_prices
+        .withColumn("rn", F.row_number().over(w_live_price))
+        .filter(F.col("rn") == 1)
+        .select("ticker", F.col("close").alias("price_close"))
+    )
+    ttm_with_price = (
+        ttm_wide.join(live_price, on="ticker", how="left")
+        .withColumn(
+            "market_cap",
+            F.when(
+                F.col("price_close").isNotNull() & F.col("shares").isNotNull(),
+                F.col("price_close") * F.col("shares"),
+            ),
+        )
+    )
 else:
     ttm_with_price = (
         ttm_wide
         .withColumn("price_close", F.lit(None).cast("double"))
         .withColumn("market_cap",  F.lit(None).cast("double"))
-        .withColumn("price_year",  F.lit(None).cast("int"))
     )
 
 print(f"✓ FY rows : {fy_with_price.count():,}")
@@ -501,6 +526,40 @@ for pdf in (fy_pdf, ttm_pdf):
         pdf["net_income"].fillna(0) + pdf["dna"].fillna(0) + pdf["sbc"].fillna(0)
         - pdf["capex"].fillna(0) - pdf["delta_wc"].fillna(0)
     )
+
+# ── Live TTM price multiples ────────────────────────────────────────────────────
+# P/E (TTM, live) / P/B (TTM, live) / EV/EBITDA (TTM, live): "current" multiples using the
+# genuinely live market_cap computed above (§5), TTM financial inputs already in ttm_pdf, and
+# the most recent quarter's balance-sheet stock values (equity/debt/cash — same STOCK_ALIASES
+# columns used everywhere else in this file). TTM-only: the FY basis already has these via
+# 22__derived_metrics.py's period_end-aligned P/E / P/B / EV/EBITDA. Mirrors safe_div / the
+# Net Income > 0 P/E guard and the |x| > 500 EV/EBITDA outlier cap from 22, just vectorized
+# in numpy here (TTM's ~3k rows) instead of F.when in Spark.
+_ttm_ni     = ttm_pdf["net_income"].to_numpy(dtype="float64")
+_ttm_mcap   = ttm_pdf["market_cap"].to_numpy(dtype="float64")
+_ttm_equity = ttm_pdf["equity"].to_numpy(dtype="float64")
+_ttm_debt   = ttm_pdf["lt_debt"].fillna(0).to_numpy(dtype="float64") + ttm_pdf["st_debt"].fillna(0).to_numpy(dtype="float64")
+_ttm_cash   = ttm_pdf["cash"].fillna(0).to_numpy(dtype="float64") + ttm_pdf["st_inv"].fillna(0).to_numpy(dtype="float64")
+_ttm_op_inc = ttm_pdf["op_income"].to_numpy(dtype="float64")
+_ttm_dna    = ttm_pdf["dna"].fillna(0).to_numpy(dtype="float64")
+
+with np.errstate(invalid="ignore", divide="ignore"):
+    _ev_live     = _ttm_mcap + _ttm_debt - _ttm_cash
+    _ebitda_ttm  = np.where(np.isnan(_ttm_op_inc), np.nan, _ttm_op_inc + _ttm_dna)
+    _pe_live     = np.where((_ttm_ni > 0) & ~np.isnan(_ttm_mcap), _ttm_mcap / _ttm_ni, np.nan)
+    _pb_live     = np.where(
+        ~np.isnan(_ttm_mcap) & ~np.isnan(_ttm_equity) & (_ttm_equity != 0),
+        _ttm_mcap / _ttm_equity, np.nan,
+    )
+    _ev_ebitda_live = np.where(
+        ~np.isnan(_ev_live) & ~np.isnan(_ebitda_ttm) & (_ebitda_ttm != 0),
+        _ev_live / _ebitda_ttm, np.nan,
+    )
+    _ev_ebitda_live = np.where(np.abs(_ev_ebitda_live) > 500, np.nan, _ev_ebitda_live)
+
+ttm_pdf["pe_live"]        = _pe_live
+ttm_pdf["pb_live"]        = _pb_live
+ttm_pdf["ev_ebitda_live"] = _ev_ebitda_live
 
 # Universe of tickers EVALUATED this run. The exposure/iv MERGEs below only upsert, so a
 # method that is now SKIPPED for a ticker (e.g. Graham Number suppressed for a distorted
@@ -957,6 +1016,28 @@ for _pdf, ptype in ((fy_pdf, "FY"), (ttm_pdf, "TTM")):
 
 exposed_frames.extend(oe_frames)
 
+# Live TTM price multiples — scenario-independent (they price off today's market_cap, not a
+# valuation assumption), so unlike EXPOSED there is only ever one variant per label, no
+# Bull/Bear suffix. dropna(value) below drops the rows where the guard above yielded NaN
+# (loss-making NI for P/E, zero/missing equity for P/B, missing/outlier EBITDA for EV/EBITDA).
+live_multiple_frames = []
+if len(ttm_pdf):
+    _yr = [int(y) if pd.notna(y) else None for y in ttm_pdf["year"].to_numpy()]
+    for _label, _values in (
+        ("P/E (TTM, live)",        ttm_pdf["pe_live"].to_numpy(dtype=float)),
+        ("P/B (TTM, live)",        ttm_pdf["pb_live"].to_numpy(dtype=float)),
+        ("EV/EBITDA (TTM, live)",  ttm_pdf["ev_ebitda_live"].to_numpy(dtype=float)),
+    ):
+        live_multiple_frames.append(pd.DataFrame({
+            "ticker":  ttm_pdf["ticker"].to_numpy(),
+            "company": ttm_pdf["company"].to_numpy(),
+            year_col:  _yr,
+            "metric":  _label,
+            "value":   _values,
+        }))
+
+exposed_frames.extend(live_multiple_frames)
+
 if exposed_frames:
     exposed_pdf = pd.concat(exposed_frames, ignore_index=True).dropna(subset=["value"])
 
@@ -989,10 +1070,11 @@ if exposed_frames:
         # labels this notebook owns — it never touches metrics produced by 22.
         # Every EXPOSED label now owns three scenario variants (mid = unsuffixed, plus Bull/Bear).
         # Include all three so the cleanup can retire any of them; the absolute Owner Earnings
-        # rows are scenario-independent and stay unsuffixed.
+        # rows and the live TTM multiples are scenario-independent and stay unsuffixed.
         _iv_labels = [
             lbl + suf for *_, lbl in EXPOSED for suf in ("", " — Bull", " — Bear")
-        ] + ["Owner Earnings (FY)", "Owner Earnings (TTM)"]
+        ] + ["Owner Earnings (FY)", "Owner Earnings (TTM)",
+             "P/E (TTM, live)", "P/B (TTM, live)", "EV/EBITDA (TTM, live)"]
         _iv_labels_sql = ", ".join("'" + lbl.replace("'", "''") + "'" for lbl in _iv_labels)
         spark.sql(f"""
             MERGE INTO {metrics_tbl} AS t

@@ -4,18 +4,18 @@
 # MAGIC Installed FIRST because `%pip` restarts the Python interpreter (any earlier state is
 # MAGIC wiped); the result then persists for every notebook pulled in via `%run` (shared session):
 # MAGIC - `lxml` — required by `13__fetch_dimensional_10k` (XBRL instance parsing); not preinstalled on serverless.
-# MAGIC - `fundamentals_pipeline` (editable, `-e .`) — the project package whose importable
+# MAGIC - `fundamentals_pipeline` (editable, `-e ../..`) — the project package whose importable
 # MAGIC   modules (`schemas`, `valuation`, `backtest`, …) `51` and `71` import. Installing it here
 # MAGIC   once lets those `%run` notebooks import it as a normal package — no `sys.path` manipulation.
 # MAGIC
-# MAGIC > **Databricks path note:** `-e .` installs from the working directory; confirm it
-# MAGIC > resolves to the repo root (where `pyproject.toml` lives). If the notebook CWD is its own
-# MAGIC > folder, use `-e ../..`; or pin an absolute Repos path. **Validate on the workspace
-# MAGIC > before the next production run** — `51`/`71` now import the installed package, not via `sys.path`.
+# MAGIC > **Databricks path note:** the notebook's CWD in a Repo is its own folder
+# MAGIC > (`90__pipelines/`), not the repo root — confirmed on the workspace 2026-07-05, `-e .`
+# MAGIC > fails with "neither 'setup.py' nor 'pyproject.toml' found". `-e ../..` resolves to the
+# MAGIC > repo root, where `pyproject.toml` actually lives.
 
 # COMMAND ----------
 
-# MAGIC %pip install lxml -e .
+# MAGIC %pip install lxml -e ../..
 
 # COMMAND ----------
 
