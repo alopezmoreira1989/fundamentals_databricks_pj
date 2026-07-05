@@ -731,6 +731,60 @@ The company detail page (Derived metrics tab) renders a horizontal "football fie
 
 ---
 
+## Django Web Application (`web/`)
+
+A second, decoupled frontend: a full Django app (session auth, watchlists/favorites/history, a
+read-only REST API + OpenAPI docs) that reads the same published GitHub Release artifacts via
+DuckDB and keeps its own PostgreSQL for user data. Strict one-directional layering
+(`views → services → repositories → infrastructure`) is documented in `docs/architecture.md`.
+No Databricks access at request time.
+
+```mermaid
+flowchart LR
+    gh{{GitHub Release · latest}} -->|parquet + meta.json| cache[(local artifact cache)]
+    cache --> duckdb[DuckDB queries]
+    duckdb --> repo[repositories/]
+    repo --> svc[services/]
+    svc --> views[apps/*/views + REST API]
+    views --> user((Browser / API client))
+
+    pg[(PostgreSQL — Aiven)] --> orm[Django ORM]
+    orm --> svc
+```
+
+### Local development
+
+```sh
+docker compose -f web/docker/docker-compose.yml up --build
+```
+Boots Django + a local Postgres container and applies migrations automatically. `web/.env.example`
+documents every environment variable (dev and production).
+
+### Deployment — Render (free) + Aiven PostgreSQL (free, permanent)
+
+The app deploys at zero cost to [Render](https://render.com) (Docker web service) paired with a
+free, permanent [Aiven](https://aiven.io) PostgreSQL instance — Render's own free Postgres expires
+after 90 days, Aiven's free plan doesn't and needs no card. Full runbook, environment variable
+reference, and troubleshooting table: **[`docs/deploy-render.md`](docs/deploy-render.md)**.
+
+Quick summary:
+1. Create a free PostgreSQL service on Aiven → copy its connection string (keep `?sslmode=require`
+   — passed straight through to Django's DB backend by `django-environ`, no code change needed).
+2. In Render: **New + → Blueprint**, point at this repo (reads the committed `render.yaml`).
+3. Set the secret env vars (`DJANGO_SECRET_KEY`, `DJANGO_ALLOWED_HOSTS`,
+   `DJANGO_CSRF_TRUSTED_ORIGINS`, `DATABASE_URL`) in the Render dashboard — never committed.
+4. Push to the connected branch — Render builds `web/docker/Dockerfile.prod` and deploys
+   automatically on every push.
+
+Health checks: `GET /healthz` (liveness) and `GET /readyz` (readiness — DB + artifact-cache
+status), gating traffic so a booting instance never receives requests early.
+
+> An alternative Fly.io runbook (`fly.toml`, `docs/deploy-fly.md`) also lives in the repo, but Fly
+> requires payment info on the account before it will create even a free-tier app, so Render +
+> Aiven is the recommended zero-cost path.
+
+---
+
 ## Dashboard — `Main Dashboard.lvdash.json`
 
 The dashboard has the following pages:
