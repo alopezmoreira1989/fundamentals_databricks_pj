@@ -28,12 +28,14 @@
 
 # COMMAND ----------
 
+import json
 import time
 
 ORACLE_TIMEOUT = 3600   # 14 is network-bound (golden set, rate-limited SEC fetch)
 RECON_TIMEOUT  = 3600   # 35 joins financials_raw (~80M rows) — Spark-heavy
 
-results = []   # (step, ok, detail)
+results = []          # (step, ok, detail)
+_recon_summary = None  # JSON string 35 passes back via dbutils.notebook.exit (divergence report)
 
 # COMMAND ----------
 
@@ -57,7 +59,7 @@ except Exception as e:
 
 _t0 = time.monotonic()
 try:
-    dbutils.notebook.run("../30__analysis/35__reconcile_filings", timeout_seconds=RECON_TIMEOUT)
+    _recon_summary = dbutils.notebook.run("../30__analysis/35__reconcile_filings", timeout_seconds=RECON_TIMEOUT)
     results.append(("35 reconcile", True, f"{(time.monotonic() - _t0) / 60:.1f} min"))
 except Exception as e:
     results.append(("35 reconcile", False, str(e)[:200]))
@@ -74,6 +76,21 @@ print("  92__reconciliation_job — summary")
 print("=" * 60)
 for step, ok, detail in results:
     print(f"  {'✓' if ok else '✗'}  {step:<14}  {detail}")
+
+# Surface 35's divergence report at the orchestrator level too — a scheduled run's own output
+# should be self-explanatory without drilling into the child notebook run. Non-fatal: parse
+# failure or a missing summary (e.g. 35 failed before reaching its exit call) just skips this.
+if _recon_summary:
+    try:
+        _rs = json.loads(_recon_summary)
+        print(f"  Divergence vs run_id={_rs['prev_run_id']}: "
+              f"{_rs['new_clusters']} new cluster(s), {_rs['grown_clusters']} grown cluster(s) "
+              f"({_rs['total_findings']} total open findings)")
+        if _rs["new_clusters"] or _rs["grown_clusters"]:
+            print("  ⚠ New/growing divergences detected — triage via main.config.reconciliation_open "
+                  "(see the external-benchmark-validation skill).")
+    except Exception as _e:
+        print(f"  (could not parse reconciliation summary: {_e})")
 print("=" * 60)
 
 # A failed step is surfaced as a hard error so the Job is marked FAILED (alerts fire). The
