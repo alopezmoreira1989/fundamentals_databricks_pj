@@ -350,6 +350,10 @@ def test_listing_search_and_sector_and_index_narrow(artifacts_from_fixtures):
     assert sectors  # non-empty picker
     _, sector_total = repo.list_page(sector=sectors[0], page_size=1)
     assert 0 < sector_total <= all_total
+    countries = repo.available_countries()
+    assert countries  # non-empty picker
+    _, country_total = repo.list_page(country=countries[0], page_size=1)
+    assert 0 < country_total <= all_total
     _, sp_total = repo.list_page(index="sp500", page_size=1)
     _, r3_total = repo.list_page(index="r3000", page_size=1)
     assert 0 < sp_total <= r3_total <= all_total
@@ -388,6 +392,7 @@ def test_screen_table_pivots_columns_over_the_universe(artifacts_from_fixtures):
         assert set(r.values) == set(cols)  # every row carries a slot per column
     tickers = [r.ticker for r in page.rows]
     assert tickers == sorted(tickers)  # default sort: ticker asc
+    assert any(r.country for r in page.rows)  # country threaded through the DuckDB pivot
 
 
 def test_screen_table_filters_and_sorts_by_metric(artifacts_from_fixtures):

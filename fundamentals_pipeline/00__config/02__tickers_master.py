@@ -806,6 +806,21 @@ master["founded"] = master["ticker"].map(founded_map).astype("object")
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ## 2e. Accounting standard + reporting currency (multi-market foundation)
+# MAGIC
+# MAGIC Static for now: every ticker in the current universe is a US SEC filer reporting under
+# MAGIC US-GAAP in USD. These columns exist so later multi-market work (IFRS 20-F filers, non-US
+# MAGIC markets) has somewhere to record a different value per ticker — no probing, no per-ticker
+# MAGIC logic yet.
+
+# COMMAND ----------
+
+master["accounting_standard"] = "us-gaap"
+master["reporting_currency"]  = "USD"
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## 3. Write to Delta
 
 # COMMAND ----------
@@ -825,6 +840,8 @@ schema = StructType([
     StructField("employees",   LongType(),    True),
     StructField("website",     StringType(),  True),
     StructField("founded",     IntegerType(), True),
+    StructField("accounting_standard", StringType(), False),
+    StructField("reporting_currency",  StringType(), False),
 ])
 
 sdf = spark.createDataFrame(master, schema=schema)

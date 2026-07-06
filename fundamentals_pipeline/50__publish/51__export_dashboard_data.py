@@ -37,7 +37,7 @@ import pandas as pd
 # sys.path manipulation.
 from fundamentals_pipeline import schemas as _schemas
 
-SCHEMA_VERSION = 9   # +company-info (description/exchange/country/employees/website/founded) on ticker_meta
+SCHEMA_VERSION = 10  # +accounting_standard/reporting_currency (multi-market foundation) on ticker_meta
 FY_YEARS       = 10
 QUARTERS       = 12
 PRICE_YEARS    = 10                              # daily-price retention window (calendar years)
@@ -62,6 +62,7 @@ tickers_df = spark.sql(f"""
     SELECT
       t.ticker, t.company, t.sector, t.industry, t.has_logo,
       t.description, t.exchange, t.country, t.employees, t.website, t.founded,
+      t.accounting_standard, t.reporting_currency,
       COALESCE(t.is_favorite, false) AS is_favorite,
       COALESCE(t.in_sp500,    false) AS in_sp500,
       COALESCE(t.in_r3000,    false) AS in_r3000
@@ -93,6 +94,8 @@ ticker_meta = [
         "employees":   None if pd.isna(r.employees) else int(r.employees),
         "website":     r.website     or "",
         "founded":     None if pd.isna(r.founded)   else int(r.founded),
+        "accounting_standard": r.accounting_standard or "",
+        "reporting_currency":  r.reporting_currency  or "",
         "is_favorite": bool(r.is_favorite),
         "in_sp500":    bool(r.in_sp500),
         "in_r3000":    bool(r.in_r3000),

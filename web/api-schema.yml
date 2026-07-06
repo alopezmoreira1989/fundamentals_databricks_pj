@@ -15,6 +15,11 @@ paths:
       summary: List companies (paginated table)
       parameters:
       - in: query
+        name: country
+        schema:
+          type: string
+        description: Exact country filter.
+      - in: query
         name: index
         schema:
           type: string
@@ -326,6 +331,9 @@ components:
         industry:
           type: string
           nullable: true
+        country:
+          type: string
+          nullable: true
         metric_value:
           type: number
           format: double
@@ -337,6 +345,7 @@ components:
           type: boolean
           nullable: true
       required:
+      - country
       - fiscal_year
       - has_logo
       - industry

@@ -24,7 +24,7 @@ PAGE_SIZE = 50
 # Descriptive (non-metric) columns that can be sorted on, as (sort key, header label). The
 # sort keys match what ``CompanyListingRepository`` whitelists for the scope table.
 _DESC_COLUMNS = (("ticker", "Ticker"), ("name", "Company"), ("sector", "Sector"),
-                 ("industry", "Industry"))
+                 ("industry", "Industry"), ("country", "Country"))
 _SORT_KEYS_DESC = frozenset(k for k, _ in _DESC_COLUMNS)
 
 
@@ -120,6 +120,7 @@ def screen_page(request: HttpRequest) -> HttpResponse:
     search = request.GET.get("q", "").strip()
     sector = request.GET.get("sector", "").strip()
     index = request.GET.get("index", "").strip()
+    country = request.GET.get("country", "").strip()
     page = _parse_page(request.GET.get("page"))
 
     # Selected display columns + metric filters, with the legacy single-metric URL folded in.
@@ -146,6 +147,7 @@ def screen_page(request: HttpRequest) -> HttpResponse:
         search=search,
         sector=sector,
         index=index,
+        country=country,
         columns=display_cols,
         filters=filters,
         sort=SortSpec(key=sort_key, descending=descending),
@@ -159,7 +161,7 @@ def screen_page(request: HttpRequest) -> HttpResponse:
     # State-carrying param pairs. `base_pairs` (no page/sort/dir) drives the sort-header links;
     # `state_pairs` (adds the active sort) drives the pagination links.
     base_pairs: list[tuple[str, str]] = []
-    for k, v in (("q", search), ("sector", sector), ("index", index)):
+    for k, v in (("q", search), ("sector", sector), ("index", index), ("country", country)):
         if v:
             base_pairs.append((k, v))
     for c in cols:
@@ -205,9 +207,11 @@ def screen_page(request: HttpRequest) -> HttpResponse:
         {
             "metrics": services.available_metrics(),
             "sectors": services.available_sectors(),
+            "countries": services.available_countries(),
             "q": search,
             "sector": sector,
             "index": index,
+            "country": country,
             "cols": cols,
             "sort_key": sort_key,
             "sort_dir": "desc" if descending else "asc",
