@@ -563,7 +563,74 @@ print(f"✓ View refreshed: {OPEN_VIEW} (latest run_id, status=OPEN)")
 
 # COMMAND ----------
 
-# MAGIC %md ## 5. Export — clustered open findings → parquet (the review gate's source)
+# MAGIC %md ## 5. Divergence report — flag new/growing clusters vs the previous run (non-fatal)
+# MAGIC
+# MAGIC Compares this run's OPEN clusters `(issue_class, concept, stmt, root_cause_hypothesis)`
+# MAGIC against the immediately preceding `run_id` in `{FINDINGS}`. Two signals, both **printed only**
+# MAGIC — a growing/new divergence is a signal for a human to triage at the per-cluster gate (see the
+# MAGIC `external-benchmark-validation` skill), not a reason to fail a scheduled Job:
+# MAGIC - **NEW** — a cluster key that was not OPEN in the previous run.
+# MAGIC - **GROWN** — an existing cluster whose ticker count grew past both `GROWTH_MIN_ABS` and
+# MAGIC   `GROWTH_MIN_PCT`, or whose severity increased (low→med→high).
+
+# COMMAND ----------
+
+GROWTH_MIN_ABS = 5      # absolute new-ticker threshold to flag growth
+GROWTH_MIN_PCT = 0.20   # relative growth threshold (20%)
+_SEV_RANK = {"low": 0, "med": 1, "high": 2}
+_CLUSTER_KEY = ["issue_class", "concept", "stmt", "root_cause_hypothesis"]
+
+_prev_run_id = spark.sql(
+    f"SELECT MAX(run_id) AS prev_run_id FROM {FINDINGS} WHERE run_id < '{run_id}'"
+).collect()[0]["prev_run_id"]
+
+
+def _cluster_summary(rid: str) -> pd.DataFrame:
+    return spark.sql(f"""
+        SELECT issue_class, concept, stmt, root_cause_hypothesis, severity,
+               COUNT(DISTINCT ticker) AS n_tickers
+        FROM {FINDINGS}
+        WHERE run_id = '{rid}' AND status = 'OPEN'
+        GROUP BY issue_class, concept, stmt, root_cause_hypothesis, severity
+    """).toPandas()
+
+
+print(f"{'─' * 20} Divergence report {'─' * 20}")
+if _prev_run_id is None:
+    _new_clusters, _grown_clusters = pd.DataFrame(), pd.DataFrame()
+    print("ℹ No previous run_id found — divergence report skipped (first run).")
+else:
+    _cur_summary  = _cluster_summary(run_id)
+    _prev_summary = _cluster_summary(_prev_run_id)
+    _merged = _cur_summary.merge(_prev_summary, on=_CLUSTER_KEY, how="left", suffixes=("_cur", "_prev"))
+
+    _new_clusters = _merged[_merged["n_tickers_prev"].isna()]
+
+    _existing = _merged.dropna(subset=["n_tickers_prev"]).copy()
+    _existing["n_tickers_prev"] = _existing["n_tickers_prev"].astype(int)
+    _existing["ticker_growth"]  = _existing["n_tickers_cur"] - _existing["n_tickers_prev"]
+    _sev_grew = _existing["severity_cur"].map(_SEV_RANK) > _existing["severity_prev"].map(_SEV_RANK)
+    _ticker_grew = (_existing["ticker_growth"] >= GROWTH_MIN_ABS) & \
+                   (_existing["ticker_growth"] >= _existing["n_tickers_prev"] * GROWTH_MIN_PCT)
+    _grown_clusters = _existing[_ticker_grew | _sev_grew]
+
+    print(f"  vs prior run_id={_prev_run_id}")
+    if len(_new_clusters):
+        print(f"  🚩 NEW clusters: {len(_new_clusters)}")
+        print(_new_clusters[_CLUSTER_KEY + ["severity_cur", "n_tickers_cur"]].to_string(index=False))
+    else:
+        print("  ✓ No new clusters vs previous run.")
+    if len(_grown_clusters):
+        print(f"  ⚠ GROWING clusters: {len(_grown_clusters)}")
+        print(_grown_clusters[_CLUSTER_KEY +
+              ["severity_prev", "severity_cur", "n_tickers_prev", "n_tickers_cur"]].to_string(index=False))
+    else:
+        print("  ✓ No clusters grew past threshold vs previous run.")
+print("─" * 59)
+
+# COMMAND ----------
+
+# MAGIC %md ## 6. Export — clustered open findings → parquet (the review gate's source)
 # MAGIC
 # MAGIC Clustering key `(issue_class, concept, stmt, root_cause_hypothesis)` so e.g. 200 tickers
 # MAGIC missing Cost of Revenue collapse to one review item. The markdown review (generated later,
@@ -622,7 +689,7 @@ print(_clusters[["issue_class", "concept", "stmt", "severity", "n_tickers", "n_r
 
 # COMMAND ----------
 
-# MAGIC %md ## 6. Summary
+# MAGIC %md ## 7. Summary
 
 # COMMAND ----------
 
@@ -632,3 +699,22 @@ spark.sql(f"""
     GROUP BY issue_class, severity
     ORDER BY issue_class, severity
 """).display()
+
+# COMMAND ----------
+
+# MAGIC %md ## 8. Exit — pass a compact summary back to the orchestrator
+# MAGIC
+# MAGIC `92__reconciliation_job` invokes this notebook via `dbutils.notebook.run`, which only gets
+# MAGIC back whatever is passed to `dbutils.notebook.exit` — without this, the orchestrator's own
+# MAGIC output would have no visibility into the divergence report at all (a human would have to open
+# MAGIC this child notebook run separately).
+
+# COMMAND ----------
+
+dbutils.notebook.exit(json.dumps({
+    "run_id":         run_id,
+    "prev_run_id":    _prev_run_id,
+    "total_findings": int(_enriched.count()),
+    "new_clusters":   int(len(_new_clusters)),
+    "grown_clusters": int(len(_grown_clusters)),
+}))
