@@ -1,20 +1,25 @@
-"""Request-scoped observability middleware.
+"""Request-scoped observability + admin-hardening middleware.
 
 :class:`RequestLogMiddleware` assigns (or honours an upstream) request id, times each request,
 emits one structured access-log record per request, and echoes the id back as ``X-Request-ID``
 so a client/proxy can correlate a response with its server-side log line. The id is published on
 the :data:`config.log.request_id_var` context var, so *every* log record emitted while the
 request is in flight — not just this access log — carries the same ``request_id``.
+
+:class:`AdminIPAllowlistMiddleware` restricts ``ADMIN_URL_PATH`` to an operator-configured IP
+allowlist (see GitHub issue #181, item 3 — admin exposure).
 """
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import time
 import uuid
 from collections.abc import Callable
 
-from django.http import HttpRequest, HttpResponse
+from django.conf import settings
+from django.http import HttpRequest, HttpResponse, HttpResponseForbidden
 
 from config.log import request_id_var
 
@@ -74,3 +79,41 @@ class RequestLogMiddleware:
             )
         except Exception:  # pragma: no cover - defensive; logging must not break the request
             logger.warning("access-log emission failed", exc_info=True)
+
+
+def _client_ip(request: HttpRequest) -> str:
+    # Behind Render/Fly's single reverse-proxy hop, the proxy APPENDS the real client IP to
+    # X-Forwarded-For rather than replacing it, so trusting only the entry NUM_PROXIES hops from
+    # the right (default 1) means a client can't spoof an earlier hop to bypass the allowlist.
+    xff = request.META.get("HTTP_X_FORWARDED_FOR", "")
+    hops = [h.strip() for h in xff.split(",") if h.strip()]
+    if hops:
+        num_proxies = getattr(settings, "NUM_PROXIES", 1) or 1
+        return hops[max(len(hops) - num_proxies, 0)]
+    return request.META.get("REMOTE_ADDR", "")
+
+
+class AdminIPAllowlistMiddleware:
+    """403s a request under ``ADMIN_URL_PATH`` whose client IP isn't in ``ADMIN_IP_ALLOWLIST``.
+
+    No-ops (allows everything through) when the allowlist is empty — the default, so local dev
+    and a fresh prod deploy (before a static admin-access IP is known) are never locked out by
+    accident; enforcement is opt-in. Both settings are read fresh per request rather than cached
+    at ``__init__`` — Django builds the middleware chain once at process start, so caching here
+    would go stale under ``override_settings``/pytest-django's ``settings`` fixture.
+    """
+
+    def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]) -> None:
+        self.get_response = get_response
+
+    def __call__(self, request: HttpRequest) -> HttpResponse:
+        allowlist: list[str] = settings.ADMIN_IP_ALLOWLIST
+        if allowlist and request.path.startswith(f"/{settings.ADMIN_URL_PATH}"):
+            try:
+                addr = ipaddress.ip_address(_client_ip(request))
+            except ValueError:
+                return HttpResponseForbidden("Forbidden")
+            networks = [ipaddress.ip_network(cidr, strict=False) for cidr in allowlist]
+            if not any(addr in net for net in networks):
+                return HttpResponseForbidden("Forbidden")
+        return self.get_response(request)
