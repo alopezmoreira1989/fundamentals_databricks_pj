@@ -58,6 +58,30 @@ def as_of_eligible(as_of: date | None, rebalance_date: date | None) -> bool:
     return as_of <= rebalance_date
 
 
+def latest_price_asof(
+    dates: list[date | None], prices: list[Number], as_of: date | None
+) -> float | None:
+    """The most recent ``prices[i]`` whose ``dates[i] <= as_of`` — last-known-value pricing with
+    no look-ahead. Mirrors (as a pure, unit-testable reference) the entry/exit price selection
+    ``70__backtest/71__run_backtest.py`` performs in Spark: filter to dates on/before the as-of
+    date, then take the latest one. ``dates`` need not be sorted or aligned 1:1 with a single
+    ticker's history — a duplicate date is resolved arbitrarily (matching Spark's `F.max` over
+    ties, which is likewise unspecified-but-deterministic-per-run).
+
+    ``None`` if ``as_of`` is ``None`` or no ``(date, price)`` pair qualifies (nothing knowable
+    yet, or every candidate price is missing/NaN).
+    """
+    if as_of is None:
+        return None
+    candidates = [
+        (d, p) for d, p in zip(dates, prices, strict=True)
+        if d is not None and d <= as_of and not _is_missing(p)
+    ]
+    if not candidates:
+        return None
+    return float(max(candidates, key=lambda dp: dp[0])[1])
+
+
 # ── predicate evaluation ──────────────────────────────────────────────────────────
 def passes_predicates(metrics: dict[str, Number], predicates: list) -> bool:
     """True iff every ``[metric, op, threshold]`` predicate holds for ``metrics``.
