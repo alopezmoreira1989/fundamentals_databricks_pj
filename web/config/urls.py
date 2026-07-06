@@ -3,6 +3,7 @@
 The home page is a static landing template (``TemplateView``) so no app needs view logic
 in Phase 1. App URLconfs are mounted in their dedicated phases.
 """
+from django.conf import settings
 from django.contrib import admin
 from django.urls import include, path
 from django.views.generic import TemplateView
@@ -13,7 +14,8 @@ from drf_spectacular.views import (
 )
 
 urlpatterns = [
-    path("admin/", admin.site.urls),
+    # Path is env-configurable (ADMIN_URL_PATH, default "admin/") — see #181 item 3.
+    path(settings.ADMIN_URL_PATH, admin.site.urls),
     # Liveness/readiness probes at the site root (before content routes), for the platform
     # health check and uptime monitor.
     path("", include("apps.health.urls")),

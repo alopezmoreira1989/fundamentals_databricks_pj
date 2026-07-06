@@ -20,6 +20,15 @@ SECRET_KEY = env("DJANGO_SECRET_KEY", default="dev-insecure-change-me")
 DEBUG = env.bool("DJANGO_DEBUG", default=False)
 ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS", default=[])
 
+# ── Admin hardening (#181 item 3: admin exposure) ────────────────────────────────────
+# Env-configurable path so an operator can move it off the well-known default in prod without a
+# code change; unset ⇒ unchanged "admin/" (local-dev default). Normalized to a single trailing
+# slash regardless of how the env var is supplied.
+ADMIN_URL_PATH = env("ADMIN_URL_PATH", default="admin/").strip("/") + "/"
+# IP/CIDR allowlist enforced by config.middleware.AdminIPAllowlistMiddleware. Empty (default) ⇒
+# the middleware no-ops (allow all) — see that class's docstring for why.
+ADMIN_IP_ALLOWLIST = env.list("ADMIN_IP_ALLOWLIST", default=[])
+
 DJANGO_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
@@ -52,6 +61,9 @@ INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 MIDDLEWARE = [
     # Outermost: assign the request id + emit the structured access log around everything else.
     "config.middleware.RequestLogMiddleware",
+    # Early (before Session/Csrf/Auth) so a blocked /admin/ hit is cheap and still logged by
+    # RequestLogMiddleware above.
+    "config.middleware.AdminIPAllowlistMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
