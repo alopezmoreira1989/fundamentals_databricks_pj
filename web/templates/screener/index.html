@@ -30,6 +30,15 @@
           <option value="r3000" {% if index == "r3000" %}selected{% endif %}>Russell 3000</option>
         </select>
       </div>
+      <div class="col-6 col-md-4">
+        <label for="country" class="form-label">Country</label>
+        <select id="country" name="country" class="form-select">
+          <option value="">All countries</option>
+          {% for c in countries %}
+            <option value="{{ c }}" {% if c == country %}selected{% endif %}>{{ c }}</option>
+          {% endfor %}
+        </select>
+      </div>
 
       <div class="col-12 col-lg-5">
         <label for="col" class="form-label">Columns <span class="text-muted small">(ctrl/⌘-click for several)</span></label>
@@ -106,6 +115,7 @@
                 <td>{{ item.row.name|default:"—" }}</td>
                 <td class="text-muted">{{ item.row.sector|default:"—" }}</td>
                 <td class="text-muted">{{ item.row.industry|default:"—" }}</td>
+                <td class="text-muted">{{ item.row.country|default:"—" }}</td>
                 {% for cell in item.cells %}
                   <td class="text-end font-monospace">{{ cell.0|metric_value:cell.1 }}</td>
                 {% endfor %}

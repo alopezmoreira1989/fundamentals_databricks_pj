@@ -129,6 +129,7 @@ class CompanyListRow:
     name: str
     sector: str | None = None
     industry: str | None = None
+    country: str | None = None
     metric_value: float | None = None
     fiscal_year: int | None = None
     has_logo: bool | None = None
@@ -168,6 +169,7 @@ class ScreenTableRow:
     name: str
     sector: str | None
     industry: str | None
+    country: str | None
     has_logo: bool | None
     values: Mapping[str, float | None]
 

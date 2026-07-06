@@ -19,6 +19,7 @@ def list_companies(
     search: str = "",
     sector: str = "",
     index: str = "",
+    country: str = "",
     metric: str = "",
     min_value: float | None = None,
     max_value: float | None = None,
@@ -30,6 +31,7 @@ def list_companies(
         search=search,
         sector=sector,
         index=index,
+        country=country,
         metric=metric,
         min_value=min_value,
         max_value=max_value,
@@ -44,6 +46,7 @@ def screen_table(
     search: str = "",
     sector: str = "",
     index: str = "",
+    country: str = "",
     columns: Sequence[str] = (),
     filters: Sequence[MetricFilter] = (),
     sort: SortSpec | None = None,
@@ -56,6 +59,7 @@ def screen_table(
         search=search,
         sector=sector,
         index=index,
+        country=country,
         columns=columns,
         filters=filters,
         sort=sort,
@@ -67,6 +71,11 @@ def screen_table(
 def available_sectors() -> tuple[str, ...]:
     """Sector names the user can filter on (for the picker)."""
     return CompanyListingRepository().available_sectors()
+
+
+def available_countries() -> tuple[str, ...]:
+    """Country names the user can filter on (for the picker)."""
+    return CompanyListingRepository().available_countries()
 
 
 def run_screen(

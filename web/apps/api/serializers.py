@@ -52,6 +52,7 @@ class CompanyListRowSerializer(serializers.Serializer):
     name = serializers.CharField()
     sector = serializers.CharField(allow_null=True)
     industry = serializers.CharField(allow_null=True)
+    country = serializers.CharField(allow_null=True)
     metric_value = serializers.FloatField(allow_null=True)
     fiscal_year = serializers.IntegerField(allow_null=True)
     has_logo = serializers.BooleanField(allow_null=True)

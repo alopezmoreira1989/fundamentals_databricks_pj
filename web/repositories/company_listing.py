@@ -44,7 +44,7 @@ _METRIC_PAGE_SQL = """
 
 # Descriptive columns of the screener table that can be sorted on (they live on the in-memory
 # scope table, not the metrics pivot). Any other sort key must name a selected metric column.
-_SORTABLE_DESCRIPTIVE = ("ticker", "name", "sector", "industry")
+_SORTABLE_DESCRIPTIVE = ("ticker", "name", "sector", "industry", "country")
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,8 +85,15 @@ class CompanyListingRepository(DuckDBRepository):
         }
         return tuple(sorted(sectors))
 
+    def available_countries(self) -> tuple[str, ...]:
+        """Distinct non-empty country names in the universe, alphabetical (for the filter picker)."""
+        countries = {
+            c for rec in load_meta().get("tickers", []) if (c := rec.get("country"))
+        }
+        return tuple(sorted(countries))
+
     def _scope(
-        self, *, search: str, sector: str, index: str
+        self, *, search: str, sector: str, index: str, country: str = ""
     ) -> list[dict[str, Any]]:
         """Universe rows passing the descriptive filters, sorted by ticker (deterministic paging)."""
         needle = search.strip().upper()
@@ -95,6 +102,8 @@ class CompanyListingRepository(DuckDBRepository):
         for rec in load_meta().get("tickers", []):
             ticker = rec.get("ticker", "")
             if sector and rec.get("sector") != sector:
+                continue
+            if country and rec.get("country") != country:
                 continue
             if flag and not rec.get(flag):
                 continue
@@ -110,6 +119,7 @@ class CompanyListingRepository(DuckDBRepository):
         search: str = "",
         sector: str = "",
         index: str = "",
+        country: str = "",
         metric: str = "",
         min_value: float | None = None,
         max_value: float | None = None,
@@ -122,7 +132,7 @@ class CompanyListingRepository(DuckDBRepository):
         ``metric`` the scoped tickers are filtered/ordered/paged by that metric's latest-FY
         value inside DuckDB. Returns ``(rows, total)``.
         """
-        scope = self._scope(search=search, sector=sector, index=index)
+        scope = self._scope(search=search, sector=sector, index=index, country=country)
         offset = max(0, (page - 1) * page_size)
 
         if not metric:
@@ -134,6 +144,7 @@ class CompanyListingRepository(DuckDBRepository):
                     name=rec.get("company", ""),
                     sector=rec.get("sector"),
                     industry=rec.get("industry"),
+                    country=rec.get("country"),
                     has_logo=_has_logo(rec),
                 )
                 for rec in window
@@ -188,6 +199,7 @@ class CompanyListingRepository(DuckDBRepository):
                 name=by_ticker[ticker].get("company", ""),
                 sector=by_ticker[ticker].get("sector"),
                 industry=by_ticker[ticker].get("industry"),
+                country=by_ticker[ticker].get("country"),
                 metric_value=value,
                 fiscal_year=fiscal_year,
                 has_logo=_has_logo(by_ticker[ticker]),
@@ -203,6 +215,7 @@ class CompanyListingRepository(DuckDBRepository):
         search: str = "",
         sector: str = "",
         index: str = "",
+        country: str = "",
         columns: Sequence[str] = (),
         filters: Sequence[MetricFilter] = (),
         sort: SortSpec | None = None,
@@ -211,12 +224,12 @@ class CompanyListingRepository(DuckDBRepository):
     ) -> ScreenTablePage:
         """One page of the multi-metric screener table.
 
-        The descriptive scope (search/sector/index over the meta universe) is pushed into a
-        DuckDB temp table; each selected/​filtered metric's latest-FY value is pivoted per ticker
-        in DuckDB, the metric filters and the sort/pagination are all applied there. Only the
-        page's rows (≤ ``page_size``) ever cross back into Python. Returns the rows, the total
-        match count, and the ordered display columns (with units, for formatting)."""
-        scope = self._scope(search=search, sector=sector, index=index)
+        The descriptive scope (search/sector/index/country over the meta universe) is pushed
+        into a DuckDB temp table; each selected/​filtered metric's latest-FY value is pivoted
+        per ticker in DuckDB, the metric filters and the sort/pagination are all applied there.
+        Only the page's rows (≤ ``page_size``) ever cross back into Python. Returns the rows,
+        the total match count, and the ordered display columns (with units, for formatting)."""
+        scope = self._scope(search=search, sector=sector, index=index, country=country)
         offset = max(0, (page - 1) * page_size)
         sort = sort or SortSpec()
 
@@ -236,6 +249,7 @@ class CompanyListingRepository(DuckDBRepository):
                 rec.get("company", ""),
                 rec.get("sector"),
                 rec.get("industry"),
+                rec.get("country"),
                 _has_logo(rec),
             )
             for rec in scope
@@ -245,15 +259,16 @@ class CompanyListingRepository(DuckDBRepository):
             con.execute("DROP TABLE IF EXISTS scoped")
             con.execute(
                 "CREATE TEMP TABLE scoped"
-                " (ticker VARCHAR, name VARCHAR, sector VARCHAR, industry VARCHAR, has_logo BOOLEAN)"
+                " (ticker VARCHAR, name VARCHAR, sector VARCHAR, industry VARCHAR,"
+                " country VARCHAR, has_logo BOOLEAN)"
             )
-            con.executemany("INSERT INTO scoped VALUES (?, ?, ?, ?, ?)", scope_rows)
+            con.executemany("INSERT INTO scoped VALUES (?, ?, ?, ?, ?, ?)", scope_rows)
 
             units = self._metric_units(con, all_metrics)
             cte, cte_params = self._pivot_cte(all_metrics, alias)
             where, where_params = self._filter_clause(filters, alias)
             select_cols = ", ".join(f"p.{alias[m]}" for m in display_metrics)
-            projection = "s.ticker, s.name, s.sector, s.industry, s.has_logo" + (
+            projection = "s.ticker, s.name, s.sector, s.industry, s.country, s.has_logo" + (
                 f", {select_cols}" if select_cols else ""
             )
             from_join = (
@@ -280,8 +295,9 @@ class CompanyListingRepository(DuckDBRepository):
                 name=row[1],
                 sector=row[2],
                 industry=row[3],
-                has_logo=row[4],
-                values={m: row[5 + i] for i, m in enumerate(display_metrics)},
+                country=row[4],
+                has_logo=row[5],
+                values={m: row[6 + i] for i, m in enumerate(display_metrics)},
             )
             for row in hits
         )
