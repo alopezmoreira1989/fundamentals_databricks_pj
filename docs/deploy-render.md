@@ -1,10 +1,10 @@
-# Deploying the web layer to Render (free tier) + Aiven PostgreSQL
+# Deploying the web layer to Render (free tier) + Neon PostgreSQL
 
 The Django `web/` app runs on Render as a single containerized web service, with its Postgres
-database hosted separately on Aiven. Both have a real, permanent free tier that needs no credit
+database hosted separately on Neon. Both have a real, permanent free tier that needs no credit
 card — the combination this project targets for a zero-cost, recruiter-visible deployment.
 (`fly.toml` / `docs/deploy-fly.md` remain in the repo as an alternative if you ever want Fly
-instead; Render + Aiven is the primary path.)
+instead; Render + Neon is the primary path.)
 
 | File | Purpose |
 | --- | --- |
@@ -13,38 +13,39 @@ instead; Render + Aiven is the primary path.)
 | `web/docker/entrypoint.prod.sh` | Optionally migrates (`RUN_MIGRATIONS_ON_BOOT=true`, Render-only — see **Migrations** below), warms the artifact cache (non-fatal), then execs gunicorn on `$PORT`. |
 
 The app reads its analytical data from the published GitHub Release parquet artifacts (via
-DuckDB, cached on the machine's local disk) and stores user/app data in **PostgreSQL** (Aiven).
+DuckDB, cached on the machine's local disk) and stores user/app data in **PostgreSQL** (Neon).
 No Databricks access at request time.
 
-## Why Render + Aiven, not one platform
+## Why Render + Neon, not one platform
 
-Render's own managed Postgres is free for 90 days only, then it's deleted. Aiven's free
-PostgreSQL plan (1 GB storage/RAM, 1 CPU) has **no time limit and needs no card** — pairing it
-with Render's free web service avoids a forced migration 90 days in. The trade-off: Aiven and
-Render live in different clouds, so there's one extra network hop between the app and its
-database (both still terminate TLS; latency is small compared to the DuckDB artifact queries
-anyway).
+Render's own managed Postgres is free for 90 days only, then it's deleted. Neon's free
+PostgreSQL plan (0.5 GB storage, autosuspending compute) has **no time limit and needs no card** —
+pairing it with Render's free web service avoids a forced migration 90 days in. The trade-off:
+Neon and Render live in different clouds, so there's one extra network hop between the app and
+its database (both still terminate TLS; latency is small compared to the DuckDB artifact queries
+anyway), and Neon's compute suspends after ~5 min idle on the free plan (see Gotchas).
 
 ## Prerequisites
 
 - A Render account (https://render.com) — no card required for the free plan.
-- An Aiven account (https://aiven.io) — no card required for the free plan.
+- A Neon account (https://neon.tech) — no card required for the free plan.
 - Run Render deploys from the repo root's `render.yaml` (Blueprint), or configure the same
   settings by hand in the Render dashboard.
 
-## One-time setup: Aiven for PostgreSQL
+## One-time setup: Neon for PostgreSQL
 
-1. Sign up / log in at https://aiven.io, create (or use) a project.
-2. **Services -> Create service -> PostgreSQL**. Free plan: you cannot pick a cloud/region — that's
-   expected, only the Free plan is restricted this way.
-3. Name the service (e.g. `fundamentals-db`) and create it. Status goes `Rebuilding` -> `Running`
-   (a minute or two).
-4. Open the service, go to **Overview -> Quick connect**, and copy the connection string. It looks
-   like:
+1. Sign up / log in at https://neon.tech, create a project (pick a region close to your Render
+   region).
+2. Neon creates a default database and role for you immediately — no separate "create service"
+   step.
+3. Open the project, go to **Connection Details**, and copy the connection string. Prefer the
+   **Pooled connection** toggle (host ends in `-pooler`) — it fronts Neon's own PgBouncer, which
+   tolerates the free tier's autosuspend/cold-start and connection bursts better than a direct
+   connection. It looks like:
    ```
-   postgres://avnadmin:<password>@<host>.aivencloud.com:<port>/defaultdb?sslmode=require
+   postgresql://<user>:<password>@<endpoint>-pooler.<region>.aws.neon.tech/<dbname>?sslmode=require
    ```
-   Keep `?sslmode=require` — Aiven requires TLS, and `django-environ`'s `env.db()` passes that
+   Keep `?sslmode=require` — Neon requires TLS, and `django-environ`'s `env.db()` passes that
    query parameter straight through to the `postgres` backend, so no code change is needed for SSL.
 
 ## One-time setup: Render
@@ -60,7 +61,7 @@ anyway).
    | `DJANGO_SECRET_KEY` | `python -c "import secrets;print(secrets.token_urlsafe(64))"` |
    | `DJANGO_ALLOWED_HOSTS` | `fundamentals-web.onrender.com` (your actual `*.onrender.com` host, plus any custom domain) |
    | `DJANGO_CSRF_TRUSTED_ORIGINS` | `https://fundamentals-web.onrender.com` (scheme-qualified; add custom domains too) |
-   | `DATABASE_URL` | the Aiven connection string from above (with `?sslmode=require`) |
+   | `DATABASE_URL` | the Neon connection string from above (with `?sslmode=require`) |
    | `SENTRY_DSN` | optional; leave empty to disable error tracking |
 
    `DJANGO_ALLOWED_HOSTS` **must** include the host Render serves the app under, or Django rejects
@@ -111,11 +112,11 @@ curl https://fundamentals-web.onrender.com/readyz    # {"status":"ready", "check
 Or open the dashboard -> service -> **Logs** for structured JSON access/error logs, one line per
 request (`config.middleware.RequestLogMiddleware`).
 
-To sanity-check the Aiven connection directly (e.g. from your own machine, useful when debugging a
+To sanity-check the Neon connection directly (e.g. from your own machine, useful when debugging a
 `/readyz` DB-check failure):
 
 ```sh
-psql "postgres://avnadmin:<password>@<host>.aivencloud.com:<port>/defaultdb?sslmode=require" -c "select 1"
+psql "postgresql://<user>:<password>@<endpoint>.neon.tech/<dbname>?sslmode=require" -c "select 1"
 ```
 
 ## Operations
@@ -143,21 +144,23 @@ psql "postgres://avnadmin:<password>@<host>.aivencloud.com:<port>/defaultdb?sslm
   (`SECURE_REDIRECT_EXEMPT`) so they aren't 301'd to https and marked unhealthy.
 - **The artifact cache is ephemeral** (instance-local, re-warmed on boot) — intentional, it's
   derivable from the Release.
-- **Aiven free-plan connection cap**: the free Postgres plan has a modest max-connections limit.
-  `DJANGO_CONN_MAX_AGE=60` (already the default) reuses connections across requests instead of
-  reconnecting each time, which keeps a single free-tier Render instance well under that cap
-  without needing a separate pooler (e.g. PgBouncer) at this scale.
-- **`DATABASE_URL` must keep `?sslmode=require`** — Aiven refuses unencrypted connections; dropping
+- **Neon free-plan autosuspend**: the compute endpoint suspends after ~5 min of inactivity and
+  wakes on the next query, adding a few hundred ms to ~1-2s of cold-start latency to that request.
+  Use the **pooled** connection string (`-pooler` host) — it's built to tolerate this and
+  connection bursts better than a direct connection. `DJANGO_CONN_MAX_AGE=60` (already the
+  default) reuses connections across requests instead of reconnecting each time.
+- **`DATABASE_URL` must keep `?sslmode=require`** — Neon refuses unencrypted connections; dropping
   the query string from the copied connection string breaks the DB connection at boot.
 
 ## Troubleshooting
 
 | Symptom | Likely cause | Fix |
 | --- | --- | --- |
-| `/readyz` returns 503, `checks` shows a database failure | `DATABASE_URL` wrong/missing, or Aiven service not `Running` yet | Re-copy the connection string from Aiven's Quick Connect page; confirm the Aiven service status |
+| `/readyz` returns 503, `checks` shows a database failure | `DATABASE_URL` wrong/missing, or the Neon project suspended/not ready | Re-copy the connection string from Neon's Connection Details pane; confirm the Neon project status |
 | Every request 400s | Render's `*.onrender.com` host (or custom domain) not in `DJANGO_ALLOWED_HOSTS` | Add the exact host Render serves under |
 | Login/signup POST returns 403 | Host missing from `DJANGO_CSRF_TRUSTED_ORIGINS`, or missing the `https://` scheme | Add the scheme-qualified origin |
 | First request after a deploy is very slow / times out | Free-plan cold start (instance was asleep) or boot-time migrate + artifact-cache warm | Expected on free tier; retry, or add an uptime pinger (see Operations) |
 | New migration isn't applied after deploy | `RUN_MIGRATIONS_ON_BOOT` unset/false | Confirm it's `"true"` in the service's Environment tab (already set by `render.yaml` for a fresh Blueprint deploy) |
 | SSL error connecting to Postgres | `?sslmode=require` dropped from `DATABASE_URL` | Restore it — see Gotchas above |
-| Local `docker compose` dev stack broken | Unrelated to Render — see `web/docker/docker-compose.yml`, uses its own local Postgres, no Aiven/Render env needed | `docker compose -f web/docker/docker-compose.yml up --build` |
+| First DB query after idle is slow (~1-2s) | Neon free-tier compute was suspended and just woke up | Expected on the free tier; use the pooled (`-pooler`) connection string, which handles this better |
+| Local `docker compose` dev stack broken | Unrelated to Render — see `web/docker/docker-compose.yml`, uses its own local Postgres, no Neon/Render env needed | `docker compose -f web/docker/docker-compose.yml up --build` |

@@ -2,7 +2,7 @@
 # with the repo root as context (the image installs the sibling `fundamentals_pipeline` package).
 #
 # Postgres is intentionally NOT Render-managed — Render's free Postgres expires after 90 days.
-# Pair this service with a free Aiven for PostgreSQL instance instead (no card, no time limit) and
+# Pair this service with a free Neon PostgreSQL project instead (no card, no time limit) and
 # paste its connection string into the DATABASE_URL secret below. Full runbook: docs/deploy-render.md.
 #
 # Deploy: push this file, then in the Render dashboard "New +" -> "Blueprint", point it at this
@@ -35,7 +35,7 @@ services:
         sync: false
       - key: DJANGO_CSRF_TRUSTED_ORIGINS
         sync: false
-      - key: DATABASE_URL          # Aiven for PostgreSQL connection string (?sslmode=require)
+      - key: DATABASE_URL          # Neon PostgreSQL connection string (?sslmode=require)
         sync: false
       - key: SENTRY_DSN            # optional; inert if omitted
         sync: false
