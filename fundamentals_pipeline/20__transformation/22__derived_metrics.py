@@ -856,6 +856,15 @@ spark.sql(f"""
 
 final_long.createOrReplaceTempView("incoming_metrics")
 
+# `unpivot()` drops NULL-valued metrics before they ever reach `incoming_metrics` (NULL = "absent",
+# no row stored). Combined with `raw`/`_raw_full` above always reading the FULL financials table
+# (no tickers_override in this notebook — every run recomputes the entire universe), that means a
+# row already in `target` whose metric later recomputes to NULL (e.g. a leverage-formula fix that
+# now treats a missing debt tag as NULL instead of 0) has no corresponding source row: `WHEN MATCHED`
+# can't fire (no match) and a plain MERGE has no other path to remove it, so the stale value would
+# persist forever even though the current code no longer produces it. `WHEN NOT MATCHED BY SOURCE`
+# deletes exactly those orphans. Safe here specifically because source is a full-universe rebuild
+# each run — a partial/incremental source would incorrectly delete untouched tickers.
 spark.sql(f"""
     MERGE INTO {metrics_tbl} AS target
     USING incoming_metrics AS source
@@ -871,6 +880,9 @@ spark.sql(f"""
     WHEN NOT MATCHED THEN
         INSERT (ticker, company, fiscal_year, metric, value)
         VALUES (source.ticker, source.company, source.fiscal_year, source.metric, source.value)
+
+    WHEN NOT MATCHED BY SOURCE THEN
+        DELETE
 """)
 
 print(f"✓ MERGE complete → {metrics_tbl}")
