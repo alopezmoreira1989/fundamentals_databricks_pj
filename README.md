@@ -243,7 +243,7 @@ To modify them: edit the JSON, commit + push, and the next pipeline run rebuilds
 
 | Table | Description |
 |---|---|
-| `{CATALOG}.config.tickers` | Active ticker universe (S&P 500 + Russell 3000 + favorites), with a per-ticker `sector` column (GICS) — precedence Wikipedia GICS (S&P) → normalized IWV → favorites → NULL |
+| `{CATALOG}.config.tickers` | Active ticker universe (S&P 500 + Russell 3000 + favorites), with a per-ticker `sector` column (GICS) — precedence Wikipedia GICS (S&P) → normalized IWV → favorites → NULL. Also carries yfinance-sourced `industry`/`description`/`exchange`/`country`/`employees`/`website`/`founded`, and static `accounting_standard`/`reporting_currency` (`"us-gaap"`/`"USD"` for the current US-only universe — multi-market foundation, not yet used for FX or reconciliation) |
 | `{CATALOG}.config.concept_hierarchy` | Accounting concept hierarchy |
 | `{CATALOG}.config.metrics_hierarchy` | Derived metrics hierarchy |
 | `{CATALOG}.{SCHEMA}.financials_raw` | Append-only audit log of all SEC scrapes (10-K + 10-Q) |
