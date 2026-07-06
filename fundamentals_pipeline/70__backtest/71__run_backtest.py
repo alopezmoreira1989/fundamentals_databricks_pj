@@ -200,6 +200,18 @@ pdf = pdf.merge(_nxt[["ticker", "fiscal_year", "exit_adj", "exit_date"]],
                 on=["ticker", "fiscal_year"], how="left")
 pdf["holding_return"] = pdf["exit_adj"] / pdf["entry_adj"] - 1.0
 
+# Chronological-anomaly guard (#163): "next fiscal year's entry" assumes filing order tracks
+# fiscal-year order, which a late or restated 10-K can break — FY Y's own as-of date can then
+# land AFTER FY (Y+1)'s, making the "exit" predate the "entry". A backwards-dated pair isn't a
+# measurable forward holding, so null it out (same treatment as a genuinely missing exit) rather
+# than let it corrupt that cohort-year's return. Rare (~0.05% of rows historically); surfaced in
+# the coverage/sanity report below.
+_bad_order = pdf["exit_date"].notna() & (pdf["exit_date"] <= pdf["entry_date"])
+if _bad_order.any():
+    print(f"⚠ {int(_bad_order.sum())} row(s) with exit_date <= entry_date (late/restated 10-K) "
+          f"— excluded from forward-return calc.")
+    pdf.loc[_bad_order, "holding_return"] = np.nan
+
 # SPY benchmark — daily series collected to the driver (one ticker, tiny), as-of via searchsorted.
 _spy = (
     spark.table(prices_tbl).filter(F.col("ticker") == BENCHMARK)
@@ -428,3 +440,97 @@ if summary_rows:
     """).display()
 else:
     print("⊘ No backtest results produced (empty universe or no qualifying cohorts).")
+
+# COMMAND ----------
+
+# MAGIC %md ## 7. Coverage + sanity report (non-fatal, #163)
+# MAGIC
+# MAGIC Read-only diagnostics over this run's own computed data — printed only, never raises (a
+# MAGIC flag here means "look at this", not "abort the run"; `backtest_results`/`backtest_summary`
+# MAGIC are already committed by this point).
+# MAGIC
+# MAGIC - **No-look-ahead, asserted on the real data** — `fundamentals_pipeline/backtest.py`'s
+# MAGIC   `as_of_date`/`as_of_eligible`/`latest_price_asof` are unit-tested in isolation, but this
+# MAGIC   Spark-native pipeline re-derives the same as-of/entry-price logic natively rather than
+# MAGIC   calling them, so nothing previously tied the two together. This checks the actual `pdf`
+# MAGIC   this run produced: every row's `entry_date <= as_of_date`, and `exit_date > entry_date`
+# MAGIC   wherever an exit exists.
+# MAGIC - **Coverage** — per archetype, years covered and cohort-size distribution.
+# MAGIC - **Benchmark alignment** — the benchmark's own price-date range vs. the backtest's
+# MAGIC   entry/exit window, and the NULL-rate of `benchmark_return` where a holding return exists.
+# MAGIC - **Sanity bounds** — flags an archetype summary with an implausible CAGR/Sharpe/drawdown.
+
+# COMMAND ----------
+
+print("=" * 20 + " Coverage + sanity report " + "=" * 20)
+
+# ── No-look-ahead invariant, asserted on the real computed data ──────────────────────────
+_bad_asof = pdf[pdf["entry_date"] > pdf["as_of_date"]]
+if len(_bad_asof):
+    print(f"🚩 NO-LOOK-AHEAD VIOLATION: {len(_bad_asof)} row(s) priced AFTER their as-of date:")
+    print(_bad_asof[["ticker", "fiscal_year", "entry_date", "as_of_date"]].head(5).to_string(index=False))
+else:
+    print(f"✓ No-look-ahead: entry_date <= as_of_date holds for all {len(pdf):,} priced rows.")
+
+_has_exit = pdf["exit_date"].notna()
+_bad_exit = pdf[_has_exit & (pdf["exit_date"] <= pdf["entry_date"])]
+if len(_bad_exit):
+    print(f"🚩 EXIT-BEFORE-ENTRY: {len(_bad_exit)} row(s) with exit_date <= entry_date:")
+    print(_bad_exit[["ticker", "fiscal_year", "entry_date", "exit_date"]].head(5).to_string(index=False))
+else:
+    print(f"✓ Exit-after-entry holds for all {int(_has_exit.sum()):,} rows with a measurable exit.")
+
+# ── Coverage per archetype ────────────────────────────────────────────────────────────────
+print("\n-- Coverage per archetype --")
+_series_by_archetype: dict[str, list[dict]] = {}
+for _r in series_rows:
+    _series_by_archetype.setdefault(_r["archetype"], []).append(_r)
+
+for _name in ARCHETYPES:
+    _rows = _series_by_archetype.get(_name, [])
+    if not _rows:
+        print(f"  {_name}: no qualifying cohorts")
+        continue
+    _sizes = [_r["n_holdings"] for _r in _rows]
+    print(f"  {_name}: {len(_rows)} yr(s) [{_rows[0]['fiscal_year']}-{_rows[-1]['fiscal_year']}], "
+          f"n_holdings min={min(_sizes)} max={max(_sizes)} avg={sum(_sizes) / len(_sizes):.1f}")
+
+# ── Benchmark alignment ────────────────────────────────────────────────────────────────────
+print("\n-- Benchmark alignment --")
+if not HAS_BENCHMARK:
+    print(f"  ⊘ {BENCHMARK} absent from {prices_tbl} — all benchmark columns are NULL by design.")
+else:
+    _spy_min_d, _spy_max_d = _spy["date"].min(), _spy["date"].max()
+    # exit_date is object-dtype with a NaT/NaN mix (rows with no next-FY exit yet) — dropna()
+    # before max()/min(), since comparing a bare NaN float against date objects raises.
+    _bt_min_d, _bt_max_d = pdf["entry_date"].min(), pdf["exit_date"].dropna().max()
+    print(f"  {BENCHMARK} price coverage: {_spy_min_d} .. {_spy_max_d}")
+    print(f"  Backtest date span:        {_bt_min_d} .. {_bt_max_d}")
+    if pd.notna(_bt_min_d) and pd.Timestamp(_bt_min_d) < pd.Timestamp(_spy_min_d):
+        print(f"  ⚠ Backtest entries start before {BENCHMARK}'s own price history — earliest "
+              f"years' benchmark_return will be NULL.")
+    if pd.notna(_bt_max_d) and pd.Timestamp(_bt_max_d) > pd.Timestamp(_spy_max_d):
+        print(f"  ⚠ Backtest exits extend past {BENCHMARK}'s latest priced date — most recent "
+              f"year's benchmark_return will be NULL.")
+    _bench_null_rate = pdf.loc[pdf["holding_return"].notna(), "benchmark_return"].isna().mean()
+    print(f"  benchmark_return NULL rate (of rows with a holding_return): {_bench_null_rate:.1%}")
+
+# ── Summary sanity bounds (non-fatal) ──────────────────────────────────────────────────────
+print("\n-- Summary sanity bounds --")
+_CAGR_BOUND, _SHARPE_BOUND, _MDD_BOUND = 1.0, 5.0, -0.95   # |100%| CAGR, |5| Sharpe, -95% drawdown
+_flagged = False
+for _row in summary_rows:
+    _issues = []
+    if _row["cagr"] is not None and abs(_row["cagr"]) > _CAGR_BOUND:
+        _issues.append(f"CAGR={_row['cagr']:.1%}")
+    if _row["sharpe"] is not None and abs(_row["sharpe"]) > _SHARPE_BOUND:
+        _issues.append(f"Sharpe={_row['sharpe']:.2f}")
+    if _row["max_drawdown"] is not None and _row["max_drawdown"] < _MDD_BOUND:
+        _issues.append(f"MaxDD={_row['max_drawdown']:.1%}")
+    if _issues:
+        _flagged = True
+        print(f"  ⚠ {_row['archetype']}: implausible {', '.join(_issues)} — review predicates/data.")
+if not _flagged:
+    print("  ✓ All archetype summary metrics within plausible bounds.")
+
+print("=" * 67)
