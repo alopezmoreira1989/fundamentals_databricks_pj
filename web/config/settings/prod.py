@@ -10,7 +10,7 @@ WARNING). Nothing here is environment-specific beyond what the env provides.
 from config.observability import init_sentry
 
 from .base import *  # noqa: F403
-from .base import MIDDLEWARE, env
+from .base import MIDDLEWARE, REST_FRAMEWORK, env
 
 DEBUG = False
 
@@ -40,9 +40,20 @@ SECURE_CONTENT_TYPE_NOSNIFF = True
 # https://fundamentals-web.onrender.com, https://fundamentals.example.com).
 CSRF_TRUSTED_ORIGINS = env.list("DJANGO_CSRF_TRUSTED_ORIGINS", default=[])
 
-# Proxy hop count so REMOTE_ADDR-derived client IP (used by the API rate throttle) is read from
-# the correct X-Forwarded-For entry. Render/Fly each add a single proxy hop; override if that changes.
+# Proxy hop count so REMOTE_ADDR-derived client IP (used by the API rate throttle and
+# config.middleware.AdminIPAllowlistMiddleware) is read from the correct X-Forwarded-For entry.
+# Render/Fly each add a single proxy hop; override if that changes.
+#
+# Exposed BOTH as a bare setting (AdminIPAllowlistMiddleware reads settings.NUM_PROXIES directly)
+# AND injected into REST_FRAMEWORK below — DRF's AnonRateThrottle (rest_framework.throttling.
+# SimpleRateThrottle.get_ident) only ever reads NUM_PROXIES via api_settings, which resolves from
+# settings.REST_FRAMEWORK, NOT from a bare top-level Django setting. Without this, DRF silently
+# falls back to trusting the entire raw X-Forwarded-For value as the client identity — for a
+# single real proxy hop that happens to still work, but it means a client can bypass the anon
+# rate limit by sending an arbitrary fake X-Forwarded-For prefix per request (the proxy appends,
+# not replaces, so "fake-id, real-ip" changes identity every time the fake prefix changes).
 NUM_PROXIES = env.int("DJANGO_NUM_PROXIES", default=1)
+REST_FRAMEWORK = {**REST_FRAMEWORK, "NUM_PROXIES": NUM_PROXIES}
 
 # ── cookies ───────────────────────────────────────────────────────────────────────────
 SESSION_COOKIE_SECURE = True
