@@ -266,6 +266,59 @@ STATEMENTS = {
     "Cash Flow":        CASH_FLOW,
 }
 
+# ── IFRS (ifrs-full) fallback tags ────────────────────────────────────────────
+# For 20-F (foreign private issuer) and 40-F (Canadian MJDS) filers that report under the
+# `ifrs-full` XBRL namespace instead of (or alongside) `us-gaap`. IFRS tag names are NOT the
+# same strings as their us-gaap counterparts (`Revenue` not `Revenues`, `ProfitLoss` not
+# `NetIncomeLoss`, ...) so this cannot be a bare namespace swap — each entry here is a
+# per-concept ifrs-full tag, tried as a lower-priority fallback in `extract_series_multi`
+# AFTER every us-gaap tag for that label has come back empty for a given period.
+#
+# Verified 2026-07-06 by cross-referencing the real `ifrs-full` concept lists pulled live from
+# TM (Toyota), VALE (Vale S.A.) and INFY (Infosys) `companyfacts` (221/380/300 real concepts
+# respectively) against the labels below — every tag here is confirmed present with non-empty
+# unit series for at least one of those three filers. Deliberately a v1 CORE-STATEMENT slice:
+# concepts not listed here (EPS variants, granular debt/buyback cash-flow chains, ...) get no
+# ifrs-full fallback yet and stay empty for ifrs-only filers, same as before this change — no
+# regression, just an acknowledged gap for a future PR. Don't add unverified guesses here (see
+# the `xbrl-concept-mapping` skill: coalesce lists are for confirmed tags, never a blind guess).
+#
+# The parent-vs-including-NCI split already distinguished for us-gaap (`ProfitLoss` →
+# "Net Income (incl NCI)", `NetIncomeLoss` → "Net Income") maps cleanly onto IFRS's own
+# `ProfitLoss` vs `ProfitLossAttributableToOwnersOfParent` distinction — same pattern, no new
+# label semantics.
+IFRS_FALLBACK_TAGS = {
+    "Revenue":                    "Revenue",
+    "Cost of Revenue":            "CostOfSales",
+    "Gross Profit":               "GrossProfit",
+    "Operating Income":           "ProfitLossFromOperatingActivities",
+    "Income Tax":                 "IncomeTaxExpenseContinuingOperations",
+    "Net Income":                 "ProfitLossAttributableToOwnersOfParent",
+    "Net Income (incl NCI)":      "ProfitLoss",
+    "R&D Expense":                "ResearchAndDevelopmentExpense",
+    "SG&A Expense":               "SellingGeneralAndAdministrativeExpense",
+    "Interest Expense":           ["FinanceCosts", "InterestExpense"],
+    "Total Assets":               "Assets",
+    "Total Current Assets":       "CurrentAssets",
+    "Total Liabilities":          "Liabilities",
+    "Total Current Liabilities":  "CurrentLiabilities",
+    "Total Stockholders Equity":  "EquityAttributableToOwnersOfParent",
+    "Total Equity (incl NCI)":    "Equity",
+    "Cash & Equivalents":         "CashAndCashEquivalents",
+    "Inventory":                  "Inventories",
+    "Accounts Receivable":        "TradeReceivables",
+    "PP&E Net":                   "PropertyPlantAndEquipment",
+    "Goodwill":                   "Goodwill",
+    "Intangible Assets":          "IntangibleAssetsOtherThanGoodwill",
+    "Retained Earnings":          "RetainedEarnings",
+    "Operating Cash Flow":        "CashFlowsFromUsedInOperatingActivities",
+    "Investing Cash Flow":        "CashFlowsFromUsedInInvestingActivities",
+    "Financing Cash Flow":        "CashFlowsFromUsedInFinancingActivities",
+    "CapEx":                      "PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities",
+    "Depreciation & Amortization":"DepreciationAndAmortisationExpense",
+    "Dividends Paid":             "DividendsPaid",
+}
+
 # ── Aggregate-or-sum concepts ──────────────────────────────────────────────────
 # Concepts whose value is an AGGREGATE over genuinely additive sub-lines. At ingestion (11),
 # extract_series_aggregate_or_sum resolves these PER FILING CONTEXT: use the `aggregate` tag when

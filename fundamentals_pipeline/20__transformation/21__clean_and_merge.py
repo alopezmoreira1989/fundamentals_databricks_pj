@@ -8,7 +8,9 @@
 # MAGIC Quarterly rows are handled by `21b__derive_quarterly` afterwards.
 # MAGIC
 # MAGIC **Logic for FY:**
-# MAGIC - Filter raw to `form IN ('10-K','10-K/A')` AND `fp = 'FY'`, EXCLUDING the sub-annual
+# MAGIC - Filter raw to `form IN ('10-K','10-K/A','20-F','20-F/A','40-F','40-F/A')` AND `fp = 'FY'`
+# MAGIC   (20-F/40-F = foreign private issuer / Canadian MJDS annual reports — always annual-only,
+# MAGIC   no 10-Q equivalent, so `21b__derive_quarterly` naturally never sees them), EXCLUDING the sub-annual
 # MAGIC   shapes a 10-K re-reports under `fp='FY'` (`Q_standalone`, `YTD_6M`, `YTD_9M`) — so only
 # MAGIC   annual shapes (`FY_or_TTM` + `other_Nd` transition stubs) compete (for flows); OR
 # MAGIC   `kind = 'stock'` AND snapshot at fiscal year-end
@@ -60,7 +62,8 @@ spark.sql(f"""
         period_end   DATE      NOT NULL,
         value        DOUBLE,
         is_derived   BOOLEAN,
-        scraped_at   TIMESTAMP
+        scraped_at   TIMESTAMP,
+        tag_namespace STRING
     )
     USING DELTA
     PARTITIONED BY (ticker, stmt)
@@ -69,6 +72,14 @@ spark.sql(f"""
         'delta.autoOptimize.autoCompact'   = 'true'
     )
 """)
+
+# `CREATE TABLE IF NOT EXISTS` above is a no-op once `{full_tbl}` already exists — it does NOT
+# retroactively add `tag_namespace` to a table created before this column existed. Unlike the
+# `financials_raw` append (which auto-evolves via `mergeSchema=true`), the MERGE below does NOT
+# auto-evolve schema, so the column must exist before the MERGE references it. Idempotent guard:
+# only runs the ALTER on a genuinely older table (existing columns won't include `tag_namespace`).
+if "tag_namespace" not in spark.table(full_tbl).columns:
+    spark.sql(f"ALTER TABLE {full_tbl} ADD COLUMNS (tag_namespace STRING)")
 
 # COMMAND ----------
 
@@ -105,7 +116,7 @@ raw = raw.localCheckpoint(eager=True)
 flow_fy = (
     raw
     .filter(F.col("kind").isin("flow_additive", "flow_nonadditive"))
-    .filter(F.col("form").isin("10-K", "10-K/A"))
+    .filter(F.col("form").isin("10-K", "10-K/A", "20-F", "20-F/A", "40-F", "40-F/A"))
     .filter(F.col("fp") == "FY")
     .filter(~F.col("period_shape").isin("snapshot", "Q_standalone", "YTD_6M", "YTD_9M"))
     .filter(F.col("value").isNotNull())
@@ -119,7 +130,7 @@ flow_fy = (
 stock_fy = (
     raw
     .filter(F.col("kind") == "stock")
-    .filter(F.col("form").isin("10-K", "10-K/A"))
+    .filter(F.col("form").isin("10-K", "10-K/A", "20-F", "20-F/A", "40-F", "40-F/A"))
     .filter(F.col("fp") == "FY")
     .filter(F.col("period_shape") == "snapshot")
     .filter(F.col("value").isNotNull())
@@ -231,6 +242,7 @@ clean_fy = incoming.select(
     F.col("value"),
     F.lit(False).alias("is_derived"),
     F.col("scraped_at"),
+    F.col("tag_namespace"),
 )
 
 # clean_fy is consumed 3× downstream: count() here, the MERGE in §3, and `_kept_keys` for
@@ -262,17 +274,18 @@ spark.sql(f"""
 
     WHEN MATCHED AND (target.value != source.value OR target.period_end != source.period_end) THEN
         UPDATE SET
-            target.value      = source.value,
-            target.period_end = source.period_end,
-            target.company    = source.company,
-            target.scraped_at = source.scraped_at
+            target.value         = source.value,
+            target.period_end    = source.period_end,
+            target.company       = source.company,
+            target.scraped_at    = source.scraped_at,
+            target.tag_namespace = source.tag_namespace
 
     WHEN NOT MATCHED THEN
         INSERT (ticker, company, stmt, concept, fiscal_year, period_type,
-                period_end, value, is_derived, scraped_at)
+                period_end, value, is_derived, scraped_at, tag_namespace)
         VALUES (source.ticker, source.company, source.stmt, source.concept,
                 source.fiscal_year, source.period_type, source.period_end,
-                source.value, source.is_derived, source.scraped_at)
+                source.value, source.is_derived, source.scraped_at, source.tag_namespace)
 """)
 
 print(f"✓ MERGE complete → {full_tbl} (FY rows)")
@@ -299,7 +312,7 @@ print(f"✓ MERGE complete → {full_tbl} (FY rows)")
 _flow_fy_all = (
     raw
     .filter(F.col("kind").isin("flow_additive", "flow_nonadditive"))
-    .filter(F.col("form").isin("10-K", "10-K/A"))
+    .filter(F.col("form").isin("10-K", "10-K/A", "20-F", "20-F/A", "40-F", "40-F/A"))
     .filter(F.col("fp") == "FY")
     .filter(F.col("period_shape") != "snapshot")
     .filter(F.col("value").isNotNull())
