@@ -81,12 +81,20 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "config.wsgi.application"
 
-DATABASES = {
-    "default": env.db(
-        "DATABASE_URL",
-        default="postgres://postgres:postgres@db:5432/fundamentals",
-    ),
-}
+# PostgreSQL (Neon in production, or the docker-compose `db` service) when DATABASE_URL is set;
+# otherwise a zero-setup local SQLite file — no Docker/Postgres server needed to just run the
+# app. `prod.py` overrides this with `env.db("DATABASE_URL")` and NO default, so production
+# fails loudly at boot if the variable is missing rather than silently falling back here.
+_database_url = env("DATABASE_URL", default="")
+if _database_url:
+    DATABASES = {"default": env.db("DATABASE_URL")}
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": BASE_DIR / "db.sqlite3",
+        }
+    }
 
 # Custom user model, set BEFORE the first migration (no migration ran in Phase 1/2), so the
 # project never touches Django's default User. `users` is the app *label* (the app's name is
