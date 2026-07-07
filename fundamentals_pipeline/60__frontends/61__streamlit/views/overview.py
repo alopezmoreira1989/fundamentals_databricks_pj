@@ -16,6 +16,8 @@ import html
 import re
 
 import pandas as pd
+
+from lib.currency import convert_to_usd, currency_badge, quote_currency
 from lib.format import EM_DASH, fmt_delta, fmt_kpi, is_missing
 from lib.news import fetch_yahoo_news
 from lib.prices import _price_delta, _px, prices_for
@@ -28,11 +30,20 @@ from lib.prices import _price_delta, _px, prices_for
 # ──────────────────────────────────────────────────────────────────────────────
 
 
-def render_kpi_strip(ticker: str, tmetrics: pd.DataFrame, prices: pd.DataFrame, meta: dict) -> str:
-    """Four headline KPIs: Market Cap · Price · Employees · P/E Ratio."""
+def render_kpi_strip(
+    ticker: str, tmetrics: pd.DataFrame, prices: pd.DataFrame, meta: dict,
+    fx: pd.DataFrame | None = None, usd_lens: bool = False,
+) -> str:
+    """Four headline KPIs: Market Cap · Price · Employees · P/E Ratio.
+
+    Market Cap (reporting_currency) and Price (quote currency, from the ticker's listing
+    `market`) can legitimately differ for the same ticker — each is converted/badged
+    independently against its OWN currency when `usd_lens` is on, never a single
+    ticker-level assumption. See lib/currency.py.
+    """
     cards = [
-        _market_cap_card(ticker, tmetrics),
-        _price_card(ticker, prices),
+        _market_cap_card(ticker, tmetrics, meta, fx, usd_lens),
+        _price_card(ticker, prices, meta, fx, usd_lens),
         _employees_card(ticker, meta),
         _pe_card(ticker, tmetrics),
     ]
@@ -51,7 +62,23 @@ def _latest_fy_metric(ticker: str, tmetrics: pd.DataFrame, metric: str) -> pd.Da
     return sub.sort_values("fiscal_year", ascending=False)
 
 
-def _market_cap_card(ticker: str, tmetrics: pd.DataFrame) -> str:
+def _usd_lens_convert(value: float, currency: str, as_of, fx: pd.DataFrame | None) -> tuple[float, str]:
+    """Convert one value to USD if possible; else return it unchanged with its badge.
+
+    Returns (display_value, badge_html). `currency` is already uppercased/non-empty-checked
+    by the caller; this only runs the actual conversion + badge decision.
+    """
+    if fx is None or fx.empty or is_missing(as_of):
+        return value, currency_badge(currency)
+    converted, ok = convert_to_usd(pd.Series([value]), pd.Series([currency]), pd.Series([as_of]), fx)
+    if bool(ok.iloc[0]):
+        return float(converted.iloc[0]), ""
+    return value, currency_badge(currency)
+
+
+def _market_cap_card(
+    ticker: str, tmetrics: pd.DataFrame, meta: dict, fx: pd.DataFrame | None, usd_lens: bool,
+) -> str:
     series = _latest_fy_metric(ticker, tmetrics, "Market Cap")
     if series.empty:
         return _empty_card("MARKET CAP")
@@ -67,18 +94,29 @@ def _market_cap_card(ticker: str, tmetrics: pd.DataFrame) -> str:
         prior_val = series.iloc[1]["value"]
         if not is_missing(prior_val) and prior_val != 0:
             yoy = (latest_val - prior_val) / abs(prior_val) * 100
-
     delta_label, delta_cls = fmt_delta(yoy)
+
+    ccy = (_ticker_info(ticker, meta).get("reporting_currency") or "USD").upper()
+    badge = ""
+    if ccy != "USD":
+        period_end = latest["period_end"] if "period_end" in series.columns else None
+        if usd_lens:
+            latest_val, badge = _usd_lens_convert(latest_val, ccy, period_end, fx)
+        else:
+            badge = currency_badge(ccy)
+
     return (
         '<div class="kpi">'
         '<div class="label">MARKET CAP</div>'
-        f'<div class="value">{fmt_kpi(latest_val)}</div>'
+        f'<div class="value">{fmt_kpi(latest_val)}{badge}</div>'
         f'<div class="delta {delta_cls}">{delta_label}  ·  FY {latest_fy}</div>'
         '</div>'
     )
 
 
-def _price_card(ticker: str, prices: pd.DataFrame) -> str:
+def _price_card(
+    ticker: str, prices: pd.DataFrame, meta: dict, fx: pd.DataFrame | None, usd_lens: bool,
+) -> str:
     pdf = prices_for(prices, ticker)
     if pdf is None or pdf.empty:
         return _empty_card("PRICE")
@@ -88,17 +126,27 @@ def _price_card(ticker: str, prices: pd.DataFrame) -> str:
     if is_missing(price):
         return _empty_card("PRICE")
 
+    # Ratio, so currency-invariant — compute BEFORE any USD-lens conversion of `price` below.
     chg_1d = None
     if len(pdf) >= 2:
         prev_close = pdf.iloc[-2]["close"]
         if not is_missing(prev_close) and prev_close != 0:
             chg_1d = (price - prev_close) / abs(prev_close) * 100
-
     delta_label, delta_cls = _price_delta(chg_1d)
+
+    ccy = quote_currency(_ticker_info(ticker, meta).get("market"))
+    badge = ""
+    if ccy != "USD":
+        trade_date = last["date"] if "date" in pdf.columns else None
+        if usd_lens:
+            price, badge = _usd_lens_convert(float(price), ccy, trade_date, fx)
+        else:
+            badge = currency_badge(ccy)
+
     return (
         '<div class="kpi">'
         '<div class="label">PRICE</div>'
-        f'<div class="value">{_px(float(price))}</div>'
+        f'<div class="value">{_px(float(price))}{badge}</div>'
         f'<div class="delta {delta_cls}">{delta_label}  ·  latest close</div>'
         '</div>'
     )
@@ -260,11 +308,18 @@ def render_news(items: list[dict]) -> str:
 # ──────────────────────────────────────────────────────────────────────────────
 
 
-def render_overview(ticker: str, tmetrics: pd.DataFrame, prices: pd.DataFrame, meta: dict) -> str:
+def render_overview(
+    ticker: str, tmetrics: pd.DataFrame, prices: pd.DataFrame, meta: dict,
+    fx: pd.DataFrame | None = None, usd_lens: bool = False,
+) -> str:
     """Full Overview tab as one HTML string (KPI strip + profile + recent news).
 
     The news fetch is a cached, fully-graceful network call (empty list on any failure),
     so a Yahoo outage degrades to a "no recent news" note rather than breaking the page.
     """
     news = fetch_yahoo_news(ticker)
-    return render_kpi_strip(ticker, tmetrics, prices, meta) + render_profile(ticker, meta) + render_news(news)
+    return (
+        render_kpi_strip(ticker, tmetrics, prices, meta, fx, usd_lens)
+        + render_profile(ticker, meta)
+        + render_news(news)
+    )

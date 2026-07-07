@@ -10,18 +10,33 @@ from __future__ import annotations
 
 import pandas as pd
 
+from .currency import currency_badge
 from .format import fmt_delta, fmt_kpi, fmt_metric, is_missing
 
 
-def render_kpi_strip(ticker: str, data: pd.DataFrame, metrics: pd.DataFrame) -> str:
-    """Return the full KPI strip as an HTML string."""
+def render_kpi_strip(ticker: str, data: pd.DataFrame, metrics: pd.DataFrame, meta: dict | None = None) -> str:
+    """Return the full KPI strip as an HTML string.
+
+    Market Cap is badged with its native currency when it isn't USD (e.g. a CAD-reporting
+    Canadian filer) — labeling only, no conversion; see views/overview.py for the toggle
+    that DOES convert. Revenue/Net Income/Net Margin are always in the ticker's
+    reporting_currency too but aren't badged here (out of scope — see CLAUDE.md's
+    currency-alignment convention; a full per-line-item conversion isn't built yet).
+    """
     mcap = _metric_series(metrics, ticker, "Market Cap")
     rev = _concept_series(data, ticker, "Revenue", "Income Statement")
     ni = _concept_series(data, ticker, "Net Income", "Income Statement")
     margin = _metric_series(metrics, ticker, "Net Margin %")
 
+    mcap_badge = ""
+    if meta:
+        for t in meta.get("tickers", []):
+            if isinstance(t, dict) and t.get("ticker") == ticker:
+                mcap_badge = currency_badge(t.get("reporting_currency"))
+                break
+
     cards = [
-        _card("MARKET CAP", fmt_kpi(_latest(mcap)), _yoy(mcap)),
+        _card("MARKET CAP", fmt_kpi(_latest(mcap)) + mcap_badge, _yoy(mcap)),
         _card("REVENUE", fmt_kpi(_latest(rev)), _yoy(rev)),
         _card("NET INCOME", fmt_kpi(_latest(ni)), _yoy(ni)),
         _card("NET MARGIN", fmt_metric(_latest(margin), "percent"), _yoy(margin)),

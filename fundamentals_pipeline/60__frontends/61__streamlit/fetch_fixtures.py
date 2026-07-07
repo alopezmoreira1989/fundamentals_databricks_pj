@@ -34,6 +34,7 @@ def main():
     tickers_df = spark.sql(f"""
         SELECT
             ticker, company, sector, industry,
+            country, accounting_standard, reporting_currency, market,
             COALESCE(is_favorite, false) AS is_favorite,
             COALESCE(in_sp500,    false) AS in_sp500,
             COALESCE(in_r3000,    false) AS in_r3000
@@ -53,6 +54,10 @@ def main():
             "company":     r.company,
             "sector":      r.sector,   # NULL → app maps to "Unknown"
             "industry":    r.industry, # NULL → app maps to "Unknown"
+            "country":             r.country             or "",
+            "accounting_standard": r.accounting_standard or "",
+            "reporting_currency":  r.reporting_currency  or "",
+            "market":              r.market              or "US",
             "is_favorite": bool(r.is_favorite),
             "in_sp500":    bool(r.in_sp500),
             "in_r3000":    bool(r.in_r3000),
@@ -107,6 +112,11 @@ def main():
     # close (no calendar offset), matching prod after the market_data → market_cap_asof migration.
     import pandas as pd
 
+    # unit mirrors each row's real market_cap_asof.currency (mostly USD, CAD for the
+    # USD-quote-mismatch case) — same _unit_expr guard as 51__export_dashboard_data.py, so
+    # local fixtures don't silently mislabel Canadian tickers' Market Cap as USD.
+    _mca_cols = {f.name for f in spark.table(f"{CATALOG}.{SCHEMA}.market_cap_asof").schema.fields}
+    _unit_expr = "LOWER(md.currency)" if "currency" in _mca_cols else "'usd'"
     market_cap = spark.sql(f"""
         SELECT
             md.ticker,
@@ -116,7 +126,7 @@ def main():
             CAST(NULL AS STRING)  AS category,
             CAST(NULL AS STRING)  AS subcategory,
             'Market Cap'          AS metric,
-            'usd'                 AS unit,
+            {_unit_expr}          AS unit,
             CAST(NULL AS DOUBLE)  AS sort_order,
             md.market_cap         AS value
         FROM {CATALOG}.{SCHEMA}.market_cap_asof md
@@ -126,13 +136,26 @@ def main():
     metrics = pd.concat([metrics, market_cap], ignore_index=True)
     print(f"  metrics: {len(metrics):,} rows (incl. {len(market_cap):,} Market Cap)")
 
+    # 3b. FX rates — full daily history (unfiltered by ticker; fx_rates_daily isn't
+    # ticker-keyed), mirroring 51__export_dashboard_data.py's dashboard_fx slice so a
+    # local "view in USD" toggle has real rates to convert against.
+    print("Fetching FX rates...")
+    fx_rates = spark.sql(f"""
+        SELECT base, quote, pair, date, rate
+        FROM {CATALOG}.{SCHEMA}.fx_rates_daily
+        ORDER BY base, quote, date
+    """).toPandas()
+    print(f"  fx_rates: {len(fx_rates):,} rows")
+
     # 4. Write fixtures.
     data_path   = OUT_DIR / "dashboard_data.parquet"
     metric_path = OUT_DIR / "dashboard_metrics.parquet"
+    fx_path     = OUT_DIR / "dashboard_fx.parquet"
     meta_path   = OUT_DIR / "dashboard_meta.json"
 
     financials.to_parquet(data_path, index=False)
     metrics.to_parquet(metric_path, index=False)
+    fx_rates.to_parquet(fx_path, index=False)
 
     fy_ranges = (
         financials[financials["period_type"] == "FY"]
@@ -144,13 +167,14 @@ def main():
     )
 
     meta = {
-        "schema_version":  7,
+        "schema_version":  12,  # kept in sync with 51__export_dashboard_data.py's SCHEMA_VERSION
         "build_timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "tickers":         ticker_meta,
         "fy_ranges":       fy_ranges,
         "row_counts": {
             "financials": len(financials),
             "metrics":    len(metrics),
+            "fx_rates":   len(fx_rates),
         },
         "retention": {
             "fy_years":  FY_YEARS,
@@ -162,7 +186,8 @@ def main():
     print(f"\n✓ Fixtures written to {OUT_DIR}/")
     print(f"  {data_path.name}    ({data_path.stat().st_size / 1024:.1f} KB)")
     print(f"  {metric_path.name}  ({metric_path.stat().st_size / 1024:.1f} KB)")
-    print(f"  {meta_path.name}    (schema v6)")
+    print(f"  {fx_path.name}      ({fx_path.stat().st_size / 1024:.1f} KB)")
+    print(f"  {meta_path.name}    (schema v{meta['schema_version']})")
 
 
 def _trim_recent(df, period_types: list[str], n_periods: int):

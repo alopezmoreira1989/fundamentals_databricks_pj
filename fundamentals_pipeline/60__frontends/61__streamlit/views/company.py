@@ -9,10 +9,13 @@ also works standalone. `set_page_config` / CSS injection live in the router
 from pathlib import Path
 
 import streamlit as st
+
 from lib.charts import render_bs_composition, render_cf_fcf, render_is_revenue_combo
+from lib.currency import quote_currency, usd_lens_toggle
 from lib.data import (
     app_version,
     compute_industry_benchmarks,
+    load_fx,
     load_latest_data,
     load_notes,
     load_prices,
@@ -91,14 +94,27 @@ tmetrics = metrics[metrics["ticker"] == ticker]
 
 # Selected ticker's industry (for the industry-median benchmark column) — same lookup as render_masthead.
 ticker_industry = ""
+ticker_info: dict = {}
 for t_info in meta.get("tickers", []):
     if t_info.get("ticker") == ticker:
         ticker_industry = t_info.get("industry") or ""
+        ticker_info = t_info
         break
+
+# "View in USD" toggle — only shown when this ticker actually has a non-USD currency to
+# convert (reporting_currency for Market Cap/financials, quote currency for Price). fx is
+# loaded unconditionally (own cheap cached entry) so the Overview tab always has it handy.
+ticker_currency = (ticker_info.get("reporting_currency") or "USD").upper()
+fx = load_fx()
+_ticker_has_non_usd = (
+    (ticker_info.get("reporting_currency") or "USD").upper() != "USD"
+    or quote_currency(ticker_info.get("market")) != "USD"
+)
 
 # Masthead + KPI strip — single markdown block so the spacing matches the spec.
 st.markdown(render_masthead(ticker, tdata, meta), unsafe_allow_html=True)
-st.markdown(render_kpi_strip(ticker, tdata, tmetrics), unsafe_allow_html=True)
+usd_lens = usd_lens_toggle() if _ticker_has_non_usd else False
+st.markdown(render_kpi_strip(ticker, tdata, tmetrics, meta), unsafe_allow_html=True)
 
 # Unit scale for the statement tables (IS / BS / CF / Quarterly). One control governs
 # all four. Billion = 1e9 (US short scale). Default "Units" → unchanged full-resolution USD.
@@ -123,7 +139,7 @@ tab_ov, tab_px, tab_is, tab_bs, tab_cf, tab_dm, tab_qt = st.tabs(
 )
 
 with tab_ov:
-    st.markdown(render_overview(ticker, tmetrics, prices, meta), unsafe_allow_html=True)
+    st.markdown(render_overview(ticker, tmetrics, prices, meta, fx, usd_lens), unsafe_allow_html=True)
 
 with tab_px:
     # Header text is window/frequency-aware, so reserve its slot now and fill it once both are
@@ -177,27 +193,28 @@ with tab_px:
                 "Prices publish with the next pipeline run (51 → 52).")
     else:
         pdf_win = slice_window(pdf_full, active_window)   # trailing window → KPIs + chart
-        st.markdown(render_price_kpis(pdf_win), unsafe_allow_html=True)   # 4-card strip
-        chart = price_chart(resample_prices(pdf_win, freq), ticker, freq)
+        price_ccy = quote_currency(ticker_info.get("market"))
+        st.markdown(render_price_kpis(pdf_win, price_ccy), unsafe_allow_html=True)   # 4-card strip
+        chart = price_chart(resample_prices(pdf_win, freq), ticker, freq, price_ccy)
         st.altair_chart(chart, use_container_width=True)
 
 with tab_is:
     df_is = income_statement_df(tdata, ticker)
     st.markdown(
         '<div class="panel-header"><h2>Income statement</h2>'
-        '<div class="meta">Up to 10 fiscal years · USD · concept_hierarchy.json</div></div>',
+        f'<div class="meta">Up to 10 fiscal years · {ticker_currency} · concept_hierarchy.json</div></div>',
         unsafe_allow_html=True,
     )
     # Combo chart is fixed in $B (like the Quarterly combo) → ignores the unit-scale control.
     st.markdown(render_is_revenue_combo(df_is), unsafe_allow_html=True)
-    st.markdown(render_table_html(df_is, statement="is", ticker=ticker, notes=notes, divisor=divisor, scale_word=scale_word), unsafe_allow_html=True)
+    st.markdown(render_table_html(df_is, statement="is", ticker=ticker, notes=notes, divisor=divisor, scale_word=scale_word, currency=ticker_currency), unsafe_allow_html=True)
     st.markdown(render_waterfall(df_is), unsafe_allow_html=True)
 
 with tab_bs:
     df_bs = balance_sheet_df(tdata, ticker)
     st.markdown(
         '<div class="panel-header"><h2>Balance sheet</h2>'
-        '<div class="meta">Fiscal year-end snapshots · USD</div></div>',
+        f'<div class="meta">Fiscal year-end snapshots · {ticker_currency}</div></div>',
         unsafe_allow_html=True,
     )
     # Composition chart is fixed in $B (like the Quarterly combo) → ignores the unit-scale
@@ -209,7 +226,7 @@ with tab_bs:
             key="bs_year", format_func=lambda y: f"FY {y}",
         )
         st.markdown(render_bs_composition(df_bs, bs_year), unsafe_allow_html=True)
-    st.markdown(render_table_html(df_bs, statement="bs", ticker=ticker, notes=notes, divisor=divisor, scale_word=scale_word), unsafe_allow_html=True)
+    st.markdown(render_table_html(df_bs, statement="bs", ticker=ticker, notes=notes, divisor=divisor, scale_word=scale_word, currency=ticker_currency), unsafe_allow_html=True)
     st.markdown(render_balance_check(df_bs), unsafe_allow_html=True)
 
 with tab_cf:
@@ -221,7 +238,7 @@ with tab_cf:
     )
     # OCF/FCF chart is fixed in $B (like the Quarterly combo) → ignores the unit-scale control.
     st.markdown(render_cf_fcf(df_cf), unsafe_allow_html=True)
-    st.markdown(render_table_html(df_cf, statement="cf", ticker=ticker, notes=notes, divisor=divisor, scale_word=scale_word), unsafe_allow_html=True)
+    st.markdown(render_table_html(df_cf, statement="cf", ticker=ticker, notes=notes, divisor=divisor, scale_word=scale_word, currency=ticker_currency), unsafe_allow_html=True)
 
 with tab_dm:
     st.markdown(
@@ -257,10 +274,10 @@ with tab_qt:
     df_q = quarterly_df(tdata, ticker)
     st.markdown(
         '<div class="panel-header"><h2>Quarterly</h2>'
-        '<div class="meta">Last 12 quarters · USD · YoY = same quarter prior year</div></div>',
+        f'<div class="meta">Last 12 quarters · {ticker_currency} · YoY = same quarter prior year</div></div>',
         unsafe_allow_html=True,
     )
     st.markdown(render_quarterly_combo(df_q), unsafe_allow_html=True)
-    st.markdown(render_table_html(df_q, statement="qt", ticker=ticker, notes=notes, divisor=divisor, scale_word=scale_word), unsafe_allow_html=True)
+    st.markdown(render_table_html(df_q, statement="qt", ticker=ticker, notes=notes, divisor=divisor, scale_word=scale_word, currency=ticker_currency), unsafe_allow_html=True)
 
 st.markdown(render_footnote_bar(meta, app_version()), unsafe_allow_html=True)

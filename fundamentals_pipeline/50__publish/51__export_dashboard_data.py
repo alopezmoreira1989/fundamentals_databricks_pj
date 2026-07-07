@@ -37,7 +37,7 @@ import pandas as pd
 # sys.path manipulation.
 from fundamentals_pipeline import schemas as _schemas
 
-SCHEMA_VERSION = 11  # +currency (market_cap_asof alignment) + dashboard_fx artifact (full FX history)
+SCHEMA_VERSION = 12  # +market (listing market / quote-currency source) on ticker meta
 FY_YEARS       = 10
 QUARTERS       = 12
 PRICE_YEARS    = 10                              # daily-price retention window (calendar years)
@@ -63,7 +63,7 @@ tickers_df = spark.sql(f"""
     SELECT
       t.ticker, t.company, t.sector, t.industry, t.has_logo,
       t.description, t.exchange, t.country, t.employees, t.website, t.founded,
-      t.accounting_standard, t.reporting_currency,
+      t.accounting_standard, t.reporting_currency, t.market,
       COALESCE(t.is_favorite, false) AS is_favorite,
       COALESCE(t.in_sp500,    false) AS in_sp500,
       COALESCE(t.in_r3000,    false) AS in_r3000
@@ -97,6 +97,11 @@ ticker_meta = [
         "founded":     None if pd.isna(r.founded)   else int(r.founded),
         "accounting_standard": r.accounting_standard or "",
         "reporting_currency":  r.reporting_currency  or "",
+        # Listing market ("US"/"CA") — the quote currency a ticker's PRICE trades in, which
+        # can differ from reporting_currency (e.g. a USD-reporting, CAD-quoted TSX filer).
+        # See CLAUDE.md's currency-alignment convention / QUOTE_CURRENCY_BY_MARKET in
+        # 22__derived_metrics.py, whose ground truth this mirrors.
+        "market":              r.market              or "US",
         "is_favorite": bool(r.is_favorite),
         "in_sp500":    bool(r.in_sp500),
         "in_r3000":    bool(r.in_r3000),
