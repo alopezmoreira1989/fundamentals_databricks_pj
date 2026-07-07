@@ -16,6 +16,21 @@ Databricks analytical pipeline that ingests SEC EDGAR XBRL filings (10-K/10-Q) f
 - **Balance Sheet dedup**: SEC re-reports prior snapshots in later 10-Qs. Dedup by `(ticker, concept, period_end)` keeping the latest `filed` — preserve this when touching ingestion/merge.
 - **Pricing is `period_end`-aligned, sourced from `market_prices_daily`.** `10__ingestion/12__fetch_market_data.py` writes a **daily** price store `main.financials.market_prices_daily` (one row per `(ticker, date)`; raw `close` for market cap, `adj_close` for returns). `22__derived_metrics.py` computes each FY's `market_cap` as the raw `close` on the latest trading day ≤ that FY's `period_end` × `Shares Diluted` reported as-of `period_end` — so non-December filers (AAPL/Sep, MSFT/Jun, WMT/Jan) are priced at their real fiscal close, not Dec 31. Use raw `close` (not `adj_close`) for market cap — `adj_close` would fold future splits into the historical cap.
 - **`market_cap_asof` is the period_end-aligned price/market-cap table.** `22__derived_metrics.py` persists `main.financials.market_cap_asof` (`ticker`, `fiscal_year`, `period_end`, `price_close`, `market_cap`) — the as-of-fiscal-close price and cap, keyed like the old `market_data` but on the **fiscal** (not calendar) basis. `23__intrinsic_value.py` (Margin of Safety / TTM price) and `50__publish/51__export_dashboard_data.py` (the exported `Market Cap` row) read it. New price/cap consumers should read `market_cap_asof`, not `market_data`.
+- **`main.config.tickers` identity key is `(ticker, market)`, not bare `ticker`.** A bare
+  ticker symbol is not a safe identity once a non-US source is merged in (Canadian TSX/MJDS
+  40-F filers, per the multi-market roadmap) — e.g. Magna International trades as `MG` on the
+  TSX, Mistras Group as `MG` on the NYSE. `02__tickers_master.py` sets `market` (currently a
+  static `"US"` literal for the whole universe), dedups on `(ticker, market)`, and calls
+  `fundamentals_pipeline/identity.py`'s `check_no_cross_market_collision()` before the Delta
+  write; `11__fetch_sec_xbrl.py` calls the same guard before CIK resolution. It raises
+  `CrossMarketCollisionError` (naming both conflicting rows) instead of silently overwriting
+  one company's row with another's. `market` is deliberately a **new** column, distinct from
+  the pre-existing `exchange` (Yahoo per-venue mnemonic — NYQ/NMS/NGM/...) and `country`
+  (incorporation jurisdiction) columns, which already carry live data displayed on both
+  frontends and must not be repurposed or overwritten. **Out of scope, still bare-`ticker`-keyed:**
+  `financials_raw`, `financials`, `market_prices_daily`, `market_cap_asof`, and both frontends —
+  re-keying them is real migration work for the actual Canadian-onboarding effort, not this
+  preventive guard.
 - **`market_data` is frozen legacy** — no longer rebuilt. It was the calendar-year-aligned (last raw `close` per **calendar** year × FY `Shares Diluted`) price/cap table; its 0–11mo fiscal offset distorted multiples for non-December filers, so `12` no longer writes it and all consumers were migrated to `market_cap_asof`. The table is left in place for ad-hoc back-compat queries but receives no new data. Don't add new dependencies on it.
 
 ## Operational gotchas

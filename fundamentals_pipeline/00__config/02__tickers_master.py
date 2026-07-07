@@ -71,6 +71,18 @@ except ImportError:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "yfinance"])
     import yfinance as yf  # noqa: F401
 
+# fundamentals_pipeline is normally pip-installed once per pipeline session (91's %pip cell),
+# but 02 is a MANUAL step not chained through 91 — same defensive install as lxml/yfinance
+# above, using the repo root two levels up from this notebook's CWD (00__config/).
+try:
+    from fundamentals_pipeline.identity import check_no_cross_market_collision
+except ImportError:
+    import subprocess
+    import sys
+
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "-e", "../.."])
+    from fundamentals_pipeline.identity import check_no_cross_market_collision
+
 INGEST_SP500  = True
 INGEST_R3000  = True
 
@@ -732,11 +744,23 @@ for col in bool_cols:
         master[col] = False
     master[col] = master[col].fillna(False)
 
+# `market` is the collision-guard identity key — which listing jurisdiction a ticker's row was
+# sourced from. The whole current universe is US SEC filers (SP500/R3000/favorites), so it's a
+# static literal today; a future Canadian TSX/MJDS source would set "CA" for its rows. Kept
+# separate from the display-oriented `exchange` column (Yahoo per-venue mnemonic, resolved in
+# 2c below) so this never collides with — or overwrites — that already-live display data.
+master["market"] = "US"
+
 master = (
-    master[["ticker", "company", "sector"] + bool_cols]
-    .drop_duplicates("ticker")
+    master[["ticker", "company", "sector", "market"] + bool_cols]
+    .drop_duplicates(["ticker", "market"])
     .sort_values("ticker")
 )
+
+# Fail loud if the same bare ticker symbol claims more than one market (e.g. a future Canadian
+# source colliding with an existing US ticker — Magna Intl 'MG' on the TSX vs Mistras Group
+# 'MG' on the NYSE) instead of silently overwriting one company's row with another's.
+check_no_cross_market_collision(master)
 
 print(f"\nUnified universe: {len(master):,} unique tickers")
 print(master[bool_cols].sum().to_string())
@@ -812,6 +836,9 @@ master["founded"] = master["ticker"].map(founded_map).astype("object")
 # MAGIC US-GAAP in USD. These columns exist so later multi-market work (IFRS 20-F filers, non-US
 # MAGIC markets) has somewhere to record a different value per ticker — no probing, no per-ticker
 # MAGIC logic yet.
+# MAGIC
+# MAGIC (`market` — the ticker-identity collision-guard key, `(ticker, market)` — was already set
+# MAGIC in section 2, before the first dedup; see `fundamentals_pipeline/identity.py`.)
 
 # COMMAND ----------
 
@@ -829,6 +856,7 @@ schema = StructType([
     StructField("ticker",      StringType(),  False),
     StructField("company",     StringType(),  True),
     StructField("sector",      StringType(),  True),
+    StructField("market",      StringType(),  False),
     StructField("is_favorite", BooleanType(), False),
     StructField("in_sp500",    BooleanType(), False),
     StructField("in_r3000",    BooleanType(), False),

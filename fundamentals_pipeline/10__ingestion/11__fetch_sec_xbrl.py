@@ -27,6 +27,25 @@
 
 if "ACTIVE_TICKERS" not in globals() or not ACTIVE_TICKERS:
     tickers_df = spark.table(f"{CATALOG}.config.tickers")
+
+    # Cross-market identity guard (see fundamentals_pipeline/identity.py): catches a bare
+    # ticker symbol claimed by two different markets — e.g. a future Canadian TSX source
+    # colliding with an existing US ticker — before CIK resolution runs on a corrupted table.
+    # Guarded for a table that predates the `market` column (pre-guard main.config.tickers).
+    if "market" in tickers_df.columns:
+        try:
+            from fundamentals_pipeline.identity import check_no_cross_market_collision
+        except ImportError:
+            import subprocess
+            import sys
+
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "-e", "../.."])
+            from fundamentals_pipeline.identity import check_no_cross_market_collision
+
+        check_no_cross_market_collision(
+            tickers_df.select("ticker", "market", "company").toPandas()
+        )
+
     ACTIVE_TICKERS = [row.ticker for row in tickers_df.select("ticker").collect()]
     print(f"✓ Config loaded — {len(ACTIVE_TICKERS)} active tickers from {CATALOG}.config.tickers")
 else:
