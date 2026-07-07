@@ -179,7 +179,7 @@ valuation_assumptions.json    edit valuation assumptions (WACC, growth, etc.)
       ↓
 04__metrics_hierarchy_master    builds main.config.metrics_hierarchy    (auto)
       ↓
-11__fetch_sec_xbrl              SEC API → financials_raw                   (10-K + 10-Q)
+11__fetch_sec_xbrl              SEC API → financials_raw       (10-K/10-Q + 20-F/40-F)
       ↓
 12__fetch_market_data           Yahoo Finance → market_data
       ↓
@@ -246,7 +246,7 @@ To modify them: edit the JSON, commit + push, and the next pipeline run rebuilds
 | `{CATALOG}.config.tickers` | Active ticker universe (S&P 500 + Russell 3000 + favorites), with a per-ticker `sector` column (GICS) — precedence Wikipedia GICS (S&P) → normalized IWV → favorites → NULL. Also carries yfinance-sourced `industry`/`description`/`exchange`/`country`/`employees`/`website`/`founded`, and static `accounting_standard`/`reporting_currency` (`"us-gaap"`/`"USD"` for the current US-only universe — multi-market foundation, not yet used for FX or reconciliation) |
 | `{CATALOG}.config.concept_hierarchy` | Accounting concept hierarchy |
 | `{CATALOG}.config.metrics_hierarchy` | Derived metrics hierarchy |
-| `{CATALOG}.{SCHEMA}.financials_raw` | Append-only audit log of all SEC scrapes (10-K + 10-Q) |
+| `{CATALOG}.{SCHEMA}.financials_raw` | Append-only audit log of all SEC scrapes (10-K/10-Q, plus 20-F/40-F for foreign-private-issuer / Canadian MJDS filers) |
 | `{CATALOG}.{SCHEMA}.financials` | Long-format fact table — one row per ticker / fiscal_year / period_type / concept |
 | `{CATALOG}.{SCHEMA}.market_data` | Year-end closing prices and market cap per ticker / fiscal_year |
 | `{CATALOG}.{SCHEMA}.stock_splits` | Sparse corporate-action store — one row per split (`ticker`, `split_date`, `ratio`); feeds the split-adjusted cross-year per-share computations (EPS-CAGR, Net Buyback Yield %, Piotroski no-dilution). Self-backfilled by `12` on first run |
@@ -320,13 +320,14 @@ Stores every fact returned by SEC EDGAR's XBRL API, across both annual (10-K) an
 | `kind` | STRING | `flow_additive` / `flow_nonadditive` / `stock` — drives quarterly derivation logic |
 | `fy` | INT | Fiscal year per SEC |
 | `fp` | STRING | Fiscal period per SEC: `FY` / `Q1` / `Q2` / `Q3` |
-| `form` | STRING | `10-K` / `10-Q` / `10-K/A` / `10-Q/A` |
+| `form` | STRING | `10-K` / `10-Q` / `10-K/A` / `10-Q/A` / `20-F` / `20-F/A` / `40-F` / `40-F/A` |
 | `period_start` | DATE | Start of period (NULL for stock concepts) |
 | `period_end` | DATE | End of period |
 | `period_shape` | STRING | `Q_standalone` (~90d) / `YTD_6M` / `YTD_9M` / `FY_or_TTM` / `snapshot` / `other_Xd` |
 | `value` | DOUBLE | Raw value in USD |
 | `filed` | DATE | Filing date (used for restatement dedupe — latest `filed` wins) |
 | `scraped_at` | TIMESTAMP | Fetch timestamp |
+| `tag_namespace` | STRING | XBRL taxonomy the concept resolved from: `us-gaap` (US filers) or `ifrs-full` (20-F foreign-private-issuer / 40-F Canadian MJDS filers, via the `IFRS_FALLBACK_TAGS` per-concept fallback in `01__tickers.py` — core-statement concepts only, tried after every `us-gaap` tag comes back empty for a period) |
 
 ---
 
@@ -346,6 +347,7 @@ Long-format fact table with one row per `ticker / fiscal_year / period_type / co
 | `value` | DOUBLE | Raw value in USD (or native unit for EPS/shares) |
 | `is_derived` | BOOLEAN | `true` if computed (Q4 = FY − YTD_Q3, or Q1..Q3 derived from YTD differences); `false` if reported directly |
 | `scraped_at` | TIMESTAMP | Source scrape timestamp |
+| `tag_namespace` | STRING | `us-gaap` or `ifrs-full` — see `financials_raw` above. 20-F/40-F filers are annual-only (no 10-Q equivalent), so they only ever populate `period_type='FY'` rows here |
 
 ---
 
