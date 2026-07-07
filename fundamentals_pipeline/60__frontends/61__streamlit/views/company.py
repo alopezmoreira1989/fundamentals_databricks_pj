@@ -9,7 +9,6 @@ also works standalone. `set_page_config` / CSS injection live in the router
 from pathlib import Path
 
 import streamlit as st
-
 from lib.charts import render_bs_composition, render_cf_fcf, render_is_revenue_combo
 from lib.currency import quote_currency, usd_lens_toggle
 from lib.data import (

@@ -19,6 +19,7 @@ import html
 
 import pandas as pd
 import streamlit as st
+
 from fundamentals_pipeline.fx import convert_price
 
 # Quote currency by listing market — mirrors 22__derived_metrics.py's

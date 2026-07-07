@@ -16,7 +16,6 @@ import html
 import re
 
 import pandas as pd
-
 from lib.currency import convert_to_usd, currency_badge, quote_currency
 from lib.format import EM_DASH, fmt_delta, fmt_kpi, is_missing
 from lib.news import fetch_yahoo_news

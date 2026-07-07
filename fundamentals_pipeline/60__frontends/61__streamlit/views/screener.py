@@ -16,7 +16,6 @@ from urllib.parse import quote
 
 import pandas as pd
 import streamlit as st
-
 from lib.currency import convert_to_usd, currency_badge, usd_lens_toggle
 from lib.data import load_fx
 from lib.render import _logo_dev_key, logo_dev_url
