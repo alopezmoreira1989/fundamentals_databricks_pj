@@ -265,7 +265,8 @@ def _pick_unit(units: dict) -> str:
 
 
 def extract_series(facts: dict, concept: str, kind: str, namespace: str = "us-gaap") -> pd.DataFrame:
-    """Extract all rows of one XBRL concept across 10-K/10-Q filings, classified by period shape."""
+    """Extract all rows of one XBRL concept across 10-K/10-Q (or 20-F/40-F) filings, classified
+    by period shape. `namespace` is persisted as `tag_namespace` provenance on the returned frame."""
     try:
         units    = facts["facts"][namespace][concept]["units"]
         rows     = units[_pick_unit(units)]
@@ -276,7 +277,10 @@ def extract_series(facts: dict, concept: str, kind: str, namespace: str = "us-ga
     if df.empty:
         return df
 
-    df = df[df["form"].isin(["10-K", "10-Q", "10-K/A", "10-Q/A"])].copy()
+    # 20-F: foreign private issuer annual report. 40-F: Canadian MJDS annual report. Both are
+    # annual-only (no 10-Q equivalent) — quarterly derivation (21b) already no-ops safely when
+    # a ticker has no form="10-Q"-shaped rows, so no change needed there.
+    df = df[df["form"].isin(["10-K", "10-Q", "10-K/A", "10-Q/A", "20-F", "20-F/A", "40-F", "40-F/A"])].copy()
     if df.empty:
         return df
 
@@ -294,8 +298,10 @@ def extract_series(facts: dict, concept: str, kind: str, namespace: str = "us-ga
     else:
         df = df[df["period_shape"] != "snapshot"].copy()
 
+    df["tag_namespace"] = namespace
+
     return df[[
-        "fy", "fp", "form", "start", "end", "period_shape", "val", "filed"
+        "fy", "fp", "form", "start", "end", "period_shape", "val", "filed", "tag_namespace"
     ]].rename(columns={
         "start": "period_start",
         "end":   "period_end",
@@ -303,12 +309,22 @@ def extract_series(facts: dict, concept: str, kind: str, namespace: str = "us-ga
     })
 
 
-def extract_series_multi(facts: dict, concepts, kind: str, namespace: str = "us-gaap") -> pd.DataFrame:
+def extract_series_multi(facts: dict, concepts, kind: str, namespace: str = "us-gaap",
+                          ifrs_concepts=None) -> pd.DataFrame:
     """Extract one concept from a priority list of XBRL tags, resolved PER PERIOD.
 
     `concepts` may be a single tag (str) or a list[str] of fallback tags in PRIORITY
     ORDER (index 0 = most preferred). For each reporting period we keep the value from
     the HIGHEST-priority tag that actually carries data for THAT period.
+
+    `ifrs_concepts` (optional, str or list[str]) extends the SAME priority list with
+    `ifrs-full`-namespace tag(s) at LOWER priority than every `namespace`-tag above — i.e.
+    tried only for periods where none of the primary-namespace tags resolved. This is how
+    20-F/40-F filers that report under `ifrs-full` (whose tag names differ from their us-gaap
+    counterparts — `Revenue` not `Revenues`, `ProfitLoss` not `NetIncomeLoss`, ...) get picked
+    up: existing US filers are unaffected (their us-gaap tags always resolve first, so the
+    ifrs-full entries never even get consulted), and ifrs-only filers (e.g. Infosys) fall
+    through to them exactly like any other tag-priority fallback.
 
     Why per-period and NOT first-non-empty-wins-for-the-whole-company: issuers switch
     tags across years. AT&T/VZ tag the long-term line ``LongTermDebtNoncurrent`` in old
@@ -331,14 +347,23 @@ def extract_series_multi(facts: dict, concepts, kind: str, namespace: str = "us-
     separate current-debt tag under "Short-term Debt", the current portion can be counted
     twice that year. Acceptable approximation for a leverage ratio.
     """
-    tags = [concepts] if isinstance(concepts, str) else list(concepts)
-    if len(tags) == 1:
-        # Single-tag concept (every non-debt concept): unchanged behaviour, no overhead.
-        return extract_series(facts, tags[0], kind, namespace=namespace)
+    tags      = [concepts] if isinstance(concepts, str) else list(concepts)
+    ifrs_tags = [] if ifrs_concepts is None else (
+        [ifrs_concepts] if isinstance(ifrs_concepts, str) else list(ifrs_concepts)
+    )
+    # (namespace, tag) pairs in priority order: every primary-namespace tag first (unchanged
+    # order/behaviour), then the ifrs-full fallback tag(s) at lower priority.
+    sources = [(namespace, t) for t in tags] + [("ifrs-full", t) for t in ifrs_tags]
+
+    if len(sources) == 1:
+        # Single-tag concept, no ifrs fallback (every non-debt concept without an
+        # IFRS_FALLBACK_TAGS entry): unchanged behaviour, no overhead.
+        ns, tag = sources[0]
+        return extract_series(facts, tag, kind, namespace=ns)
 
     frames = []
-    for priority, tag in enumerate(tags):
-        series = extract_series(facts, tag, kind, namespace=namespace)
+    for priority, (ns, tag) in enumerate(sources):
+        series = extract_series(facts, tag, kind, namespace=ns)
         if not series.empty:
             series = series.copy()
             series["_priority"] = priority   # 0 = most preferred
@@ -396,7 +421,7 @@ def extract_series_aggregate_or_sum(facts, aggregate_tag, component_tags, kind, 
     context with a single component sums to that component → byte-identical to the old coalesce for
     single-component filers (the overwhelming majority).
     """
-    _CTX = ["fy", "fp", "form", "period_start", "period_end", "period_shape", "filed"]
+    _CTX = ["fy", "fp", "form", "period_start", "period_end", "period_shape", "filed", "tag_namespace"]
 
     agg = extract_series(facts, aggregate_tag, kind, namespace=namespace)
 
@@ -499,8 +524,11 @@ def process_ticker(ticker: str, scraped_at_ts: datetime) -> tuple:
                     series = extract_series_aggregate_or_sum(
                         facts, _spec["aggregate"], _spec["sum"], kind)
                 else:
-                    # xbrl_concept may be a single tag (str) or a priority list[str].
-                    series = extract_series_multi(facts, xbrl_concept, kind)
+                    # xbrl_concept may be a single tag (str) or a priority list[str]. Concepts
+                    # in IFRS_FALLBACK_TAGS also get an ifrs-full fallback tried after every
+                    # us-gaap tag comes back empty (20-F/40-F filers — see IFRS_FALLBACK_TAGS).
+                    series = extract_series_multi(
+                        facts, xbrl_concept, kind, ifrs_concepts=IFRS_FALLBACK_TAGS.get(label))
                 if series.empty:
                     continue
                 # Share Repurchases is a positive cash-outflow MAGNITUDE by definition. Some filers
@@ -530,6 +558,7 @@ def process_ticker(ticker: str, scraped_at_ts: datetime) -> tuple:
         records = allf[[
             "ticker", "company", "stmt", "concept", "kind", "fy", "fp", "form",
             "period_start", "period_end", "period_shape", "value", "filed", "scraped_at",
+            "tag_namespace",
         ]].to_dict("records")
         return records, None
     except Exception as e:
@@ -557,7 +586,8 @@ if RUN_TICKERS:
             period_shape  STRING,
             value         DOUBLE,
             filed         DATE,
-            scraped_at    TIMESTAMP
+            scraped_at    TIMESTAMP,
+            tag_namespace STRING
         )
         USING DELTA
         PARTITIONED BY (ticker)
@@ -582,6 +612,7 @@ if RUN_TICKERS:
         StructField("value",         DoubleType(),    True),
         StructField("filed",         DateType(),      True),
         StructField("scraped_at",    TimestampType(), True),
+        StructField("tag_namespace", StringType(),    True),
     ])
 
 # COMMAND ----------
