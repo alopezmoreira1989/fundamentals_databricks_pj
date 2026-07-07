@@ -21,8 +21,24 @@
 
 # COMMAND ----------
 
+from datetime import datetime
+
 from pyspark.sql import functions as F
+from pyspark.sql.types import StringType, StructField, StructType, TimestampType
 from pyspark.sql.window import Window
+
+# fundamentals_pipeline is normally pip-installed once per pipeline session (91's %pip cell),
+# but 22 can also run standalone (e.g. local Databricks Connect prototyping) — same defensive
+# install pattern as 00__config/02__tickers_master.py, using the repo root two levels up from
+# this notebook's CWD (20__transformation/).
+try:
+    from fundamentals_pipeline import fx
+except ImportError:
+    import subprocess
+    import sys
+
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "-e", "../.."])
+    from fundamentals_pipeline import fx
 
 full_tbl    = f"{CATALOG}.{SCHEMA}.{TABLE}"
 market_tbl  = f"{CATALOG}.{SCHEMA}.market_data"            # legacy (deprecated; not read here)
@@ -30,6 +46,14 @@ prices_tbl  = f"{CATALOG}.{SCHEMA}.market_prices_daily"   # daily price store �
 splits_tbl  = f"{CATALOG}.{SCHEMA}.stock_splits"          # for split-adjusting cross-year share metrics
 metrics_tbl = f"{CATALOG}.{SCHEMA}.financials_metrics"
 mca_tbl     = f"{CATALOG}.{SCHEMA}.market_cap_asof"       # period_end-aligned price + market cap
+
+# Quote currency by listing market — the same style as 00__config/02__tickers_master.py's own
+# _SECTOR_NORMALIZE. Only US/CA exist today; a future market addition extends this dict, not
+# the join logic below. Used to detect a currency MISMATCH against a ticker's fundamentals
+# reporting_currency (main.config.tickers) — e.g. a USD-reporting, CAD-quoted Canadian gold
+# miner — which is a same-ticker unit-mismatch bug independent of any cross-market
+# comparability question (see fundamentals_pipeline/fx.py).
+QUOTE_CURRENCY_BY_MARKET = {"US": "USD", "CA": "CAD"}
 
 # COMMAND ----------
 
@@ -537,8 +561,159 @@ else:
         .filter(F.col("date") <= F.col("period_end"))
         .withColumn("_rn", F.row_number().over(_w_px))
         .filter(F.col("_rn") == 1)
-        .select("ticker", "fiscal_year", F.col("close").alias("asof_close"))
+        .select("ticker", "fiscal_year", "period_end", F.col("close").alias("asof_close"))
     )
+
+    # ── Currency alignment (multi-market foundation) ─────────────────────────────────
+    # A ticker's price is quoted in whatever currency its LISTING market trades in
+    # (QUOTE_CURRENCY_BY_MARKET); its fundamentals are reported in `reporting_currency`
+    # (main.config.tickers) — these can differ for the SAME ticker. market_cap = price × shares
+    # is only correct when both operands share a currency, so a mismatch here is a same-ticker
+    # unit-mismatch bug, independent of any cross-market comparability choice — the pipeline
+    # otherwise stores every value in its native reporting currency (no dual-currency columns,
+    # no blanket USD conversion; that normalization is a future FRONTEND concern). `asof_close`
+    # is converted here, BEFORE it's combined with shares below, using the FX rate dated at
+    # each row's own `period_end` — NEVER `filed`, NEVER "today's" spot rate (the currency-
+    # domain analogue of the market_data → market_cap_asof fiscal-close fix; see CLAUDE.md and
+    # fundamentals_pipeline/fx.py). Defensive: config.tickers may predate `market`/
+    # `reporting_currency` (pre-Canadian-onboarding schema) — in that case every ticker
+    # defaults to quote_currency=reporting_currency="USD" and this whole block is a no-op.
+    try:
+        _tk_ccy = spark.table(f"{CATALOG}.config.tickers")
+        _tk_cols = _tk_ccy.columns
+        _market_col = F.col("market") if "market" in _tk_cols else F.lit("US")
+        _rc_col = F.col("reporting_currency") if "reporting_currency" in _tk_cols else F.lit("USD")
+        _quote_ccy_expr = F.lit("USD")
+        for _mkt, _ccy in QUOTE_CURRENCY_BY_MARKET.items():
+            if _ccy != "USD":
+                _quote_ccy_expr = F.when(_market_col == _mkt, F.lit(_ccy)).otherwise(_quote_ccy_expr)
+        ticker_currency = _tk_ccy.select(
+            "ticker",
+            F.coalesce(_quote_ccy_expr, F.lit("USD")).alias("quote_currency"),
+            F.coalesce(_rc_col, F.lit("USD")).alias("reporting_currency"),
+        )
+    except Exception as _e:
+        print(f"⚠ Could not read config.tickers for currency alignment ({_e}) — assuming "
+              f"quote_currency=reporting_currency='USD' for every ticker.")
+        ticker_currency = None
+
+    if ticker_currency is None:
+        asof_close = asof_close.withColumn("currency", F.lit("USD")).select(
+            "ticker", "fiscal_year", "asof_close", "currency"
+        )
+    else:
+        asof_close_ccy = (
+            asof_close
+            .join(F.broadcast(ticker_currency), on="ticker", how="left")
+            .withColumn("quote_currency",     F.coalesce(F.col("quote_currency"),     F.lit("USD")))
+            .withColumn("reporting_currency", F.coalesce(F.col("reporting_currency"), F.lit("USD")))
+            .withColumn("needs_conversion",   F.col("quote_currency") != F.col("reporting_currency"))
+        )
+
+        if asof_close_ccy.filter(F.col("needs_conversion")).limit(1).count() == 0:
+            asof_close = asof_close_ccy.select(
+                "ticker", "fiscal_year", "asof_close",
+                F.col("reporting_currency").alias("currency"),
+            )
+        else:
+            try:
+                _fx = spark.table(f"{CATALOG}.{SCHEMA}.fx_rates_daily").select("base", "quote", "date", "rate")
+                _has_fx = _fx.limit(1).count() > 0
+            except Exception:
+                _has_fx = False
+
+            if not _has_fx:
+                raise fx.MissingFxRateError(
+                    "Currency conversion is needed (a ticker's quote_currency differs from its "
+                    "reporting_currency) but fx_rates_daily is missing/empty — run "
+                    "12__fetch_market_data.py first."
+                )
+
+            # As-of FX rate: latest rate dated on/before each row's own period_end — the SAME
+            # as-of principle as asof_close above, applied to the currency domain.
+            _w_fx = Window.partitionBy("ticker", "fiscal_year").orderBy(F.col("fx_date").desc())
+            _fx_bcast = F.broadcast(
+                _fx.withColumnRenamed("date", "fx_date").withColumnRenamed("rate", "fx_rate")
+            )
+            asof_close_fx = (
+                asof_close_ccy
+                .join(
+                    _fx_bcast,
+                    on=[
+                        asof_close_ccy.quote_currency     == _fx_bcast.base,
+                        asof_close_ccy.reporting_currency == _fx_bcast.quote,
+                        _fx_bcast.fx_date <= asof_close_ccy.period_end,
+                    ],
+                    how="left",
+                )
+                .withColumn("_rn", F.row_number().over(_w_fx))
+                .filter((F.col("_rn") == 1) | F.col("fx_rate").isNull())
+            )
+
+            # Hard failure: a row that NEEDS conversion but found no matching rate. Rows that
+            # don't need conversion never match the join (fx_rates_daily only stores genuinely
+            # different-currency pairs), so the `needs_conversion` guard is what separates a
+            # real gap from a row that was never supposed to join.
+            _missing = asof_close_fx.filter(F.col("needs_conversion") & F.col("fx_rate").isNull())
+            if _missing.limit(1).count() > 0:
+                _missing_rows = (
+                    _missing
+                    .select("ticker", "fiscal_year", "period_end", "quote_currency", "reporting_currency")
+                    .collect()
+                )
+                _failures_tbl = f"{CATALOG}.{SCHEMA}.ingestion_failures"
+                spark.sql(f"""
+                    CREATE TABLE IF NOT EXISTS {_failures_tbl} (
+                        ticker         STRING    NOT NULL,
+                        error_type     STRING    NOT NULL,
+                        error_message  STRING,
+                        step           STRING    NOT NULL,
+                        scraped_at     TIMESTAMP NOT NULL
+                    )
+                    USING DELTA
+                    TBLPROPERTIES (
+                        'delta.autoOptimize.optimizeWrite' = 'true',
+                        'delta.autoOptimize.autoCompact'   = 'true'
+                    )
+                """)
+                _fail_schema = StructType([
+                    StructField("ticker",        StringType(),    False),
+                    StructField("error_type",    StringType(),    False),
+                    StructField("error_message", StringType(),    True),
+                    StructField("step",          StringType(),    False),
+                    StructField("scraped_at",    TimestampType(), False),
+                ])
+                _scraped_at = datetime.utcnow()
+                _fail_records = [{
+                    "ticker": r.ticker,
+                    "error_type": "missing_fx_rate",
+                    "error_message": (
+                        f"No {r.quote_currency}->{r.reporting_currency} FX rate on/before "
+                        f"{r.period_end} (fiscal_year={r.fiscal_year})"
+                    ),
+                    "step": "currency_alignment",
+                    "scraped_at": _scraped_at,
+                } for r in _missing_rows]
+                spark.createDataFrame(_fail_records, schema=_fail_schema) \
+                     .write.mode("append").saveAsTable(_failures_tbl)
+                _first = _missing_rows[0]
+                raise fx.MissingFxRateError(
+                    f"Missing FX rate for {len(_missing_rows)} (ticker, fiscal_year) row(s) "
+                    f"needing currency conversion — logged to {_failures_tbl}. First: "
+                    f"{_first.ticker} FY{_first.fiscal_year} "
+                    f"({_first.quote_currency}->{_first.reporting_currency} as of {_first.period_end})"
+                )
+
+            asof_close = (
+                asof_close_fx
+                .withColumn(
+                    "asof_close",
+                    F.when(F.col("needs_conversion"), F.col("asof_close") * F.col("fx_rate"))
+                     .otherwise(F.col("asof_close")),
+                )
+                .select("ticker", "fiscal_year", "asof_close",
+                        F.col("reporting_currency").alias("currency"))
+            )
 
     # As-of shares: most recent Shares Diluted (ANY period_type) with period_end ≤ FY period_end;
     # FY-preferred on a tie so a normal FY uses its own reported figure, falling back across
@@ -581,6 +756,9 @@ else:
     # CALENDAR-aligned `market_data` (which `12` no longer rebuilds). Keyed by (ticker,
     # fiscal_year) like market_data, but `period_end` is the REAL fiscal close and `price_close`
     # / `market_cap` are priced as-of it (the same basis as every multiple in financials_metrics).
+    # `currency` is the ticker's `reporting_currency` — STORED, not inferred, so every
+    # downstream consumer knows without guessing what currency a row is in (native currency
+    # only; no dual USD column — see the currency-alignment note above and CLAUDE.md).
     # Full overwrite each run — 22 recomputes all FY. saveAsTable(overwrite) creates if absent
     # (no MERGE → no schema-evolution trap; no CREATE SCHEMA — main.financials is provisioned).
     market_cap_asof = (
@@ -591,11 +769,13 @@ else:
             "ticker", "fiscal_year", "period_end",
             F.col("asof_close").alias("price_close"),
             "market_cap",
+            "currency",
         )
     )
     (market_cap_asof.write.format("delta").mode("overwrite")
      .option("overwriteSchema", "true").saveAsTable(mca_tbl))
     print(f"✓ wrote {mca_tbl}")
+    market_cap_asof.groupBy("currency").count().show()
 
 # COMMAND ----------
 

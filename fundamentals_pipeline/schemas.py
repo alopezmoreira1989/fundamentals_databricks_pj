@@ -82,6 +82,19 @@ _PRICES_SPEC: dict[str, set[str]] = {
     "adj_close": {"numeric"},
 }
 
+# Full daily FX-rate history (not just the latest value) — so a future frontend "view in USD"
+# toggle can convert a HISTORICAL figure using the rate from that figure's own period_end,
+# never today's spot rate (see fundamentals_pipeline/fx.py's date-anchoring rule). `pair` is
+# the yfinance ticker (e.g. "CADUSD=X"); `base`/`quote` are the same pair decomposed for a
+# direct lookup without re-parsing the string.
+_FX_SPEC: dict[str, set[str]] = {
+    "base": {"string"},
+    "quote": {"string"},
+    "pair": {"string"},
+    "date": {"datetime", "string"},
+    "rate": {"numeric"},
+}
+
 # Backtest equity-curve series (one row per archetype × fiscal_year). benchmark_* are NULL
 # (all-NaN float → still 'numeric') when the benchmark ticker is absent from the price store.
 _BACKTEST_SPEC: dict[str, set[str]] = {
@@ -99,6 +112,7 @@ ARTIFACTS: dict[str, dict[str, set[str]]] = {
     "dashboard_metrics": _METRICS_SPEC,
     "dashboard_prices": _PRICES_SPEC,
     "dashboard_backtest": _BACKTEST_SPEC,
+    "dashboard_fx": _FX_SPEC,
 }
 ARTIFACT_NAMES = tuple(ARTIFACTS)
 
