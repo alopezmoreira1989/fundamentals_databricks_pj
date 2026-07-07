@@ -27,18 +27,11 @@ from pyspark.sql import functions as F
 from pyspark.sql.types import StringType, StructField, StructType, TimestampType
 from pyspark.sql.window import Window
 
-# fundamentals_pipeline is normally pip-installed once per pipeline session (91's %pip cell),
-# but 22 can also run standalone (e.g. local Databricks Connect prototyping) — same defensive
-# install pattern as 00__config/02__tickers_master.py, using the repo root two levels up from
-# this notebook's CWD (20__transformation/).
-try:
-    from fundamentals_pipeline import fx
-except ImportError:
-    import subprocess
-    import sys
-
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "-e", "../.."])
-    from fundamentals_pipeline import fx
+# CONTRACT: the currency-conversion arithmetic below (native Spark F.when/multiply, for
+# performance over ~30k rows) mirrors fundamentals_pipeline/fx.py's convert_price() scalar
+# semantics — no-op when currencies match, multiply by rate otherwise, never guess a missing
+# rate. fx.py is the pure reference + the contract test (tests/test_fx.py); if you change the
+# conversion rule here, mirror it there.
 
 full_tbl    = f"{CATALOG}.{SCHEMA}.{TABLE}"
 market_tbl  = f"{CATALOG}.{SCHEMA}.market_data"            # legacy (deprecated; not read here)
@@ -597,6 +590,62 @@ else:
               f"quote_currency=reporting_currency='USD' for every ticker.")
         ticker_currency = None
 
+    def _log_missing_fx(missing_df, step_label: str) -> None:
+        """Log rows needing currency conversion with no resolvable FX rate to
+        `ingestion_failures` — visible and trackable (never silent), but NOT a run-aborting
+        raise: the affected (ticker, fiscal_year) rows are simply excluded from
+        `market_cap_asof` this run (same "real gap reads NULL/absent" convention as every
+        other data guard in this file), so one ticker's FX gap doesn't block the whole
+        universe's refresh. Retried automatically next run once the rate is available.
+        """
+        _missing_rows = (
+            missing_df
+            .select("ticker", "fiscal_year", "period_end", "quote_currency", "reporting_currency")
+            .collect()
+        )
+        if not _missing_rows:
+            return
+        _failures_tbl = f"{CATALOG}.{SCHEMA}.ingestion_failures"
+        spark.sql(f"""
+            CREATE TABLE IF NOT EXISTS {_failures_tbl} (
+                ticker         STRING    NOT NULL,
+                error_type     STRING    NOT NULL,
+                error_message  STRING,
+                step           STRING    NOT NULL,
+                scraped_at     TIMESTAMP NOT NULL
+            )
+            USING DELTA
+            TBLPROPERTIES (
+                'delta.autoOptimize.optimizeWrite' = 'true',
+                'delta.autoOptimize.autoCompact'   = 'true'
+            )
+        """)
+        _fail_schema = StructType([
+            StructField("ticker",        StringType(),    False),
+            StructField("error_type",    StringType(),    False),
+            StructField("error_message", StringType(),    True),
+            StructField("step",          StringType(),    False),
+            StructField("scraped_at",    TimestampType(), False),
+        ])
+        _scraped_at = datetime.utcnow()
+        _fail_records = [{
+            "ticker": r.ticker,
+            "error_type": "missing_fx_rate",
+            "error_message": (
+                f"No {r.quote_currency}->{r.reporting_currency} FX rate on/before "
+                f"{r.period_end} (fiscal_year={r.fiscal_year}) — excluded from market_cap_asof"
+            ),
+            "step": step_label,
+            "scraped_at": _scraped_at,
+        } for r in _missing_rows]
+        spark.createDataFrame(_fail_records, schema=_fail_schema) \
+             .write.mode("append").saveAsTable(_failures_tbl)
+        _first = _missing_rows[0]
+        print(f"⚠ Missing FX rate for {len(_missing_rows)} (ticker, fiscal_year) row(s) needing "
+              f"currency conversion — logged to {_failures_tbl} and EXCLUDED from "
+              f"market_cap_asof this run. First: {_first.ticker} FY{_first.fiscal_year} "
+              f"({_first.quote_currency}->{_first.reporting_currency} as of {_first.period_end})")
+
     if ticker_currency is None:
         asof_close = asof_close.withColumn("currency", F.lit("USD")).select(
             "ticker", "fiscal_year", "asof_close", "currency"
@@ -623,97 +672,61 @@ else:
                 _has_fx = False
 
             if not _has_fx:
-                raise fx.MissingFxRateError(
-                    "Currency conversion is needed (a ticker's quote_currency differs from its "
-                    "reporting_currency) but fx_rates_daily is missing/empty — run "
-                    "12__fetch_market_data.py first."
+                print("⚠ Currency conversion is needed but fx_rates_daily is missing/empty — "
+                      "run 12__fetch_market_data.py first. All rows needing conversion are "
+                      "excluded from market_cap_asof this run.")
+                _log_missing_fx(
+                    asof_close_ccy.filter(F.col("needs_conversion"))
+                    .withColumn("fx_rate", F.lit(None).cast("double")),
+                    "currency_alignment",
                 )
-
-            # As-of FX rate: latest rate dated on/before each row's own period_end — the SAME
-            # as-of principle as asof_close above, applied to the currency domain.
-            _w_fx = Window.partitionBy("ticker", "fiscal_year").orderBy(F.col("fx_date").desc())
-            _fx_bcast = F.broadcast(
-                _fx.withColumnRenamed("date", "fx_date").withColumnRenamed("rate", "fx_rate")
-            )
-            asof_close_fx = (
-                asof_close_ccy
-                .join(
-                    _fx_bcast,
-                    on=[
-                        asof_close_ccy.quote_currency     == _fx_bcast.base,
-                        asof_close_ccy.reporting_currency == _fx_bcast.quote,
-                        _fx_bcast.fx_date <= asof_close_ccy.period_end,
-                    ],
-                    how="left",
+                asof_close = (
+                    asof_close_ccy
+                    .filter(~F.col("needs_conversion"))
+                    .select("ticker", "fiscal_year", "asof_close",
+                            F.col("reporting_currency").alias("currency"))
                 )
-                .withColumn("_rn", F.row_number().over(_w_fx))
-                .filter((F.col("_rn") == 1) | F.col("fx_rate").isNull())
-            )
-
-            # Hard failure: a row that NEEDS conversion but found no matching rate. Rows that
-            # don't need conversion never match the join (fx_rates_daily only stores genuinely
-            # different-currency pairs), so the `needs_conversion` guard is what separates a
-            # real gap from a row that was never supposed to join.
-            _missing = asof_close_fx.filter(F.col("needs_conversion") & F.col("fx_rate").isNull())
-            if _missing.limit(1).count() > 0:
-                _missing_rows = (
-                    _missing
-                    .select("ticker", "fiscal_year", "period_end", "quote_currency", "reporting_currency")
-                    .collect()
+            else:
+                # As-of FX rate: latest rate dated on/before each row's own period_end — the
+                # SAME as-of principle as asof_close above, applied to the currency domain.
+                _w_fx = Window.partitionBy("ticker", "fiscal_year").orderBy(F.col("fx_date").desc())
+                _fx_bcast = F.broadcast(
+                    _fx.withColumnRenamed("date", "fx_date").withColumnRenamed("rate", "fx_rate")
                 )
-                _failures_tbl = f"{CATALOG}.{SCHEMA}.ingestion_failures"
-                spark.sql(f"""
-                    CREATE TABLE IF NOT EXISTS {_failures_tbl} (
-                        ticker         STRING    NOT NULL,
-                        error_type     STRING    NOT NULL,
-                        error_message  STRING,
-                        step           STRING    NOT NULL,
-                        scraped_at     TIMESTAMP NOT NULL
+                asof_close_fx = (
+                    asof_close_ccy
+                    .join(
+                        _fx_bcast,
+                        on=[
+                            asof_close_ccy.quote_currency     == _fx_bcast.base,
+                            asof_close_ccy.reporting_currency == _fx_bcast.quote,
+                            _fx_bcast.fx_date <= asof_close_ccy.period_end,
+                        ],
+                        how="left",
                     )
-                    USING DELTA
-                    TBLPROPERTIES (
-                        'delta.autoOptimize.optimizeWrite' = 'true',
-                        'delta.autoOptimize.autoCompact'   = 'true'
-                    )
-                """)
-                _fail_schema = StructType([
-                    StructField("ticker",        StringType(),    False),
-                    StructField("error_type",    StringType(),    False),
-                    StructField("error_message", StringType(),    True),
-                    StructField("step",          StringType(),    False),
-                    StructField("scraped_at",    TimestampType(), False),
-                ])
-                _scraped_at = datetime.utcnow()
-                _fail_records = [{
-                    "ticker": r.ticker,
-                    "error_type": "missing_fx_rate",
-                    "error_message": (
-                        f"No {r.quote_currency}->{r.reporting_currency} FX rate on/before "
-                        f"{r.period_end} (fiscal_year={r.fiscal_year})"
-                    ),
-                    "step": "currency_alignment",
-                    "scraped_at": _scraped_at,
-                } for r in _missing_rows]
-                spark.createDataFrame(_fail_records, schema=_fail_schema) \
-                     .write.mode("append").saveAsTable(_failures_tbl)
-                _first = _missing_rows[0]
-                raise fx.MissingFxRateError(
-                    f"Missing FX rate for {len(_missing_rows)} (ticker, fiscal_year) row(s) "
-                    f"needing currency conversion — logged to {_failures_tbl}. First: "
-                    f"{_first.ticker} FY{_first.fiscal_year} "
-                    f"({_first.quote_currency}->{_first.reporting_currency} as of {_first.period_end})"
+                    .withColumn("_rn", F.row_number().over(_w_fx))
+                    .filter((F.col("_rn") == 1) | F.col("fx_rate").isNull())
                 )
 
-            asof_close = (
-                asof_close_fx
-                .withColumn(
-                    "asof_close",
-                    F.when(F.col("needs_conversion"), F.col("asof_close") * F.col("fx_rate"))
-                     .otherwise(F.col("asof_close")),
+                # A row that NEEDS conversion but found no matching rate. Rows that don't need
+                # conversion never match the join (fx_rates_daily only stores genuinely
+                # different-currency pairs), so `needs_conversion` separates a real gap from a
+                # row that was never supposed to join.
+                _missing = asof_close_fx.filter(F.col("needs_conversion") & F.col("fx_rate").isNull())
+                if _missing.limit(1).count() > 0:
+                    _log_missing_fx(_missing, "currency_alignment")
+
+                asof_close = (
+                    asof_close_fx
+                    .filter(~(F.col("needs_conversion") & F.col("fx_rate").isNull()))
+                    .withColumn(
+                        "asof_close",
+                        F.when(F.col("needs_conversion"), F.col("asof_close") * F.col("fx_rate"))
+                         .otherwise(F.col("asof_close")),
+                    )
+                    .select("ticker", "fiscal_year", "asof_close",
+                            F.col("reporting_currency").alias("currency"))
                 )
-                .select("ticker", "fiscal_year", "asof_close",
-                        F.col("reporting_currency").alias("currency"))
-            )
 
     # As-of shares: most recent Shares Diluted (ANY period_type) with period_end ≤ FY period_end;
     # FY-preferred on a tie so a normal FY uses its own reported figure, falling back across
