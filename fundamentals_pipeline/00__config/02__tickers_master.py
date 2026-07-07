@@ -5,19 +5,28 @@
 # MAGIC Builds the unified ticker universe by merging:
 # MAGIC - **S&P 500** — 500 large-cap US stocks (Wikipedia)
 # MAGIC - **Russell 3000** — broad US market ~3000 stocks (iShares IWV ETF)
+# MAGIC - **S&P/TSX Composite** — ~220 Canadian equities (via XIC holdings), gated to
+# MAGIC   SEC-registered (MJDS/40-F) filers only — see section 2a
 # MAGIC - **Favorites** — from `00__config/favorites.json` in the repo root
 # MAGIC
 # MAGIC **Output table:** `main.config.tickers`
 # MAGIC
 # MAGIC ```
-# MAGIC ticker | company    | sector                 | in_sp500 | in_r3000 | is_favorite
-# MAGIC AAPL   | Apple      | Information Technology | true     | true     | false
-# MAGIC TSM    | TSMC       | NULL                   | false    | false    | true
+# MAGIC ticker | company    | sector                 | market | in_sp500 | in_r3000 | is_favorite
+# MAGIC AAPL   | Apple      | Information Technology | US     | true     | true     | false
+# MAGIC TSM    | TSMC       | NULL                   | US     | false    | false    | true
+# MAGIC RY     | Royal Bank | Financials              | CA     | false    | false    | false
 # MAGIC ```
 # MAGIC
 # MAGIC `sector` is one of the 11 canonical **GICS sectors** (or NULL/Unknown). Precedence
 # MAGIC when a ticker appears in multiple sources: **Wikipedia GICS (S&P) → IWV normalized
 # MAGIC → favorites.json → NULL**.
+# MAGIC
+# MAGIC `market` is the ticker-identity collision-guard key (`fundamentals_pipeline/identity.py`) —
+# MAGIC which sourcing pipeline a row came from, `"US"` or `"CA"` today. A bare ticker can
+# MAGIC legitimately collide across markets (Magna Intl `MG` on the TSX vs Mistras Group `MG` on
+# MAGIC the NYSE) or refer to the same dual-listed company (`BAM`, `SHOP`); section 2a's admission
+# MAGIC gate and `check_no_cross_market_collision()` tell the two apart.
 # MAGIC
 # MAGIC ### ✏️ How to add/remove favorites
 # MAGIC Edit `00__config/favorites.json` in the Git repository and re-run this notebook.
@@ -75,16 +84,19 @@ except ImportError:
 # but 02 is a MANUAL step not chained through 91 — same defensive install as lxml/yfinance
 # above, using the repo root two levels up from this notebook's CWD (00__config/).
 try:
-    from fundamentals_pipeline.identity import check_no_cross_market_collision
+    from fundamentals_pipeline.identity import check_no_cross_market_collision, classify_company_match
+    from fundamentals_pipeline.tickers_universe import parse_tsx_composite_csv
 except ImportError:
     import subprocess
     import sys
 
     subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "-e", "../.."])
-    from fundamentals_pipeline.identity import check_no_cross_market_collision
+    from fundamentals_pipeline.identity import check_no_cross_market_collision, classify_company_match
+    from fundamentals_pipeline.tickers_universe import parse_tsx_composite_csv
 
-INGEST_SP500  = True
-INGEST_R3000  = True
+INGEST_SP500         = True
+INGEST_R3000         = True
+INGEST_TSX_COMPOSITE = True
 
 # ── Refresh policy for the industry probe ──────────────────────────────────────
 # Inherit force_full_refresh from the parent 91 via globals() — SAME handoff as 11/12
@@ -677,6 +689,77 @@ def fetch_favorites() -> pd.DataFrame:
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC ## 1b. S&P/TSX Composite (via XIC) + SEC ticker index
+# MAGIC
+# MAGIC No ETF tracks the S&P/TSX Composite exactly; **XIC** (iShares Core S&P/TSX Capped
+# MAGIC Composite Index ETF) matches its membership closely (weights capped at 10%, membership
+# MAGIC effectively the same) and is run by BlackRock — but unlike IWV (Russell 3000), XIC is
+# MAGIC NOT served by the varnish-api `fundDownload` SpreadsheetML endpoint (confirmed 2026-07:
+# MAGIC that URL 400s — `BAD_REQUEST_INVALID_PARAM_VALUES` — for this fund regardless of
+# MAGIC `targetSite`/`locale`). The real mechanism is a plain CSV at a different `blackrock.com/
+# MAGIC ca/investors/...` path; see `fundamentals_pipeline/tickers_universe.py` for the parser
+# MAGIC and the exact format.
+# MAGIC
+# MAGIC Every XIC candidate is gated through SEC's own `company_tickers.json` (the same map
+# MAGIC `11__fetch_sec_xbrl.py` builds) before admission — this is deliberately narrow: Phase 1
+# MAGIC of the multi-market roadmap is Canadian **MJDS/40-F filers**, i.e. companies that also
+# MAGIC register with the SEC, not the whole TSX. A ticker resolving in that map is NOT
+# MAGIC sufficient on its own, though — SEC's map is bare-ticker-keyed across its entire ~10,000
+# MAGIC company universe, so plenty of XIC tickers coincidentally resolve to an unrelated US
+# MAGIC filer (confirmed real examples: XIC's `MG` = Magna International, but SEC's `MG` = a
+# MAGIC stale entry for Mistras Group, taken private in 2023; `TVE` = Tamarack Valley Energy vs
+# MAGIC SEC's `TVE` = the Tennessee Valley Authority). `classify_company_match` (imported above)
+# MAGIC adjudicates every resolution before admission.
+
+# COMMAND ----------
+
+_XIC_HOLDINGS_URL = (
+    "https://www.blackrock.com/ca/investors/en/products/239837/"
+    "ishares-sptsx-capped-composite-index-etf/1464253357814.ajax"
+    "?fileType=csv&fileName=XIC_holdings&dataType=fund"
+)
+
+_SEC_TICKER_INDEX_URL = "https://www.sec.gov/files/company_tickers.json"
+
+# XIC's live holdings count fluctuates modestly (~220-250); this is a live-response sanity
+# floor, not a parsing concern — kept separate from parse_tsx_composite_csv so that function
+# stays testable against small fixtures (see tests/test_tickers_universe.py).
+_XIC_MIN_HOLDINGS = 150
+
+
+def fetch_tsx_composite() -> pd.DataFrame:
+    """Fetch XIC's live holdings (S&P/TSX Composite proxy) as [ticker, company, sector].
+
+    See `fundamentals_pipeline/tickers_universe.py::parse_tsx_composite_csv` for the parser
+    and why this is a plain CSV, not the varnish-api SpreadsheetML `fetch_russell3000()` uses.
+    """
+    resp = requests.get(_XIC_HOLDINGS_URL, headers=_HEADERS, timeout=30)
+    resp.raise_for_status()
+    df = parse_tsx_composite_csv(resp.text)
+    if len(df) < _XIC_MIN_HOLDINGS:
+        raise ValueError(
+            f"XIC holdings too few: {len(df)} (expected ~200+). "
+            f"Possible format change or partial response."
+        )
+    print(f"  ✓ Parsed {len(df)} equity holdings from XIC")
+    return df
+
+
+def fetch_sec_ticker_map() -> dict:
+    """SEC's bare-ticker -> (cik, title) map, same source `11__fetch_sec_xbrl.py`'s
+    `TICKER_MAP` uses. Used here ONLY to gate Canadian admission to tickers that are actually
+    SEC-registered filers (Phase-1 MJDS/40-F scope) and to resolve the company-identity match
+    (`fundamentals_pipeline.identity.classify_company_match`) — a ticker resolving here is
+    necessary but not sufficient for admission; see section 2a.
+    """
+    resp = requests.get(_SEC_TICKER_INDEX_URL, headers=_HEADERS, timeout=30)
+    resp.raise_for_status()
+    idx = resp.json()
+    return {entry["ticker"].upper(): (str(entry["cik_str"]).zfill(10), entry["title"]) for entry in idx.values()}
+
+# COMMAND ----------
+
 raw_sources: dict[str, pd.DataFrame] = {}
 
 if INGEST_SP500:
@@ -692,6 +775,18 @@ if INGEST_R3000:
     except Exception as _r3k_err:
         print(f"  ✗ Russell 3000 fetch failed: {_r3k_err}")
         print("  ⚠ Continuing with S&P 500 + favorites only — R3000 will be missing")
+
+# TSX Composite candidates are NOT merged into raw_sources like sp500/r3000 (a plain outer-merge
+# would blindly trust every ticker) — they go through the SEC-registration + company-identity
+# admission gate in section 2a instead, run against the US-only universe assembled below.
+tsx_composite_df = pd.DataFrame(columns=["ticker", "company", "sector"])
+if INGEST_TSX_COMPOSITE:
+    print("Fetching S&P/TSX Composite (via XIC)...")
+    try:
+        tsx_composite_df = fetch_tsx_composite()
+    except Exception as _tsx_err:
+        print(f"  ✗ TSX Composite fetch failed: {_tsx_err}")
+        print("  ⚠ Continuing without Canadian tickers this run")
 
 print("Loading favorites from favorites.json...")
 favorites_df = fetch_favorites()
@@ -759,11 +854,103 @@ master = (
 
 # Fail loud if the same bare ticker symbol claims more than one market (e.g. a future Canadian
 # source colliding with an existing US ticker — Magna Intl 'MG' on the TSX vs Mistras Group
-# 'MG' on the NYSE) instead of silently overwriting one company's row with another's.
-check_no_cross_market_collision(master)
+# 'MG' on the NYSE) instead of silently overwriting one company's row with another's. At this
+# point every row is market="US", so this is a no-op pass-through — cheap, and consistent with
+# calling the guard right after every merge step that could in principle introduce a collision.
+master = check_no_cross_market_collision(master)
 
 print(f"\nUnified universe: {len(master):,} unique tickers")
 print(master[bool_cols].sum().to_string())
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 2a. Canadian ticker universe (S&P/TSX Composite via XIC)
+# MAGIC
+# MAGIC Three-way admission per XIC candidate:
+# MAGIC 1. **No SEC CIK at all** → not a Phase-1 (MJDS/40-F) candidate → excluded, logged.
+# MAGIC 2. **Resolves, but `classify_company_match` says "different" or "ambiguous"** → the
+# MAGIC    bare ticker collides with an unrelated US-registered filer (confirmed real cases:
+# MAGIC    `MG`→Mistras Group, `TVE`→Tennessee Valley Authority, `IAU`→the iShares Gold Trust
+# MAGIC    ETF, among others) → excluded, logged — never guessed.
+# MAGIC 3. **Resolves and `classify_company_match` says "same"** → genuine MJDS/40-F filer.
+# MAGIC    If the ticker is already in `master` (a dual-listed company, e.g. `BAM`, `SHOP`,
+# MAGIC    `GFL`), no new row is added — it's already covered via the US path; only the
+# MAGIC    `in_tsx_composite` flag is set. Otherwise it's admitted as a new `market="CA"` row.
+# MAGIC
+# MAGIC `accounting_standard` / `reporting_currency` are deliberately left `NULL` here — real
+# MAGIC per-ticker detection needs each filer's actual `companyfacts` (ifrs-full vs us-gaap;
+# MAGIC CAD vs USD is NOT a function of namespace alone — e.g. Nutrien/Gildan file ifrs-full in
+# MAGIC USD). `11__fetch_sec_xbrl.py` already fetches that response per ticker for real
+# MAGIC ingestion, so it derives and writes these two fields back rather than this notebook
+# MAGIC fetching `companyfacts` again just for metadata.
+# MAGIC
+# MAGIC ⚠ **Known limitation:** the `has_logo` / company-info (`industry`, `description`,
+# MAGIC `employees`, `website`) / `founded` probes below (2b-2d) call `yf.Ticker(ticker)` with
+# MAGIC the BARE ticker — Yahoo Finance requires a `.TO` suffix for TSX-listed symbols, so these
+# MAGIC probes may silently return `NULL` (or, rarely, data for an unrelated Yahoo-side symbol)
+# MAGIC for newly-admitted Canadian tickers. `country`/`exchange` are protected below (seeded to
+# MAGIC "Canada"/"TSX" and never overwritten by these probes for `market="CA"` rows); `industry`/
+# MAGIC `description`/`employees`/`website`/`founded` are NOT — tracked as follow-up work, not
+# MAGIC fixed in this pass (see CLAUDE.md).
+
+# COMMAND ----------
+
+_new_ca_rows: list[dict] = []
+_ca_excluded: list[tuple] = []
+_ca_dual_listed: list[str] = []
+
+if INGEST_TSX_COMPOSITE and not tsx_composite_df.empty:
+    print("Loading SEC ticker index for Canadian admission gate...")
+    _sec_ticker_map = fetch_sec_ticker_map()
+    _existing_tickers = set(master["ticker"])
+
+    for _, _row in tsx_composite_df.iterrows():
+        _t, _company, _sector = _row["ticker"], _row["company"], _row["sector"]
+        _hit = _sec_ticker_map.get(_t.upper())
+        if _hit is None:
+            _ca_excluded.append((_t, _company, "no SEC CIK — not a Phase-1 MJDS/40-F candidate"))
+            continue
+
+        _cik, _sec_title = _hit
+        _verdict = classify_company_match(_company, _sec_title)
+        if _verdict != "same":
+            _ca_excluded.append(
+                (_t, _company, f"{_verdict} match vs SEC {_sec_title!r} (CIK {_cik})")
+            )
+            continue
+
+        if _t in _existing_tickers:
+            _ca_dual_listed.append(_t)
+            continue
+
+        _new_ca_rows.append({
+            "ticker": _t, "company": _company, "sector": _sector, "market": "CA",
+            "is_favorite": False, "in_sp500": False, "in_r3000": False,
+            "country": "Canada", "exchange": "TSX",
+            "accounting_standard": None, "reporting_currency": None,
+        })
+
+    print(f"  Admitted new Canadian tickers : {len(_new_ca_rows)}")
+    print(f"  Already covered (dual-listed) : {len(_ca_dual_listed)} — {_ca_dual_listed}")
+    print(f"  Excluded (see detail below)   : {len(_ca_excluded)}")
+    for _t, _company, _reason in _ca_excluded:
+        print(f"    ✗ {_t:<8} {_company:<40} {_reason}")
+
+    if _new_ca_rows:
+        master = pd.concat([master, pd.DataFrame(_new_ca_rows)], ignore_index=True)
+
+_tsx_tickers = set(tsx_composite_df["ticker"]) if not tsx_composite_df.empty else set()
+master["in_tsx_composite"] = master["ticker"].isin(_tsx_tickers)
+
+# Defense in depth: re-run the guard over the fully-assembled (US + admitted CA) universe.
+# Should be a no-op given the admission gate above already excludes/dedupes collisions and
+# dual-listings — this is the final fail-safe, not the primary mechanism.
+master = check_no_cross_market_collision(master)
+master = master.sort_values("ticker").reset_index(drop=True)
+
+print(f"\nUniverse after Canadian admission: {len(master):,} unique tickers "
+      f"({int(master['market'].eq('CA').sum())} market=CA)")
 
 # COMMAND ----------
 
@@ -813,6 +1000,16 @@ company_info_map    = resolve_company_info(_universe, _known_company_info)
 for _field in _COMPANY_INFO_FIELDS:
     master[_field] = master["ticker"].map(lambda t, f=_field: company_info_map[t][f]).astype("object")
 
+# Protect the seeded country="Canada"/exchange="TSX" (set in section 2a) from this probe:
+# yfinance's .info requires a ".TO" suffix for TSX-listed symbols (see 12__fetch_market_data.py
+# for the analogous fix on the pricing side), so a BARE-ticker lookup for a Canadian symbol can
+# return NULL or, rarely, data for an unrelated Yahoo-side symbol — never something more
+# reliable than the authoritative XIC/TSX source. industry/description/employees/website are
+# NOT protected (they have no equally-authoritative fallback here) — see section 2a's note.
+_is_ca = master["market"] == "CA"
+master.loc[_is_ca, "country"]  = "Canada"
+master.loc[_is_ca, "exchange"] = "TSX"
+
 # COMMAND ----------
 
 # MAGIC %md
@@ -832,18 +1029,26 @@ master["founded"] = master["ticker"].map(founded_map).astype("object")
 # MAGIC %md
 # MAGIC ## 2e. Accounting standard + reporting currency (multi-market foundation)
 # MAGIC
-# MAGIC Static for now: every ticker in the current universe is a US SEC filer reporting under
-# MAGIC US-GAAP in USD. These columns exist so later multi-market work (IFRS 20-F filers, non-US
-# MAGIC markets) has somewhere to record a different value per ticker — no probing, no per-ticker
-# MAGIC logic yet.
+# MAGIC US rows (`market="US"`) are always `"us-gaap"`/`"USD"` — every US SEC filer reports
+# MAGIC that way, so this stays a blanket literal for them, as before. Canadian rows
+# MAGIC (`market="CA"`, admitted in section 2a) are left `NULL` here on purpose: real Canadian
+# MAGIC MJDS/40-F filers are a genuine mix (confirmed 2026-07 against real `companyfacts` —
+# MAGIC most banks/energy file `ifrs-full`/CAD, but IMO/Shopify/BlackBerry file `us-gaap`/USD,
+# MAGIC and Nutrien/Gildan file `ifrs-full`/**USD** — currency is NOT a function of namespace
+# MAGIC alone), so a blanket literal would be wrong for a large share of them. Real per-ticker
+# MAGIC detection needs each filer's actual `companyfacts` response, which
+# MAGIC `11__fetch_sec_xbrl.py` already fetches per ticker for ingestion — it derives and
+# MAGIC writes these two fields back to `main.config.tickers` rather than this notebook
+# MAGIC fetching `companyfacts` again just for metadata.
 # MAGIC
 # MAGIC (`market` — the ticker-identity collision-guard key, `(ticker, market)` — was already set
 # MAGIC in section 2, before the first dedup; see `fundamentals_pipeline/identity.py`.)
 
 # COMMAND ----------
 
-master["accounting_standard"] = "us-gaap"
-master["reporting_currency"]  = "USD"
+_is_us = master["market"] == "US"
+master.loc[_is_us, "accounting_standard"] = "us-gaap"
+master.loc[_is_us, "reporting_currency"]  = "USD"
 
 # COMMAND ----------
 
@@ -860,6 +1065,7 @@ schema = StructType([
     StructField("is_favorite", BooleanType(), False),
     StructField("in_sp500",    BooleanType(), False),
     StructField("in_r3000",    BooleanType(), False),
+    StructField("in_tsx_composite", BooleanType(), False),
     StructField("has_logo",    BooleanType(), True),
     StructField("industry",    StringType(),  True),
     StructField("description", StringType(),  True),
@@ -868,8 +1074,10 @@ schema = StructType([
     StructField("employees",   LongType(),    True),
     StructField("website",     StringType(),  True),
     StructField("founded",     IntegerType(), True),
-    StructField("accounting_standard", StringType(), False),
-    StructField("reporting_currency",  StringType(), False),
+    # Nullable now (were NOT NULL literals pre-Canadian-onboarding): admitted CA rows start
+    # NULL here and are backfilled by 11__fetch_sec_xbrl.py from real per-ticker companyfacts.
+    StructField("accounting_standard", StringType(), True),
+    StructField("reporting_currency",  StringType(), True),
 ])
 
 sdf = spark.createDataFrame(master, schema=schema)
@@ -903,6 +1111,19 @@ spark.sql(f"""
         SUM(CASE WHEN is_favorite AND NOT in_sp500
                   AND NOT in_r3000 THEN 1 ELSE 0 END)           AS favorites_only
     FROM {TARGET_TABLE}
+""").show()
+
+# Market breakdown — CA rows admitted in section 2a; accounting_standard/reporting_currency
+# for CA rows are NULL until 11__fetch_sec_xbrl.py's next run backfills them from companyfacts.
+print("Market breakdown:")
+spark.sql(f"""
+    SELECT
+        market, COUNT(*) AS n,
+        SUM(CAST(in_tsx_composite AS INT))                        AS in_tsx_composite,
+        SUM(CASE WHEN accounting_standard IS NULL THEN 1 ELSE 0 END) AS pending_accounting_standard
+    FROM {TARGET_TABLE}
+    GROUP BY market
+    ORDER BY market
 """).show()
 
 # Sector coverage + distribution (NULL bucketed as "Unknown", matching the app).

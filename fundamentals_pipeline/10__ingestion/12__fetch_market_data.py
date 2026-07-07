@@ -44,6 +44,18 @@ if "ACTIVE_TICKERS" not in globals() or not ACTIVE_TICKERS:
 else:
     print(f"✓ Inherited {len(ACTIVE_TICKERS)} tickers from parent (override mode)")
 
+# Ticker -> market, needed for the Yahoo ".TO" suffix (TSX-listed tickers — see YAHOO_SYMBOL
+# below). Queried independently of the ACTIVE_TICKERS branch above (override mode doesn't read
+# config.tickers at all) and guarded for a table that predates the `market` column, in which
+# case every ticker defaults to "US" (no suffix) via MARKET_MAP.get(t, "US").
+try:
+    MARKET_MAP = {
+        row.ticker: row.market
+        for row in spark.table(f"{CATALOG}.config.tickers").select("ticker", "market").collect()
+    }
+except Exception:
+    MARKET_MAP = {}
+
 # COMMAND ----------
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -72,6 +84,18 @@ INCR_BUFFER_DAYS = 7     # incremental: refetch from (max stored date − buffer
 # 71__run_backtest reads the benchmark symbol from backtest_archetypes.json (config.benchmark = SPY);
 # keep this list in sync with it. Empty list ⇒ no benchmark priced (71 degrades benchmark to NULL).
 BENCHMARK_TICKERS = ["SPY"]
+
+# Yahoo Finance requires a ".TO" suffix to resolve TSX-listed symbols (e.g. "RY.TO", not "RY")
+# — the bare ticker alone either 404s or can resolve to an unrelated Yahoo-side symbol. The
+# bare ticker stays the identity key everywhere (market_prices_daily, stock_splits,
+# config.tickers, financials) — this mapping is used ONLY at the yf.download() call boundary in
+# fetch_batch/fetch_splits_batch, which translate back to the bare ticker for every written row.
+# Benchmark tickers (SPY) are never in config.tickers, so MARKET_MAP.get(t, "US") defaults them
+# to "US" (no suffix) — never fails looking a benchmark up.
+YAHOO_SYMBOL = {
+    t: (f"{t}.TO" if MARKET_MAP.get(t, "US") == "CA" else t)
+    for t in [*ACTIVE_TICKERS, *BENCHMARK_TICKERS]
+}
 
 # ── Refresh policy ────────────────────────────────────────────────────────────
 # Inherit force_full_refresh from the parent 91 via globals() — SAME handoff as
@@ -230,15 +254,21 @@ def fetch_batch(batch: list, period: str | None = None, start=None) -> tuple:
     """Download a batch in ONE yf.download call (auto_adjust=False → raw Close + Adj Close)
     and return (list_of_per_ticker_frames, failed). Either `period` (e.g. 'max') or `start`
     is used. MultiIndex (multi-ticker) and flat (single-ticker) shapes both handled; a ticker
-    yf drops or that returns no/all-NaN Close is logged via _classify_mkt_error / _empty_err."""
+    yf drops or that returns no/all-NaN Close is logged via _classify_mkt_error / _empty_err.
+
+    `batch` holds bare tickers (the identity used everywhere else); the actual yf.download
+    call uses each ticker's YAHOO_SYMBOL (bare, or "<ticker>.TO" for market="CA" tickers) —
+    every returned/failed row is still keyed by the bare ticker.
+    """
     fetched_at = datetime.utcnow()
+    yahoo_batch = [YAHOO_SYMBOL.get(t, t) for t in batch]
     kw = dict(group_by="ticker", threads=True, progress=False, auto_adjust=False)
     if start is not None:
         kw["start"] = start.isoformat() if hasattr(start, "isoformat") else start
     else:
         kw["period"] = period or "max"
     try:
-        data = yf.download(batch, **kw)
+        data = yf.download(yahoo_batch, **kw)
     except Exception as e:
         err = _classify_mkt_error(e)
         return [], [{"ticker": t, "error": err} for t in batch]
@@ -247,16 +277,17 @@ def fetch_batch(batch: list, period: str | None = None, start=None) -> tuple:
         return [], [{"ticker": t, "error": _empty_err(t)} for t in batch]
 
     multi = isinstance(data.columns, pd.MultiIndex)
-    present = set(data.columns.get_level_values(0)) if multi else set(batch)
+    present = set(data.columns.get_level_values(0)) if multi else set(yahoo_batch)
 
     frames, failed_local = [], []
     for t in batch:
+        yahoo_symbol = YAHOO_SYMBOL.get(t, t)
         try:
             if multi:
-                if t not in present:                 # yf dropped this ticker entirely
+                if yahoo_symbol not in present:      # yf dropped this ticker entirely
                     failed_local.append({"ticker": t, "error": _empty_err(t)})
                     continue
-                sub = data[t]
+                sub = data[yahoo_symbol]
             else:
                 sub = data                           # single-ticker batch → flat columns
             fr = _daily_frame(t, sub, fetched_at)
@@ -374,14 +405,19 @@ else:
 def fetch_splits_batch(batch: list, period: str | None = None, start=None) -> list:
     """One `yf.download(actions=True)` → per-ticker `(ticker, split_date, ratio)` frames.
     Splits-only: prices/dividends in the response are ignored. Missing column / no split days /
-    yf error → no rows (never a 'failure' — most tickers simply never split)."""
+    yf error → no rows (never a 'failure' — most tickers simply never split).
+
+    `batch` holds bare tickers; the actual yf.download call uses each ticker's YAHOO_SYMBOL
+    (see fetch_batch) — output rows are still keyed by the bare ticker.
+    """
+    yahoo_batch = [YAHOO_SYMBOL.get(t, t) for t in batch]
     kw = dict(group_by="ticker", threads=True, progress=False, auto_adjust=False, actions=True)
     if start is not None:
         kw["start"] = start.isoformat() if hasattr(start, "isoformat") else start
     else:
         kw["period"] = period or "max"
     try:
-        data = yf.download(batch, **kw)
+        data = yf.download(yahoo_batch, **kw)
     except Exception:
         return []
     if data is None or data.empty:
@@ -389,8 +425,9 @@ def fetch_splits_batch(batch: list, period: str | None = None, start=None) -> li
     multi = isinstance(data.columns, pd.MultiIndex)
     out = []
     for t in batch:
+        yahoo_symbol = YAHOO_SYMBOL.get(t, t)
         try:
-            sub = data[t] if multi else data
+            sub = data[yahoo_symbol] if multi else data
             if "Stock Splits" not in sub.columns:
                 continue
             ss = pd.to_numeric(sub["Stock Splits"], errors="coerce")

@@ -17,20 +17,53 @@ Databricks analytical pipeline that ingests SEC EDGAR XBRL filings (10-K/10-Q) f
 - **Pricing is `period_end`-aligned, sourced from `market_prices_daily`.** `10__ingestion/12__fetch_market_data.py` writes a **daily** price store `main.financials.market_prices_daily` (one row per `(ticker, date)`; raw `close` for market cap, `adj_close` for returns). `22__derived_metrics.py` computes each FY's `market_cap` as the raw `close` on the latest trading day ≤ that FY's `period_end` × `Shares Diluted` reported as-of `period_end` — so non-December filers (AAPL/Sep, MSFT/Jun, WMT/Jan) are priced at their real fiscal close, not Dec 31. Use raw `close` (not `adj_close`) for market cap — `adj_close` would fold future splits into the historical cap.
 - **`market_cap_asof` is the period_end-aligned price/market-cap table.** `22__derived_metrics.py` persists `main.financials.market_cap_asof` (`ticker`, `fiscal_year`, `period_end`, `price_close`, `market_cap`) — the as-of-fiscal-close price and cap, keyed like the old `market_data` but on the **fiscal** (not calendar) basis. `23__intrinsic_value.py` (Margin of Safety / TTM price) and `50__publish/51__export_dashboard_data.py` (the exported `Market Cap` row) read it. New price/cap consumers should read `market_cap_asof`, not `market_data`.
 - **`main.config.tickers` identity key is `(ticker, market)`, not bare `ticker`.** A bare
-  ticker symbol is not a safe identity once a non-US source is merged in (Canadian TSX/MJDS
-  40-F filers, per the multi-market roadmap) — e.g. Magna International trades as `MG` on the
-  TSX, Mistras Group as `MG` on the NYSE. `02__tickers_master.py` sets `market` (currently a
-  static `"US"` literal for the whole universe), dedups on `(ticker, market)`, and calls
+  ticker symbol is not a safe identity across markets — e.g. Magna International trades as
+  `MG` on the TSX, Mistras Group as `MG` on the NYSE (confirmed still live in SEC's own
+  `company_tickers.json` as of 2026-07: a stale entry from before Mistras went private in
+  2023). `02__tickers_master.py` sets `market` (`"US"` for S&P 500/Russell 3000/favorites,
+  `"CA"` for admitted S&P/TSX Composite tickers), dedups on `(ticker, market)`, and calls
   `fundamentals_pipeline/identity.py`'s `check_no_cross_market_collision()` before the Delta
   write; `11__fetch_sec_xbrl.py` calls the same guard before CIK resolution. It raises
-  `CrossMarketCollisionError` (naming both conflicting rows) instead of silently overwriting
-  one company's row with another's. `market` is deliberately a **new** column, distinct from
-  the pre-existing `exchange` (Yahoo per-venue mnemonic — NYQ/NMS/NGM/...) and `country`
-  (incorporation jurisdiction) columns, which already carry live data displayed on both
-  frontends and must not be repurposed or overwritten. **Out of scope, still bare-`ticker`-keyed:**
-  `financials_raw`, `financials`, `market_prices_daily`, `market_cap_asof`, and both frontends —
-  re-keying them is real migration work for the actual Canadian-onboarding effort, not this
-  preventive guard.
+  `CrossMarketCollisionError` instead of silently overwriting one company's row with
+  another's, but also tells apart a genuine collision from the SAME company dual-listed on
+  both markets (`BAM`, `SHOP`, `GFL`, ...) via `classify_company_match()` — normalized-name
+  token comparison, three-way (same/different/ambiguous) and deliberately conservative: it
+  only ever auto-merges a dual-listing when confident, and raises (never silently guesses)
+  for anything else, including a merely-plausible partial match. `market` is deliberately a
+  **new** column, distinct from the pre-existing `exchange` (Yahoo per-venue mnemonic —
+  NYQ/NMS/NGM/...) and `country` (incorporation jurisdiction) columns, which already carry
+  live data displayed on both frontends and must not be repurposed or overwritten.
+- **Canadian ticker-universe onboarding (multi-market roadmap Phase 1) — ticker-identity
+  layer implemented, IFRS/valuation work still pending.** `02__tickers_master.py`'s
+  `fetch_tsx_composite()` pulls S&P/TSX Composite membership via XIC (iShares Core S&P/TSX
+  Capped Composite Index ETF) — a **plain CSV** at a `blackrock.com/ca/investors/...` path,
+  NOT the varnish-api `fundDownload` SpreadsheetML endpoint `fetch_russell3000()` uses (that
+  endpoint 400s for this Canadian fund regardless of params, confirmed 2026-07). Every XIC
+  candidate is gated through SEC's `company_tickers.json` (Phase 1 = Canadian **MJDS/40-F
+  filers** only, i.e. companies that also register with the SEC — not the whole TSX) AND
+  `classify_company_match()` — a ticker resolving in SEC's map is necessary but not
+  sufficient, since that map is bare-ticker-keyed across its entire ~10,000-company universe
+  and plenty of XIC tickers coincidentally resolve to an unrelated US filer (confirmed real
+  cases: `TVE`→the Tennessee Valley Authority, `IAU`→the iShares Gold Trust ETF, `SAP`→SAP SE,
+  among others). Excluded tickers are logged with a reason, not silently dropped.
+  `accounting_standard`/`reporting_currency` are left `NULL` for admitted Canadian rows —
+  real MJDS/40-F filers are a genuine mix (confirmed 2026-07: most banks/energy file
+  `ifrs-full` in CAD, but IMO/Shopify/BlackBerry file `us-gaap` in USD, and Nutrien/Gildan
+  file `ifrs-full` in **USD** — currency is not a function of namespace alone) —
+  `11__fetch_sec_xbrl.py` derives both from the real per-ticker `companyfacts` response it
+  already fetches for ingestion and writes them back via `MERGE INTO config.tickers`, scoped
+  to `market="CA"` rows only. `12__fetch_market_data.py` translates a Canadian ticker to its
+  Yahoo symbol (`f"{ticker}.TO"`) only at the `yf.download()` call boundary — the bare ticker
+  stays the identity everywhere else (`market_prices_daily`, `stock_splits`, `config.tickers`,
+  `financials`). **Known, un-fixed limitation:** `02`'s `has_logo`/`industry`/`description`/
+  `employees`/`website`/`founded` probes call `yf.Ticker(ticker)` with the bare ticker —
+  `country`/`exchange` are explicitly protected (re-seeded to `"Canada"`/`"TSX"` after the
+  probe) but the other fields are not, so they may come back `NULL` (or, rarely, data for an
+  unrelated Yahoo-side symbol) for Canadian tickers until that's addressed as follow-up work.
+  **Still out of scope, deliberately:** IFRS XBRL concept mapping in `01__tickers.py`, any
+  dual-currency change to `20__transformation/` or `valuation.py`, and re-keying
+  `financials_raw`/`financials`/`market_prices_daily`/`market_cap_asof`/both frontends off
+  bare `ticker` — those are separate, not-yet-started roadmap items.
 - **`market_data` is frozen legacy** — no longer rebuilt. It was the calendar-year-aligned (last raw `close` per **calendar** year × FY `Shares Diluted`) price/cap table; its 0–11mo fiscal offset distorted multiples for non-December filers, so `12` no longer writes it and all consumers were migrated to `market_cap_asof`. The table is left in place for ad-hoc back-compat queries but receives no new data. Don't add new dependencies on it.
 
 ## Operational gotchas
