@@ -135,6 +135,30 @@ psql "postgresql://<user>:<password>@<endpoint>.neon.tech/<dbname>?sslmode=requi
 - **Rollback**: dashboard -> service -> **Events/Deploys** -> pick a previous successful deploy ->
   **Redeploy**.
 
+## Backups & restore (Neon)
+
+Neon takes automatic backups for every plan, including free: point-in-time recovery (PITR) via
+its copy-on-write storage, with a **free-tier retention window of 24 hours** (paid plans extend
+this). No configuration is needed to enable it — it's always on. "Tested" (issue #152's last
+acceptance criterion) means actually exercising a restore once, not just trusting that PITR exists:
+
+1. In the Neon console, open the project -> **Branches**.
+2. **Create branch** -> **From a point in time** -> pick a timestamp a few minutes in the past
+   (anything after project creation). This clones the database as of that instant into a new
+   branch **without touching the primary** — the safest possible way to test a restore, since
+   there's nothing to undo if something looks wrong.
+3. Grab the new branch's connection string (Connection Details, scoped to that branch) and verify
+   the data matches what you expect as of that timestamp, e.g.:
+   ```sh
+   psql "<branch-connection-string>" -c "SELECT COUNT(*) FROM users_user;"
+   ```
+4. Delete the test branch once verified (**Branches -> ... -> Delete**) — it counts against the
+   free tier's storage otherwise.
+
+This is the same mechanism you'd use for a real incident (restore into a branch, verify, then
+either point `DATABASE_URL` at the restored branch or copy data back) — so testing it once also
+doubles as a dry run of the actual recovery procedure.
+
 ## Gotchas
 
 - **Secrets vs env**: `render.yaml`'s plain `envVars` entries are committed and public — only
