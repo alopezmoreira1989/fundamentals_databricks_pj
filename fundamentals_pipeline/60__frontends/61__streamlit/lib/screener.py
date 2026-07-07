@@ -103,10 +103,24 @@ def build_screener_frame() -> tuple[pd.DataFrame, dict[str, str], list[str]]:
     fy = m.groupby("ticker", observed=True)["fiscal_year"].max().rename("fiscal_year")
     wide = wide.join(fy).reset_index()
 
-    # company + universe flags + GICS sector from meta.
+    # Market Cap's own period_end (per ticker) — needed to date-anchor a CAD→USD
+    # conversion to the SAME fiscal close the pipeline priced it at, not today's date.
+    if "period_end" in m.columns:
+        mc_dates = (
+            m[m["metric"] == MARKET_CAP][["ticker", "period_end"]]
+            .dropna(subset=["period_end"])
+            .drop_duplicates("ticker", keep="last")
+            .rename(columns={"period_end": "market_cap_period_end"})
+        )
+        wide = wide.merge(mc_dates, on="ticker", how="left")
+
+    # company + universe flags + GICS sector + currency fields from meta.
     info = pd.DataFrame(meta.get("tickers", []))
     if "ticker" in info.columns:
-        keep = ["ticker"] + [c for c in ("company", "sector", "industry", *_FLAG_COLS) if c in info.columns]
+        keep = ["ticker"] + [
+            c for c in ("company", "sector", "industry", "reporting_currency", "market", *_FLAG_COLS)
+            if c in info.columns
+        ]
         wide = wide.merge(info[keep], on="ticker", how="left")
     if "company" not in wide.columns:
         wide["company"] = wide["ticker"]

@@ -27,6 +27,25 @@
 
 if "ACTIVE_TICKERS" not in globals() or not ACTIVE_TICKERS:
     tickers_df = spark.table(f"{CATALOG}.config.tickers")
+
+    # Cross-market identity guard (see fundamentals_pipeline/identity.py): catches a bare
+    # ticker symbol claimed by two different markets — e.g. a future Canadian TSX source
+    # colliding with an existing US ticker — before CIK resolution runs on a corrupted table.
+    # Guarded for a table that predates the `market` column (pre-guard main.config.tickers).
+    if "market" in tickers_df.columns:
+        try:
+            from fundamentals_pipeline.identity import check_no_cross_market_collision
+        except ImportError:
+            import subprocess
+            import sys
+
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "-e", "../.."])
+            from fundamentals_pipeline.identity import check_no_cross_market_collision
+
+        check_no_cross_market_collision(
+            tickers_df.select("ticker", "market", "company").toPandas()
+        )
+
     ACTIVE_TICKERS = [row.ticker for row in tickers_df.select("ticker").collect()]
     print(f"✓ Config loaded — {len(ACTIVE_TICKERS)} active tickers from {CATALOG}.config.tickers")
 else:
@@ -452,6 +471,69 @@ def extract_series_aggregate_or_sum(facts, aggregate_tag, component_tags, kind, 
 
 # COMMAND ----------
 
+# MAGIC %md ## 3b. Accounting standard + reporting currency detection (Canadian tickers)
+# MAGIC
+# MAGIC `02__tickers_master.py` admits Canadian (`market="CA"`) tickers with
+# MAGIC `accounting_standard`/`reporting_currency` left `NULL` — real Canadian MJDS/40-F filers
+# MAGIC are a genuine mix (confirmed 2026-07: most banks/energy file `ifrs-full` in CAD, but
+# MAGIC IMO/Shopify/BlackBerry file `us-gaap` in USD, and Nutrien/Gildan file `ifrs-full` in
+# MAGIC **USD** — currency is NOT a function of namespace alone), so it needs real per-ticker
+# MAGIC detection, not a blanket literal. Rather than fetching `companyfacts` a second time just
+# MAGIC for this metadata, `process_ticker` derives it from the SAME response already fetched
+# MAGIC for real ingestion below, and the run backfills it onto `main.config.tickers` in step 7b.
+# MAGIC US tickers are never touched here (they already carry the correct static
+# MAGIC `"us-gaap"`/`"USD"` from `02`) — the write-back in 7b filters to `market="CA"` rows only.
+
+# COMMAND ----------
+
+# Canonical concepts to probe for a namespace's currency — tried in priority order, first
+# non-empty wins. Assets is nearly universal; the others cover the rare filer without it.
+_ACCOUNTING_PROBE_CONCEPTS = ("Assets", "Revenues", "Revenue", "NetIncomeLoss", "ProfitLoss")
+
+
+def _namespace_latest_end_and_currency(facts: dict, namespace: str) -> tuple:
+    """(latest `end` date string, currency unit) for the first probe concept with data under
+    `namespace`, or (None, None) if none of them have any rows."""
+    concept_map = facts.get("facts", {}).get(namespace, {})
+    for concept in _ACCOUNTING_PROBE_CONCEPTS:
+        units = concept_map.get(concept, {}).get("units", {})
+        if not units:
+            continue
+        currency = next(iter(units))
+        ends = [r.get("end") for r in units[currency] if r.get("end")]
+        if ends:
+            return max(ends), currency
+    return None, None
+
+
+def detect_accounting_standard_and_currency(facts: dict) -> tuple:
+    """Detect (accounting_standard, reporting_currency) from a companyfacts response.
+
+    `accounting_standard`: `"ifrs-full"` if that namespace is present, `"us-gaap"` if only
+    that one is, else `None`. A filer can carry BOTH (a taxonomy-transition artifact — e.g.
+    Suncor/Cenovus, confirmed 2026-07) — in that case the namespace with the MORE RECENT
+    probe-concept fact wins, since that reflects the filer's CURRENT reporting basis.
+
+    `reporting_currency`: the currency unit of that same concept under the winning namespace
+    (CAD/USD observed in practice; read directly, never assumed from the namespace).
+    """
+    ns_facts = facts.get("facts", {})
+    candidates = [ns for ns in ("ifrs-full", "us-gaap") if ns in ns_facts]
+    if not candidates:
+        return None, None
+    if len(candidates) == 1:
+        _, currency = _namespace_latest_end_and_currency(facts, candidates[0])
+        return candidates[0], currency
+
+    results = {ns: _namespace_latest_end_and_currency(facts, ns) for ns in candidates}
+    with_data = {ns: r for ns, r in results.items() if r[0] is not None}
+    if not with_data:
+        return candidates[0], None
+    winner = max(with_data, key=lambda ns: with_data[ns][0])
+    return winner, with_data[winner][1]
+
+# COMMAND ----------
+
 # MAGIC %md ## 4. Per-ticker worker
 
 # COMMAND ----------
@@ -476,17 +558,22 @@ def _classify_error(e: Exception, step: str) -> dict:
 
 
 def process_ticker(ticker: str, scraped_at_ts: datetime) -> tuple:
-    """Returns (records, error_dict | None). error_dict has: error_type, error_message, step."""
+    """Returns (records, error_dict | None, meta_dict | None).
+
+    error_dict has: error_type, error_message, step. meta_dict has: accounting_standard,
+    reporting_currency — detected from this ticker's companyfacts response (see
+    detect_accounting_standard_and_currency), None whenever facts couldn't be fetched at all.
+    """
     records = []
     try:
         cik, company_name = get_cik(ticker)
     except Exception as e:
-        return [], _classify_error(e, "fetch_cik")
+        return [], _classify_error(e, "fetch_cik"), None
 
     try:
         facts = get_facts(cik)
     except Exception as e:
-        return [], _classify_error(e, "fetch_facts")
+        return [], _classify_error(e, "fetch_facts"), None
 
     # Merge predecessor CIKs (mergers, MLP→C-corp, spinoffs). A broken alias
     # must not abort ingestion for the ticker — log and continue with what we have.
@@ -502,6 +589,9 @@ def process_ticker(ticker: str, scraped_at_ts: datetime) -> tuple:
                 print(f"    ⚠ {ticker}: alias CIK {_alias_cik} failed ({_alias_err})")
         if _alias_facts:
             facts = merge_facts(facts, *_alias_facts)
+
+    accounting_standard, reporting_currency = detect_accounting_standard_and_currency(facts)
+    meta = {"accounting_standard": accounting_standard, "reporting_currency": reporting_currency}
 
     try:
         # VECTORIZED row construction. Previously: series.iterrows() per concept — ~42% of
@@ -541,7 +631,11 @@ def process_ticker(ticker: str, scraped_at_ts: datetime) -> tuple:
                 frames.append(series.assign(stmt=stmt_name, concept=label, kind=kind))
 
         if not frames:
-            return [], {"error_type": "empty_facts", "error_message": f"No XBRL facts extracted for {ticker}", "step": "extract"}
+            return (
+                [],
+                {"error_type": "empty_facts", "error_message": f"No XBRL facts extracted for {ticker}", "step": "extract"},
+                meta,
+            )
 
         allf = pd.concat(frames, ignore_index=True)
         allf["ticker"]     = ticker.upper()
@@ -560,9 +654,9 @@ def process_ticker(ticker: str, scraped_at_ts: datetime) -> tuple:
             "period_start", "period_end", "period_shape", "value", "filed", "scraped_at",
             "tag_namespace",
         ]].to_dict("records")
-        return records, None
+        return records, None, meta
     except Exception as e:
-        return records, _classify_error(e, "extract")
+        return records, _classify_error(e, "extract"), meta
 
 # COMMAND ----------
 
@@ -650,6 +744,7 @@ if RUN_TICKERS:
     scraped_at   = datetime.utcnow()
     buffer       = []
     failed       = []
+    ticker_meta  = {}   # ticker -> {"accounting_standard": ..., "reporting_currency": ...}
 
     state_lock   = Lock()
     completed    = [0]
@@ -658,7 +753,7 @@ if RUN_TICKERS:
     started_at   = time.monotonic()
 
     def submit_and_collect(ticker: str):
-        records, err = process_ticker(ticker, scraped_at)
+        records, err, meta = process_ticker(ticker, scraped_at)
 
         should_flush = False
         to_write     = None
@@ -666,6 +761,9 @@ if RUN_TICKERS:
         with state_lock:
             completed[0] += 1
             n = completed[0]
+
+            if meta is not None:
+                ticker_meta[ticker] = meta
 
             if err:
                 failed.append({"ticker": ticker, "error": err})
@@ -719,6 +817,58 @@ if RUN_TICKERS:
         if len(failed) > 10:
             print(f"                ... and {len(failed)-10} more")
     print(f"{'='*60}")
+
+# COMMAND ----------
+
+# MAGIC %md ## 7b. Backfill accounting_standard / reporting_currency for Canadian tickers
+# MAGIC
+# MAGIC Writes `ticker_meta` (collected per-ticker in `submit_and_collect` above, from the SAME
+# MAGIC `companyfacts` response already fetched for real ingestion — see section 3b) back onto
+# MAGIC `main.config.tickers`, filtered to `market="CA"` rows only. US rows are never touched —
+# MAGIC they already carry the correct static `"us-gaap"`/`"USD"` from `02__tickers_master.py`.
+# MAGIC Guarded for a table that predates the `market` column.
+
+# COMMAND ----------
+
+if RUN_TICKERS and ticker_meta:
+    try:
+        _ca_tickers = {
+            row.ticker for row in spark.sql(
+                f"SELECT ticker FROM {CATALOG}.config.tickers WHERE market = 'CA'"
+            ).collect()
+        }
+    except Exception as _e:
+        print(f"  ⚠ Could not read market column from {CATALOG}.config.tickers "
+              f"({_e}) — skipping accounting_standard/reporting_currency backfill")
+        _ca_tickers = set()
+
+    _meta_records = [
+        {"ticker": t, **m} for t, m in ticker_meta.items()
+        if t in _ca_tickers and (m["accounting_standard"] is not None or m["reporting_currency"] is not None)
+    ]
+
+    if _meta_records:
+        _meta_schema = StructType([
+            StructField("ticker",              StringType(), False),
+            StructField("accounting_standard", StringType(), True),
+            StructField("reporting_currency",  StringType(), True),
+        ])
+        spark.createDataFrame(_meta_records, schema=_meta_schema) \
+             .createOrReplaceTempView("incoming_ticker_accounting_meta")
+        spark.sql(f"""
+            MERGE INTO {CATALOG}.config.tickers AS t
+            USING incoming_ticker_accounting_meta AS s
+            ON t.ticker = s.ticker
+            WHEN MATCHED THEN UPDATE SET
+                t.accounting_standard = s.accounting_standard,
+                t.reporting_currency  = s.reporting_currency
+        """)
+        print(f"✓ accounting_standard/reporting_currency backfilled for {len(_meta_records)} "
+              f"Canadian ticker(s)")
+    else:
+        print("✓ No Canadian ticker accounting_standard/reporting_currency to backfill this run")
+else:
+    print("✓ No ticker metadata collected this run (nothing to backfill)")
 
 # COMMAND ----------
 

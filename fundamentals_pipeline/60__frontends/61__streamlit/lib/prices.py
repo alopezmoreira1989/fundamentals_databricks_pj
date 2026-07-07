@@ -5,6 +5,7 @@ import altair as alt
 import pandas as pd
 
 from .colors import BLUE, CORAL, CREAM, GREEN
+from .currency import currency_badge
 from .format import fmt_cagr  # CAGR label + css class (fmt_delta is NOT reused — it bakes in "YoY")
 
 ACCENT = BLUE   # accent blue #185FA5 (reuse the shared token)
@@ -144,12 +145,13 @@ def _kpi_card(label: str, value: str, delta: str, delta_cls: str, value_cls: str
     )
 
 
-def render_price_kpis(pdf: pd.DataFrame) -> str:
+def render_price_kpis(pdf: pd.DataFrame, currency: str = "USD") -> str:
     """4-card strip: latest price, 1Y return, 52-week range, window CAGR.
 
     Derived stats use adj_close (consistent with the plotted line, split-safe); the LATEST
     PRICE headline uses raw close. All computed from the DAILY series, independent of the
-    freq toggle. Returns '' when empty.
+    freq toggle. Returns '' when empty. `currency` (the ticker's quote currency, e.g. CAD
+    for a TSX listing) badges the LATEST PRICE card — labeling only, no conversion.
     """
     if pdf is None or pdf.empty:
         return ""
@@ -167,7 +169,7 @@ def render_price_kpis(pdf: pd.DataFrame) -> str:
     if len(s) >= 2 and pd.notna(s.iloc[-2]["close"]) and s.iloc[-2]["close"] != 0:
         chg_1d = (price - float(s.iloc[-2]["close"])) / abs(float(s.iloc[-2]["close"])) * 100
     d1_label, d1_cls = _price_delta(chg_1d, " (1d)")
-    card1 = _kpi_card("LATEST PRICE", _px(price),
+    card1 = _kpi_card("LATEST PRICE", _px(price) + currency_badge(currency),
                       f"{d1_label}  ·  {last_date.strftime('%b %d, %Y')}", d1_cls)
 
     # 2) 1-year return (adj_close, as-of ~1y ago)
@@ -198,12 +200,13 @@ def render_price_kpis(pdf: pd.DataFrame) -> str:
 
 # ── chart ─────────────────────────────────────────────────────────────────────
 
-def price_chart(df: pd.DataFrame, ticker: str, freq: str = "Daily"):
+def price_chart(df: pd.DataFrame, ticker: str, freq: str = "Daily", currency: str = "USD"):
     """Interactive Altair chart: adjusted close + SMA 20/50/200, hierarchical month/year axis.
 
     SMAs are 'N-DAY' averages (computed on the daily series upstream), shown at the chart's
     frequency. Vega-Lite stacks the tick label into two lines (month/day on top, year below at
     each January) via labelExpr. Clicking a legend entry toggles a series. Returns None if empty.
+    `currency` (the ticker's quote currency) labels the y-axis — no conversion, native currency.
     """
     if df is None or df.empty:
         return None
@@ -233,7 +236,7 @@ def price_chart(df: pd.DataFrame, ticker: str, freq: str = "Daily"):
         .encode(
             x=alt.X("date:T", title=None,
                     axis=alt.Axis(labelExpr=label_expr, labelAngle=0, labelOverlap=True)),
-            y=alt.Y("value:Q", title="Adjusted close (USD)",
+            y=alt.Y("value:Q", title=f"Adjusted close ({currency})",
                     scale=alt.Scale(zero=False, nice=True)),
             color=alt.Color("series:N", title=None, sort=_SERIES_ORDER,
                             scale=alt.Scale(domain=_SERIES_ORDER,

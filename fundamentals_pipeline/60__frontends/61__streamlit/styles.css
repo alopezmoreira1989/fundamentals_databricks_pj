@@ -378,6 +378,16 @@ table.fs tbody td.trend-cagr .r2-badge {
   margin-left: 4px;
 }
 
+/* Native-currency label next to a $ figure that isn't USD (e.g. a CAD Market Cap) —
+   kept visually subordinate, same idea as .r2-badge. */
+.ccy-badge {
+  font-size: 10px;
+  font-family: var(--mono);
+  color: var(--ink-3);
+  margin-left: 4px;
+  letter-spacing: 0.04em;
+}
+
 /* Section divider rows */
 tr.section-row td {
   padding: 18px 20px 6px;

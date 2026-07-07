@@ -82,6 +82,16 @@ def _prices_frame() -> pd.DataFrame:
     )
 
 
+def _fx_frame() -> pd.DataFrame:
+    return pd.DataFrame({
+        "base": pd.Series(["CAD", "CAD"], dtype="object"),
+        "quote": pd.Series(["USD", "USD"], dtype="object"),
+        "pair": pd.Series(["CADUSD=X", "CADUSD=X"], dtype="object"),
+        "date": pd.to_datetime(["2024-01-02", "2024-01-03"]),
+        "rate": pd.Series([0.745, 0.744], dtype="float64"),
+    })
+
+
 def _backtest_frame() -> pd.DataFrame:
     return pd.DataFrame({
         "archetype": pd.Series(["graham_defensive", "graham_defensive"], dtype="object"),
@@ -127,6 +137,26 @@ def test_synthetic_prices_is_valid():
 
 def test_synthetic_backtest_is_valid():
     assert schemas.validate_artifact("dashboard_backtest", _backtest_frame()) == []
+
+
+def test_synthetic_fx_is_valid():
+    assert schemas.validate_artifact("dashboard_fx", _fx_frame()) == []
+
+
+def test_empty_typed_fx_is_valid():
+    # Matches the empty-but-typed fallback 51 writes when fx_rates_daily is absent/empty.
+    empty = pd.DataFrame({c: pd.Series(dtype=t) for c, t in {
+        "base": "object", "quote": "object", "pair": "object",
+        "date": "datetime64[ns]", "rate": "float64",
+    }.items()})
+    assert schemas.validate_artifact("dashboard_fx", empty) == []
+
+
+def test_date_as_object_accepted_for_fx():
+    # date32 reads as object pre-normalization — the contract must accept it, same as prices.
+    df = _fx_frame()
+    df["date"] = df["date"].dt.date.astype("object")
+    assert schemas.validate_artifact("dashboard_fx", df) == []
 
 
 def test_backtest_null_benchmark_still_valid():

@@ -16,6 +16,8 @@ from urllib.parse import quote
 
 import pandas as pd
 import streamlit as st
+from lib.currency import convert_to_usd, currency_badge, usd_lens_toggle
+from lib.data import load_fx
 from lib.render import _logo_dev_key, logo_dev_url
 from lib.screener import (
     ALL_INDUSTRIES,
@@ -135,6 +137,7 @@ def _state_qs(
 _LOGO_KEY = _logo_dev_key()
 
 wide, unit_map, metric_order = build_screener_frame()
+fx = load_fx()
 
 # Seed the sector filter from the URL BEFORE anything reads SECTOR_KEY (the stat band,
 # the sector strip and the selectbox all share it). Only fires when the key is absent —
@@ -535,6 +538,12 @@ with st.container(border=True):
         default_cols = _cols_qp or [c for c in DEFAULT_COLUMNS if c in metric_order]
         cols = st.multiselect("Columns (metrics)", metric_order, default=default_cols)
 
+    if "reporting_currency" in wide.columns and (wide["reporting_currency"].astype(str).str.upper().isin(["CAD"])).any():
+        usd_lens = usd_lens_toggle()
+        st.caption("Converts Market Cap only, at each fiscal year's own FX close — other $ columns stay native-currency.")
+    else:
+        usd_lens = False
+
     # Filterable metrics follow the selected columns (always incl. Market Cap),
     # so adding any metric as a column makes it filterable. Buckets come from the
     # per-metric / unit-based bands in lib.screener — no percentile clamping.
@@ -582,6 +591,18 @@ fdf = wide[mask].reset_index(drop=True)
 show_cols = ["ticker", "company"] + [c for c in cols if c in fdf.columns]
 disp = fdf[show_cols].rename(columns={"ticker": "Ticker", "company": "Company"})
 
+# Market Cap's native currency per ticker — badged unless/until converted below. Other
+# usd-unit columns (EV, Revenue, …) aren't badged/converted here; see the toggle caption.
+if "reporting_currency" in fdf.columns:
+    mc_ccy = fdf["reporting_currency"].astype(object).fillna("USD").replace("", "USD").astype(str).str.upper()
+else:
+    mc_ccy = pd.Series("USD", index=fdf.index)
+
+if usd_lens and MARKET_CAP in disp.columns and "market_cap_period_end" in fdf.columns:
+    mc_usd, mc_converted = convert_to_usd(disp[MARKET_CAP], mc_ccy, fdf["market_cap_period_end"], fx)
+    disp[MARKET_CAP] = mc_usd
+    mc_ccy = mc_ccy.where(~mc_converted, "USD")
+
 # usd metrics (incl. Market Cap) render in $B — convert once so display AND sort agree.
 for c in cols:
     if c in disp.columns and (c == MARKET_CAP or unit_map.get(c, "") == "usd"):
@@ -604,13 +625,19 @@ def _header_label(col: str) -> str:
     return col
 
 
-def _fmt_value(col: str, val) -> str:
-    """Format one numeric cell to match the old column_config formats; NaN → em-dash."""
+def _fmt_value(col: str, val, ccy: str = "USD") -> str:
+    """Format one numeric cell to match the old column_config formats; NaN → em-dash.
+
+    `ccy` badges Market Cap when it's not (or couldn't be converted to) USD — see the
+    mc_ccy tracking above. Other usd-unit columns aren't badged (unconverted, native
+    currency; scope explicitly limited to Market Cap for now).
+    """
     if pd.isna(val):
         return "—"
     unit = unit_map.get(col, "")
     if col == MARKET_CAP or unit == "usd":   # already divided to $B above
-        return f"${val:.1f}B"
+        badge = currency_badge(ccy) if col == MARKET_CAP else ""
+        return f"${val:.1f}B{badge}"
     if unit == "percent":
         return f"{val:.1f}%"
     if unit == "ratio":
@@ -666,7 +693,8 @@ def _table_html() -> str:
         )
 
     body = []
-    for rec in disp.to_dict("records"):
+    row_ccy = mc_ccy.reindex(disp.index).tolist()
+    for rec, ccy in zip(disp.to_dict("records"), row_ccy, strict=True):
         tkr = str(rec["Ticker"])
         co = str(rec["Company"])
         cells = [
@@ -674,7 +702,7 @@ def _table_html() -> str:
             f'<td class="scr-td-co" title="{html.escape(co)}">{html.escape(co)}</td>',
         ]
         for c in metric_cols:
-            text = _fmt_value(c, rec[c])
+            text = _fmt_value(c, rec[c], ccy)
             if text == "—":
                 cells.append('<td class="scr-na">—</td>')
                 continue

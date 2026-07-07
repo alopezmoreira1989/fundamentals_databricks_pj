@@ -52,8 +52,13 @@ def fmt_eps(v) -> str:
     return f"{v:,.2f}"
 
 
-def fmt_kpi(v) -> str:
-    """KPI strip: $391.0B / $93.7M (scale-aware, one decimal)."""
+def fmt_kpi(v, currency: str | None = None) -> str:
+    """KPI strip: $391.0B / $93.7M (scale-aware, one decimal).
+
+    `currency`: the value's native currency code (e.g. "CAD"). None/""/"USD" leaves the
+    output unchanged (the common case); anything else appends a " CAD"-style suffix so a
+    non-USD figure is never silently shown as if it were USD.
+    """
     if is_missing(v):
         return EM_DASH
     sign = "-" if v < 0 else ""
@@ -61,18 +66,24 @@ def fmt_kpi(v) -> str:
     # The export keeps raw USD. We display in $B if ≥ $1B else $M.
     # Source values are already in raw USD (not millions); financials are large numbers.
     if a >= 1_000_000_000:
-        return f"{sign}${a / 1_000_000_000:.1f}B"
-    if a >= 1_000_000:
-        return f"{sign}${a / 1_000_000:.1f}M"
-    return f"{sign}${a:,.0f}"
+        out = f"{sign}${a / 1_000_000_000:.1f}B"
+    elif a >= 1_000_000:
+        out = f"{sign}${a / 1_000_000:.1f}M"
+    else:
+        out = f"{sign}${a:,.0f}"
+    if currency and currency.upper() != "USD":
+        out = f"{out} {currency.upper()}"
+    return out
 
 
-def fmt_metric(v, unit: str | None, signed: bool = False) -> str:
+def fmt_metric(v, unit: str | None, signed: bool = False, currency: str | None = None) -> str:
     """Derived metrics: format depending on unit (percent / ratio / usd).
 
     `signed=True` forces a leading "+" on positive percents — only for metrics
     that represent *direction* (growth YoY, margin of safety), not level
     (margins, returns, yields). Negatives always show "−" either way.
+
+    `currency`: passed through to fmt_kpi for unit == "usd" — see its docstring.
     """
     if is_missing(v):
         return EM_DASH
@@ -83,7 +94,7 @@ def fmt_metric(v, unit: str | None, signed: bool = False) -> str:
     if unit == "ratio":
         return f"{v:,.2f}x"
     if unit == "usd":
-        return fmt_kpi(v)
+        return fmt_kpi(v, currency=currency)
     return f"{v:,.2f}"
 
 

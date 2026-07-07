@@ -6,6 +6,10 @@
   //    "cik": "0000123456",            // override the primary CIK (if SEC doesn't resolve the ticker)
   //    "cik_aliases": ["0000999999"],  // predecessor CIKs (mergers, MLP→C-corp, spinoffs)
   //    "aliases": ["XXXX.OLD"],        // alternate tickers that should map to this one
+  //    "market": "CA",                 // optional, defaults to "US" — declare a non-US listing
+  //                                    // unambiguously (e.g. a Canadian TSX/MJDS 40-F filer)
+  //                                    // so it can't silently collide with a same-symbol US
+  //                                    // ticker (see fundamentals_pipeline/identity.py)
   //    "note": "Optional note"}
   {"ticker": "VNOM", "company": "Viper Energy Inc", "cik": "0002074176", "cik_aliases": ["0001602065"], "note": "MLP→C-corp 2024 (former: Viper Energy Partners LP, CIK 0001602065). Confirmed by 33__history_audit run #2: formerNames=[New Cobra Pubco, Inc.]"},
   {"ticker": "UNIT", "company": "Uniti Group", "cik": "0002020795", "cik_aliases": ["0001620280"], "note": "Windstream merger 2025 created a new CIK (predecessor: Uniti Group Inc. CIK 0001620280, formerNames: Communications Sales & Leasing, Inc.). Confirmed by 33__history_audit + EDGAR full-text (16x 10-K 2016-2025 under the old CIK)"},

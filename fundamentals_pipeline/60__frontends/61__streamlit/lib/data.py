@@ -32,6 +32,7 @@ METRIC_FILE   = "dashboard_metrics.parquet"
 META_FILE     = "dashboard_meta.json"
 PRICE_FILE    = "dashboard_prices.parquet"
 BACKTEST_FILE = "dashboard_backtest.parquet"
+FX_FILE       = "dashboard_fx.parquet"
 
 FIXTURE_DIR = Path(__file__).parent.parent / "fixtures"
 
@@ -39,6 +40,7 @@ FIXTURE_DIR = Path(__file__).parent.parent / "fixtures"
 _CATEGORICAL_COLS = (
     "ticker", "period_type", "stmt", "section", "group",
     "concept", "display_name", "category", "subcategory", "metric", "unit",
+    "base", "quote", "pair",
 )
 
 
@@ -290,6 +292,44 @@ def load_backtest() -> pd.DataFrame:
 
     df["archetype"] = df["archetype"].astype("category")
     return df
+
+
+@st.cache_data(ttl=_DATA_TTL, max_entries=1, show_spinner="Loading FX rates…")
+def load_fx() -> pd.DataFrame:
+    """FX rate history published by 51/52 (base, quote, pair, date, rate) — full daily
+    history, no retention window, so a "view in USD" toggle can convert a historical
+    figure using the rate dated at that figure's own observation date (never spot/today).
+
+    MUST degrade gracefully: missing artifact (404 / not yet published) or absent fixture →
+    return an EMPTY frame with the right columns. Never st.stop() — currency badges/toggle
+    just have nothing to convert with, the rest of the app keeps working (same rule as
+    load_prices/load_backtest).
+    """
+    empty = pd.DataFrame(columns=["base", "quote", "pair", "date", "rate"])
+    use_fixtures = os.environ.get("DASHBOARD_USE_FIXTURES") == "1"
+    if use_fixtures:
+        df = pd.read_parquet(FIXTURE_DIR / FX_FILE) if (FIXTURE_DIR / FX_FILE).exists() else empty
+    else:
+        try:
+            df = _fetch_parquet(FX_FILE)
+        except Exception:
+            df = pd.read_parquet(FIXTURE_DIR / FX_FILE) if (FIXTURE_DIR / FX_FILE).exists() else empty
+
+    if df.empty:
+        return empty
+
+    # SOFT schema check (same rule as load_prices/load_backtest): degrade to no-data.
+    violations = validate_artifact("dashboard_fx", df)
+    if violations:
+        print("⚠️ dashboard_fx failed schema validation — degrading to no-data:\n  - " + "\n  - ".join(violations))
+        return empty
+
+    df["date"] = pd.to_datetime(df["date"])
+    df = _optimize_dtypes(df)
+    # Sorted by date only (not grouped by pair first) — pd.merge_asof requires the `on`
+    # key monotonic across the WHOLE frame passed in, even when a caller later filters to
+    # a single (base, quote) pair before merging.
+    return df.sort_values("date").reset_index(drop=True)
 
 
 def _render_load_error(exc: Exception) -> NoReturn:

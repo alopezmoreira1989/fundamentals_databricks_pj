@@ -44,6 +44,18 @@ if "ACTIVE_TICKERS" not in globals() or not ACTIVE_TICKERS:
 else:
     print(f"✓ Inherited {len(ACTIVE_TICKERS)} tickers from parent (override mode)")
 
+# Ticker -> market, needed for the Yahoo ".TO" suffix (TSX-listed tickers — see YAHOO_SYMBOL
+# below). Queried independently of the ACTIVE_TICKERS branch above (override mode doesn't read
+# config.tickers at all) and guarded for a table that predates the `market` column, in which
+# case every ticker defaults to "US" (no suffix) via MARKET_MAP.get(t, "US").
+try:
+    MARKET_MAP = {
+        row.ticker: row.market
+        for row in spark.table(f"{CATALOG}.config.tickers").select("ticker", "market").collect()
+    }
+except Exception:
+    MARKET_MAP = {}
+
 # COMMAND ----------
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -72,6 +84,18 @@ INCR_BUFFER_DAYS = 7     # incremental: refetch from (max stored date − buffer
 # 71__run_backtest reads the benchmark symbol from backtest_archetypes.json (config.benchmark = SPY);
 # keep this list in sync with it. Empty list ⇒ no benchmark priced (71 degrades benchmark to NULL).
 BENCHMARK_TICKERS = ["SPY"]
+
+# Yahoo Finance requires a ".TO" suffix to resolve TSX-listed symbols (e.g. "RY.TO", not "RY")
+# — the bare ticker alone either 404s or can resolve to an unrelated Yahoo-side symbol. The
+# bare ticker stays the identity key everywhere (market_prices_daily, stock_splits,
+# config.tickers, financials) — this mapping is used ONLY at the yf.download() call boundary in
+# fetch_batch/fetch_splits_batch, which translate back to the bare ticker for every written row.
+# Benchmark tickers (SPY) are never in config.tickers, so MARKET_MAP.get(t, "US") defaults them
+# to "US" (no suffix) — never fails looking a benchmark up.
+YAHOO_SYMBOL = {
+    t: (f"{t}.TO" if MARKET_MAP.get(t, "US") == "CA" else t)
+    for t in [*ACTIVE_TICKERS, *BENCHMARK_TICKERS]
+}
 
 # ── Refresh policy ────────────────────────────────────────────────────────────
 # Inherit force_full_refresh from the parent 91 via globals() — SAME handoff as
@@ -230,15 +254,21 @@ def fetch_batch(batch: list, period: str | None = None, start=None) -> tuple:
     """Download a batch in ONE yf.download call (auto_adjust=False → raw Close + Adj Close)
     and return (list_of_per_ticker_frames, failed). Either `period` (e.g. 'max') or `start`
     is used. MultiIndex (multi-ticker) and flat (single-ticker) shapes both handled; a ticker
-    yf drops or that returns no/all-NaN Close is logged via _classify_mkt_error / _empty_err."""
+    yf drops or that returns no/all-NaN Close is logged via _classify_mkt_error / _empty_err.
+
+    `batch` holds bare tickers (the identity used everywhere else); the actual yf.download
+    call uses each ticker's YAHOO_SYMBOL (bare, or "<ticker>.TO" for market="CA" tickers) —
+    every returned/failed row is still keyed by the bare ticker.
+    """
     fetched_at = datetime.utcnow()
+    yahoo_batch = [YAHOO_SYMBOL.get(t, t) for t in batch]
     kw = dict(group_by="ticker", threads=True, progress=False, auto_adjust=False)
     if start is not None:
         kw["start"] = start.isoformat() if hasattr(start, "isoformat") else start
     else:
         kw["period"] = period or "max"
     try:
-        data = yf.download(batch, **kw)
+        data = yf.download(yahoo_batch, **kw)
     except Exception as e:
         err = _classify_mkt_error(e)
         return [], [{"ticker": t, "error": err} for t in batch]
@@ -247,16 +277,17 @@ def fetch_batch(batch: list, period: str | None = None, start=None) -> tuple:
         return [], [{"ticker": t, "error": _empty_err(t)} for t in batch]
 
     multi = isinstance(data.columns, pd.MultiIndex)
-    present = set(data.columns.get_level_values(0)) if multi else set(batch)
+    present = set(data.columns.get_level_values(0)) if multi else set(yahoo_batch)
 
     frames, failed_local = [], []
     for t in batch:
+        yahoo_symbol = YAHOO_SYMBOL.get(t, t)
         try:
             if multi:
-                if t not in present:                 # yf dropped this ticker entirely
+                if yahoo_symbol not in present:      # yf dropped this ticker entirely
                     failed_local.append({"ticker": t, "error": _empty_err(t)})
                     continue
-                sub = data[t]
+                sub = data[yahoo_symbol]
             else:
                 sub = data                           # single-ticker batch → flat columns
             fr = _daily_frame(t, sub, fetched_at)
@@ -374,14 +405,19 @@ else:
 def fetch_splits_batch(batch: list, period: str | None = None, start=None) -> list:
     """One `yf.download(actions=True)` → per-ticker `(ticker, split_date, ratio)` frames.
     Splits-only: prices/dividends in the response are ignored. Missing column / no split days /
-    yf error → no rows (never a 'failure' — most tickers simply never split)."""
+    yf error → no rows (never a 'failure' — most tickers simply never split).
+
+    `batch` holds bare tickers; the actual yf.download call uses each ticker's YAHOO_SYMBOL
+    (see fetch_batch) — output rows are still keyed by the bare ticker.
+    """
+    yahoo_batch = [YAHOO_SYMBOL.get(t, t) for t in batch]
     kw = dict(group_by="ticker", threads=True, progress=False, auto_adjust=False, actions=True)
     if start is not None:
         kw["start"] = start.isoformat() if hasattr(start, "isoformat") else start
     else:
         kw["period"] = period or "max"
     try:
-        data = yf.download(batch, **kw)
+        data = yf.download(yahoo_batch, **kw)
     except Exception:
         return []
     if data is None or data.empty:
@@ -389,8 +425,9 @@ def fetch_splits_batch(batch: list, period: str | None = None, start=None) -> li
     multi = isinstance(data.columns, pd.MultiIndex)
     out = []
     for t in batch:
+        yahoo_symbol = YAHOO_SYMBOL.get(t, t)
         try:
-            sub = data[t] if multi else data
+            sub = data[yahoo_symbol] if multi else data
             if "Stock Splits" not in sub.columns:
                 continue
             ss = pd.to_numeric(sub["Stock Splits"], errors="coerce")
@@ -478,6 +515,199 @@ if _split_frames:
         print(f"✓ MERGED {len(splits_pd):,} split rows into {splits_tbl}")
 else:
     print("✓ No splits fetched this run.")
+
+# COMMAND ----------
+
+# MAGIC %md ## 4c. FX rates (currency-alignment foundation)
+# MAGIC
+# MAGIC Some filers report fundamentals in a different currency than their primary listing
+# MAGIC quotes in (a Canadian gold miner reporting in USD while its TSX listing quotes in CAD is
+# MAGIC the concrete case) — `market_cap = price × shares` is only correct when both operands
+# MAGIC share a currency, so `22__derived_metrics.py` converts the price into the ticker's
+# MAGIC `reporting_currency` before computing `market_cap_asof`. That conversion needs a daily FX
+# MAGIC rate table, fetched here with the SAME batched yfinance machinery as prices/splits above —
+# MAGIC no new vendor dependency.
+# MAGIC
+# MAGIC Currency pairs are derived DYNAMICALLY from whatever currencies are actually in play
+# MAGIC (quote currencies via `market`, reporting currencies via `reporting_currency` on
+# MAGIC `main.config.tickers`) rather than a hardcoded list, so a future market addition doesn't
+# MAGIC require editing this logic. Every ordered pair of distinct currencies gets its own
+# MAGIC yfinance `"{base}{quote}=X"` ticker (e.g. `CADUSD=X`) — fetching both directions avoids
+# MAGIC the conversion helper (`fundamentals_pipeline/fx.py`) ever needing to invert a rate.
+# MAGIC Guarded for a `config.tickers` that predates `market`/`reporting_currency` (in which case
+# MAGIC every ticker is USD/USD and no FX data is needed at all).
+
+# COMMAND ----------
+
+QUOTE_CURRENCY_BY_MARKET = {"US": "USD", "CA": "CAD"}
+fx_tbl = f"{CATALOG}.{SCHEMA}.fx_rates_daily"
+
+
+def _needed_currencies() -> set:
+    """Every currency actually in play (quote currencies + reporting currencies), read from
+    main.config.tickers. Defensive — the table may predate `market`/`reporting_currency`
+    (pre-Canadian-onboarding schema), in which case only "USD" is needed (no conversion is
+    ever required) and the FX fetch below is skipped entirely."""
+    currencies = {"USD"}
+    try:
+        _tk = spark.table(f"{CATALOG}.config.tickers")
+        _cols = _tk.columns
+        if "market" in _cols:
+            markets = {r.market for r in _tk.select("market").distinct().collect() if r.market}
+            currencies |= {QUOTE_CURRENCY_BY_MARKET.get(m, "USD") for m in markets}
+        if "reporting_currency" in _cols:
+            rcs = {
+                r.reporting_currency
+                for r in _tk.select("reporting_currency").distinct().collect()
+                if r.reporting_currency
+            }
+            currencies |= rcs
+    except Exception as _e:
+        print(f"  ⚠ Could not read config.tickers for FX-pair derivation ({_e}) — assuming USD-only.")
+    return currencies
+
+
+_fx_currencies = _needed_currencies()
+FX_PAIRS = [
+    {"base": b, "quote": q, "pair": f"{b}{q}=X"}
+    for b in sorted(_fx_currencies) for q in sorted(_fx_currencies) if b != q
+]
+if FX_PAIRS:
+    print(f"FX pairs needed: {[p['pair'] for p in FX_PAIRS]}")
+else:
+    print("No FX conversion needed this run (single-currency universe) — fx_rates_daily untouched.")
+
+spark.sql(f"""
+    CREATE TABLE IF NOT EXISTS {fx_tbl} (
+        base       STRING    NOT NULL,
+        quote      STRING    NOT NULL,
+        pair       STRING    NOT NULL,
+        date       DATE      NOT NULL,
+        rate       DOUBLE,
+        fetched_at TIMESTAMP
+    )
+    USING DELTA
+    TBLPROPERTIES (
+        'delta.autoOptimize.optimizeWrite' = 'true',
+        'delta.autoOptimize.autoCompact'   = 'true'
+    )
+""")
+
+
+def fetch_fx_batch(pairs: list, period: str | None = None, start=None) -> list:
+    """One `yf.download` call for a batch of FX pair tickers (e.g. `'CADUSD=X'`) -> per-pair
+    `(base, quote, pair, date, rate)` frames. Mirrors `fetch_splits_batch`'s shape (a small,
+    sparse table, not the daily-price hot path) — no failure tracking: an FX pair that fails
+    to fetch just yields no rows for this run and is retried next run."""
+    if not pairs:
+        return []
+    symbols = [p["pair"] for p in pairs]
+    kw = dict(group_by="ticker", threads=True, progress=False, auto_adjust=False)
+    if start is not None:
+        kw["start"] = start.isoformat() if hasattr(start, "isoformat") else start
+    else:
+        kw["period"] = period or "max"
+    try:
+        data = yf.download(symbols, **kw)
+    except Exception as e:
+        print(f"  ⚠ FX fetch failed for {symbols}: {e}")
+        return []
+    if data is None or data.empty:
+        return []
+    multi = isinstance(data.columns, pd.MultiIndex)
+    out = []
+    for p in pairs:
+        sym = p["pair"]
+        try:
+            sub = data[sym] if multi else data
+            if "Close" not in sub.columns:
+                continue
+            closes = pd.to_numeric(sub["Close"], errors="coerce").dropna()
+            if closes.empty:
+                continue
+            out.append(pd.DataFrame({
+                "base":  p["base"],
+                "quote": p["quote"],
+                "pair":  sym,
+                "date":  pd.to_datetime(closes.index).date,
+                "rate":  closes.astype(float).values,
+            }))
+        except Exception:
+            continue
+    return out
+
+
+if FX_PAIRS:
+    try:
+        _fx_has_data = spark.table(fx_tbl).limit(1).count() > 0
+    except Exception:
+        _fx_has_data = False
+
+    _fx_scraped_at = datetime.utcnow()
+    _fx_mode = "full" if (FORCE_FULL_REFRESH or not _fx_has_data) else "incremental"
+
+    if _fx_mode == "full":
+        _fx_full_pairs, _fx_incr_pairs, _fx_incr_start = FX_PAIRS, [], None
+        print(f"FX FULL refresh — {len(_fx_full_pairs)} pair(s), period=max (overwrite)")
+    else:
+        _fx_maxd = {
+            (r["base"], r["quote"]): r["max_date"]
+            for r in spark.sql(f"""
+                SELECT base, quote, MAX(date) AS max_date FROM {fx_tbl} GROUP BY base, quote
+            """).collect()
+        }
+        _fx_cutoff = date.today() - timedelta(days=STALENESS_DAYS)
+        _fx_full_pairs = [p for p in FX_PAIRS if (p["base"], p["quote"]) not in _fx_maxd]
+        _fx_incr_pairs = [
+            p for p in FX_PAIRS
+            if (p["base"], p["quote"]) in _fx_maxd and _fx_maxd[(p["base"], p["quote"])] < _fx_cutoff
+        ]
+        _fx_stale_maxes = [_fx_maxd[(p["base"], p["quote"])] for p in _fx_incr_pairs]
+        _fx_incr_start = (min(_fx_stale_maxes) - timedelta(days=INCR_BUFFER_DAYS)) if _fx_stale_maxes else None
+        print("FX INCREMENTAL run:")
+        print(f"  New (period=max) : {len(_fx_full_pairs)}")
+        print(f"  Stale (gap-fill) : {len(_fx_incr_pairs)}  start={_fx_incr_start}")
+
+    _fx_frames = fetch_fx_batch(_fx_full_pairs, period="max")
+    if _fx_incr_pairs and _fx_incr_start:
+        _fx_frames += fetch_fx_batch(_fx_incr_pairs, start=_fx_incr_start)
+
+    if _fx_frames:
+        fx_pd = pd.concat(_fx_frames, ignore_index=True)
+        fx_pd["date"] = pd.to_datetime(fx_pd["date"]).dt.date
+        fx_pd["rate"] = fx_pd["rate"].astype(float)
+        fx_pd["fetched_at"] = pd.Timestamp(_fx_scraped_at)
+        fx_pd = fx_pd.drop_duplicates(subset=["base", "quote", "date"], keep="last")
+
+        _fx_schema = StructType([
+            StructField("base",       StringType(),    False),
+            StructField("quote",      StringType(),    False),
+            StructField("pair",       StringType(),    False),
+            StructField("date",       DateType(),      False),
+            StructField("rate",       DoubleType(),    True),
+            StructField("fetched_at", TimestampType(), True),
+        ])
+        fx_sdf = spark.createDataFrame(fx_pd, schema=_fx_schema)
+
+        if _fx_mode == "full":
+            (fx_sdf.write.format("delta").mode("overwrite")
+             .option("overwriteSchema", "true").saveAsTable(fx_tbl))
+            n_pairs = fx_pd[["base", "quote"]].drop_duplicates().shape[0]
+            print(f"✓ OVERWROTE {fx_tbl} — {len(fx_pd):,} FX rows ({n_pairs} pair(s))")
+        else:
+            fx_sdf.createOrReplaceTempView("incoming_fx_rates")
+            spark.sql(f"""
+                MERGE INTO {fx_tbl} AS t
+                USING incoming_fx_rates AS s
+                ON t.base = s.base AND t.quote = s.quote AND t.date = s.date
+                WHEN MATCHED THEN UPDATE SET t.rate = s.rate, t.fetched_at = s.fetched_at
+                WHEN NOT MATCHED THEN
+                    INSERT (base, quote, pair, date, rate, fetched_at)
+                    VALUES (s.base, s.quote, s.pair, s.date, s.rate, s.fetched_at)
+            """)
+            print(f"✓ MERGED {len(fx_pd):,} FX rows into {fx_tbl}")
+    else:
+        print("✓ No new FX rates to write.")
 
 # COMMAND ----------
 

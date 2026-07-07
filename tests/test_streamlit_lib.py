@@ -48,6 +48,17 @@ def test_fmt_kpi_scale_aware():
     assert fmt.fmt_kpi(-1_000_000_000) == "-$1.0B"
 
 
+def test_fmt_kpi_currency_suffix():
+    assert fmt.fmt_kpi(1_000_000_000, currency="USD") == "$1.0B"   # USD → unchanged
+    assert fmt.fmt_kpi(1_000_000_000, currency=None) == "$1.0B"
+    assert fmt.fmt_kpi(1_000_000_000, currency="CAD") == "$1.0B CAD"
+
+
+def test_fmt_metric_usd_passes_through_currency():
+    assert fmt.fmt_metric(1_000_000_000, "usd", currency="CAD") == "$1.0B CAD"
+    assert fmt.fmt_metric(1_000_000_000, "usd") == "$1.0B"
+
+
 def test_fmt_cagr_basic_and_sign_change():
     label, cls = fmt.fmt_cagr(100, 121, 2)
     assert label == "+10.0%"
@@ -247,3 +258,84 @@ def test_industry_summary_no_industry_column():
     summary, info = screener.industry_summary(pd.DataFrame({"ticker": ["A"], "P/E": [10.0]}))
     assert summary.empty
     assert info["n_industries"] == 0 and info["unknown"] == 0
+
+
+# ── currency (streamlit-gated) ──────────────────────────────────────────────────
+currency = pytest.importorskip("lib.currency")
+
+
+def test_quote_currency_by_market():
+    assert currency.quote_currency("US") == "USD"
+    assert currency.quote_currency("CA") == "CAD"
+    assert currency.quote_currency(None) == "USD"
+    assert currency.quote_currency("XX") == "USD"   # unknown market → USD default
+
+
+def test_currency_badge_usd_and_empty_are_blank():
+    assert currency.currency_badge("USD") == ""
+    assert currency.currency_badge("usd") == ""
+    assert currency.currency_badge("") == ""
+    assert currency.currency_badge(None) == ""
+
+
+def test_currency_badge_non_usd():
+    badge = currency.currency_badge("cad")
+    assert "CAD" in badge
+    assert badge.startswith("<span")
+
+
+def _fx_frame() -> pd.DataFrame:
+    """Two CADUSD=X rates a week apart — asof lookups must pick the one on/before the date."""
+    return pd.DataFrame({
+        "base":  ["CAD", "CAD"],
+        "quote": ["USD", "USD"],
+        "pair":  ["CADUSD=X", "CADUSD=X"],
+        "date":  pd.to_datetime(["2024-01-01", "2024-01-08"]),
+        "rate":  [0.74, 0.75],
+    })
+
+
+def test_convert_to_usd_same_currency_is_noop():
+    values = pd.Series([100.0, 200.0])
+    ccy = pd.Series(["USD", "USD"])
+    dates = pd.Series(pd.to_datetime(["2024-01-05", "2024-01-05"]))
+    out, converted = currency.convert_to_usd(values, ccy, dates, _fx_frame())
+    assert list(out) == [100.0, 200.0]
+    assert not converted.any()
+
+
+def test_convert_to_usd_applies_matching_rate():
+    values = pd.Series([100.0])
+    ccy = pd.Series(["CAD"])
+    dates = pd.Series(pd.to_datetime(["2024-01-05"]))   # between the two fx dates
+    out, converted = currency.convert_to_usd(values, ccy, dates, _fx_frame())
+    assert converted.iloc[0]
+    assert out.iloc[0] == pytest.approx(74.0)   # 100 * 0.74 (the 01-01 rate, not 01-08)
+
+
+def test_convert_to_usd_date_anchoring_never_picks_a_later_rate():
+    values = pd.Series([100.0])
+    ccy = pd.Series(["CAD"])
+    dates = pd.Series(pd.to_datetime(["2024-01-01"]))   # exactly the first rate's date
+    out, converted = currency.convert_to_usd(values, ccy, dates, _fx_frame())
+    assert converted.iloc[0]
+    assert out.iloc[0] == pytest.approx(74.0)   # not the later 0.75 rate
+
+
+def test_convert_to_usd_missing_rate_leaves_value_native():
+    values = pd.Series([100.0])
+    ccy = pd.Series(["CAD"])
+    dates = pd.Series(pd.to_datetime(["2023-01-01"]))   # before any known fx rate
+    out, converted = currency.convert_to_usd(values, ccy, dates, _fx_frame())
+    assert not converted.iloc[0]
+    assert out.iloc[0] == 100.0   # left native, never guessed
+
+
+def test_convert_to_usd_empty_fx_frame_leaves_values_native():
+    values = pd.Series([100.0])
+    ccy = pd.Series(["CAD"])
+    dates = pd.Series(pd.to_datetime(["2024-01-05"]))
+    empty_fx = pd.DataFrame(columns=["base", "quote", "pair", "date", "rate"])
+    out, converted = currency.convert_to_usd(values, ccy, dates, empty_fx)
+    assert not converted.iloc[0]
+    assert out.iloc[0] == 100.0

@@ -51,8 +51,23 @@ import pyspark.sql.functions as F
 import pyspark.sql.types as T
 from pyspark.sql.window import Window
 
+# CONTRACT: the currency-conversion arithmetic below (native Spark F.when/multiply) mirrors
+# fundamentals_pipeline/fx.py's convert_price() scalar semantics — no-op when currencies
+# match, multiply by rate otherwise, never guess a missing rate. fx.py is the pure reference
+# + the contract test (tests/test_fx.py); if you change the conversion rule here, mirror it
+# there. Same as 22__derived_metrics.py's own copy of this contract note.
+
 # ── Paths & table names ──────────────────────────────────────────────────────
 ASSUMPTIONS_JSON_PATH = "../00__config/valuation_assumptions.json"
+
+# Quote currency by listing market — mirrors 22__derived_metrics.py's own constant (kept
+# duplicated rather than shared across these two self-contained notebooks, matching this
+# file's existing convention of duplicating the split-factor logic rather than sharing it).
+# Only US/CA exist today; a future market addition extends this dict, not the join logic
+# below. See fundamentals_pipeline/fx.py for why this matters: a ticker's TTM live price is
+# quoted in whatever currency its listing market trades in, but its fundamentals are reported
+# in `reporting_currency` — these can differ for the SAME ticker.
+QUOTE_CURRENCY_BY_MARKET = {"US": "USD", "CA": "CAD"}
 
 full_table  = f"{CATALOG}.{SCHEMA}.{TABLE}"
 # Period_end-aligned price + market cap written by 22 (replaces legacy calendar-aligned
@@ -475,8 +490,166 @@ if has_live_price:
         _daily_prices
         .withColumn("rn", F.row_number().over(w_live_price))
         .filter(F.col("rn") == 1)
-        .select("ticker", F.col("close").alias("price_close"))
+        .select("ticker", "date", F.col("close").alias("price_close"))
     )
+
+    # ── Currency alignment (multi-market foundation) ─────────────────────────────
+    # Same principle as 22__derived_metrics.py's FY basis (see there for the full rationale)
+    # — applied here to the TTM/live price. There is no separate `period_end` for a live
+    # quote, so the anchor is the price's OWN trade `date` — never `filed`, never a rate from
+    # some OTHER date than the observation itself. Defensive: config.tickers may predate
+    # `market`/`reporting_currency` (pre-Canadian-onboarding schema) — in that case every
+    # ticker defaults to quote_currency=reporting_currency="USD" and this block is a no-op.
+    try:
+        _tk_ccy = spark.table(f"{CATALOG}.config.tickers")
+        _tk_cols = _tk_ccy.columns
+        _market_col = F.col("market") if "market" in _tk_cols else F.lit("US")
+        _rc_col = F.col("reporting_currency") if "reporting_currency" in _tk_cols else F.lit("USD")
+        _quote_ccy_expr = F.lit("USD")
+        for _mkt, _ccy in QUOTE_CURRENCY_BY_MARKET.items():
+            if _ccy != "USD":
+                _quote_ccy_expr = F.when(_market_col == _mkt, F.lit(_ccy)).otherwise(_quote_ccy_expr)
+        ticker_currency = _tk_ccy.select(
+            "ticker",
+            F.coalesce(_quote_ccy_expr, F.lit("USD")).alias("quote_currency"),
+            F.coalesce(_rc_col, F.lit("USD")).alias("reporting_currency"),
+        )
+    except Exception as _e:
+        print(f"⚠ Could not read config.tickers for TTM currency alignment ({_e}) — assuming "
+              f"quote_currency=reporting_currency='USD' for every ticker.")
+        ticker_currency = None
+
+    def _log_missing_fx_ttm(missing_df) -> None:
+        """Log TTM rows needing currency conversion with no resolvable FX rate to
+        `ingestion_failures` — visible and trackable (never silent), but NOT a run-aborting
+        raise: the affected tickers are simply excluded from the TTM live-price/market_cap
+        this run (same convention as 22__derived_metrics.py's FY-basis version of this
+        guard), so one ticker's FX gap doesn't block every other ticker's TTM refresh.
+        """
+        _missing_rows = (
+            missing_df.select("ticker", "date", "quote_currency", "reporting_currency").collect()
+        )
+        if not _missing_rows:
+            return
+        _failures_tbl = f"{CATALOG}.{SCHEMA}.ingestion_failures"
+        spark.sql(f"""
+            CREATE TABLE IF NOT EXISTS {_failures_tbl} (
+                ticker         STRING    NOT NULL,
+                error_type     STRING    NOT NULL,
+                error_message  STRING,
+                step           STRING    NOT NULL,
+                scraped_at     TIMESTAMP NOT NULL
+            )
+            USING DELTA
+            TBLPROPERTIES (
+                'delta.autoOptimize.optimizeWrite' = 'true',
+                'delta.autoOptimize.autoCompact'   = 'true'
+            )
+        """)
+        _fail_schema = T.StructType([
+            T.StructField("ticker",        T.StringType(),    False),
+            T.StructField("error_type",    T.StringType(),    False),
+            T.StructField("error_message", T.StringType(),    True),
+            T.StructField("step",          T.StringType(),    False),
+            T.StructField("scraped_at",    T.TimestampType(), False),
+        ])
+        _scraped_at_ttm = datetime.utcnow()
+        _fail_records = [{
+            "ticker": r.ticker,
+            "error_type": "missing_fx_rate",
+            "error_message": (
+                f"No {r.quote_currency}->{r.reporting_currency} FX rate on/before "
+                f"{r.date} (TTM live price) — excluded from TTM market_cap"
+            ),
+            "step": "currency_alignment_ttm",
+            "scraped_at": _scraped_at_ttm,
+        } for r in _missing_rows]
+        spark.createDataFrame(_fail_records, schema=_fail_schema) \
+             .write.mode("append").saveAsTable(_failures_tbl)
+        _first = _missing_rows[0]
+        print(f"⚠ Missing FX rate for {len(_missing_rows)} TTM ticker(s) needing currency "
+              f"conversion — logged to {_failures_tbl} and EXCLUDED from TTM market_cap this "
+              f"run. First: {_first.ticker} "
+              f"({_first.quote_currency}->{_first.reporting_currency} as of {_first.date})")
+
+    if ticker_currency is None:
+        live_price = live_price.withColumn("currency", F.lit("USD")).select(
+            "ticker", "price_close", "currency"
+        )
+    else:
+        live_price_ccy = (
+            live_price
+            .join(F.broadcast(ticker_currency), on="ticker", how="left")
+            .withColumn("quote_currency",     F.coalesce(F.col("quote_currency"),     F.lit("USD")))
+            .withColumn("reporting_currency", F.coalesce(F.col("reporting_currency"), F.lit("USD")))
+            .withColumn("needs_conversion",   F.col("quote_currency") != F.col("reporting_currency"))
+        )
+
+        if live_price_ccy.filter(F.col("needs_conversion")).limit(1).count() == 0:
+            live_price = live_price_ccy.select(
+                "ticker", "price_close", F.col("reporting_currency").alias("currency")
+            )
+        else:
+            try:
+                _fx = spark.table(f"{CATALOG}.{SCHEMA}.fx_rates_daily").select("base", "quote", "date", "rate")
+                _has_fx = _fx.limit(1).count() > 0
+            except Exception:
+                _has_fx = False
+
+            if not _has_fx:
+                print("⚠ TTM currency conversion is needed but fx_rates_daily is "
+                      "missing/empty — run 12__fetch_market_data.py first. All tickers "
+                      "needing conversion are excluded from TTM price/market_cap this run.")
+                _log_missing_fx_ttm(
+                    live_price_ccy.filter(F.col("needs_conversion"))
+                    .withColumn("fx_rate", F.lit(None).cast("double"))
+                )
+                live_price = (
+                    live_price_ccy
+                    .filter(~F.col("needs_conversion"))
+                    .select("ticker", "price_close", F.col("reporting_currency").alias("currency"))
+                )
+            else:
+                # As-of FX rate: latest rate dated on/before the live price's OWN `date` — the
+                # SAME as-of principle as the FY basis, anchored on this row's own observation date.
+                _w_fx_ttm = Window.partitionBy("ticker").orderBy(F.col("fx_date").desc())
+                _fx_bcast = F.broadcast(
+                    _fx.withColumnRenamed("date", "fx_date").withColumnRenamed("rate", "fx_rate")
+                )
+                live_price_fx = (
+                    live_price_ccy
+                    .join(
+                        _fx_bcast,
+                        on=[
+                            live_price_ccy.quote_currency     == _fx_bcast.base,
+                            live_price_ccy.reporting_currency == _fx_bcast.quote,
+                            _fx_bcast.fx_date <= live_price_ccy.date,
+                        ],
+                        how="left",
+                    )
+                    .withColumn("_rn", F.row_number().over(_w_fx_ttm))
+                    .filter((F.col("_rn") == 1) | F.col("fx_rate").isNull())
+                )
+
+                # A ticker that NEEDS conversion but found no matching rate. Tickers that don't
+                # need conversion never match the join (fx_rates_daily only stores genuinely
+                # different-currency pairs), so `needs_conversion` separates a real gap from a
+                # row that was never supposed to join.
+                _missing = live_price_fx.filter(F.col("needs_conversion") & F.col("fx_rate").isNull())
+                if _missing.limit(1).count() > 0:
+                    _log_missing_fx_ttm(_missing)
+
+                live_price = (
+                    live_price_fx
+                    .filter(~(F.col("needs_conversion") & F.col("fx_rate").isNull()))
+                    .withColumn(
+                        "price_close",
+                        F.when(F.col("needs_conversion"), F.col("price_close") * F.col("fx_rate"))
+                         .otherwise(F.col("price_close")),
+                    )
+                    .select("ticker", "price_close", F.col("reporting_currency").alias("currency"))
+                )
+
     ttm_with_price = (
         ttm_wide.join(live_price, on="ticker", how="left")
         .withColumn(
@@ -492,6 +665,7 @@ else:
         ttm_wide
         .withColumn("price_close", F.lit(None).cast("double"))
         .withColumn("market_cap",  F.lit(None).cast("double"))
+        .withColumn("currency",    F.lit(None).cast("string"))
     )
 
 print(f"✓ FY rows : {fy_with_price.count():,}")

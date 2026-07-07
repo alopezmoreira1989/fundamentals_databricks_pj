@@ -142,6 +142,7 @@ def render_masthead(ticker: str, data: pd.DataFrame, meta: dict[str, Any]) -> st
     sector = "Unknown"   # NULL / missing / legacy (pre-v6) artifacts → "Unknown" bucket
     industry = ""
     has_logo: bool | None = None   # True / False / None (None = pre-bump snapshot, unknown)
+    reporting_currency = "USD"
     ticker_info_list = meta.get("tickers", [])
     if ticker_info_list and isinstance(ticker_info_list[0], dict):
         match = next((t for t in ticker_info_list if t["ticker"] == ticker), None)
@@ -150,6 +151,7 @@ def render_masthead(ticker: str, data: pd.DataFrame, meta: dict[str, Any]) -> st
             sector = match.get("sector") or "Unknown"
             industry = match.get("industry") or ""
             has_logo = match.get("has_logo")
+            reporting_currency = match.get("reporting_currency") or "USD"
 
     # FY range for this ticker.
     fy_range = ""
@@ -180,7 +182,7 @@ def render_masthead(ticker: str, data: pd.DataFrame, meta: dict[str, Any]) -> st
         '  </div>'
         '  <div class="masthead-right">'
         f'    <div class="date">{fy_range}</div>'
-        f'    <div>{n_years} fiscal years · USD</div>'
+        f'    <div>{n_years} fiscal years · {html.escape(reporting_currency)}</div>'
         f'    <div style="margin-top:6px;">main.financials.financials</div>'
         '  </div>'
         '</div>'
@@ -204,12 +206,14 @@ def render_table_html(
     notes: dict[str, Any],
     divisor: int = 1,
     scale_word: str = "",
+    currency: str = "USD",
 ) -> str:
     """Render IS / BS / CF / quarterly tables as full <table> HTML.
 
     `divisor` / `scale_word` re-scale the money cells (1 / 1e3 / 1e6 / 1e9). Defaults
     keep every existing caller at full-resolution USD, unchanged. Per-share and
-    share-count rows are never scaled (see the cell loop below).
+    share-count rows are never scaled (see the cell loop below). `currency` is the
+    ticker's real reporting_currency — labeling only (values aren't converted).
     """
     if df.empty:
         return '<p style="color:var(--ink-3)">No data available.</p>'
@@ -220,9 +224,10 @@ def render_table_html(
     # Quarter labels reconstructed as FY − YTD_Q3 (Q4), if the export flags them.
     derived_qs = df.attrs.get("derived_quarters", set()) if is_quarterly else set()
 
-    # Header row. Values are stored as raw USD; the corner label reflects the unit
-    # scale chosen by the selector ("USD" at full resolution, else "USD millions" etc.).
-    usd_label = "USD" if divisor == 1 else f"USD {scale_word}"
+    # Header row. Values are stored raw in the ticker's reporting currency; the corner
+    # label reflects both that currency and the unit scale chosen by the selector.
+    currency = currency or "USD"
+    usd_label = currency if divisor == 1 else f"{currency} {scale_word}"
     header_cells = [f'<th class="col-label">{usd_label}</th>']
     for i, yr in enumerate(year_cols):
         is_last = i == len(year_cols) - 1

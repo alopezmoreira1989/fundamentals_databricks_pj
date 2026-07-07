@@ -37,7 +37,7 @@ import pandas as pd
 # sys.path manipulation.
 from fundamentals_pipeline import schemas as _schemas
 
-SCHEMA_VERSION = 10  # +accounting_standard/reporting_currency (multi-market foundation) on ticker_meta
+SCHEMA_VERSION = 12  # +market (listing market / quote-currency source) on ticker meta
 FY_YEARS       = 10
 QUARTERS       = 12
 PRICE_YEARS    = 10                              # daily-price retention window (calendar years)
@@ -48,6 +48,7 @@ METRIC_PARQUET = OUT_DIR / "dashboard_metrics.parquet"
 META_JSON      = OUT_DIR / "dashboard_meta.json"
 PRICE_PARQUET  = OUT_DIR / "dashboard_prices.parquet"
 BACKTEST_PARQUET = OUT_DIR / "dashboard_backtest.parquet"
+FX_PARQUET     = OUT_DIR / "dashboard_fx.parquet"
 
 # COMMAND ----------
 
@@ -62,7 +63,7 @@ tickers_df = spark.sql(f"""
     SELECT
       t.ticker, t.company, t.sector, t.industry, t.has_logo,
       t.description, t.exchange, t.country, t.employees, t.website, t.founded,
-      t.accounting_standard, t.reporting_currency,
+      t.accounting_standard, t.reporting_currency, t.market,
       COALESCE(t.is_favorite, false) AS is_favorite,
       COALESCE(t.in_sp500,    false) AS in_sp500,
       COALESCE(t.in_r3000,    false) AS in_r3000
@@ -96,6 +97,11 @@ ticker_meta = [
         "founded":     None if pd.isna(r.founded)   else int(r.founded),
         "accounting_standard": r.accounting_standard or "",
         "reporting_currency":  r.reporting_currency  or "",
+        # Listing market ("US"/"CA") — the quote currency a ticker's PRICE trades in, which
+        # can differ from reporting_currency (e.g. a USD-reporting, CAD-quoted TSX filer).
+        # See CLAUDE.md's currency-alignment convention / QUOTE_CURRENCY_BY_MARKET in
+        # 22__derived_metrics.py, whose ground truth this mirrors.
+        "market":              r.market              or "US",
         "is_favorite": bool(r.is_favorite),
         "in_sp500":    bool(r.in_sp500),
         "in_r3000":    bool(r.in_r3000),
@@ -194,9 +200,16 @@ metrics = spark.sql(f"""
 # category.dropna(), so these rows are invisible there but the screener still picks them up.
 # `period_end` is the REAL fiscal close and the value is priced as-of it, so — unlike the old
 # market_data source — it's on the same fiscal basis as every other FY metric (no 0–11mo offset).
+#
+# `unit`: market_cap_asof's `currency` column (added alongside the currency-alignment fix,
+# schema v11) is each row's REAL native reporting currency (not always USD once Canadian
+# tickers exist — see fundamentals_pipeline/fx.py) — read it directly rather than hardcoding
+# 'usd'. Defensively falls back to the 'usd' literal for a table that predates that column.
 MKT_COLUMNS = ["ticker", "period_type", "period_end", "fiscal_year",
                "category", "subcategory", "metric", "unit", "sort_order", "value"]
 try:
+    _mca_cols = {f.name for f in spark.table(f"{CATALOG}.{SCHEMA}.market_cap_asof").schema.fields}
+    _unit_expr = "LOWER(md.currency)" if "currency" in _mca_cols else "'usd'"
     market_cap = spark.sql(f"""
         WITH ranked AS (
           SELECT
@@ -207,7 +220,7 @@ try:
             CAST(NULL AS STRING)  AS category,
             CAST(NULL AS STRING)  AS subcategory,
             'Market Cap'          AS metric,
-            'usd'                 AS unit,
+            {_unit_expr}          AS unit,
             CAST(NULL AS DOUBLE)  AS sort_order,
             md.market_cap         AS value,
             DENSE_RANK() OVER (PARTITION BY md.ticker ORDER BY md.fiscal_year DESC) AS yr_rank
@@ -310,6 +323,40 @@ else:
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ## 3d. FX rates slice (fx_rates_daily)
+# MAGIC
+# MAGIC **Full daily history** (no retention window, unlike prices) — a future frontend "view
+# MAGIC in USD" toggle needs the rate from a HISTORICAL figure's own `period_end`, never today's
+# MAGIC spot rate (see `fundamentals_pipeline/fx.py`'s date-anchoring rule), so truncating this
+# MAGIC to a recent window would silently break that for older fiscal years. The table itself is
+# MAGIC tiny (a handful of currency pairs × ~20 years of daily rates), so exporting it whole
+# MAGIC costs nothing. Building the toggle itself is out of scope here — this just publishes the
+# MAGIC data it will need.
+
+# COMMAND ----------
+
+FX_COLUMNS = {"base": "object", "quote": "object", "pair": "object",
+              "date": "datetime64[ns]", "rate": "float64"}
+try:
+    fx_rates = spark.sql(f"""
+        SELECT base, quote, pair, date, rate
+        FROM {CATALOG}.{SCHEMA}.fx_rates_daily
+        ORDER BY base, quote, date
+    """).toPandas()
+    if fx_rates.empty:
+        print("⚠️ fx_rates_daily returned 0 rows — writing empty FX slice")
+except Exception as exc:  # noqa: BLE001 — table absent or unreadable: degrade, don't fail the export
+    print(f"⚠️ Could not read fx_rates_daily ({type(exc).__name__}: {exc}) — writing empty FX slice")
+    fx_rates = pd.DataFrame({c: pd.Series(dtype=t) for c, t in FX_COLUMNS.items()})
+
+if fx_rates.empty:
+    print("  fx rows: 0 (empty slice)")
+else:
+    print(f"  fx rows: {len(fx_rates):,} ({fx_rates[['base', 'quote']].drop_duplicates().shape[0]} pair(s))")
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## 4. Write parquet + meta
 
 # COMMAND ----------
@@ -322,6 +369,7 @@ financials.attrs = {}
 metrics.attrs = {}
 prices.attrs = {}
 backtest.attrs = {}
+fx_rates.attrs = {}
 
 # Schema contract — fail the run LOUDLY rather than shipping an artifact the public app
 # can't read. assert_artifact raises SchemaError naming the offending artifact/column.
@@ -329,11 +377,13 @@ _schemas.assert_artifact("dashboard_data", financials)
 _schemas.assert_artifact("dashboard_metrics", metrics)
 _schemas.assert_artifact("dashboard_prices", prices)
 _schemas.assert_artifact("dashboard_backtest", backtest)
+_schemas.assert_artifact("dashboard_fx", fx_rates)
 
 financials.to_parquet(DATA_PARQUET, index=False)
 metrics.to_parquet(METRIC_PARQUET, index=False)
 prices.to_parquet(PRICE_PARQUET, index=False)
 backtest.to_parquet(BACKTEST_PARQUET, index=False)
+fx_rates.to_parquet(FX_PARQUET, index=False)
 
 # Per-ticker FY range — used by the Streamlit masthead.
 fy_ranges = (
@@ -355,6 +405,7 @@ meta = {
         "metrics":      int(len(metrics)),
         "prices":       int(len(prices)),
         "backtest":     int(len(backtest)),
+        "fx":           int(len(fx_rates)),
     },
     "retention": {
         "fy_years":     FY_YEARS,
@@ -370,6 +421,7 @@ print(f"  {DATA_PARQUET}   ({DATA_PARQUET.stat().st_size / 1024:.1f} KB)")
 print(f"  {METRIC_PARQUET} ({METRIC_PARQUET.stat().st_size / 1024:.1f} KB)")
 print(f"  {PRICE_PARQUET}  ({PRICE_PARQUET.stat().st_size / 1024:.1f} KB)")
 print(f"  {BACKTEST_PARQUET} ({BACKTEST_PARQUET.stat().st_size / 1024:.1f} KB)")
+print(f"  {FX_PARQUET}     ({FX_PARQUET.stat().st_size / 1024:.1f} KB)")
 print(f"  {META_JSON}      (schema_version={SCHEMA_VERSION})")
 
 # COMMAND ----------
@@ -389,7 +441,7 @@ VOLUME_PATH    = "/Volumes/main/financials/_publish"   # must already exist
 
 if COPY_TO_VOLUME:
     dbutils.fs.mkdirs(VOLUME_PATH)
-    for f in [DATA_PARQUET, METRIC_PARQUET, PRICE_PARQUET, BACKTEST_PARQUET, META_JSON]:
+    for f in [DATA_PARQUET, METRIC_PARQUET, PRICE_PARQUET, BACKTEST_PARQUET, FX_PARQUET, META_JSON]:
         dest = f"{VOLUME_PATH}/{f.name}"
         dbutils.fs.cp(f"file:{f}", dest, recurse=False)
         print(f"  ✓ {f.name} → {dest}")
