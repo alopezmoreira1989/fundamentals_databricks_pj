@@ -1080,6 +1080,13 @@ schema = StructType([
     StructField("reporting_currency",  StringType(), True),
 ])
 
+# createDataFrame(pandas_df, schema=StructType(...)) binds schema fields to DataFrame
+# columns POSITIONALLY, not by name — `master`'s columns were built up incrementally
+# across sections 2-2e in whatever order each field was first assigned, which does not
+# match the field order declared in `schema` above. Reindex explicitly or the write
+# silently scrambles columns into the wrong typed slots (or throws, if the scrambled
+# types are incompatible).
+master = master[[f.name for f in schema.fields]]
 sdf = spark.createDataFrame(master, schema=schema)
 spark.sql(f"DROP TABLE IF EXISTS {TARGET_TABLE}")
 
