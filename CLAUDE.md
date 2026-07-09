@@ -48,9 +48,11 @@ Databricks analytical pipeline that ingests SEC EDGAR XBRL filings (10-K/10-Q) f
   cases: `TVE`→the Tennessee Valley Authority, `IAU`→the iShares Gold Trust ETF, `SAP`→SAP SE,
   among others). Excluded tickers are logged with a reason, not silently dropped.
   `accounting_standard`/`reporting_currency` are left `NULL` for admitted Canadian rows —
-  real MJDS/40-F filers are a genuine mix (confirmed 2026-07: most banks/energy file
-  `ifrs-full` in CAD, but IMO/Shopify/BlackBerry file `us-gaap` in USD, and Nutrien/Gildan
-  file `ifrs-full` in **USD** — currency is not a function of namespace alone) —
+  real MJDS/40-F filers are a genuine mix (confirmed 2026-07-09 against live production
+  data from `main.config.tickers`: most banks/energy file `ifrs-full` in CAD, and Imperial
+  Oil (`IMO`) also files `us-gaap` in **CAD** despite being a US-style filer, but
+  Shopify/BlackBerry file `us-gaap` in USD, and Nutrien/Gildan file `ifrs-full` in
+  **USD** — currency is not a function of namespace alone) —
   `11__fetch_sec_xbrl.py` derives both from the real per-ticker `companyfacts` response it
   already fetches for ingestion and writes them back via `MERGE INTO config.tickers`, scoped
   to `market="CA"` rows only. `12__fetch_market_data.py` translates a Canadian ticker to its
