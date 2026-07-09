@@ -522,20 +522,20 @@ with feat_col, st.container(key="scr_featured"):
 # Filters (top)
 # ──────────────────────────────────────────────────────────────────────────────
 with st.container(border=True):
-    c1, c1b, c2, c3, c4, c5 = st.columns([1.0, 0.9, 1.2, 1.2, 1.3, 2.3])
+    c1, c1b, c2, c3, c4, c5 = st.columns([0.9, 1.0, 1.2, 1.2, 1.3, 2.3])
     with c1:
-        # Seed the universe from the URL (first instantiation only) — falls back to index 0.
-        _univ_list = list(UNIVERSE_FLAGS)
-        _univ_qp = st.query_params.get("u")
-        _univ_index = _univ_list.index(_univ_qp) if _univ_qp in _univ_list else 0
-        universe = st.selectbox("Universe", _univ_list, index=_univ_index)
-    with c1b:
         # Listing market ("US"/"Canada") — independent of Universe (a dual-listed ticker can
         # be market="US" and still count toward S&P/TSX Composite). Same URL-seeding pattern.
         _market_list = list(MARKET_LABELS)
         _market_qp = st.query_params.get("m")
         _market_index = _market_list.index(_market_qp) if _market_qp in _market_list else 0
         market = st.selectbox("Market", _market_list, index=_market_index)
+    with c1b:
+        # Seed the universe from the URL (first instantiation only) — falls back to index 0.
+        _univ_list = list(UNIVERSE_FLAGS)
+        _univ_qp = st.query_params.get("u")
+        _univ_index = _univ_list.index(_univ_qp) if _univ_qp in _univ_list else 0
+        universe = st.selectbox("Universe", _univ_list, index=_univ_index)
     with c2:
         # Keyed so the sector strip's callbacks can drive it; SECTOR_KEY is pre-seeded from
         # the URL above, so default = that value on a fresh load, else "All sectors".
