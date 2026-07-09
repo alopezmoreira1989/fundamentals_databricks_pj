@@ -580,7 +580,9 @@ def _render_benchmark_subrow(benchmarks, metric_name: str, ticker: str,
 
 
 def render_metrics_grid(metrics: pd.DataFrame, ticker: str, iv_period: str = "FY",
-                        iv_price=_IV_PRICE_UNSET, benchmarks=None, ticker_industry: str = "") -> str:
+                        iv_price=_IV_PRICE_UNSET, benchmarks=None, ticker_industry: str = "",
+                        exclude_categories: frozenset[str] = frozenset(),
+                        only_categories: frozenset[str] | None = None) -> str:
     """Render the derived metrics cards — one per category from metrics_hierarchy.json.
 
     `iv_period` ("FY" | "TTM") selects which Intrinsic Value flavour to show — the
@@ -590,6 +592,10 @@ def render_metrics_grid(metrics: pd.DataFrame, ticker: str, iv_period: str = "FY
     `iv_price` is the back-out anchor price for the Intrinsic Value scenario rows. The
     caller (company.py) reuses the same value for the football field, so it can pass it
     in to avoid a second `iv_price_from_metrics` pass; left unset it's computed here.
+
+    `exclude_categories`/`only_categories` split one metrics_hierarchy.json category set
+    across two tabs (Derived metrics vs Valuation, see company.py) without a second grid
+    implementation — both default to no filtering for any other caller.
     """
     sub = metrics[(metrics["ticker"] == ticker) & (metrics["period_type"] == "FY")].copy()
     if sub.empty:
@@ -597,7 +603,10 @@ def render_metrics_grid(metrics: pd.DataFrame, ticker: str, iv_period: str = "FY
 
     # Group by category → subcategory → metric (preserving sort_order).
     sub = sub.sort_values("sort_order", na_position="last")
-    categories = sub["category"].dropna().unique().tolist()
+    categories = [
+        c for c in sub["category"].dropna().unique().tolist()
+        if c not in exclude_categories and (only_categories is None or c in only_categories)
+    ]
 
     cards: list[str] = []
     for cat in categories:

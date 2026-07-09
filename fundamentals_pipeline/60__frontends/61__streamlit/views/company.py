@@ -133,8 +133,9 @@ scale_label = st.segmented_control(
 )
 divisor, scale_word = SCALE_OPTIONS[scale_label or "Units"]
 
-tab_ov, tab_px, tab_is, tab_bs, tab_cf, tab_dm, tab_qt = st.tabs(
-    ["Overview", "Price", "Income statement", "Balance sheet", "Cash flow", "Derived metrics", "Quarterly"]
+tab_ov, tab_px, tab_is, tab_bs, tab_cf, tab_dm, tab_val, tab_qt = st.tabs(
+    ["Overview", "Price", "Income statement", "Balance sheet", "Cash flow", "Derived metrics",
+     "Valuation", "Quarterly"]
 )
 
 with tab_ov:
@@ -245,6 +246,20 @@ with tab_dm:
         '<div class="meta">From metrics_hierarchy.json</div></div>',
         unsafe_allow_html=True,
     )
+    # Valuation multiples/yields and Intrinsic Value are their own tab (see tab_val below) —
+    # shown there once instead of repeated here, mirroring the Django app's company page.
+    st.markdown(
+        render_metrics_grid(tmetrics, ticker, benchmarks=benchmarks, ticker_industry=ticker_industry,
+                            exclude_categories=frozenset({"Valuation", "Intrinsic Value"})),
+        unsafe_allow_html=True,
+    )
+
+with tab_val:
+    st.markdown(
+        '<div class="panel-header"><h2>Valuation</h2>'
+        '<div class="meta">Multiples, yields &amp; intrinsic value</div></div>',
+        unsafe_allow_html=True,
+    )
     iv_period = st.segmented_control(
         "Intrinsic value",
         ["FY", "TTM"],
@@ -260,7 +275,8 @@ with tab_dm:
     ff_price = iv_price_from_metrics(tmetrics, ticker, iv_period=iv_period)
     st.markdown(
         render_metrics_grid(tmetrics, ticker, iv_period=iv_period, iv_price=ff_price,
-                            benchmarks=benchmarks, ticker_industry=ticker_industry),
+                            benchmarks=benchmarks, ticker_industry=ticker_industry,
+                            only_categories=frozenset({"Valuation", "Intrinsic Value"})),
         unsafe_allow_html=True,
     )
     # Valuation football field — fills the gap below the grid.
