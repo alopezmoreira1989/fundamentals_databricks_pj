@@ -23,6 +23,9 @@ class CompanySummary:
     exchange: str | None = None
     country: str | None = None
     market: str | None = None
+    reporting_currency: str | None = None
+    accounting_standard: str | None = None
+    in_tsx_composite: bool | None = None
     description: str | None = None
     website: str | None = None
     employees: int | None = None
@@ -47,6 +50,7 @@ class MetricPoint:
     category: str | None = None
     subcategory: str | None = None
     sort_order: float | None = None
+    period_end: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,11 +109,17 @@ class PricePoint:
 
 @dataclass(frozen=True, slots=True)
 class HeadlineKpi:
-    """A single headline figure (latest fiscal year) for the company overview strip."""
+    """A single headline figure (latest fiscal year) for the company overview strip.
+
+    ``currency`` is ``None`` for the statement-derived KPIs (Revenue, Net Income, …) — always
+    the ticker's ``reporting_currency`` and rendered with the default ``$`` prefix; Market Cap
+    sets it explicitly (native currency, or ``"USD"`` once converted by the USD-lens toggle)
+    so the template can badge a non-USD value instead of assuming ``$``."""
 
     label: str
     value: float | None
     fiscal_year: int | None
+    currency: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,6 +141,7 @@ class CompanyListRow:
     sector: str | None = None
     industry: str | None = None
     country: str | None = None
+    market: str | None = None
     metric_value: float | None = None
     fiscal_year: int | None = None
     has_logo: bool | None = None
@@ -175,6 +186,7 @@ class ScreenTableRow:
     sector: str | None
     industry: str | None
     country: str | None
+    market: str | None
     has_logo: bool | None
     values: Mapping[str, float | None]
     units: Mapping[str, str | None]

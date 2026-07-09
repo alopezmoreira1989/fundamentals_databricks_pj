@@ -17,8 +17,11 @@ Everything above (services/views) sees only immutable DTOs.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
+
+import duckdb
+from fundamentals_pipeline.fx import convert_price
 
 from infrastructure.storage import meta as load_meta
 
@@ -44,7 +47,24 @@ _METRIC_PAGE_SQL = """
 
 # Descriptive columns of the screener table that can be sorted on (they live on the in-memory
 # scope table, not the metrics pivot). Any other sort key must name a selected metric column.
-_SORTABLE_DESCRIPTIVE = ("ticker", "name", "sector", "industry", "country")
+_SORTABLE_DESCRIPTIVE = ("ticker", "name", "sector", "industry", "country", "market")
+
+# Market Cap's FX rate for tickers whose native unit isn't already USD, for the USD-lens
+# toggle (#220) — date-anchored to each ticker's own Market Cap period_end, mirroring the
+# Streamlit app's usd_lens_convert()/convert_to_usd(). Scoped to just the page's tickers.
+_MARKET_CAP_FX_SQL = """
+    WITH mc AS (
+        SELECT ticker, unit, period_end
+        FROM metrics
+        WHERE metric = 'Market Cap' AND period_type = 'FY' AND value IS NOT NULL
+          AND UPPER(unit) != 'USD' AND list_contains(?, ticker)
+        QUALIFY row_number() OVER (PARTITION BY ticker ORDER BY fiscal_year DESC) = 1
+    )
+    SELECT mc.ticker, fx.rate
+    FROM mc
+    LEFT JOIN fx ON fx.base = UPPER(mc.unit) AND fx.quote = 'USD' AND fx.date <= mc.period_end
+    QUALIFY row_number() OVER (PARTITION BY mc.ticker ORDER BY fx.date DESC) = 1
+"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,7 +88,7 @@ class SortSpec:
 
 def _index_flag(index: str) -> str | None:
     """Map an index-membership filter value to its meta boolean key (``None`` ⇒ no filter)."""
-    return {"sp500": "in_sp500", "r3000": "in_r3000"}.get(index)
+    return {"sp500": "in_sp500", "r3000": "in_r3000", "tsx": "in_tsx_composite"}.get(index)
 
 
 def _has_logo(rec: dict[str, Any]) -> bool | None:
@@ -92,8 +112,18 @@ class CompanyListingRepository(DuckDBRepository):
         }
         return tuple(sorted(countries))
 
+    def available_markets(self) -> tuple[str, ...]:
+        """Distinct non-empty listing markets in the universe, alphabetical (for the filter
+        picker) — e.g. ``("CA", "US")``. Independent of ``country`` (incorporation/HQ) and of
+        the Universe index-membership filter (a dual-listed ticker's `market` can be "US" while
+        it's also `in_tsx_composite`)."""
+        markets = {
+            m for rec in load_meta().get("tickers", []) if (m := rec.get("market"))
+        }
+        return tuple(sorted(markets))
+
     def _scope(
-        self, *, search: str, sector: str, index: str, country: str = ""
+        self, *, search: str, sector: str, index: str, country: str = "", market: str = ""
     ) -> list[dict[str, Any]]:
         """Universe rows passing the descriptive filters, sorted by ticker (deterministic paging)."""
         needle = search.strip().upper()
@@ -104,6 +134,8 @@ class CompanyListingRepository(DuckDBRepository):
             if sector and rec.get("sector") != sector:
                 continue
             if country and rec.get("country") != country:
+                continue
+            if market and rec.get("market") != market:
                 continue
             if flag and not rec.get(flag):
                 continue
@@ -120,6 +152,7 @@ class CompanyListingRepository(DuckDBRepository):
         sector: str = "",
         index: str = "",
         country: str = "",
+        market: str = "",
         metric: str = "",
         min_value: float | None = None,
         max_value: float | None = None,
@@ -132,7 +165,7 @@ class CompanyListingRepository(DuckDBRepository):
         ``metric`` the scoped tickers are filtered/ordered/paged by that metric's latest-FY
         value inside DuckDB. Returns ``(rows, total)``.
         """
-        scope = self._scope(search=search, sector=sector, index=index, country=country)
+        scope = self._scope(search=search, sector=sector, index=index, country=country, market=market)
         offset = max(0, (page - 1) * page_size)
 
         if not metric:
@@ -145,6 +178,7 @@ class CompanyListingRepository(DuckDBRepository):
                     sector=rec.get("sector"),
                     industry=rec.get("industry"),
                     country=rec.get("country"),
+                    market=rec.get("market"),
                     has_logo=_has_logo(rec),
                 )
                 for rec in window
@@ -200,6 +234,7 @@ class CompanyListingRepository(DuckDBRepository):
                 sector=by_ticker[ticker].get("sector"),
                 industry=by_ticker[ticker].get("industry"),
                 country=by_ticker[ticker].get("country"),
+                market=by_ticker[ticker].get("market"),
                 metric_value=value,
                 fiscal_year=fiscal_year,
                 has_logo=_has_logo(by_ticker[ticker]),
@@ -216,20 +251,26 @@ class CompanyListingRepository(DuckDBRepository):
         sector: str = "",
         index: str = "",
         country: str = "",
+        market: str = "",
         columns: Sequence[str] = (),
         filters: Sequence[MetricFilter] = (),
         sort: SortSpec | None = None,
         page: int = 1,
         page_size: int = 50,
+        usd_lens: bool = False,
     ) -> ScreenTablePage:
         """One page of the multi-metric screener table.
 
-        The descriptive scope (search/sector/index/country over the meta universe) is pushed
-        into a DuckDB temp table; each selected/​filtered metric's latest-FY value is pivoted
-        per ticker in DuckDB, the metric filters and the sort/pagination are all applied there.
-        Only the page's rows (≤ ``page_size``) ever cross back into Python. Returns the rows,
-        the total match count, and the ordered display columns (with units, for formatting)."""
-        scope = self._scope(search=search, sector=sector, index=index, country=country)
+        The descriptive scope (search/sector/index/country/market over the meta universe) is
+        pushed into a DuckDB temp table; each selected/​filtered metric's latest-FY value is
+        pivoted per ticker in DuckDB, the metric filters and the sort/pagination are all applied
+        there. Only the page's rows (≤ ``page_size``) ever cross back into Python.
+        ``usd_lens`` converts the Market Cap column to USD (only, date-anchored per ticker's own
+        Market Cap period_end) when it's a displayed column — #220's USD-lens toggle, mirroring
+        the Streamlit app; every other ``$``-unit column stays native regardless. Returns the
+        rows, the total match count, and the ordered display columns (with units, for
+        formatting)."""
+        scope = self._scope(search=search, sector=sector, index=index, country=country, market=market)
         offset = max(0, (page - 1) * page_size)
         sort = sort or SortSpec()
 
@@ -250,6 +291,7 @@ class CompanyListingRepository(DuckDBRepository):
                 rec.get("sector"),
                 rec.get("industry"),
                 rec.get("country"),
+                rec.get("market"),
                 _has_logo(rec),
             )
             for rec in scope
@@ -260,16 +302,17 @@ class CompanyListingRepository(DuckDBRepository):
             con.execute(
                 "CREATE TEMP TABLE scoped"
                 " (ticker VARCHAR, name VARCHAR, sector VARCHAR, industry VARCHAR,"
-                " country VARCHAR, has_logo BOOLEAN)"
+                " country VARCHAR, market VARCHAR, has_logo BOOLEAN)"
             )
-            con.executemany("INSERT INTO scoped VALUES (?, ?, ?, ?, ?, ?)", scope_rows)
+            con.executemany("INSERT INTO scoped VALUES (?, ?, ?, ?, ?, ?, ?)", scope_rows)
 
             units = self._metric_units(con, all_metrics)
             cte, cte_params = self._pivot_cte(all_metrics, alias)
             where, where_params = self._filter_clause(filters, alias)
             select_cols = ", ".join(f"p.{alias[m]}, p.{alias[m]}_u" for m in display_metrics)
-            projection = "s.ticker, s.name, s.sector, s.industry, s.country, s.has_logo" + (
-                f", {select_cols}" if select_cols else ""
+            projection = (
+                "s.ticker, s.name, s.sector, s.industry, s.country, s.market, s.has_logo"
+                + (f", {select_cols}" if select_cols else "")
             )
             from_join = (
                 "scoped s LEFT JOIN pivoted p USING (ticker)" if all_metrics else "scoped s"
@@ -289,23 +332,55 @@ class CompanyListingRepository(DuckDBRepository):
             )
             hits = cursor.fetchall()
 
-        rows = tuple(
-            ScreenTableRow(
-                ticker=row[0],
-                name=row[1],
-                sector=row[2],
-                industry=row[3],
-                country=row[4],
-                has_logo=row[5],
-                values={m: row[6 + 2 * i] for i, m in enumerate(display_metrics)},
-                units={m: row[6 + 2 * i + 1] for i, m in enumerate(display_metrics)},
+            rows = tuple(
+                ScreenTableRow(
+                    ticker=row[0],
+                    name=row[1],
+                    sector=row[2],
+                    industry=row[3],
+                    country=row[4],
+                    market=row[5],
+                    has_logo=row[6],
+                    values={m: row[7 + 2 * i] for i, m in enumerate(display_metrics)},
+                    units={m: row[7 + 2 * i + 1] for i, m in enumerate(display_metrics)},
+                )
+                for row in hits
             )
-            for row in hits
-        )
+            if usd_lens and "Market Cap" in display_metrics and rows:
+                rows = self._apply_usd_lens(con, rows)
+
         columns_meta = tuple(
             ScreenColumn(key=m, unit=units.get(m)) for m in display_metrics
         )
         return ScreenTablePage(rows=rows, total=total, columns=columns_meta)
+
+    @staticmethod
+    def _apply_usd_lens(con: Any, rows: tuple[ScreenTableRow, ...]) -> tuple[ScreenTableRow, ...]:
+        """Convert each row's Market Cap to USD where a same-date FX rate exists; rows with no
+        rate (missing `fx` view, or no rate dated early enough) are returned unchanged — still
+        native-currency, still badged, never silently guessed."""
+        try:
+            rate_rows = con.execute(_MARKET_CAP_FX_SQL, [[r.ticker for r in rows]]).fetchall()
+        except duckdb.Error:
+            return rows  # `fx` view not registered (dashboard_fx.parquet unavailable) — degrade
+        rate_by_ticker = {ticker: rate for ticker, rate in rate_rows if rate is not None}
+        if not rate_by_ticker:
+            return rows
+        converted = []
+        for row in rows:
+            rate = rate_by_ticker.get(row.ticker)
+            native_value = row.values.get("Market Cap")
+            native_unit = row.units.get("Market Cap")
+            if rate is None or native_value is None or not native_unit:
+                converted.append(row)
+                continue
+            usd_value = convert_price(native_value, native_unit.upper(), "USD", rate)
+            converted.append(replace(
+                row,
+                values={**row.values, "Market Cap": usd_value},
+                units={**row.units, "Market Cap": "usd"},
+            ))
+        return tuple(converted)
 
     @staticmethod
     def _metric_units(con: Any, metrics: list[str]) -> dict[str, str | None]:

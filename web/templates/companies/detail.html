@@ -8,8 +8,10 @@
   .co-masthead h1 { font-size: clamp(1.8rem, 4vw, 2.6rem); line-height: 1; }
   .co-chip { font-family: var(--mono); font-size: .8rem; letter-spacing: .04em; padding: 3px 10px;
              background: var(--ink); color: var(--bg); border-radius: 3px; }
-  /* KPI strip (overview) — hairline grid, Fraunces values */
-  .kpi-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px;
+  /* KPI strip (overview) — hairline grid, Fraunces values. auto-fit so a 5th cell (Market
+     Cap, only present when the artifact has one for this ticker) doesn't leave an
+     awkward lone cell under a hardcoded 4-column layout. */
+  .kpi-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1px;
                background: var(--rule); border: 1px solid var(--rule); border-radius: 4px; overflow: hidden; }
   .kpi-cell { background: var(--bg-card); padding: 16px 18px; }
   .kpi-cell .k { font-family: var(--mono); font-size: .6rem; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); }
@@ -201,11 +203,20 @@
   <div class="tab-content">
     <!-- Overview -->
     <div class="tab-pane fade show active" id="pane-overview" role="tabpanel" aria-labelledby="tab-overview" tabindex="0">
+      {% if show_usd_toggle %}
+        <div class="d-flex justify-content-end mb-2">
+          {% if usd_lens %}
+            <a class="small text-muted" href="{{ request.path }}">Viewing in USD · <span class="text-decoration-underline">show native currency</span></a>
+          {% else %}
+            <a class="small text-muted" href="?usd=1"><span class="text-decoration-underline">View in USD</span> (Market Cap only; other figures stay native)</a>
+          {% endif %}
+        </div>
+      {% endif %}
       <div class="kpi-strip mb-4">
         {% for k in headline %}
           <div class="kpi-cell">
             <div class="k">{{ k.label }}</div>
-            <div class="v">{% if k.value is not None %}${{ k.value|compact_money }}{% else %}—{% endif %}</div>
+            <div class="v">{{ k.value|compact_money_ccy:k.currency }}</div>
             <div class="fy">{% if k.fiscal_year %}FY {{ k.fiscal_year }}{% endif %}</div>
           </div>
         {% endfor %}

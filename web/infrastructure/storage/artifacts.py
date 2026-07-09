@@ -1,10 +1,10 @@
 """Retrieval, validation, and local caching of the published Release artifacts.
 
 The web layer's analytical source is the exact same set of artifacts the Streamlit app
-reads — five files published to the GitHub Release ``latest`` by ``50__publish/51+52``:
+reads — six files published to the GitHub Release ``latest`` by ``50__publish/51+52``:
 
     dashboard_data.parquet      dashboard_metrics.parquet   dashboard_prices.parquet
-    dashboard_backtest.parquet  dashboard_meta.json
+    dashboard_backtest.parquet  dashboard_fx.parquet        dashboard_meta.json
 
 This module ensures a *fresh local copy* of each artifact exists on disk and returns its
 path; ``services/duckdb`` then queries the parquet files directly (no per-request pandas
@@ -45,6 +45,7 @@ PARQUET_FILES: dict[str, str] = {
     "dashboard_metrics": "dashboard_metrics.parquet",
     "dashboard_prices": "dashboard_prices.parquet",
     "dashboard_backtest": "dashboard_backtest.parquet",
+    "dashboard_fx": "dashboard_fx.parquet",
 }
 META_FILE = "dashboard_meta.json"
 

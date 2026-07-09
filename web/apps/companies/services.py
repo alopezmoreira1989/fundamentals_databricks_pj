@@ -6,6 +6,7 @@ the data comes from DuckDB/parquet.
 
 from __future__ import annotations
 
+from fundamentals_pipeline.fx import convert_price
 from infrastructure.news import NewsItem, fetch_yahoo_news
 from repositories.companies import CompanyRepository
 from repositories.dtos import (
@@ -98,3 +99,25 @@ def headline_kpis(statements: CompanyStatements) -> tuple[HeadlineKpi, ...]:
 def get_company_summary(ticker: str) -> CompanySummary | None:
     """Descriptive facts for a ticker, or ``None`` if unknown (no metrics fetch)."""
     return CompanyRepository().get_summary(ticker)
+
+
+def get_market_cap_kpi(ticker: str, *, usd_lens: bool) -> HeadlineKpi | None:
+    """Market Cap headline card (``None`` if the ticker has no Market Cap row).
+
+    Native currency by default; converts to USD only when `usd_lens` is on AND a same-date FX
+    rate exists (#181/#220's USD-lens toggle) — mirrors the Streamlit app's
+    ``usd_lens_convert()`` exactly, including the "no rate → stay native, still badge"
+    fallback (never silently guessed).
+    """
+    repo = CompanyRepository()
+    mc = repo.market_cap(ticker)
+    if mc is None:
+        return None
+    currency = (mc.unit or "usd").upper()
+    value = mc.value
+    if usd_lens and currency != "USD" and mc.period_end:
+        rate = repo.usd_fx_rate(currency, mc.period_end)
+        if rate is not None:
+            value = convert_price(value, currency, "USD", rate)
+            currency = "USD"
+    return HeadlineKpi(label="Market Cap", value=value, fiscal_year=mc.fiscal_year, currency=currency)
