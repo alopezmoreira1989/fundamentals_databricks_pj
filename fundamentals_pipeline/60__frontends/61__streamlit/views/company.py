@@ -270,18 +270,19 @@ with tab_val:
     # segmented_control returns None if the user deselects the active chip.
     iv_period = iv_period or "FY"
     # Back out the IV anchor price ONCE (the app stores no per-share price directly) and reuse
-    # it for both the metrics grid and the football field below — otherwise the same MoS
+    # it for both the football field and the metrics grid below — otherwise the same MoS
     # inversion runs 2–3× per rerun. Returns None when unavailable → both renderers degrade.
     ff_price = iv_price_from_metrics(tmetrics, ticker, iv_period=iv_period)
+    # Chart first, table below — same layout convention as every other tab (Income statement,
+    # Balance sheet, Cash flow, Quarterly all lead with their chart/visual).
+    st.markdown(
+        render_valuation_football_field(tmetrics, ticker, ff_price, iv_period=iv_period),
+        unsafe_allow_html=True,
+    )
     st.markdown(
         render_metrics_grid(tmetrics, ticker, iv_period=iv_period, iv_price=ff_price,
                             benchmarks=benchmarks, ticker_industry=ticker_industry,
                             only_categories=frozenset({"Valuation", "Intrinsic Value"})),
-        unsafe_allow_html=True,
-    )
-    # Valuation football field — fills the gap below the grid.
-    st.markdown(
-        render_valuation_football_field(tmetrics, ticker, ff_price, iv_period=iv_period),
         unsafe_allow_html=True,
     )
 
