@@ -2,6 +2,8 @@
 
 End-to-end Databricks pipeline that ingests **annual (10-K) and quarterly (10-Q)** XBRL financial filings from SEC EDGAR, fetches market data from Yahoo Finance, and serves Income Statement, Balance Sheet, Cash Flow, and derived financial metrics via direct queries on Delta tables. A public Streamlit dashboard provides read-only access without Databricks credentials.
 
+**Multi-market:** alongside ~2,600 US tickers (S&P 500 + Russell 3000 + favorites), the universe now includes Canadian MJDS/40-F filers (S&P/TSX Composite, gated to companies that also register with the SEC) — same SEC EDGAR ingestion, `ifrs-full`/`us-gaap` namespace detected per filer, and native-currency (USD/CAD) storage with date-anchored FX conversion for cross-currency market-cap math. See [Multi-market ticker universe](#multi-market-ticker-universe) below.
+
 ```mermaid
 flowchart TD
     %% ---- Config / JSON inputs (edit here) ----
@@ -115,16 +117,19 @@ fundamentals_databricks_pj/
 │   ├── valuation_assumptions.json           ← valuation assumptions (WACC, growth, per-ticker overrides)
 │   └── backtest_archetypes.json             ← investor-archetype screens for the backtester (70__backtest)
 │
-├── _core/                                   ← pure-Python library (no Spark/Streamlit dep), unit-tested
+├── fundamentals_pipeline/                   ← installable package (pip install -e .), pure-Python, unit-tested
 │   ├── valuation.py                         ← scalar reference impls (Graham, DCF, Owner Earnings, EPS CAGR)
 │   ├── periods.py                           ← Q4 = FY − YTD_Q3 period arithmetic
-│   ├── schemas.py                           ← export↔Streamlit artifact schema contract (single source of truth)
+│   ├── schemas.py                           ← export↔app artifact schema contract (single source of truth)
 │   ├── splits.py                            ← cumulative stock-split factor for cross-year per-share rescaling
-│   └── backtest.py                          ← as-of (no look-ahead), predicate eval, CAGR/drawdown/vol/Sharpe
+│   ├── backtest.py                          ← as-of (no look-ahead), predicate eval, CAGR/drawdown/vol/Sharpe
+│   ├── fx.py                                ← currency-conversion reference (date-anchored, multi-market)
+│   ├── identity.py                          ← cross-market ticker-collision guard + company-name matching
+│   └── tickers_universe.py                  ← pure parsing for non-US ticker-universe sources (e.g. TSX/XIC)
 │
 ├── 10__ingestion/
 │   ├── 11__fetch_sec_xbrl.py         ← SEC EDGAR XBRL API → financials_raw (parallel + Arrow + batched)
-│   └── 12__fetch_market_data.py      ← Yahoo Finance (yfinance) → market_data
+│   └── 12__fetch_market_data.py      ← Yahoo Finance (yfinance) → market_prices_daily, stock_splits, fx_rates_daily
 │
 ├── 20__transformation/
 │   ├── 21__clean_and_merge.py        ← MERGE FY rows into financials
@@ -156,12 +161,15 @@ fundamentals_databricks_pj/
 │   ├── 91__full_pipeline.py          ← Job entry point — runs the pipeline in sequence
 │   └── 93__delta_maintenance.py      ← OPTIMIZE / VACUUM (gated on run_optimization)
 │
-└── tests/                            ← pytest suite for the pure _core + Streamlit lib helpers (repo root)
+└── tests/                            ← pytest suite for fundamentals_pipeline + Streamlit lib helpers (repo root)
 ```
 
 > Run the tests locally with `pip install -r requirements-dev.txt && pytest -q`. They cover the
-> pure `_core` modules and the Streamlit `lib/` masks/formatters — no Spark or network needed.
-> (`requirements.txt` stays minimal; it is the Streamlit Cloud runtime manifest.)
+> pure `fundamentals_pipeline` modules and the Streamlit `lib/` masks/formatters — no Spark or
+> network needed. (`requirements.txt` stays minimal; it is the Streamlit Cloud runtime manifest.)
+>
+> This tree omits `web/` (the Django app, a separate consumer of the published artifacts — see
+> [Django Web Application](#django-web-application-web) below) and `docs/` for brevity.
 
 ---
 
@@ -181,7 +189,7 @@ valuation_assumptions.json    edit valuation assumptions (WACC, growth, etc.)
       ↓
 11__fetch_sec_xbrl              SEC API → financials_raw       (10-K/10-Q + 20-F/40-F)
       ↓
-12__fetch_market_data           Yahoo Finance → market_data
+12__fetch_market_data           Yahoo Finance → market_prices_daily, stock_splits, fx_rates_daily
       ↓
 21__clean_and_merge             FY rows   → MERGE into financials
 21b__derive_quarterly           Q1..Q4    → MERGE into financials
@@ -243,12 +251,14 @@ To modify them: edit the JSON, commit + push, and the next pipeline run rebuilds
 
 | Table | Description |
 |---|---|
-| `{CATALOG}.config.tickers` | Active ticker universe (S&P 500 + Russell 3000 + favorites), with a per-ticker `sector` column (GICS) — precedence Wikipedia GICS (S&P) → normalized IWV → favorites → NULL. Also carries yfinance-sourced `industry`/`description`/`exchange`/`country`/`employees`/`website`/`founded`, and static `accounting_standard`/`reporting_currency` (`"us-gaap"`/`"USD"` for the current US-only universe — multi-market foundation, not yet used for FX or reconciliation) |
+| `{CATALOG}.config.tickers` | Active ticker universe (S&P 500 + Russell 3000 + favorites + S&P/TSX Composite), identity-keyed `(ticker, market)` — `market` is `"US"` or `"CA"`, `in_tsx_composite` flags TSX Composite membership independent of `market` (a dual-listed name can be `market="US"` and still be a TSX Composite member). Per-ticker `sector` column (GICS, remapped into the 11 canonical sectors for every source, never a new taxonomy) — precedence Wikipedia GICS (S&P) → normalized IWV → favorites → NULL. Also carries yfinance-sourced `industry`/`description`/`exchange`/`country`/`employees`/`website`/`founded`, and per-ticker `accounting_standard`/`reporting_currency` (`"us-gaap"`/`"USD"` for US rows; detected per-filer from real `companyfacts` for Canadian rows — `ifrs-full` vs `us-gaap` and CAD vs USD are each a genuine mix, not a function of namespace alone) |
 | `{CATALOG}.config.concept_hierarchy` | Accounting concept hierarchy |
 | `{CATALOG}.config.metrics_hierarchy` | Derived metrics hierarchy |
 | `{CATALOG}.{SCHEMA}.financials_raw` | Append-only audit log of all SEC scrapes (10-K/10-Q, plus 20-F/40-F for foreign-private-issuer / Canadian MJDS filers) |
 | `{CATALOG}.{SCHEMA}.financials` | Long-format fact table — one row per ticker / fiscal_year / period_type / concept |
-| `{CATALOG}.{SCHEMA}.market_data` | Year-end closing prices and market cap per ticker / fiscal_year |
+| `{CATALOG}.{SCHEMA}.market_data` | **Frozen legacy** — calendar-year-aligned prices/market cap, no longer rebuilt. Superseded by `market_cap_asof` below; kept only for ad-hoc back-compat queries |
+| `{CATALOG}.{SCHEMA}.market_cap_asof` | period_end-aligned price + market cap per ticker / fiscal_year, in each ticker's native `reporting_currency` (converted from quote currency when they differ — e.g. a USD-reporting, CAD-quoted TSX filer) — the live market-cap table every valuation/dashboard consumer reads |
+| `{CATALOG}.{SCHEMA}.fx_rates_daily` | Full daily FX history (`base`, `quote`, `pair`, `date`, `rate`) for every currency pair actually in play, both directions — the source every date-anchored USD conversion (pipeline-side and the Streamlit "View in USD" toggle) reads from |
 | `{CATALOG}.{SCHEMA}.stock_splits` | Sparse corporate-action store — one row per split (`ticker`, `split_date`, `ratio`); feeds the split-adjusted cross-year per-share computations (EPS-CAGR, Net Buyback Yield %, Piotroski no-dilution). Self-backfilled by `12` on first run |
 | `{CATALOG}.{SCHEMA}.financials_metrics` | Derived metrics — margins, FCF, YoY, leverage, valuation ratios |
 | `{CATALOG}.{SCHEMA}.financials_intrinsic_value` | Intrinsic value models — Graham, DCF, Owner Earnings (FY + TTM), each computed for the `bull` / `mid` / `bear` scenario (`scenario` column) |
@@ -257,6 +267,54 @@ To modify them: edit the JSON, commit + push, and the next pipeline run rebuilds
 | `{CATALOG}.{SCHEMA}.ingestion_failures` | Append-only log of ingestion errors (SEC + yfinance) per run |
 | `{CATALOG}.config.pipeline_runs` | Per-run, per-step telemetry — `run_id`, `step`, `minutes`, `status` (run-log) |
 | `{CATALOG}.config.pipeline_run_coverage` | Per-run coverage/freshness snapshot — tickers ingested, favorites %, `max(filed)`, staleness |
+
+---
+
+## Multi-market ticker universe
+
+Beyond the US universe (S&P 500 + Russell 3000 + favorites), `config.tickers` admits Canadian
+**MJDS/40-F filers** — companies on the S&P/TSX Composite (sourced from the XIC ETF's holdings
+CSV) that *also* register with the SEC, so they're reachable through the exact same SEC EDGAR
+XBRL ingestion as every US filer. No separate ingestion adapter, no SEDAR+ integration.
+
+- **Identity.** `(ticker, market)` is the real identity key, not bare `ticker` — a bare symbol
+  isn't safe across markets (e.g. Magna International trades as `MG` on the TSX, Mistras Group
+  as `MG` on the NYSE). A collision guard (`fundamentals_pipeline/identity.py`) tells a genuine
+  cross-market collision apart from the same company legitimately dual-listed on both markets
+  (`BAM`, `SHOP`, `GFL`, …) via normalized-name matching — conservative by design: it only
+  auto-merges a dual-listing when confident, and never silently guesses otherwise.
+- **Admission gate.** Every XIC candidate must resolve in SEC's own ticker index *and* pass the
+  same name-matching check, since a bare ticker can coincidentally resolve to a wholly unrelated
+  US filer (confirmed real collisions: `TVE`→Tennessee Valley Authority, `IAU`→the iShares Gold
+  Trust ETF, among others). Excluded candidates are logged with a reason, never silently dropped
+  — and critically, **exclusion is respected everywhere**: `in_tsx_composite` (the flag behind
+  the Streamlit screener's "S&P/TSX Composite" Universe option) is built only from tickers that
+  actually passed this gate, never a blanket ticker-symbol match against the raw XIC list.
+- **Accounting standard & currency are genuinely per-filer, not a function of namespace.**
+  Real Canadian MJDS/40-F filers are a mix — most banks/energy file `ifrs-full` in CAD, but some
+  file `us-gaap`, and some file `ifrs-full` in **USD**. Each ticker's real `companyfacts`
+  response is inspected during ingestion to detect both fields; nothing is assumed from a
+  hardcoded list.
+- **Currency alignment, not cross-market normalization.** `market_cap = price × shares` is only
+  correct when both operands share a currency, so `price`/`market_cap` are converted into each
+  ticker's own `reporting_currency` before storage whenever its quote currency differs (e.g. a
+  USD-reporting, CAD-quoted TSX filer) — every conversion is date-anchored to the figure's own
+  observation date (a fiscal `period_end` for FY, a trade date for TTM/live price), never
+  today's spot rate. This is a same-ticker unit-mismatch **correctness fix**, not a "convert
+  everything to USD" feature: native reporting currency is still what's stored. A missing FX
+  rate excludes just that `(ticker, fiscal_year)` row rather than aborting the run.
+- **Sector/industry never grow a new taxonomy.** A non-US source's own sector labels are
+  remapped into the *existing* 11 canonical GICS sectors (or dropped to `NULL`/"Unknown") —
+  never grafted in as new category values. See [#218](https://github.com/alopezmoreira1989/fundamentals_databricks_pj/issues/218)
+  for the policy this is expected to follow as more non-US sources come online.
+- **Frontend.** The Streamlit dashboard exposes a **Market** filter (US/Canada, independent of
+  Universe) and a **"S&P/TSX Composite"** Universe option, a currency badge on any non-USD
+  figure, and a "View in USD" toggle that converts Market Cap/Price using the same date-anchored
+  FX lookup as the pipeline. The Django web app does not yet have equivalent multi-market
+  support — see the note under [Django Web Application](#django-web-application-web) below.
+- **Still out of scope, deliberately:** IFRS-specific XBRL concept mapping, dual-currency
+  (native + USD) storage anywhere in the pipeline, and re-keying `financials`/`market_prices_daily`/
+  `market_cap_asof` off bare `ticker` instead of `(ticker, market)`.
 
 ---
 
@@ -387,7 +445,12 @@ ORDER BY ticker, fiscal_year DESC;
 
 ---
 
-## `market_data` — year-end prices & market cap
+## `market_data` — year-end prices & market cap *(frozen legacy)*
+
+> **No longer rebuilt.** `12__fetch_market_data.py` stopped writing this table once
+> `market_cap_asof` (below) replaced it as the live source for every market-cap/price
+> consumer. Kept only for ad-hoc back-compat queries against historical runs — don't add new
+> dependencies on it. New work should read `market_cap_asof` instead.
 
 Year-end adjusted closing prices fetched from Yahoo Finance via `yfinance`, joined with `Shares Diluted` from `financials` to compute an annual market cap.
 
@@ -400,7 +463,23 @@ Year-end adjusted closing prices fetched from Yahoo Finance via `yfinance`, join
 | `market_cap` | DOUBLE | `price_close × shares_diluted` |
 | `fetched_at` | TIMESTAMP | Fetch timestamp |
 
-> **Note on `fiscal_year`:** the column name matches `financials` for join convenience, but the value here is **calendar year**. For companies with non-December fiscal year-ends (AAPL/Sep, MSFT/Jun, WMT/Jan), this introduces a known 0–11 month offset between fundamentals (fiscal) and price (calendar). Acceptable for trend analysis; precise valuation requires `period_end`-based pricing.
+> **Note on `fiscal_year`:** the column name matches `financials` for join convenience, but the value here is **calendar year**. For companies with non-December fiscal year-ends (AAPL/Sep, MSFT/Jun, WMT/Jan), this introduces a known 0–11 month offset between fundamentals (fiscal) and price (calendar) — exactly what `market_cap_asof` fixes.
+
+## `market_cap_asof` — period_end-aligned prices & market cap *(live)*
+
+Each fiscal year's market cap priced at the company's real **fiscal** close (not a calendar
+year-end), sourced from the daily `market_prices_daily` store and `Shares Diluted` as reported
+`as of period_end`. Written by `22__derived_metrics.py`; read by `23__intrinsic_value.py`
+(Margin of Safety / TTM price) and `51__export_dashboard_data.py` (the exported Market Cap row).
+
+| Column | Type | Description |
+|---|---|---|
+| `ticker` | STRING | Stock ticker symbol |
+| `fiscal_year` | INT | Fiscal year (not calendar — fixes `market_data`'s offset) |
+| `period_end` | DATE | The fiscal year's real period-end date |
+| `price_close` | DOUBLE | Raw `close` (not `adj_close` — avoids folding future splits into historical cap) on the latest trading day ≤ `period_end`, in the ticker's `reporting_currency` |
+| `market_cap` | DOUBLE | `price_close × Shares Diluted`, converted into `reporting_currency` when the ticker's quote currency differs (e.g. a USD-reporting, CAD-quoted TSX filer) — see [Multi-market ticker universe](#multi-market-ticker-universe) |
+| `currency` | STRING | The row's real native `reporting_currency`, stored not inferred |
 
 ---
 
@@ -414,14 +493,14 @@ Lookup table organising derived metrics into categories. Rebuilt every run from 
 | `subcategory` | STRING | Margins, YoY, Leverage, Liquidity, Price Multiples, Enterprise Value, Absolute, Payout, Yield |
 | `metric` | STRING | Exact name as it appears in `financials_metrics.metric` |
 | `unit` | STRING | `percent` / `usd` / `ratio` |
-| `requires_market_data` | BOOLEAN | `true` for metrics that depend on `market_data` |
+| `requires_market_data` | BOOLEAN | `true` for metrics that depend on a market-cap value (`market_cap_asof`) |
 | `sort_order` | INT | Global ordering (10, 20, 30, ...) |
 
 ---
 
 ## Derived metrics — `financials_metrics`
 
-Long-format table: one row per `ticker / fiscal_year / metric`. Computed by `22__derived_metrics` from `financials` (FY rows only) and `market_data`.
+Long-format table: one row per `ticker / fiscal_year / metric`. Computed by `22__derived_metrics` from `financials` (FY rows only) and `market_cap_asof`.
 
 ```
 ticker | company | fiscal_year | metric          | value
@@ -504,7 +583,7 @@ efficiency. See also the *Goodwill Risk* and *Tangible Value* metrics below.
 | `Current Ratio` | `Total Current Assets / Total Current Liabilities` |
 | `Quick Ratio` | `(Total Current Assets − Inventory) / Total Current Liabilities` — acid-test; missing Inventory treated as 0 |
 
-### Valuation — Price Multiples *(requires `market_data`)*
+### Valuation — Price Multiples *(requires `market_cap_asof`)*
 
 | Metric | Formula |
 |---|---|
@@ -513,14 +592,14 @@ efficiency. See also the *Goodwill Risk* and *Tangible Value* metrics below.
 | `P/FCF` | `Market Cap / Free Cash Flow` |
 | `P/B` | `Market Cap / Total Stockholders Equity` |
 
-### Valuation — Enterprise Value *(requires `market_data`)*
+### Valuation — Enterprise Value *(requires `market_cap_asof`)*
 
 | Metric | Formula | Notes |
 |---|---|---|
 | `EV` | `Market Cap + Total Debt − (Cash & Equivalents + ST Investments)` | Enterprise value in USD |
 | `EV/EBITDA` | `EV / (Operating Income + D&A)` | Outliers beyond ±500× filtered out |
 
-### Valuation — Yields *(requires `market_data`)*
+### Valuation — Yields *(requires `market_cap_asof`)*
 
 | Metric | Formula |
 |---|---|
@@ -539,7 +618,7 @@ efficiency. See also the *Goodwill Risk* and *Tangible Value* metrics below.
 |---|---|---|
 | `NCAV` | `Total Current Assets − Total Liabilities` | net current asset value, USD |
 | `NCAV / Share` | `NCAV / Shares Diluted` | per-share net-net value |
-| `NCAV Ratio` | `Market Cap / NCAV` *(only when NCAV > 0)* | price-over-NCAV; lower = cheaper, `< 1` = cap below net current assets, net-net buy ≈ `≤ 0.67`. NULL for negative-NCAV firms. *requires `market_data`* |
+| `NCAV Ratio` | `Market Cap / NCAV` *(only when NCAV > 0)* | price-over-NCAV; lower = cheaper, `< 1` = cap below net current assets, net-net buy ≈ `≤ 0.67`. NULL for negative-NCAV firms. *requires `market_cap_asof`* |
 
 ### Valuation — Tangible Value
 
@@ -552,7 +631,7 @@ carries both); equity itself is **not** coalesced, so the value is NULL when equ
 |---|---|---|
 | `Tangible Book Value` | `Total Stockholders Equity − Goodwill − Intangible Assets` | USD; can be **negative** (more intangibles than equity) — itself the signal. |
 | `Tangible Book Value / Share` | `Tangible Book Value / Shares Diluted` | per-share tangible floor |
-| `Price / Tangible Book Value` | `Market Cap / Tangible Book Value` | Graham's preferred substitute for `P/B` when Goodwill is large. **Ungated** (like `P/B`) — a negative ratio flags tangible-basis insolvency. *requires `market_data`* |
+| `Price / Tangible Book Value` | `Market Cap / Tangible Book Value` | Graham's preferred substitute for `P/B` when Goodwill is large. **Ungated** (like `P/B`) — a negative ratio flags tangible-basis insolvency. *requires `market_cap_asof`* |
 
 ### Capital Returns — Payout
 
@@ -575,16 +654,16 @@ ratios stay NULL when their one component is absent.
 
 | Metric | Formula | Notes |
 |---|---|---|
-| `Dividend Yield %` | `abs(Dividends Paid) / Market Cap × 100` | *requires `market_data`* |
-| `Buyback Yield %` | `abs(Share Repurchases) / Market Cap × 100` | gross cash spent on buybacks; *requires `market_data`* |
-| `Shareholder Yield %` | `(abs(Dividends Paid) + abs(Share Repurchases)) / Market Cap × 100` | *requires `market_data`* |
+| `Dividend Yield %` | `abs(Dividends Paid) / Market Cap × 100` | *requires `market_cap_asof`* |
+| `Buyback Yield %` | `abs(Share Repurchases) / Market Cap × 100` | gross cash spent on buybacks; *requires `market_cap_asof`* |
+| `Shareholder Yield %` | `(abs(Dividends Paid) + abs(Share Repurchases)) / Market Cap × 100` | *requires `market_cap_asof`* |
 | `Net Buyback Yield %` | `−(YoY % change in Shares Diluted)` | **share-count based, dilution-aware** — nets SBC/issuance against buybacks (a shrinking share count → positive yield), unlike the gross cash-based `Buyback Yield %`. No market data needed. The YoY share count is **split-adjusted** (`_core/splits.py`) so a split isn't misread as ±900% dilution. |
 
 ### Quality & Risk
 
 | Metric | Formula | Notes |
 |---|---|---|
-| `Altman Z-Score` | `1.2·X1 + 1.4·X2 + 3.3·X3 + 0.6·X4 + 1.0·X5` where X1 = Working Capital / Total Assets, X2 = Retained Earnings / Total Assets, X3 = Operating Income (EBIT) / Total Assets, X4 = Market Cap / Total Liabilities, X5 = Revenue / Total Assets | Bankruptcy risk. > 3 safe, 1.8–3 grey, < 1.8 distress. *Requires `market_data`* (X4). **Original manufacturing model** — less meaningful for financial firms / non-manufacturers (same caveat class as EV/EBITDA for banks). NULL unless Total Assets and Total Liabilities are both present and > 0. `Total Liabilities` falls back to `Total Assets − Total Stockholders Equity` (BS identity) for issuers that don't tag us-gaap:Liabilities directly (e.g. VZ). |
+| `Altman Z-Score` | `1.2·X1 + 1.4·X2 + 3.3·X3 + 0.6·X4 + 1.0·X5` where X1 = Working Capital / Total Assets, X2 = Retained Earnings / Total Assets, X3 = Operating Income (EBIT) / Total Assets, X4 = Market Cap / Total Liabilities, X5 = Revenue / Total Assets | Bankruptcy risk. > 3 safe, 1.8–3 grey, < 1.8 distress. *Requires `market_cap_asof`* (X4). **Original manufacturing model** — less meaningful for financial firms / non-manufacturers (same caveat class as EV/EBITDA for banks). NULL unless Total Assets and Total Liabilities are both present and > 0. `Total Liabilities` falls back to `Total Assets − Total Stockholders Equity` (BS identity) for issuers that don't tag us-gaap:Liabilities directly (e.g. VZ). |
 | `Piotroski F-Score` | Sum of 9 binary signals (0–9 integer) | Fundamental health. Profitability: ROA > 0, Operating CF > 0, ΔROA > 0, Operating CF > Net Income. Leverage/liquidity/dilution: Δ(Debt/Assets) < 0, ΔCurrent Ratio > 0, no share dilution (≤ +0.1%). Efficiency: ΔGross Margin > 0, ΔAsset Turnover > 0. NULL in a ticker's first year (no prior to compare). ≥ 7 strong, ≤ 3 weak. |
 | `Accruals Ratio` | `(Net Income − Operating Cash Flow) / Total Assets` | Earnings quality. High positive accruals = earnings not backed by cash → **lower is better** (≤ 0.05 good, ≥ 0.15 poor). A company with operating cash flow above net income shows a negative (good) accrual. |
 
@@ -598,9 +677,9 @@ true zero (unlike the multi-tag debt case, where absence was ambiguous).
 |---|---|---|
 | `Goodwill / Total Assets %` | `Goodwill / Total Assets × 100` | what fraction of the balance sheet is unverifiable acquisition residue |
 | `Goodwill / Tangible Equity %` | `Goodwill / Tangible Book Value × 100` | how much of *real* equity a full Goodwill write-off would wipe out. `> 100%` = Goodwill exceeds the entire tangible equity base. NULL unless Tangible Book Value > 0. |
-| `Goodwill / Market Cap %` | `Goodwill / Market Cap × 100` | how much of today's price is accounting residue. *requires `market_data`* |
+| `Goodwill / Market Cap %` | `Goodwill / Market Cap × 100` | how much of today's price is accounting residue. *requires `market_cap_asof`* |
 
-### Intrinsic Value *(requires `market_data`)*
+### Intrinsic Value *(requires `market_cap_asof`)*
 
 Computed by `23__intrinsic_value` for **each fiscal year** and for **TTM** (rolling 4 quarters), under four lenses. Each is emitted both into `financials_intrinsic_value` (one row per `ticker / period_type / fiscal_year / method`, with an `assumptions` JSON column) and exposed as `(FY)` / `(TTM)` metrics here.
 
@@ -640,7 +719,7 @@ Per-ticker `overrides` are **scenario-aware**: a lever that varies by scenario m
 `{bull, mid, bear}` object so the override doesn't collapse that name's spread; structural flags
 (`skip`, `horizon_years`) stay flat scalars.
 
-> Valuation metrics are only populated for `ticker / fiscal_year` combinations where `market_data` has a valid `market_cap`. Assumptions (WACC, growth, multiples, per-ticker and per-sector skips, per-scenario profiles) are configured in `00__config/valuation_assumptions.json` — editing it requires no code change.
+> Valuation metrics are only populated for `ticker / fiscal_year` combinations where `market_cap_asof` has a valid `market_cap`. Assumptions (WACC, growth, multiples, per-ticker and per-sector skips, per-scenario profiles) are configured in `00__config/valuation_assumptions.json` — editing it requires no code change.
 
 ---
 
@@ -691,7 +770,8 @@ wrapped in try/except — a logging failure never aborts an otherwise-successful
 
 Idempotent `OPTIMIZE` (file compaction) + `VACUUM` (`RETAIN 168 HOURS`, never lowering the
 retention safety check) over `financials_raw`, `financials`, `financials_metrics`,
-`financials_intrinsic_value`, `market_prices_daily`, and legacy `market_data`. Wired into `91`
+`financials_intrinsic_value`, `market_prices_daily`, `market_cap_asof`, and legacy `market_data`.
+Wired into `91`
 as the final step, **gated on `run_optimization`** (a default run is a no-op). `ZORDER` is a
 clearly-commented opt-in (off by default — `market_prices_daily` is liquid-clustered and can't be
 Z-ordered; `ticker` is already the partition key elsewhere). `financials_raw` row-level retention
@@ -703,9 +783,9 @@ is an opt-in block, **disabled** by design (the table is append-only).
 
 **Live app: https://alm-equity-fundamentals.streamlit.app/**
 
-A read-only dashboard at Streamlit Community Cloud renders the same data without Databricks credentials. Currently serves ~2,500 tickers (S&P 500 + Russell 2000 proxy) with synthetic data for preview; production data is published via GitHub Release. See [`60__frontends/61__streamlit/README.md`](fundamentals_pipeline/60__frontends/61__streamlit/README.md) for details.
+A read-only dashboard at Streamlit Community Cloud renders real production data (~2,600 tickers, US + Canadian) without Databricks credentials, published via GitHub Release. Synthetic fixtures exist only as a local dev/preview fallback (`DASHBOARD_USE_FIXTURES=1`). See [`60__frontends/61__streamlit/README.md`](fundamentals_pipeline/60__frontends/61__streamlit/README.md) for details.
 
-The landing-page **screener** filters the universe by index membership (All / S&P 500 / Russell 3000 / Favorites) and by **GICS sector** — the 11 canonical sectors sourced from `config.tickers.sector`, with a no-op `All sectors` default. Tickers with no sector (NULL/legacy artifacts) fall into an **Unknown** bucket. Each company's sector is also shown as a chip on the detail-page masthead.
+The landing-page **screener** filters the universe by listing **Market** (All / US / Canada), by index **Universe** membership (All / S&P 500 / Russell 3000 / S&P/TSX Composite / Favorites), and by **GICS sector** — the 11 canonical sectors sourced from `config.tickers.sector`, with a no-op `All sectors` default. Tickers with no sector (NULL/legacy artifacts) fall into an **Unknown** bucket. Each company's sector is also shown as a chip on the detail-page masthead. Any Market Cap/Price figure in a non-USD native currency (currently CAD, for Canadian tickers) carries a currency badge; a **"View in USD"** toggle converts Market Cap and Price using the same date-anchored FX lookup the pipeline uses (`lib/currency.py`) — everything else stays in native currency.
 
 ### Valuation tape (screener hero)
 
@@ -729,7 +809,7 @@ The company detail page (Derived metrics tab) renders a horizontal "football fie
 - **The bars are a presentational ±15% sensitivity band** (`FF_BAND`) around each method's stored point estimate — **not** a confidence interval. There is no stored low/high triple; the envelope is constructed for readability (a caption says so). The market price is backed out of any method's `MoS %` row (`price = IV × (1 − MoS/100)`), since the app stores no per-share price directly.
 - **`Graham Number` is intentionally excluded** — it's suppressed upstream for distorted-book firms and is often a wild outlier that would crush the shared x-scale. Only Graham Revised, DCF, and Owner Earnings are shown (`FF_METHODS`). For Energy / Financials / Real Estate names the DCF and Owner Earnings bars are absent (sector-skipped upstream), so the field shows Graham Revised alone — by design.
 - **Over/under-valued color rule:** a method's base **above** the price line → undervalued → green (`--positive`); **below** → overvalued → red (`--negative`); neutral blue when no price is available. So "every bar below the line" reads instantly as overvalued (e.g. AAPL), "every bar above" as undervalued (e.g. VZ).
-- **Graceful degradation:** no methods → the card is hidden (returns `""`); a single method still renders (with a note); no `market_data` price → bars render neutral with no price line and a "no market price" caption; non-finite or ≤0 base values are skipped.
+- **Graceful degradation:** no methods → the card is hidden (returns `""`); a single method still renders (with a note); no market cap price → bars render neutral with no price line and a "no market price" caption; non-finite or ≤0 base values are skipped.
 
 ---
 
@@ -740,6 +820,14 @@ read-only REST API + OpenAPI docs) that reads the same published GitHub Release 
 DuckDB and keeps its own PostgreSQL for user data. Strict one-directional layering
 (`views → services → repositories → infrastructure`) is documented in `docs/architecture.md`.
 No Databricks access at request time.
+
+> **Multi-market gap, not yet closed:** unlike the Streamlit dashboard, the Django app has no
+> awareness yet of `market`/`reporting_currency`/`in_tsx_composite`, doesn't fetch the FX
+> artifact, and two spots render a Canadian ticker's native-currency Price/Market Cap as if it
+> were USD ([#219](https://github.com/alopezmoreira1989/fundamentals_databricks_pj/issues/219) —
+> bug). Market filter, "S&P/TSX Composite" Universe option, and a "View in USD" toggle
+> equivalent to the Streamlit ones are tracked as feature-parity work in
+> [#220](https://github.com/alopezmoreira1989/fundamentals_databricks_pj/issues/220).
 
 ```mermaid
 flowchart LR
