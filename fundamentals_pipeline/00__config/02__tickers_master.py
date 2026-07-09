@@ -940,8 +940,13 @@ if INGEST_TSX_COMPOSITE and not tsx_composite_df.empty:
     if _new_ca_rows:
         master = pd.concat([master, pd.DataFrame(_new_ca_rows)], ignore_index=True)
 
-_tsx_tickers = set(tsx_composite_df["ticker"]) if not tsx_composite_df.empty else set()
-master["in_tsx_composite"] = master["ticker"].isin(_tsx_tickers)
+# Bare `.isin()` against the RAW XIC ticker set would re-admit exactly the collisions the
+# gate above just excluded (e.g. a real TSX "ARE" constituent vs the unrelated NYSE-listed
+# Alexandria Real Estate Equities, also ticker ARE) — `in_tsx_composite` must only be True
+# for tickers that passed `classify_company_match()`: newly-admitted CA rows + confirmed
+# dual-listings. Excluded/unresolved XIC tickers never set this flag on an unrelated row.
+_confirmed_tsx_tickers = {r["ticker"] for r in _new_ca_rows} | set(_ca_dual_listed)
+master["in_tsx_composite"] = master["ticker"].isin(_confirmed_tsx_tickers)
 
 # Defense in depth: re-run the guard over the fully-assembled (US + admitted CA) universe.
 # Should be a no-op given the admission gate above already excludes/dedupes collisions and
