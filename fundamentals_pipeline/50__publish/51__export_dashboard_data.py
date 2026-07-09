@@ -37,7 +37,7 @@ import pandas as pd
 # sys.path manipulation.
 from fundamentals_pipeline import schemas as _schemas
 
-SCHEMA_VERSION = 12  # +market (listing market / quote-currency source) on ticker meta
+SCHEMA_VERSION = 13  # +in_tsx_composite (S&P/TSX Composite membership) on ticker meta
 FY_YEARS       = 10
 QUARTERS       = 12
 PRICE_YEARS    = 10                              # daily-price retention window (calendar years)
@@ -57,16 +57,17 @@ FX_PARQUET     = OUT_DIR / "dashboard_fx.parquet"
 
 # COMMAND ----------
 
-# Universe flags (is_favorite / in_sp500 / in_r3000) drive the Streamlit
-# screener's universe filter. COALESCE to false so NULLs don't leak through.
+# Universe flags (is_favorite / in_sp500 / in_r3000 / in_tsx_composite) drive the
+# Streamlit screener's universe filter. COALESCE to false so NULLs don't leak through.
 tickers_df = spark.sql(f"""
     SELECT
       t.ticker, t.company, t.sector, t.industry, t.has_logo,
       t.description, t.exchange, t.country, t.employees, t.website, t.founded,
       t.accounting_standard, t.reporting_currency, t.market,
-      COALESCE(t.is_favorite, false) AS is_favorite,
-      COALESCE(t.in_sp500,    false) AS in_sp500,
-      COALESCE(t.in_r3000,    false) AS in_r3000
+      COALESCE(t.is_favorite,       false) AS is_favorite,
+      COALESCE(t.in_sp500,          false) AS in_sp500,
+      COALESCE(t.in_r3000,          false) AS in_r3000,
+      COALESCE(t.in_tsx_composite,  false) AS in_tsx_composite
     FROM {CATALOG}.config.tickers t
     JOIN (SELECT DISTINCT ticker FROM {CATALOG}.{SCHEMA}.financials) f
       ON f.ticker = t.ticker
@@ -102,9 +103,13 @@ ticker_meta = [
         # See CLAUDE.md's currency-alignment convention / QUOTE_CURRENCY_BY_MARKET in
         # 22__derived_metrics.py, whose ground truth this mirrors.
         "market":              r.market              or "US",
-        "is_favorite": bool(r.is_favorite),
-        "in_sp500":    bool(r.in_sp500),
-        "in_r3000":    bool(r.in_r3000),
+        "is_favorite":       bool(r.is_favorite),
+        "in_sp500":          bool(r.in_sp500),
+        "in_r3000":          bool(r.in_r3000),
+        # S&P/TSX Composite membership (multi-market roadmap) — drives the screener's
+        # "S&P/TSX Composite" Universe option. Independent of `market`: a dual-listed
+        # US-primary ticker (BAM, SHOP, GFL, …) can be in_tsx_composite=true with market="US".
+        "in_tsx_composite":  bool(r.in_tsx_composite),
     }
     for r in tickers_df.itertuples()
 ]
