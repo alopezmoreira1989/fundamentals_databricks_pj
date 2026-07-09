@@ -25,7 +25,11 @@ def signup(request: HttpRequest) -> HttpResponse:
                 email=data["email"],
                 password=data["password1"],
             )
-            login(request, user)  # single configured backend ⇒ inferred automatically
+            # AUTHENTICATION_BACKENDS has two entries (AxesBackend + ModelBackend, #181 item 2),
+            # so login() can no longer infer the backend on its own — this never went through
+            # authenticate() (no credential check needed right after creating the account), so
+            # the backend must be named explicitly.
+            login(request, user, backend="django.contrib.auth.backends.ModelBackend")
             return redirect("home")
     else:
         form = SignupForm()

@@ -10,8 +10,14 @@ from apps.users.services import authenticate_user, create_user, get_by_email
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError
+from django.test import RequestFactory
 
 pytestmark = pytest.mark.django_db
+
+# authenticate_user() requires a real request (AxesBackend needs it to track attempts per
+# ip_address/username, #181 item 2) — a bare RequestFactory request satisfies that without
+# spinning up a full view/client round-trip for these service-level tests.
+_rf = RequestFactory()
 
 
 # ── configuration ────────────────────────────────────────────────────────────────────
@@ -74,23 +80,23 @@ def test_create_superuser_flags_and_requires_email():
 # ── authentication ───────────────────────────────────────────────────────────────────
 def test_authentication_succeeds_with_correct_credentials():
     create_user(username="carol", email="carol@example.com", password="hunter2")
-    assert authenticate_user(username="carol", password="hunter2") is not None
+    assert authenticate_user(request=_rf.post("/"), username="carol", password="hunter2") is not None
 
 
 def test_authentication_fails_with_wrong_password():
     create_user(username="dave", email="dave@example.com", password="right")
-    assert authenticate_user(username="dave", password="wrong") is None
+    assert authenticate_user(request=_rf.post("/"), username="dave", password="wrong") is None
 
 
 def test_authentication_fails_for_unknown_user():
-    assert authenticate_user(username="ghost", password="whatever") is None
+    assert authenticate_user(request=_rf.post("/"), username="ghost", password="whatever") is None
 
 
 def test_inactive_user_cannot_authenticate():
     create_user(
         username="ex", email="ex@example.com", password="pw", is_active=False
     )
-    assert authenticate_user(username="ex", password="pw") is None
+    assert authenticate_user(request=_rf.post("/"), username="ex", password="pw") is None
 
 
 # ── service helper ───────────────────────────────────────────────────────────────────

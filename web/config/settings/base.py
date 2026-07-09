@@ -41,6 +41,7 @@ DJANGO_APPS = [
 THIRD_PARTY_APPS = [
     "rest_framework",
     "drf_spectacular",
+    "axes",
 ]
 # Presentation + user-domain apps only. All financial logic lives in the installed
 # `fundamentals_pipeline` package; nothing here computes ratios, valuations, or metrics.
@@ -71,6 +72,19 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    # Last, per django-axes' own requirement — it needs to run after AuthenticationMiddleware
+    # and every other middleware has had a chance to run first (#181 item 2).
+    "axes.middleware.AxesMiddleware",
+]
+
+# AxesBackend MUST be first — it wraps authenticate() to enforce lockout (raising before
+# falling through to ModelBackend's real credential check) rather than after (#181 item 2).
+# Django's built-in LoginView (apps/users/urls.py) calls authenticate() under the hood, so it
+# gets this for free; apps.users.views.signup's direct login() call is unaffected — it never
+# calls authenticate(), see the backend= kwarg there for why a second backend needs it anyway.
+AUTHENTICATION_BACKENDS = [
+    "axes.backends.AxesBackend",
+    "django.contrib.auth.backends.ModelBackend",
 ]
 
 ROOT_URLCONF = "config.urls"
@@ -125,6 +139,16 @@ AUTH_PASSWORD_VALIDATORS = [
 LOGIN_URL = "users:login"
 LOGIN_REDIRECT_URL = "home"
 LOGOUT_REDIRECT_URL = "home"
+
+# ── Login brute-force protection (#181 item 2) ────────────────────────────────────────────
+# Locks the specific (username, ip_address) PAIR after AXES_FAILURE_LIMIT failed
+# /accounts/login/ attempts — not the IP or username alone, so one bad actor can't
+# collateral-lock every other user behind a shared IP (office/NAT network), and an attacker
+# can't lock a real account out from every IP by spraying failures from many addresses.
+AXES_FAILURE_LIMIT = env.int("AXES_FAILURE_LIMIT", default=5)
+AXES_LOCKOUT_PARAMETERS = [["username", "ip_address"]]
+AXES_COOLOFF_TIME = 1  # hour — lockout expires on its own; no admin unlock needed
+AXES_RESET_ON_SUCCESS = True  # a real login clears the counter, so stray typos don't add up
 
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = "UTC"

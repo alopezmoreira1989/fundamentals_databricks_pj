@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from django.contrib.auth import authenticate as _authenticate
 from django.contrib.auth import get_user_model
+from django.http import HttpRequest
 
 User = get_user_model()
 
@@ -22,9 +23,14 @@ def create_user(*, username: str, email: str, password: str, **extra_fields):
     )
 
 
-def authenticate_user(*, username: str, password: str):
-    """Return the user for valid credentials, else ``None`` (Django's ModelBackend)."""
-    return _authenticate(username=username, password=password)
+def authenticate_user(*, request: HttpRequest, username: str, password: str):
+    """Return the user for valid credentials, else ``None``.
+
+    ``request`` is required (not optional) — AxesBackend (login brute-force lockout, #181
+    item 2) needs it to track failed attempts per (ip_address, username) and raises rather
+    than silently skipping the check when it's missing.
+    """
+    return _authenticate(request, username=username, password=password)
 
 
 def get_by_email(email: str):

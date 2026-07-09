@@ -4,10 +4,16 @@ from __future__ import annotations
 
 import pytest
 from django.contrib.auth import get_user_model
+from django.test import override_settings
 
 pytestmark = pytest.mark.django_db
 
 User = get_user_model()
+
+# A small, fast limit for the lockout tests below — independent of the real AXES_FAILURE_LIMIT
+# default (5, or the AXES_FAILURE_LIMIT env var in prod) so the test doesn't need 5 requests
+# and stays correct even if that default changes.
+_AXES_TEST_SETTINGS = {"AXES_FAILURE_LIMIT": 3, "AXES_LOCKOUT_PARAMETERS": [["username", "ip_address"]]}
 
 
 def test_signup_get_renders_form_for_anonymous(client):
@@ -71,9 +77,52 @@ def test_login_valid_and_invalid(client):
     assert bad.status_code == 200  # re-renders with an error, no redirect
 
 
+@override_settings(**_AXES_TEST_SETTINGS)
+def test_login_locks_out_after_repeated_failures(client):
+    """#181 item 2: repeated failed logins for one (username, ip) pair get locked out —
+    even a subsequent CORRECT password is rejected until the cooloff period elapses."""
+    User.objects.create_user(username="erin", email="erin@example.com", password="pw-erin-123!")
+
+    for _ in range(_AXES_TEST_SETTINGS["AXES_FAILURE_LIMIT"] - 1):
+        resp = client.post("/accounts/login/", {"username": "erin", "password": "wrong"})
+        assert resp.status_code == 200  # normal invalid-credentials re-render, not locked yet
+
+    # This failure hits the limit — axes locks out on the triggering attempt itself.
+    locked = client.post("/accounts/login/", {"username": "erin", "password": "wrong"})
+    assert locked.status_code == 429
+
+    # Locked out now: even the CORRECT password is rejected while cooled off.
+    still_locked = client.post("/accounts/login/", {"username": "erin", "password": "pw-erin-123!"})
+    assert still_locked.status_code == 429
+    assert not still_locked.wsgi_request.user.is_authenticated
+
+
+@override_settings(**_AXES_TEST_SETTINGS)
+def test_login_lockout_is_scoped_to_username_and_ip(client):
+    """A different username from the same client isn't caught by another user's lockout —
+    AXES_LOCKOUT_PARAMETERS=[["username", "ip_address"]] scopes to the specific pair."""
+    User.objects.create_user(username="frank", email="frank@example.com", password="pw-frank-1!")
+    User.objects.create_user(username="grace", email="grace@example.com", password="pw-grace-1!")
+
+    for _ in range(_AXES_TEST_SETTINGS["AXES_FAILURE_LIMIT"]):
+        client.post("/accounts/login/", {"username": "frank", "password": "wrong"})
+
+    # frank is locked out...
+    frank_attempt = client.post("/accounts/login/", {"username": "frank", "password": "pw-frank-1!"})
+    assert frank_attempt.status_code == 429
+
+    # ...but grace, from the same test client (same IP), is unaffected.
+    grace_attempt = client.post("/accounts/login/", {"username": "grace", "password": "pw-grace-1!"})
+    assert grace_attempt.status_code == 302 and grace_attempt.headers["Location"] == "/"
+
+
 def test_logout_requires_post_and_clears_session(client):
-    User.objects.create_user(username="carol", email="carol@example.com", password="pw-carol-1!")
-    client.login(username="carol", password="pw-carol-1!")
+    user = User.objects.create_user(username="carol", email="carol@example.com", password="pw-carol-1!")
+    # force_login sets the session directly rather than going through authenticate() — these
+    # two tests aren't exercising login itself, and AxesBackend.authenticate() requires a real
+    # request object that client.login()'s shortcut doesn't provide (see test_login_* above
+    # for the tests that actually exercise the login view + axes).
+    client.force_login(user)
     assert client.get("/").wsgi_request.user.is_authenticated
 
     assert client.get("/accounts/logout/").status_code == 405  # GET not allowed
@@ -86,7 +135,7 @@ def test_navbar_reflects_auth_state(client):
     anon = client.get("/").content.decode()
     assert "Log in" in anon and "Sign up" in anon
 
-    User.objects.create_user(username="dave", email="dave@example.com", password="pw-dave-12!")
-    client.login(username="dave", password="pw-dave-12!")
+    user = User.objects.create_user(username="dave", email="dave@example.com", password="pw-dave-12!")
+    client.force_login(user)  # see test_logout_requires_post_and_clears_session for why
     body = client.get("/").content.decode()
     assert "Log out" in body and "dave" in body
