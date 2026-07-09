@@ -54,6 +54,11 @@ CSRF_TRUSTED_ORIGINS = env.list("DJANGO_CSRF_TRUSTED_ORIGINS", default=[])
 # not replaces, so "fake-id, real-ip" changes identity every time the fake prefix changes).
 NUM_PROXIES = env.int("DJANGO_NUM_PROXIES", default=1)
 REST_FRAMEWORK = {**REST_FRAMEWORK, "NUM_PROXIES": NUM_PROXIES}
+# django-axes (#181 item 2) resolves the client IP via django-ipware, which has its own proxy
+# hop setting — point it at the same trusted hop count so a locked-out attacker can't bypass
+# the (username, ip_address) lockout by forging X-Forwarded-For, the same class of bug the
+# NUM_PROXIES comment above documents for the DRF throttle.
+AXES_IPWARE_PROXY_COUNT = NUM_PROXIES
 
 # ── cookies ───────────────────────────────────────────────────────────────────────────
 SESSION_COOKIE_SECURE = True
