@@ -113,7 +113,7 @@ _ticker_has_non_usd = (
 # Masthead + KPI strip — single markdown block so the spacing matches the spec.
 st.markdown(render_masthead(ticker, tdata, meta), unsafe_allow_html=True)
 usd_lens = usd_lens_toggle() if _ticker_has_non_usd else False
-st.markdown(render_kpi_strip(ticker, tdata, tmetrics, meta), unsafe_allow_html=True)
+st.markdown(render_kpi_strip(ticker, tdata, tmetrics, meta, fx, usd_lens), unsafe_allow_html=True)
 
 # Unit scale for the statement tables (IS / BS / CF / Quarterly). One control governs
 # all four. Billion = 1e9 (US short scale). Default "Units" → unchanged full-resolution USD.

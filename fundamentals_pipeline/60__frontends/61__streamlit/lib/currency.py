@@ -22,6 +22,8 @@ import streamlit as st
 
 from fundamentals_pipeline.fx import convert_price
 
+from .format import is_missing
+
 # Quote currency by listing market — mirrors 22__derived_metrics.py's
 # QUOTE_CURRENCY_BY_MARKET (the pipeline-side ground truth this reads from `market`).
 QUOTE_CURRENCY_BY_MARKET = {"US": "USD", "CA": "CAD"}
@@ -43,6 +45,20 @@ def usd_lens_toggle(key: str = "usd_lens") -> bool:
     """Shared 'view in USD' toggle — same session_state key wherever it's rendered, so
     the choice persists as the user moves between the Screener and Company pages."""
     return st.toggle("View in USD", key=key)
+
+
+def usd_lens_convert(value: float, currency: str, as_of, fx: pd.DataFrame | None) -> tuple[float, str]:
+    """Convert one scalar value to USD if possible; else return it unchanged with its badge.
+
+    Shared by every "View in USD" card (top KPI strip, Overview tab) so they always agree —
+    `currency` is assumed already uppercased/non-empty-checked by the caller.
+    """
+    if fx is None or fx.empty or is_missing(as_of):
+        return value, currency_badge(currency)
+    converted, ok = convert_to_usd(pd.Series([value]), pd.Series([currency]), pd.Series([as_of]), fx)
+    if bool(ok.iloc[0]):
+        return float(converted.iloc[0]), ""
+    return value, currency_badge(currency)
 
 
 def convert_to_usd(

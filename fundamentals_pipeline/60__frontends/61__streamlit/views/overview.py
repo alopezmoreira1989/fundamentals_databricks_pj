@@ -16,7 +16,7 @@ import html
 import re
 
 import pandas as pd
-from lib.currency import convert_to_usd, currency_badge, quote_currency
+from lib.currency import currency_badge, quote_currency, usd_lens_convert
 from lib.format import EM_DASH, fmt_delta, fmt_kpi, is_missing
 from lib.news import fetch_yahoo_news
 from lib.prices import _price_delta, _px, prices_for
@@ -61,20 +61,6 @@ def _latest_fy_metric(ticker: str, tmetrics: pd.DataFrame, metric: str) -> pd.Da
     return sub.sort_values("fiscal_year", ascending=False)
 
 
-def _usd_lens_convert(value: float, currency: str, as_of, fx: pd.DataFrame | None) -> tuple[float, str]:
-    """Convert one value to USD if possible; else return it unchanged with its badge.
-
-    Returns (display_value, badge_html). `currency` is already uppercased/non-empty-checked
-    by the caller; this only runs the actual conversion + badge decision.
-    """
-    if fx is None or fx.empty or is_missing(as_of):
-        return value, currency_badge(currency)
-    converted, ok = convert_to_usd(pd.Series([value]), pd.Series([currency]), pd.Series([as_of]), fx)
-    if bool(ok.iloc[0]):
-        return float(converted.iloc[0]), ""
-    return value, currency_badge(currency)
-
-
 def _market_cap_card(
     ticker: str, tmetrics: pd.DataFrame, meta: dict, fx: pd.DataFrame | None, usd_lens: bool,
 ) -> str:
@@ -100,7 +86,7 @@ def _market_cap_card(
     if ccy != "USD":
         period_end = latest["period_end"] if "period_end" in series.columns else None
         if usd_lens:
-            latest_val, badge = _usd_lens_convert(latest_val, ccy, period_end, fx)
+            latest_val, badge = usd_lens_convert(latest_val, ccy, period_end, fx)
         else:
             badge = currency_badge(ccy)
 
@@ -138,7 +124,7 @@ def _price_card(
     if ccy != "USD":
         trade_date = last["date"] if "date" in pdf.columns else None
         if usd_lens:
-            price, badge = _usd_lens_convert(float(price), ccy, trade_date, fx)
+            price, badge = usd_lens_convert(float(price), ccy, trade_date, fx)
         else:
             badge = currency_badge(ccy)
 
