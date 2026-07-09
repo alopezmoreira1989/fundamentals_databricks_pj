@@ -6,12 +6,13 @@ frame is built by pivoting the long-format `dashboard_metrics.parquet` to the
 latest available fiscal year per ticker.
 
 Universe flags (`is_favorite` / `in_sp500` / `in_r3000` / `in_tsx_composite`, schema
-v13), listing `market` ("US"/"CA", schema v12), the GICS `sector`, the Yahoo `industry`
-(sub-sector grouping key, schema v8), and **Market Cap** (a `Market Cap` metric row) all
-come from `50__publish/51__export_dashboard_data.py`. Older artifacts that predate a
-field simply yield its default — all-False flags, no `market` column (Market filter
-becomes a no-op), ``"Unknown"`` sector/industry, an empty Market Cap column — so the
-screener degrades gracefully until the next publish.
+v13), listing `market` ("US"/"CA", schema v12), `country` (incorporation/HQ jurisdiction,
+independent of `market` — e.g. NG/NovaGold is `market="US"` but `country="Canada"`), the
+GICS `sector`, the Yahoo `industry` (sub-sector grouping key, schema v8), and **Market Cap**
+(a `Market Cap` metric row) all come from `50__publish/51__export_dashboard_data.py`. Older
+artifacts that predate a field simply yield its default — all-False flags, no `market` column
+(Market filter becomes a no-op), ``"Unknown"`` sector/industry/country, an empty Market Cap
+column — so the screener degrades gracefully until the next publish.
 """
 
 from __future__ import annotations
@@ -48,6 +49,12 @@ UNKNOWN_SECTOR = "Unknown"
 UNKNOWN_INDUSTRY = "Unknown"
 # No-op default for the (data-driven) industry filter — mirrors SECTORS[0] "All sectors".
 ALL_INDUSTRIES = "All industries"
+# Same "Unknown" bucket for `country` (incorporation/HQ jurisdiction, NOT the same concept as
+# `market` — a company's `market` is its listing/quote-currency basis and can be "US" while its
+# `country` is "Canada", e.g. dual-listed NG/NovaGold). NULL / missing / legacy artifacts.
+UNKNOWN_COUNTRY = "Unknown"
+# No-op default for the (data-driven) country filter — mirrors ALL_INDUSTRIES.
+ALL_COUNTRIES = "All countries"
 # 11 canonical GICS sectors (sorted) + a no-op default. Mirrors the hardcoded
 # UNIVERSE_FLAGS pattern; "All sectors" is the no-op default.
 SECTORS = ["All sectors"] + sorted([
@@ -125,7 +132,7 @@ def build_screener_frame() -> tuple[pd.DataFrame, dict[str, str], list[str]]:
     info = pd.DataFrame(meta.get("tickers", []))
     if "ticker" in info.columns:
         keep = ["ticker"] + [
-            c for c in ("company", "sector", "industry", "reporting_currency", "market", *_FLAG_COLS)
+            c for c in ("company", "sector", "industry", "reporting_currency", "market", "country", *_FLAG_COLS)
             if c in info.columns
         ]
         wide = wide.merge(info[keep], on="ticker", how="left")
@@ -149,6 +156,14 @@ def build_screener_frame() -> tuple[pd.DataFrame, dict[str, str], list[str]]:
     wide["industry"] = (
         wide["industry"].astype("object").where(wide["industry"].notna(), UNKNOWN_INDUSTRY)
         .astype(str).str.strip().replace("", UNKNOWN_INDUSTRY)
+    )
+
+    # Country (incorporation/HQ jurisdiction): NULL / missing / legacy artifacts → "Unknown".
+    if "country" not in wide.columns:
+        wide["country"] = UNKNOWN_COUNTRY
+    wide["country"] = (
+        wide["country"].astype("object").where(wide["country"].notna(), UNKNOWN_COUNTRY)
+        .astype(str).str.strip().replace("", UNKNOWN_COUNTRY)
     )
 
     # Market Cap may not exist yet (Release predating schema v3).
@@ -202,6 +217,28 @@ def industry_mask(df: pd.DataFrame, industry: str) -> pd.Series:
     if not industry or industry == ALL_INDUSTRIES or "industry" not in df.columns:
         return pd.Series(True, index=df.index)
     return df["industry"].astype(str) == industry
+
+
+def country_options(df: pd.DataFrame) -> list[str]:
+    """Sorted country choices for the screener filter: ``"All countries"`` (no-op default)
+    + the distinct non-Unknown countries actually present in the frame. Data-driven (a company's
+    incorporation/HQ jurisdiction, from Yahoo — independent of `market`, e.g. NG/NovaGold is
+    market="US" but country="Canada"); an artifact with no `country` column yields just the
+    default."""
+    if "country" not in df.columns:
+        return [ALL_COUNTRIES]
+    vals = sorted({
+        str(x) for x in df["country"].dropna().unique()
+        if str(x).strip() and str(x) != UNKNOWN_COUNTRY
+    })
+    return [ALL_COUNTRIES] + vals
+
+
+def country_mask(df: pd.DataFrame, country: str) -> pd.Series:
+    """Boolean mask for one country. ``"All countries"`` (the default) is a no-op."""
+    if not country or country == ALL_COUNTRIES or "country" not in df.columns:
+        return pd.Series(True, index=df.index)
+    return df["country"].astype(str) == country
 
 
 # Comparison-page metric sets. Valuation multiples take their median EX-NEGATIVES (a negative
