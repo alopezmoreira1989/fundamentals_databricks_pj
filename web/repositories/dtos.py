@@ -22,6 +22,7 @@ class CompanySummary:
     industry: str | None = None
     exchange: str | None = None
     country: str | None = None
+    market: str | None = None
     description: str | None = None
     website: str | None = None
     employees: int | None = None
@@ -163,7 +164,11 @@ class ScreenTableRow:
 
     ``values`` maps a :class:`ScreenColumn` key → the ticker's latest-FY value (``None`` where
     the ticker has no reported value for that metric), so the view renders cells by column key
-    without ever touching a SQL column name."""
+    without ever touching a SQL column name. ``units`` is the same row's own per-metric unit —
+    most metrics carry one fixed unit column-wide (``ScreenColumn.unit`` covers those), but
+    Market Cap's unit is each ticker's own native reporting currency (``"usd"``/``"cad"``, see
+    CLAUDE.md's currency-alignment convention), so it must be read per row, never assumed from
+    the column."""
 
     ticker: str
     name: str
@@ -172,6 +177,7 @@ class ScreenTableRow:
     country: str | None
     has_logo: bool | None
     values: Mapping[str, float | None]
+    units: Mapping[str, str | None]
 
 
 @dataclass(frozen=True, slots=True)

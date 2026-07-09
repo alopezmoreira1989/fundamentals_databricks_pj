@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from django import template
+from django.utils.html import format_html
 from django.utils.safestring import SafeString, mark_safe
 
 from apps.companies.charts import sparkline_svg
@@ -17,6 +18,13 @@ from apps.companies.charts import sparkline_svg
 register = template.Library()
 
 _EMPTY = "—"  # em dash for missing values
+
+
+def currency_badge(currency: str | None) -> str:
+    """Small inline label for a non-USD currency; "" for USD/empty (no badge shown)."""
+    if not currency or currency.upper() == "USD":
+        return ""
+    return format_html('<span class="ccy-badge">{}</span>', currency.upper())
 
 
 @register.filter
@@ -32,8 +40,10 @@ def sparkline(values: Sequence[float | None] | None) -> SafeString:
 def metric_value(value: float | None, unit: str | None = None) -> str:
     """Render a metric value for display, using its ``unit`` to pick the format.
 
-    ``percent`` → ``-43.8%``; ``usd`` → ``$177.60``; anything else → a thousands-grouped
-    number. ``None`` (missing) renders as an em dash.
+    ``percent`` → ``-43.8%``; ``usd`` → ``$177.60``; any other 3-letter code (e.g. ``cad``,
+    the ticker's real native currency for Market Cap / raw price — see CLAUDE.md's
+    currency-alignment convention) → ``177.60 CAD`` with a currency badge; anything else → a
+    thousands-grouped number. ``None`` (missing) renders as an em dash.
     """
     if value is None:
         return _EMPTY
@@ -42,6 +52,8 @@ def metric_value(value: float | None, unit: str | None = None) -> str:
         return f"{value:,.1f}%"
     if u == "usd":
         return f"${value:,.2f}"
+    if len(u) == 3 and u.isalpha():
+        return format_html("{} {}", f"{value:,.2f}", currency_badge(u))
     return f"{value:,.2f}"
 
 

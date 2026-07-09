@@ -92,6 +92,7 @@ class CompanyRepository(DuckDBRepository):
                     industry=rec.get("industry"),
                     exchange=rec.get("exchange"),
                     country=rec.get("country"),
+                    market=rec.get("market"),
                     description=rec.get("description"),
                     website=_clean(rec.get("website")),
                     employees=_as_int(rec.get("employees")),

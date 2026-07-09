@@ -178,9 +178,11 @@ def screen_page(request: HttpRequest) -> HttpResponse:
     metric_headers = _sort_headers(
         [(c.key, c.key, c.unit or "") for c in result.columns], sort_key, descending, base_pairs
     )
-    # Rows as (row, aligned metric cells) so the template never indexes a mapping by key.
+    # Rows as (row, aligned metric cells) so the template never indexes a mapping by key. Each
+    # cell's unit comes from the ROW, not the column — Market Cap's unit is per-ticker (its own
+    # native currency), so a column-wide unit would mislabel every non-USD ticker's cell.
     rows = [
-        {"row": r, "cells": [(r.values.get(c.key), c.unit) for c in result.columns]}
+        {"row": r, "cells": [(r.values.get(c.key), r.units.get(c.key) or c.unit) for c in result.columns]}
         for r in result.rows
     ]
 

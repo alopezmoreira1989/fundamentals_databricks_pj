@@ -17,6 +17,7 @@ from apps.valuation.football import build_chart
 from apps.watchlists import services as watchlist_services
 
 from . import charts, pricechart, services
+from .currency import quote_currency
 
 
 def company_page(request: HttpRequest, ticker: str) -> HttpResponse:
@@ -50,6 +51,7 @@ def company_page(request: HttpRequest, ticker: str) -> HttpResponse:
     derived_metrics, valuation_metrics = services.split_metrics(detail.metrics)
     iv_chart = build_chart(valuation_services.get_intrinsic_value_field(ticker))
     mos_scenarios = valuation_services.get_margin_of_safety_scenarios(ticker)
+    price_currency = quote_currency(detail.summary.market).lower()
     in_favorites = False
     watchlists: list = []
     ticker_watchlist_ids: set = set()
@@ -67,6 +69,7 @@ def company_page(request: HttpRequest, ticker: str) -> HttpResponse:
             "statement_panes": statement_panes,
             "headline": headline,
             "price_chart": price_chart,
+            "price_currency": price_currency,
             "quarterly": quarterly,
             "quarterly_chart": quarterly_chart,
             "bs_compositions": bs_compositions,

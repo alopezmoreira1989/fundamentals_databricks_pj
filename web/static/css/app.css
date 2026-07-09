@@ -188,6 +188,16 @@ a:focus-visible, button:focus-visible, .btn:focus-visible,
 .badge.text-bg-danger  { background: var(--negative-soft) !important; color: var(--negative) !important; }
 .badge.text-bg-primary { background: var(--accent-soft) !important; color: var(--accent-ink) !important; }
 
+/* Native-currency label next to a figure that isn't USD (e.g. a CAD Market Cap or price) —
+   mirrors the Streamlit app's .ccy-badge so the two front-ends read as one product. */
+.ccy-badge {
+  font-size: .68rem;
+  font-family: var(--mono);
+  color: var(--ink-3);
+  margin-left: 4px;
+  letter-spacing: .04em;
+}
+
 /* ---------- More buttons ---------- */
 .btn-dark {
   --bs-btn-bg: var(--ink); --bs-btn-border-color: var(--ink);
