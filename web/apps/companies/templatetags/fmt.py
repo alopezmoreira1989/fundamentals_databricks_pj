@@ -76,6 +76,20 @@ def compact_money(value: float | None) -> str:
 
 
 @register.filter
+def compact_money_ccy(value: float | None, currency: str | None = None) -> str:
+    """Like :func:`compact_money`, but prefixes ``$`` only for USD/unset — any other currency
+    (e.g. a Canadian ticker's native Market Cap) gets the compact figure plus a badge instead,
+    never a ``$`` it doesn't actually trade in."""
+    if value is None:
+        return _EMPTY
+    body = compact_money(value)
+    ccy = (currency or "USD").upper()
+    if ccy == "USD":
+        return f"${body}"
+    return format_html("{} {}", body, currency_badge(ccy))
+
+
+@register.filter
 def sign_class(value: float | None) -> str:
     """Bootstrap text colour for a signed value: green ≥ 0, red < 0, empty for missing.
 

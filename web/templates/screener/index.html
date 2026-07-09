@@ -28,6 +28,7 @@
           <option value="">Any</option>
           <option value="sp500" {% if index == "sp500" %}selected{% endif %}>S&amp;P 500</option>
           <option value="r3000" {% if index == "r3000" %}selected{% endif %}>Russell 3000</option>
+          <option value="tsx" {% if index == "tsx" %}selected{% endif %}>S&amp;P/TSX Composite</option>
         </select>
       </div>
       <div class="col-6 col-md-4">
@@ -39,6 +40,21 @@
           {% endfor %}
         </select>
       </div>
+      <div class="col-6 col-md-4">
+        <label for="market" class="form-label">Market</label>
+        <select id="market" name="market" class="form-select">
+          <option value="">All markets</option>
+          {% for m in markets %}
+            <option value="{{ m }}" {% if m == market %}selected{% endif %}>{{ m }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      {% if show_usd_toggle %}
+        <div class="col-12 col-md-4 form-check">
+          <input type="checkbox" class="form-check-input" id="usd" name="usd" value="1" {% if usd_lens %}checked{% endif %}>
+          <label class="form-check-label" for="usd">View Market Cap in USD <span class="text-muted small">(other figures stay native)</span></label>
+        </div>
+      {% endif %}
 
       <div class="col-12 col-lg-5">
         <label for="col" class="form-label">Columns <span class="text-muted small">(ctrl/⌘-click for several)</span></label>
@@ -116,6 +132,7 @@
                 <td class="text-muted">{{ item.row.sector|default:"—" }}</td>
                 <td class="text-muted">{{ item.row.industry|default:"—" }}</td>
                 <td class="text-muted">{{ item.row.country|default:"—" }}</td>
+                <td class="text-muted">{{ item.row.market|default:"—" }}</td>
                 {% for cell in item.cells %}
                   <td class="text-end font-monospace">{{ cell.0|metric_value:cell.1 }}</td>
                 {% endfor %}

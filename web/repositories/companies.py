@@ -33,6 +33,25 @@ _LATEST_METRICS_SQL = """
     LIMIT ?
 """
 
+# Market Cap's category is NULL in the artifact by design (screener-only, invisible in the
+# metrics grid — mirrors the Streamlit app; see 51__export_dashboard_data.py's injection
+# comment), so it needs its own targeted fetch rather than _LATEST_METRICS_SQL's
+# category-IS-NOT-NULL filter. period_end (a real date) is included for the USD-lens toggle's
+# date-anchored FX lookup (see usd_fx_rate below) — the only MetricPoint use case that needs it.
+_MARKET_CAP_SQL = """
+    SELECT ticker, 'Market Cap' AS metric, unit, fiscal_year, period_end, value
+    FROM metrics
+    WHERE ticker = ? AND metric = 'Market Cap' AND period_type = 'FY' AND value IS NOT NULL
+    ORDER BY fiscal_year DESC
+    LIMIT 1
+"""
+
+# Most recent currency->USD rate on or before `as_of` — the date-anchoring rule from
+# fundamentals_pipeline/fx.py (never today's spot rate, never the SEC filed timestamp).
+_FX_RATE_SQL = """
+    SELECT rate FROM fx WHERE base = ? AND quote = 'USD' AND date <= ? ORDER BY date DESC LIMIT 1
+"""
+
 # Reported financial-statement line items across fiscal years (the raw statements, not the
 # derived metrics). Ordered by the reporting hierarchy so the pivot below preserves line order.
 _STATEMENTS_SQL = """
@@ -93,6 +112,9 @@ class CompanyRepository(DuckDBRepository):
                     exchange=rec.get("exchange"),
                     country=rec.get("country"),
                     market=rec.get("market"),
+                    reporting_currency=_clean(rec.get("reporting_currency")),
+                    accounting_standard=_clean(rec.get("accounting_standard")),
+                    in_tsx_composite=_as_bool(rec.get("in_tsx_composite")),
                     description=rec.get("description"),
                     website=_clean(rec.get("website")),
                     employees=_as_int(rec.get("employees")),
@@ -104,6 +126,23 @@ class CompanyRepository(DuckDBRepository):
     def latest_metrics(self, ticker: str, *, limit: int = 400) -> tuple[MetricPoint, ...]:
         """The latest available value of each derived metric, ordered for grouped display."""
         return self._fetch(_LATEST_METRICS_SQL, [ticker, limit], MetricPoint)
+
+    def market_cap(self, ticker: str) -> MetricPoint | None:
+        """The ticker's latest-FY Market Cap, or ``None`` if unavailable (see _MARKET_CAP_SQL
+        for why this bypasses latest_metrics())."""
+        rows = self._fetch(_MARKET_CAP_SQL, [ticker], MetricPoint)
+        return rows[0] if rows else None
+
+    def usd_fx_rate(self, currency: str, as_of: str) -> float | None:
+        """Most recent `currency`->USD rate on or before `as_of`, or ``None`` if the `fx` view
+        is absent or carries no rate dated early enough — callers must keep the value in its
+        native currency then, never silently guess (fundamentals_pipeline.fx's date-anchoring
+        rule)."""
+        try:
+            rates = self._fetch_column(_FX_RATE_SQL, [currency.upper(), as_of])
+        except duckdb.Error:
+            return None
+        return float(rates[0]) if rates and rates[0] is not None else None
 
     def get_statements(self, ticker: str, *, max_years: int = 8) -> CompanyStatements:
         """The ticker's reported statements as line-item × fiscal-year grids (newest year first).

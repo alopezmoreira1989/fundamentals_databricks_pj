@@ -52,6 +52,13 @@ def company_page(request: HttpRequest, ticker: str) -> HttpResponse:
     iv_chart = build_chart(valuation_services.get_intrinsic_value_field(ticker))
     mos_scenarios = valuation_services.get_margin_of_safety_scenarios(ticker)
     price_currency = quote_currency(detail.summary.market).lower()
+    # Only offer the toggle for a ticker that actually has something non-USD to convert —
+    # mirrors the Streamlit app's same conditional (no point showing it for a USD-only name).
+    reporting_currency = (detail.summary.reporting_currency or "USD").upper()
+    show_usd_toggle = price_currency != "usd" or reporting_currency != "USD"
+    usd_lens = show_usd_toggle and request.GET.get("usd") == "1"
+    market_cap_kpi = services.get_market_cap_kpi(ticker, usd_lens=usd_lens)
+    headline = (*headline, market_cap_kpi) if market_cap_kpi else headline
     in_favorites = False
     watchlists: list = []
     ticker_watchlist_ids: set = set()
@@ -70,6 +77,8 @@ def company_page(request: HttpRequest, ticker: str) -> HttpResponse:
             "headline": headline,
             "price_chart": price_chart,
             "price_currency": price_currency,
+            "show_usd_toggle": show_usd_toggle,
+            "usd_lens": usd_lens,
             "quarterly": quarterly,
             "quarterly_chart": quarterly_chart,
             "bs_compositions": bs_compositions,

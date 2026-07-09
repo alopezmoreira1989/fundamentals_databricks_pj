@@ -24,7 +24,7 @@ PAGE_SIZE = 50
 # Descriptive (non-metric) columns that can be sorted on, as (sort key, header label). The
 # sort keys match what ``CompanyListingRepository`` whitelists for the scope table.
 _DESC_COLUMNS = (("ticker", "Ticker"), ("name", "Company"), ("sector", "Sector"),
-                 ("industry", "Industry"), ("country", "Country"))
+                 ("industry", "Industry"), ("country", "Country"), ("market", "Market"))
 _SORT_KEYS_DESC = frozenset(k for k, _ in _DESC_COLUMNS)
 
 
@@ -121,6 +121,12 @@ def screen_page(request: HttpRequest) -> HttpResponse:
     sector = request.GET.get("sector", "").strip()
     index = request.GET.get("index", "").strip()
     country = request.GET.get("country", "").strip()
+    market = request.GET.get("market", "").strip()
+    # Only meaningful once the universe actually has non-US tickers; otherwise there's nothing
+    # for it to convert, so it isn't offered (mirrors the Streamlit app's own condition).
+    markets = services.available_markets()
+    show_usd_toggle = "CA" in markets
+    usd_lens = show_usd_toggle and request.GET.get("usd") == "1"
     page = _parse_page(request.GET.get("page"))
 
     # Selected display columns + metric filters, with the legacy single-metric URL folded in.
@@ -148,20 +154,26 @@ def screen_page(request: HttpRequest) -> HttpResponse:
         sector=sector,
         index=index,
         country=country,
+        market=market,
         columns=display_cols,
         filters=filters,
         sort=SortSpec(key=sort_key, descending=descending),
         page=page,
         page_size=PAGE_SIZE,
+        usd_lens=usd_lens,
     )
 
     num_pages = max(1, math.ceil(result.total / PAGE_SIZE))
     page = min(page, num_pages)
 
     # State-carrying param pairs. `base_pairs` (no page/sort/dir) drives the sort-header links;
-    # `state_pairs` (adds the active sort) drives the pagination links.
+    # `state_pairs` (adds the active sort) drives the pagination links. usd_lens rides along in
+    # both so toggling it survives a sort/page click, same bookmarkable-URL contract as every
+    # other filter here.
     base_pairs: list[tuple[str, str]] = []
-    for k, v in (("q", search), ("sector", sector), ("index", index), ("country", country)):
+    for k, v in (
+        ("q", search), ("sector", sector), ("index", index), ("country", country), ("market", market)
+    ):
         if v:
             base_pairs.append((k, v))
     for c in cols:
@@ -170,6 +182,8 @@ def screen_page(request: HttpRequest) -> HttpResponse:
         base_pairs.append(("fmetric", f.metric))
         base_pairs.append(("fmin", "" if f.min_value is None else _num(f.min_value)))
         base_pairs.append(("fmax", "" if f.max_value is None else _num(f.max_value)))
+    if usd_lens:
+        base_pairs.append(("usd", "1"))
     state_pairs = [*base_pairs, ("sort", sort_key), ("dir", "desc" if descending else "asc")]
 
     desc_headers = _sort_headers(
@@ -210,10 +224,14 @@ def screen_page(request: HttpRequest) -> HttpResponse:
             "metrics": services.available_metrics(),
             "sectors": services.available_sectors(),
             "countries": services.available_countries(),
+            "markets": markets,
             "q": search,
             "sector": sector,
             "index": index,
             "country": country,
+            "market": market,
+            "show_usd_toggle": show_usd_toggle,
+            "usd_lens": usd_lens,
             "cols": cols,
             "sort_key": sort_key,
             "sort_dir": "desc" if descending else "asc",
