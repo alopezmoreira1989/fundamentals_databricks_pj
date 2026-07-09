@@ -12,7 +12,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from fundamentals_pipeline.tickers_universe import parse_tsx_composite_csv
+from fundamentals_pipeline.tickers_universe import normalize_sector, parse_tsx_composite_csv
 
 _SAMPLE_CSV = (
     'Fund Holdings as of,"Jul 6, 2026"\n'
@@ -27,6 +27,8 @@ _SAMPLE_CSV = (
     '"Toronto Stock Exchange","CAD","1.00","CAD"\n'
     '"XYZ","MYSTERY SECTOR CO","Not A Real GICS Sector","Equity","1.00","0.00",'
     '"1.00","1.00","1.00","Canada","Toronto Stock Exchange","CAD","1.00","CAD"\n'
+    '"BCE","BCE INC","Telecommunication Services","Equity","500.00","0.00",'
+    '"500.00","10.00","50.00","Canada","Toronto Stock Exchange","CAD","1.00","CAD"\n'
     '"MLPFT","CASH COLLATERAL CAD MLPFT","Cash and/or Derivatives",'
     '"Cash Collateral and Margins","4,246,000.00","0.01","4,246,000.00","4,246,000.00",'
     '"100.00","Canada","-","CAD","1.00","CAD"\n'
@@ -39,7 +41,7 @@ _SAMPLE_CSV = (
 
 def test_parses_equity_rows_only():
     df = parse_tsx_composite_csv(_SAMPLE_CSV)
-    assert set(df["ticker"]) == {"RY", "SHOP", "XYZ"}
+    assert set(df["ticker"]) == {"RY", "SHOP", "XYZ", "BCE"}
     assert "MLPFT" not in set(df["ticker"])
     assert "PTU6" not in set(df["ticker"])
 
@@ -58,6 +60,25 @@ def test_unmapped_sector_becomes_none():
     assert xyz["sector"] is None
 
 
+def test_near_miss_sector_label_is_remapped_not_dropped():
+    """#218: a real, live gap — BlackRock's XIC feed labels BCE (a telecom) "Telecommunication
+    Services", the pre-2018 GICS name; the strict canonical-membership-only check used to drop
+    this straight to NULL. XIC and IWV (fetch_russell3000, also iShares/BlackRock) share this
+    exact label variant, so it's remapped via the same shared SECTOR_NORMALIZE table."""
+    df = parse_tsx_composite_csv(_SAMPLE_CSV)
+    bce = df[df["ticker"] == "BCE"].iloc[0]
+    assert bce["sector"] == "Communication Services"
+
+
+def test_normalize_sector_handles_missing_and_canonical_values():
+    assert normalize_sector(None) is None
+    assert normalize_sector("") is None
+    assert normalize_sector("-") is None
+    assert normalize_sector("Financials") == "Financials"
+    assert normalize_sector("Telecommunication Services") == "Communication Services"
+    assert normalize_sector("Not A Real GICS Sector") is None
+
+
 def test_missing_header_raises():
     with pytest.raises(ValueError, match="header row"):
         parse_tsx_composite_csv("not,a,real,csv\n1,2,3,4\n")
@@ -66,4 +87,4 @@ def test_missing_header_raises():
 def test_returns_dataframe():
     df = parse_tsx_composite_csv(_SAMPLE_CSV)
     assert isinstance(df, pd.DataFrame)
-    assert len(df) == 3
+    assert len(df) == 4
