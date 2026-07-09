@@ -21,10 +21,9 @@ import io
 
 import pandas as pd
 
-# The 11 canonical GICS sectors — same set 02__tickers_master.py's own `_CANONICAL_SECTORS`
-# uses for S&P 500 / Russell 3000. XIC's raw `Sector` column has been observed (2026-07) to
-# already carry canonical GICS labels for every holding, so this is a defensive pass-through/
-# validation rather than a remapping table like `_SECTOR_NORMALIZE`.
+# The 11 canonical GICS sectors — the single normalization target for every ticker source
+# (US or otherwise). #218: this taxonomy never grows as new markets are added; a source's own
+# labels are remapped into these 11, never grafted in as new distinct values.
 CANONICAL_SECTORS = {
     "Energy",
     "Materials",
@@ -38,6 +37,55 @@ CANONICAL_SECTORS = {
     "Utilities",
     "Real Estate",
 }
+
+# Known IWV / BlackRock (and other GICS-derived) labels -> canonical GICS sector. Seeded from
+# observing fetch_russell3000()'s (IWV, also an iShares/BlackRock fund) unmapped-label reports
+# — the same vendor family as XIC (parse_tsx_composite_csv below), so this table is shared
+# across every BlackRock-sourced ticker universe rather than duplicated per market (#218's
+# rule: extend one maintained table, never a market-specific one-off). Canonical labels
+# themselves are handled by normalize_sector() as an identity match and need not be repeated.
+SECTOR_NORMALIZE: dict[str, str] = {
+    "Technology":               "Information Technology",
+    "Information Technology":    "Information Technology",
+    "Communication":            "Communication Services",
+    "Communication Services":    "Communication Services",
+    "Telecommunications":       "Communication Services",
+    "Telecommunication Services": "Communication Services",
+    "Financial":                "Financials",
+    "Financials":               "Financials",
+    "Financial Services":       "Financials",
+    "Health Care":              "Health Care",
+    "Healthcare":               "Health Care",
+    "Consumer Discretionary":    "Consumer Discretionary",
+    "Consumer, Cyclical":       "Consumer Discretionary",
+    "Consumer Staples":         "Consumer Staples",
+    "Consumer, Non-cyclical":    "Consumer Staples",
+    "Industrials":              "Industrials",
+    "Industrial":               "Industrials",
+    "Materials":                "Materials",
+    "Basic Materials":          "Materials",
+    "Energy":                   "Energy",
+    "Utilities":                "Utilities",
+    "Real Estate":              "Real Estate",
+}
+
+
+def normalize_sector(raw: object) -> str | None:
+    """Map a raw source sector label to one of the canonical 11 GICS sectors.
+
+    Returns the canonical label, or ``None`` when the input is missing/blank or unknown.
+    Unknown labels are deliberately dropped to NULL (the app renders them as "Unknown") rather
+    than guessed — callers should surface an unmapped-label report so SECTOR_NORMALIZE can be
+    extended (see fetch_russell3000()/parse_tsx_composite_csv's warnings).
+    """
+    if raw is None or (isinstance(raw, float) and pd.isna(raw)):
+        return None
+    s = str(raw).strip()
+    if not s or s in ("-", "—"):
+        return None
+    if s in CANONICAL_SECTORS:
+        return s
+    return SECTOR_NORMALIZE.get(s)
 
 # Index-mechanics rows that are not real equity holdings — the same kind of noise
 # `fetch_russell3000()` already tolerates (cash sleeves, futures overlay, collateral).
@@ -61,10 +109,12 @@ def parse_tsx_composite_csv(raw_text: str) -> pd.DataFrame:
     NBSP footer row.
 
     Filters out non-equity asset classes (cash, cash collateral, futures overlay — see
-    `NON_EQUITY_ASSET_CLASSES`). `sector` is BlackRock's raw label, passed through when it is
-    already one of the 11 canonical GICS labels (`CANONICAL_SECTORS`) and `None` otherwise
-    (printed as a warning so an unexpected label can be investigated, mirroring
-    `fetch_russell3000()`'s own unmapped-sector report).
+    `NON_EQUITY_ASSET_CLASSES`). `sector` is BlackRock's raw label, remapped to one of the 11
+    canonical GICS labels via `normalize_sector()` (#218) — the same shared table
+    `fetch_russell3000()` uses, since XIC and IWV are both iShares/BlackRock funds and have
+    been observed to share label variants (e.g. "Telecommunication Services"). A label with no
+    mapping is dropped to `None` and printed as a warning so it can be investigated, mirroring
+    `fetch_russell3000()`'s own unmapped-sector report.
 
     Raises `ValueError` if the expected header row can't be found (structural parse failure —
     e.g. BlackRock changes the export format). Does NOT validate row count — that's a
@@ -88,13 +138,15 @@ def parse_tsx_composite_csv(raw_text: str) -> pd.DataFrame:
 
     df = df[~df["Asset Class"].isin(NON_EQUITY_ASSET_CLASSES)].copy()
 
-    unmapped = sorted(set(df.loc[~df["Sector"].isin(CANONICAL_SECTORS), "Sector"].dropna().astype(str)))
+    sector = df["Sector"].map(normalize_sector)
+    unmapped = sorted(set(df.loc[sector.isna(), "Sector"].dropna().astype(str)))
     if unmapped:
-        print(f"  ⚠ {len(unmapped)} unmapped XIC sector label(s) — treated as NULL: {unmapped}")
+        print(f"  ⚠ {len(unmapped)} unmapped XIC sector label(s) — treated as NULL, "
+              f"extend SECTOR_NORMALIZE: {unmapped}")
 
     out = pd.DataFrame({
         "ticker":  df["Ticker"].astype(str).str.strip(),
         "company": df["Name"].astype(str).str.strip(),
-        "sector":  df["Sector"].where(df["Sector"].isin(CANONICAL_SECTORS), None),
+        "sector":  sector,
     })
     return out.reset_index(drop=True)

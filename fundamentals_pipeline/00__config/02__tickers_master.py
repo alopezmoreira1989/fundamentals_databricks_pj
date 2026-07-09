@@ -85,14 +85,14 @@ except ImportError:
 # above, using the repo root two levels up from this notebook's CWD (00__config/).
 try:
     from fundamentals_pipeline.identity import check_no_cross_market_collision, classify_company_match
-    from fundamentals_pipeline.tickers_universe import parse_tsx_composite_csv
+    from fundamentals_pipeline.tickers_universe import normalize_sector, parse_tsx_composite_csv
 except ImportError:
     import subprocess
     import sys
 
     subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "-e", "../.."])
     from fundamentals_pipeline.identity import check_no_cross_market_collision, classify_company_match
-    from fundamentals_pipeline.tickers_universe import parse_tsx_composite_csv
+    from fundamentals_pipeline.tickers_universe import normalize_sector, parse_tsx_composite_csv
 
 INGEST_SP500         = True
 INGEST_R3000         = True
@@ -117,66 +117,10 @@ TARGET_TABLE = f"{CATALOG}.config.tickers"
 
 _HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; research-bot/1.0)"}
 
-# The 11 canonical GICS sectors — the normalization target for every source.
-_CANONICAL_SECTORS = {
-    "Energy",
-    "Materials",
-    "Industrials",
-    "Consumer Discretionary",
-    "Consumer Staples",
-    "Health Care",
-    "Financials",
-    "Information Technology",
-    "Communication Services",
-    "Utilities",
-    "Real Estate",
-}
-
-# Known IWV / BlackRock (and other GICS-derived) labels → canonical GICS sector.
-# Seeded with the obvious mismatches; extend it whenever `fetch_russell3000()` prints
-# an unmapped label. Canonical labels themselves are handled by `_normalize_sector`
-# (identity) and need not be repeated here.
-_SECTOR_NORMALIZE: dict[str, str] = {
-    "Technology":               "Information Technology",
-    "Information Technology":    "Information Technology",
-    "Communication":            "Communication Services",
-    "Communication Services":    "Communication Services",
-    "Telecommunications":       "Communication Services",
-    "Telecommunication Services": "Communication Services",
-    "Financial":                "Financials",
-    "Financials":               "Financials",
-    "Financial Services":       "Financials",
-    "Health Care":              "Health Care",
-    "Healthcare":               "Health Care",
-    "Consumer Discretionary":    "Consumer Discretionary",
-    "Consumer, Cyclical":       "Consumer Discretionary",
-    "Consumer Staples":         "Consumer Staples",
-    "Consumer, Non-cyclical":    "Consumer Staples",
-    "Industrials":              "Industrials",
-    "Industrial":               "Industrials",
-    "Materials":                "Materials",
-    "Basic Materials":          "Materials",
-    "Energy":                   "Energy",
-    "Utilities":                "Utilities",
-    "Real Estate":              "Real Estate",
-}
-
-
-def _normalize_sector(raw: object) -> str | None:
-    """Map a raw source sector label to one of the canonical 11 GICS sectors.
-
-    Returns the canonical label, or ``None`` when the input is missing/blank or
-    unknown. Unknown labels are deliberately dropped to NULL (the app renders them
-    as "Unknown") and surfaced by the caller so the map can be extended.
-    """
-    if raw is None or (isinstance(raw, float) and pd.isna(raw)):
-        return None
-    s = str(raw).strip()
-    if not s or s in ("-", "—"):
-        return None
-    if s in _CANONICAL_SECTORS:
-        return s
-    return _SECTOR_NORMALIZE.get(s)
+# The 11-canonical-GICS-sector normalization (CANONICAL_SECTORS/SECTOR_NORMALIZE/
+# normalize_sector) lives in fundamentals_pipeline/tickers_universe.py (imported above) — a
+# single shared table for every ticker source, US or otherwise (#218's rule: extend one
+# maintained table, never a market-specific one-off or a new category).
 
 # COMMAND ----------
 
@@ -520,7 +464,7 @@ def fetch_sp500() -> pd.DataFrame:
     df["ticker"] = df["ticker"].str.replace(".", "-", regex=False)
     # Already canonical, but normalize defensively so a stray label lands as NULL
     # rather than leaking a non-canonical value into the table.
-    df["sector"] = df["sector"].map(_normalize_sector)
+    df["sector"] = df["sector"].map(normalize_sector)
     return df.dropna(subset=["ticker"])
 
 
@@ -534,7 +478,7 @@ def fetch_russell3000() -> pd.DataFrame:
     name, so the parser is resilient to metadata rows being added or removed.
 
     A `Sector` column (BlackRock labels, GICS-derived) is parsed when present and
-    normalized to the canonical 11 via `_SECTOR_NORMALIZE`; if the column is absent
+    normalized to the canonical 11 via `SECTOR_NORMALIZE`; if the column is absent
     the parse still succeeds with `sector = None` for every row.
     """
     import re
@@ -628,7 +572,7 @@ def fetch_russell3000() -> pd.DataFrame:
         raise ValueError(f"IWV holdings: {nan_pct:.1%} of tickers are NaN (>5% threshold)")
 
     # Normalize sector + surface unmapped labels so the map can be extended next run.
-    df["sector"] = df["sector_raw"].map(_normalize_sector)
+    df["sector"] = df["sector_raw"].map(normalize_sector)
     if sector_col is not None:
         raw = df["sector_raw"].astype("object")
         # A raw label is "unmapped" only if it's present/non-blank yet still landed NULL.
@@ -638,7 +582,7 @@ def fetch_russell3000() -> pd.DataFrame:
         unmapped = sorted({str(x).strip() for x in raw[is_unmapped]})
         if unmapped:
             print(f"  ⚠ {len(unmapped)} unmapped IWV sector label(s) "
-                  f"→ extend _SECTOR_NORMALIZE: {unmapped}")
+                  f"→ extend SECTOR_NORMALIZE: {unmapped}")
         else:
             print("  ✓ All IWV sector labels mapped to canonical GICS")
     df = df.drop(columns=["sector_raw"])
@@ -676,7 +620,7 @@ def fetch_favorites() -> pd.DataFrame:
         df = full[["ticker", "company"]].copy()
         df["ticker"] = df["ticker"].str.upper().str.strip()
         # Optional sector field — normalize to canonical GICS (NULL when absent/unknown).
-        df["sector"] = full["sector"].map(_normalize_sector) if "sector" in full.columns else None
+        df["sector"] = full["sector"].map(normalize_sector) if "sector" in full.columns else None
         print(f"  ✓ {len(df)} favorite(s) loaded from favorites.json")
         return df
 
