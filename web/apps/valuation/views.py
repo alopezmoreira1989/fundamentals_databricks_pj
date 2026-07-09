@@ -10,6 +10,9 @@ from __future__ import annotations
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import render
 
+from apps.companies import services as company_services
+from apps.companies.currency import quote_currency
+
 from . import services
 from .football import build_chart
 
@@ -20,10 +23,18 @@ def valuation_page(request: HttpRequest, ticker: str) -> HttpResponse:
     points = services.get_margin_of_safety(ticker)
     scenarios = services.get_margin_of_safety_scenarios(ticker)
     chart = build_chart(services.get_intrinsic_value_field(ticker))
+    summary = company_services.get_company_summary(ticker)
+    price_currency = quote_currency(summary.market if summary else None).lower()
     return render(
         request,
         "valuation/detail.html",
-        {"ticker": ticker, "points": points, "scenarios": scenarios, "chart": chart},
+        {
+            "ticker": ticker,
+            "points": points,
+            "scenarios": scenarios,
+            "chart": chart,
+            "price_currency": price_currency,
+        },
     )
 
 

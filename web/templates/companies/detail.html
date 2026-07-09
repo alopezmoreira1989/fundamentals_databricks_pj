@@ -251,7 +251,7 @@
           <div class="d-flex justify-content-between align-items-baseline mb-3 flex-wrap gap-2">
             <div>
               <div class="eyebrow">Close price</div>
-              <div class="price-last">${{ price_chart.last_close|floatformat:2 }}</div>
+              <div class="price-last">{{ price_chart.last_close|metric_value:price_currency }}</div>
             </div>
             <div class="eyebrow">{{ price_chart.first_date }} → {{ price_chart.last_date }}</div>
           </div>
@@ -262,8 +262,8 @@
             <polyline points="{{ price_chart.polyline }}" class="line" fill="none"/>
           </svg>
           <div class="d-flex justify-content-between eyebrow mt-2">
-            <span>Low ${{ price_chart.min_close|floatformat:2 }}</span>
-            <span>High ${{ price_chart.max_close|floatformat:2 }}</span>
+            <span>Low {{ price_chart.min_close|metric_value:price_currency }}</span>
+            <span>High {{ price_chart.max_close|metric_value:price_currency }}</span>
           </div>
         </div>
       </div>
@@ -391,7 +391,7 @@
                 <div class="eyebrow">Intrinsic value</div>
                 <h2 class="h6 mb-0 mt-1">Per share · bear – mid – bull</h2>
               </div>
-              {% if iv_chart.price is not None %}<span class="mono small">Price {{ iv_chart.price|metric_value:"usd" }}</span>{% endif %}
+              {% if iv_chart.price is not None %}<span class="mono small">Price {{ iv_chart.price|metric_value:price_currency }}</span>{% endif %}
             </div>
             {% for b in iv_chart.bars %}
               <div class="mb-3">

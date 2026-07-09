@@ -536,7 +536,15 @@ with feat_col, st.container(key="scr_featured"):
 # Filters (top)
 # ──────────────────────────────────────────────────────────────────────────────
 with st.container(border=True):
-    c1, c1b, c2, c3, c3b, c4, c5 = st.columns([0.9, 1.0, 1.2, 1.2, 1.1, 1.2, 2.1])
+    c3b, c1, c1b, c2, c3, c4, c5 = st.columns([1.1, 0.9, 1.0, 1.2, 1.2, 1.2, 2.1])
+    with c3b:
+        # Incorporation/HQ jurisdiction — independent of Market (e.g. NG/NovaGold is
+        # market="US" but country="Canada"). Data-driven, unscoped, same URL-seeding pattern
+        # as Market (no session key needed — no drill-through writes into it). Shown first —
+        # it's the broadest, most-used cut for the non-US universe.
+        _country_qp = st.query_params.get("ctry")
+        _country_index = _country_opts.index(_country_qp) if _country_qp in _country_opts else 0
+        country = st.selectbox("Country", _country_opts, index=_country_index)
     with c1:
         # Listing market ("US"/"Canada") — independent of Universe (a dual-listed ticker can
         # be market="US" and still count toward S&P/TSX Composite). Same URL-seeding pattern.
@@ -558,13 +566,6 @@ with st.container(border=True):
         # Keyed + pre-seeded above (from ?ind or the compare-page drill-through); options are
         # data-driven. The Sectors page links here with ?ind=<industry> to land pre-filtered.
         industry = st.selectbox("Industry", _industry_opts, key=INDUSTRY_KEY)
-    with c3b:
-        # Incorporation/HQ jurisdiction — independent of Market (e.g. NG/NovaGold is
-        # market="US" but country="Canada"). Data-driven, unscoped, same URL-seeding pattern
-        # as Market (no session key needed — no drill-through writes into it).
-        _country_qp = st.query_params.get("ctry")
-        _country_index = _country_opts.index(_country_qp) if _country_qp in _country_opts else 0
-        country = st.selectbox("Country", _country_opts, index=_country_index)
     with c4:
         query = st.text_input("Search (ticker or name)", st.query_params.get("q", ""))
     with c5:

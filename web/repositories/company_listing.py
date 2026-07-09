@@ -267,7 +267,7 @@ class CompanyListingRepository(DuckDBRepository):
             units = self._metric_units(con, all_metrics)
             cte, cte_params = self._pivot_cte(all_metrics, alias)
             where, where_params = self._filter_clause(filters, alias)
-            select_cols = ", ".join(f"p.{alias[m]}" for m in display_metrics)
+            select_cols = ", ".join(f"p.{alias[m]}, p.{alias[m]}_u" for m in display_metrics)
             projection = "s.ticker, s.name, s.sector, s.industry, s.country, s.has_logo" + (
                 f", {select_cols}" if select_cols else ""
             )
@@ -297,7 +297,8 @@ class CompanyListingRepository(DuckDBRepository):
                 industry=row[3],
                 country=row[4],
                 has_logo=row[5],
-                values={m: row[6 + i] for i, m in enumerate(display_metrics)},
+                values={m: row[6 + 2 * i] for i, m in enumerate(display_metrics)},
+                units={m: row[6 + 2 * i + 1] for i, m in enumerate(display_metrics)},
             )
             for row in hits
         )
@@ -321,15 +322,24 @@ class CompanyListingRepository(DuckDBRepository):
     @staticmethod
     def _pivot_cte(metrics: list[str], alias: dict[str, str]) -> tuple[str, list[Any]]:
         """The ``WITH latest, pivoted`` CTE that gives each scoped ticker its latest-FY value of
-        every needed metric, one column (``m0``, ``m1``, …) per metric. Empty when no metrics."""
+        every needed metric, one value column (``m0``, ``m1``, …) plus its own unit column
+        (``m0_u``, ``m1_u``, …) per metric. Most metrics carry one fixed unit across every
+        ticker (``ScreenColumn.unit`` covers those), but Market Cap's unit is each ticker's own
+        native reporting currency — read per row here rather than assumed column-wide (see
+        CLAUDE.md's currency-alignment convention). Empty when no metrics."""
         if not metrics:
             return "", []
-        filters_sql = ", ".join(
-            f"max(value) FILTER (WHERE metric = ?) AS {alias[m]}" for m in metrics
-        )
+        parts: list[str] = []
+        params: list[Any] = [metrics]  # the IN-list param for list_contains(?, metric)
+        for m in metrics:
+            parts.append(f"max(value) FILTER (WHERE metric = ?) AS {alias[m]}")
+            params.append(m)
+            parts.append(f"any_value(unit) FILTER (WHERE metric = ?) AS {alias[m]}_u")
+            params.append(m)
+        filters_sql = ", ".join(parts)
         cte = (
             "WITH latest AS ("
-            "  SELECT ticker, metric, value FROM metrics"
+            "  SELECT ticker, metric, value, unit FROM metrics"
             "  WHERE period_type = 'FY' AND value IS NOT NULL AND list_contains(?, metric)"
             "    AND ticker IN (SELECT ticker FROM scoped)"
             "  QUALIFY row_number() OVER (PARTITION BY ticker, metric ORDER BY fiscal_year DESC) = 1"
@@ -337,8 +347,6 @@ class CompanyListingRepository(DuckDBRepository):
             f"  SELECT ticker, {filters_sql} FROM latest GROUP BY ticker"
             ") "
         )
-        # The IN-list param first, then one equality param per FILTER alias (in column order).
-        params: list[Any] = [metrics, *metrics]
         return cte, params
 
     @staticmethod
