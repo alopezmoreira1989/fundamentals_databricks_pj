@@ -20,6 +20,7 @@ from lib.currency import convert_to_usd, currency_badge, usd_lens_toggle
 from lib.data import load_fx
 from lib.render import _logo_dev_key, logo_dev_url
 from lib.screener import (
+    ALL_COUNTRIES,
     ALL_INDUSTRIES,
     DEFAULT_COLUMNS,
     MARKET_CAP,
@@ -30,6 +31,8 @@ from lib.screener import (
     bucket_mask,
     buckets_for,
     build_screener_frame,
+    country_mask,
+    country_options,
     industry_mask,
     industry_options,
     market_mask,
@@ -42,6 +45,7 @@ from lib.signals import signal_absolute
 COMPANY_PAGE = "views/company.py"
 SECTOR_KEY = "scr_sector"   # selectbox key the sector strip drives via callback
 INDUSTRY_KEY = "scr_industry"   # Industry selectbox key (also seeded by the compare-page drill-through)
+COUNTRY_KEY = "scr_country"   # Country selectbox key (data-driven options, same seeding pattern as Industry)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # URL = single source of truth for ALL filter state.
@@ -101,15 +105,16 @@ def _decode_buckets(raw: str, metrics: list[str]) -> dict[str, list[str]]:
 
 
 def _state_qs(
-    universe: str, market: str, sector: str, industry: str, query: str, cols: list[str],
-    selections: dict[str, list[str]], sort_col: str | None, sort_dir: str,
+    universe: str, market: str, sector: str, industry: str, country: str, query: str,
+    cols: list[str], selections: dict[str, list[str]], sort_col: str | None, sort_dir: str,
 ) -> str:
     """Build the FULL query string (no leading "?") encoding all filter state + sort.
 
     Each value is percent-encoded via ``quote(..., safe="")``. A key is omitted
     when its value is falsy/default (universe "All", market "All", sector "All sectors",
-    industry "All industries", empty search, no columns, no buckets) to keep URLs short —
-    but ``sort``/``dir`` are ALWAYS emitted once a sort is active.
+    industry "All industries", country "All countries", empty search, no columns, no
+    buckets) to keep URLs short — but ``sort``/``dir`` are ALWAYS emitted once a sort is
+    active.
     """
     parts: list[tuple[str, str]] = []
     if universe and universe != "All":
@@ -120,6 +125,8 @@ def _state_qs(
         parts.append(("sec", sector))
     if industry and industry != ALL_INDUSTRIES:
         parts.append(("ind", industry))
+    if country and country != ALL_COUNTRIES:
+        parts.append(("ctry", country))
     if query:
         parts.append(("q", query))
     if cols:
@@ -142,6 +149,10 @@ _LOGO_KEY = _logo_dev_key()
 
 wide, unit_map, metric_order = build_screener_frame()
 fx = load_fx()
+
+# Country (incorporation/HQ jurisdiction) — data-driven, unscoped by sector/universe (unlike
+# Industry, which is sector-scoped) since it's a geographic property, not a business one.
+_country_opts = country_options(wide)
 
 # Seed the sector filter from the URL BEFORE anything reads SECTOR_KEY (the stat band,
 # the sector strip and the selectbox all share it). Only fires when the key is absent —
@@ -304,6 +315,9 @@ def _valuation_tape(src: pd.DataFrame, active_sector: str, active_industry: str)
     market_top = st.query_params.get("m", "All")
     if market_top not in MARKET_LABELS:
         market_top = "All"
+    country_top = st.query_params.get("ctry", ALL_COUNTRIES)
+    if country_top not in _country_opts:
+        country_top = ALL_COUNTRIES
     query_top = st.query_params.get("q", "")
     cols_top = [c for c in st.query_params.get("cols", "").split("|") if c in metric_order] \
         or [c for c in DEFAULT_COLUMNS if c in metric_order]
@@ -318,8 +332,8 @@ def _valuation_tape(src: pd.DataFrame, active_sector: str, active_industry: str)
         toggled = {k: v for k, v in sel_top.items() if k != "P/E"}
         toggled["P/E"] = cur
         href = html.escape("?" + _state_qs(
-            universe_top, market_top, active_sector, active_industry, query_top, cols_href, toggled,
-            sort_col, sort_dir))
+            universe_top, market_top, active_sector, active_industry, country_top, query_top,
+            cols_href, toggled, sort_col, sort_dir))
         is_active = " is-active" if label in active_pe else ""
         segs.append(
             f'<a class="scr-band {cls}{is_active}" href="{href}" '
@@ -522,7 +536,7 @@ with feat_col, st.container(key="scr_featured"):
 # Filters (top)
 # ──────────────────────────────────────────────────────────────────────────────
 with st.container(border=True):
-    c1, c1b, c2, c3, c4, c5 = st.columns([0.9, 1.0, 1.2, 1.2, 1.3, 2.3])
+    c1, c1b, c2, c3, c3b, c4, c5 = st.columns([0.9, 1.0, 1.2, 1.2, 1.1, 1.2, 2.1])
     with c1:
         # Listing market ("US"/"Canada") — independent of Universe (a dual-listed ticker can
         # be market="US" and still count toward S&P/TSX Composite). Same URL-seeding pattern.
@@ -544,6 +558,13 @@ with st.container(border=True):
         # Keyed + pre-seeded above (from ?ind or the compare-page drill-through); options are
         # data-driven. The Sectors page links here with ?ind=<industry> to land pre-filtered.
         industry = st.selectbox("Industry", _industry_opts, key=INDUSTRY_KEY)
+    with c3b:
+        # Incorporation/HQ jurisdiction — independent of Market (e.g. NG/NovaGold is
+        # market="US" but country="Canada"). Data-driven, unscoped, same URL-seeding pattern
+        # as Market (no session key needed — no drill-through writes into it).
+        _country_qp = st.query_params.get("ctry")
+        _country_index = _country_opts.index(_country_qp) if _country_qp in _country_opts else 0
+        country = st.selectbox("Country", _country_opts, index=_country_index)
     with c4:
         query = st.text_input("Search (ticker or name)", st.query_params.get("q", ""))
     with c5:
@@ -590,7 +611,7 @@ with st.container(border=True):
 # Apply filters
 # ──────────────────────────────────────────────────────────────────────────────
 mask = (universe_mask(wide, universe) & market_mask(wide, market) & sector_mask(wide, sector)
-        & industry_mask(wide, industry) & search_mask(wide, query))
+        & industry_mask(wide, industry) & country_mask(wide, country) & search_mask(wide, query))
 for metric, sel in selections.items():
     mask &= bucket_mask(wide[metric], sel, bucket_specs[metric])
 fdf = wide[mask].reset_index(drop=True)
@@ -692,7 +713,7 @@ def _table_html() -> str:
 
     def _sort_href(col: str) -> str:
         """Full href carrying ALL filter state + the requested sort (HTML-attribute safe)."""
-        qs = _state_qs(universe, market, sector, industry, query, cols, selections, col, _next_dir(col))
+        qs = _state_qs(universe, market, sector, industry, country, query, cols, selections, col, _next_dir(col))
         return html.escape("?" + qs)
 
     head = [
