@@ -23,6 +23,7 @@ from lib.screener import (
     ALL_INDUSTRIES,
     DEFAULT_COLUMNS,
     MARKET_CAP,
+    MARKET_LABELS,
     SECTORS,
     UNIVERSE_FLAGS,
     UNKNOWN_SECTOR,
@@ -31,6 +32,7 @@ from lib.screener import (
     build_screener_frame,
     industry_mask,
     industry_options,
+    market_mask,
     search_mask,
     sector_mask,
     universe_mask,
@@ -99,19 +101,21 @@ def _decode_buckets(raw: str, metrics: list[str]) -> dict[str, list[str]]:
 
 
 def _state_qs(
-    universe: str, sector: str, industry: str, query: str, cols: list[str],
+    universe: str, market: str, sector: str, industry: str, query: str, cols: list[str],
     selections: dict[str, list[str]], sort_col: str | None, sort_dir: str,
 ) -> str:
     """Build the FULL query string (no leading "?") encoding all filter state + sort.
 
     Each value is percent-encoded via ``quote(..., safe="")``. A key is omitted
-    when its value is falsy/default (universe "All", sector "All sectors", industry
-    "All industries", empty search, no columns, no buckets) to keep URLs short — but
-    ``sort``/``dir`` are ALWAYS emitted once a sort is active.
+    when its value is falsy/default (universe "All", market "All", sector "All sectors",
+    industry "All industries", empty search, no columns, no buckets) to keep URLs short —
+    but ``sort``/``dir`` are ALWAYS emitted once a sort is active.
     """
     parts: list[tuple[str, str]] = []
     if universe and universe != "All":
         parts.append(("u", universe))
+    if market and market != "All":
+        parts.append(("m", market))
     if sector and sector != SECTORS[0]:
         parts.append(("sec", sector))
     if industry and industry != ALL_INDUSTRIES:
@@ -297,6 +301,9 @@ def _valuation_tape(src: pd.DataFrame, active_sector: str, active_industry: str)
     universe_top = st.query_params.get("u", "All")
     if universe_top not in UNIVERSE_FLAGS:
         universe_top = "All"
+    market_top = st.query_params.get("m", "All")
+    if market_top not in MARKET_LABELS:
+        market_top = "All"
     query_top = st.query_params.get("q", "")
     cols_top = [c for c in st.query_params.get("cols", "").split("|") if c in metric_order] \
         or [c for c in DEFAULT_COLUMNS if c in metric_order]
@@ -311,7 +318,7 @@ def _valuation_tape(src: pd.DataFrame, active_sector: str, active_industry: str)
         toggled = {k: v for k, v in sel_top.items() if k != "P/E"}
         toggled["P/E"] = cur
         href = html.escape("?" + _state_qs(
-            universe_top, active_sector, active_industry, query_top, cols_href, toggled,
+            universe_top, market_top, active_sector, active_industry, query_top, cols_href, toggled,
             sort_col, sort_dir))
         is_active = " is-active" if label in active_pe else ""
         segs.append(
@@ -515,13 +522,20 @@ with feat_col, st.container(key="scr_featured"):
 # Filters (top)
 # ──────────────────────────────────────────────────────────────────────────────
 with st.container(border=True):
-    c1, c2, c3, c4, c5 = st.columns([1.0, 1.3, 1.3, 1.4, 2.6])
+    c1, c1b, c2, c3, c4, c5 = st.columns([1.0, 0.9, 1.2, 1.2, 1.3, 2.3])
     with c1:
         # Seed the universe from the URL (first instantiation only) — falls back to index 0.
         _univ_list = list(UNIVERSE_FLAGS)
         _univ_qp = st.query_params.get("u")
         _univ_index = _univ_list.index(_univ_qp) if _univ_qp in _univ_list else 0
         universe = st.selectbox("Universe", _univ_list, index=_univ_index)
+    with c1b:
+        # Listing market ("US"/"Canada") — independent of Universe (a dual-listed ticker can
+        # be market="US" and still count toward S&P/TSX Composite). Same URL-seeding pattern.
+        _market_list = list(MARKET_LABELS)
+        _market_qp = st.query_params.get("m")
+        _market_index = _market_list.index(_market_qp) if _market_qp in _market_list else 0
+        market = st.selectbox("Market", _market_list, index=_market_index)
     with c2:
         # Keyed so the sector strip's callbacks can drive it; SECTOR_KEY is pre-seeded from
         # the URL above, so default = that value on a fresh load, else "All sectors".
@@ -575,7 +589,7 @@ with st.container(border=True):
 # ──────────────────────────────────────────────────────────────────────────────
 # Apply filters
 # ──────────────────────────────────────────────────────────────────────────────
-mask = (universe_mask(wide, universe) & sector_mask(wide, sector)
+mask = (universe_mask(wide, universe) & market_mask(wide, market) & sector_mask(wide, sector)
         & industry_mask(wide, industry) & search_mask(wide, query))
 for metric, sel in selections.items():
     mask &= bucket_mask(wide[metric], sel, bucket_specs[metric])
@@ -678,7 +692,7 @@ def _table_html() -> str:
 
     def _sort_href(col: str) -> str:
         """Full href carrying ALL filter state + the requested sort (HTML-attribute safe)."""
-        qs = _state_qs(universe, sector, industry, query, cols, selections, col, _next_dir(col))
+        qs = _state_qs(universe, market, sector, industry, query, cols, selections, col, _next_dir(col))
         return html.escape("?" + qs)
 
     head = [

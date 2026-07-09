@@ -5,12 +5,13 @@ detail page uses) — there is **no Databricks connection at runtime**. The wide
 frame is built by pivoting the long-format `dashboard_metrics.parquet` to the
 latest available fiscal year per ticker.
 
-Universe flags (`is_favorite` / `in_sp500` / `in_r3000`), the GICS `sector`, the
-Yahoo `industry` (sub-sector grouping key, schema v8), and **Market Cap** (a
-`Market Cap` metric row) all come from `50__publish/51__export_dashboard_data.py`.
-Older artifacts that predate a field simply yield its default — all-False flags,
-``"Unknown"`` sector/industry, an empty Market Cap column — so the screener degrades
-gracefully until the next publish.
+Universe flags (`is_favorite` / `in_sp500` / `in_r3000` / `in_tsx_composite`, schema
+v13), listing `market` ("US"/"CA", schema v12), the GICS `sector`, the Yahoo `industry`
+(sub-sector grouping key, schema v8), and **Market Cap** (a `Market Cap` metric row) all
+come from `50__publish/51__export_dashboard_data.py`. Older artifacts that predate a
+field simply yield its default — all-False flags, no `market` column (Market filter
+becomes a no-op), ``"Unknown"`` sector/industry, an empty Market Cap column — so the
+screener degrades gracefully until the next publish.
 """
 
 from __future__ import annotations
@@ -28,12 +29,18 @@ DEFAULT_COLUMNS = [
 ]
 # Universe → flag column in the frame ("" = no filter).
 UNIVERSE_FLAGS = {
-    "All":          "",
-    "S&P 500":      "in_sp500",
-    "Russell 3000": "in_r3000",
-    "Favorites":    "is_favorite",
+    "All":               "",
+    "S&P 500":           "in_sp500",
+    "Russell 3000":      "in_r3000",
+    "S&P/TSX Composite": "in_tsx_composite",
+    "Favorites":         "is_favorite",
 }
-_FLAG_COLS = ("is_favorite", "in_sp500", "in_r3000")
+_FLAG_COLS = ("is_favorite", "in_sp500", "in_r3000", "in_tsx_composite")
+
+# Market (listing market) → `market` column code ("" = no filter, i.e. "All"). Independent
+# of Universe: a dual-listed ticker (BAM, SHOP, GFL, …) can be market="US" and still carry
+# in_tsx_composite=true, so these two filters answer different questions on purpose.
+MARKET_LABELS = {"All": "", "US": "US", "Canada": "CA"}
 
 # Bucket for tickers with no/NULL/legacy sector (the app's "Unknown" bucket).
 UNKNOWN_SECTOR = "Unknown"
@@ -164,6 +171,16 @@ def sector_mask(df: pd.DataFrame, sector: str) -> pd.Series:
     if not sector or sector == SECTORS[0] or "sector" not in df.columns:
         return pd.Series(True, index=df.index)
     return df["sector"].astype(str) == sector
+
+
+def market_mask(df: pd.DataFrame, market: str) -> pd.Series:
+    """Boolean mask for one listing market ("US"/"Canada"). ``"All"`` (the default) is a
+    no-op. An artifact predating schema v12 (no `market` column) degrades to all-True —
+    same pattern as `universe_mask`/`sector_mask` for a missing/legacy column."""
+    code = MARKET_LABELS.get(market, "")
+    if not code or "market" not in df.columns:
+        return pd.Series(True, index=df.index)
+    return df["market"].astype(str).str.upper() == code
 
 
 def industry_options(df: pd.DataFrame) -> list[str]:
