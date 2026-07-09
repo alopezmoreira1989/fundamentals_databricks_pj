@@ -10,38 +10,69 @@ from __future__ import annotations
 
 import pandas as pd
 
-from .currency import currency_badge
+from .currency import currency_badge, usd_lens_convert
 from .format import fmt_delta, fmt_kpi, fmt_metric, is_missing
 
 
-def render_kpi_strip(ticker: str, data: pd.DataFrame, metrics: pd.DataFrame, meta: dict | None = None) -> str:
+def render_kpi_strip(
+    ticker: str, data: pd.DataFrame, metrics: pd.DataFrame, meta: dict | None = None,
+    fx: pd.DataFrame | None = None, usd_lens: bool = False,
+) -> str:
     """Return the full KPI strip as an HTML string.
 
-    Market Cap is badged with its native currency when it isn't USD (e.g. a CAD-reporting
-    Canadian filer) — labeling only, no conversion; see views/overview.py for the toggle
-    that DOES convert. Revenue/Net Income/Net Margin are always in the ticker's
-    reporting_currency too but aren't badged here (out of scope — see CLAUDE.md's
-    currency-alignment convention; a full per-line-item conversion isn't built yet).
+    Market Cap converts to USD when the "View in USD" toggle (`usd_lens`) is on and this
+    ticker's reporting_currency isn't already USD — same date-anchored conversion as the
+    Overview tab's Market Cap/Price cards (lib/currency.py's usd_lens_convert), so the two
+    cards always agree instead of one converting and the other staying native. When the
+    toggle is off, Market Cap is badged with its native currency only (no conversion).
+    Revenue/Net Income/Net Margin stay in native currency either way — out of scope, no
+    per-line-item conversion built yet (see CLAUDE.md's currency-alignment convention).
     """
-    mcap = _metric_series(metrics, ticker, "Market Cap")
+    mcap_rows = _fy_rows(metrics, ticker, "Market Cap")
     rev = _concept_series(data, ticker, "Revenue", "Income Statement")
     ni = _concept_series(data, ticker, "Net Income", "Income Statement")
     margin = _metric_series(metrics, ticker, "Net Margin %")
 
+    mcap_val = None
+    mcap_yoy = None
     mcap_badge = ""
-    if meta:
-        for t in meta.get("tickers", []):
-            if isinstance(t, dict) and t.get("ticker") == ticker:
-                mcap_badge = currency_badge(t.get("reporting_currency"))
-                break
+    if not mcap_rows.empty:
+        latest = mcap_rows.iloc[-1]
+        if not is_missing(latest["value"]):
+            mcap_val = latest["value"]
+            if len(mcap_rows) >= 2:
+                prior_val = mcap_rows.iloc[-2]["value"]
+                if not is_missing(prior_val) and prior_val != 0:
+                    mcap_yoy = (mcap_val - prior_val) / abs(prior_val) * 100.0
+
+            ccy = "USD"
+            if meta:
+                for t in meta.get("tickers", []):
+                    if isinstance(t, dict) and t.get("ticker") == ticker:
+                        ccy = (t.get("reporting_currency") or "USD").upper()
+                        break
+            if ccy != "USD":
+                if usd_lens:
+                    period_end = latest["period_end"] if "period_end" in mcap_rows.columns else None
+                    mcap_val, mcap_badge = usd_lens_convert(mcap_val, ccy, period_end, fx)
+                else:
+                    mcap_badge = currency_badge(ccy)
 
     cards = [
-        _card("MARKET CAP", fmt_kpi(_latest(mcap)) + mcap_badge, _yoy(mcap)),
+        _card("MARKET CAP", fmt_kpi(mcap_val) + mcap_badge, mcap_yoy),
         _card("REVENUE", fmt_kpi(_latest(rev)), _yoy(rev)),
         _card("NET INCOME", fmt_kpi(_latest(ni)), _yoy(ni)),
         _card("NET MARGIN", fmt_metric(_latest(margin), "percent"), _yoy(margin)),
     ]
     return f'<div class="kpi-strip">{"".join(cards)}</div>'
+
+
+def _fy_rows(metrics: pd.DataFrame, ticker: str, name: str) -> pd.DataFrame:
+    """Ordered FY rows (oldest → newest, full columns incl. period_end) for one metric."""
+    if metrics.empty:
+        return metrics
+    mask = (metrics["ticker"] == ticker) & (metrics["period_type"] == "FY") & (metrics["metric"] == name)
+    return metrics[mask].sort_values("fiscal_year")
 
 
 def _fy_series(df: pd.DataFrame, mask: pd.Series) -> list:
