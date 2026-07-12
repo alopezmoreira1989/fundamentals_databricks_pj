@@ -50,6 +50,17 @@
 
 body { font-family: var(--sans); background: var(--bg); color: var(--ink); }
 
+/* Bootstrap's default .container caps out at 1320px (xxl) — on a normal desktop monitor
+   (1600-1920px+) that leaves several hundred px of unused margin on both sides, especially
+   noticeable on wide content like the screener table and financial statements. Widen the cap
+   at larger breakpoints; unchanged below 1400px so phones/tablets/small laptops are unaffected. */
+@media (min-width: 1400px) {
+  .container { max-width: 1600px; }
+}
+@media (min-width: 1800px) {
+  .container { max-width: 1840px; }
+}
+
 /* Display typography — Fraunces for headings, tight and optical-size 144. */
 h1, h2, h3, h4, h5, h6, .display-face {
   font-family: var(--display);

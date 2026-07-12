@@ -122,8 +122,21 @@ class CompanyListingRepository(DuckDBRepository):
         }
         return tuple(sorted(markets))
 
+    def available_industries(self, *, sector: str = "") -> tuple[str, ...]:
+        """Distinct non-empty industry names in the universe, alphabetical (for the filter
+        picker). Scoped to `sector` when given (#231) — Yahoo's ~145-value industry taxonomy is
+        too large to show unscoped, and industries are logically nested one level under sector,
+        so picking a sector first narrows this to the relevant subset (mirrors the Streamlit
+        screener's own `industry_options(wide[sector_mask(...)])`)."""
+        industries = {
+            i for rec in load_meta().get("tickers", [])
+            if (i := rec.get("industry")) and (not sector or rec.get("sector") == sector)
+        }
+        return tuple(sorted(industries))
+
     def _scope(
-        self, *, search: str, sector: str, index: str, country: str = "", market: str = ""
+        self, *, search: str, sector: str, index: str, country: str = "", market: str = "",
+        industry: str = ""
     ) -> list[dict[str, Any]]:
         """Universe rows passing the descriptive filters, sorted by ticker (deterministic paging)."""
         needle = search.strip().upper()
@@ -132,6 +145,8 @@ class CompanyListingRepository(DuckDBRepository):
         for rec in load_meta().get("tickers", []):
             ticker = rec.get("ticker", "")
             if sector and rec.get("sector") != sector:
+                continue
+            if industry and rec.get("industry") != industry:
                 continue
             if country and rec.get("country") != country:
                 continue
@@ -153,6 +168,7 @@ class CompanyListingRepository(DuckDBRepository):
         index: str = "",
         country: str = "",
         market: str = "",
+        industry: str = "",
         metric: str = "",
         min_value: float | None = None,
         max_value: float | None = None,
@@ -165,7 +181,8 @@ class CompanyListingRepository(DuckDBRepository):
         ``metric`` the scoped tickers are filtered/ordered/paged by that metric's latest-FY
         value inside DuckDB. Returns ``(rows, total)``.
         """
-        scope = self._scope(search=search, sector=sector, index=index, country=country, market=market)
+        scope = self._scope(search=search, sector=sector, index=index, country=country,
+                            market=market, industry=industry)
         offset = max(0, (page - 1) * page_size)
 
         if not metric:
@@ -252,6 +269,7 @@ class CompanyListingRepository(DuckDBRepository):
         index: str = "",
         country: str = "",
         market: str = "",
+        industry: str = "",
         columns: Sequence[str] = (),
         filters: Sequence[MetricFilter] = (),
         sort: SortSpec | None = None,
@@ -261,16 +279,17 @@ class CompanyListingRepository(DuckDBRepository):
     ) -> ScreenTablePage:
         """One page of the multi-metric screener table.
 
-        The descriptive scope (search/sector/index/country/market over the meta universe) is
-        pushed into a DuckDB temp table; each selected/​filtered metric's latest-FY value is
-        pivoted per ticker in DuckDB, the metric filters and the sort/pagination are all applied
-        there. Only the page's rows (≤ ``page_size``) ever cross back into Python.
+        The descriptive scope (search/sector/index/country/market/industry over the meta
+        universe) is pushed into a DuckDB temp table; each selected/​filtered metric's latest-FY
+        value is pivoted per ticker in DuckDB, the metric filters and the sort/pagination are
+        all applied there. Only the page's rows (≤ ``page_size``) ever cross back into Python.
         ``usd_lens`` converts the Market Cap column to USD (only, date-anchored per ticker's own
         Market Cap period_end) when it's a displayed column — #220's USD-lens toggle, mirroring
         the Streamlit app; every other ``$``-unit column stays native regardless. Returns the
         rows, the total match count, and the ordered display columns (with units, for
         formatting)."""
-        scope = self._scope(search=search, sector=sector, index=index, country=country, market=market)
+        scope = self._scope(search=search, sector=sector, index=index, country=country,
+                            market=market, industry=industry)
         offset = max(0, (page - 1) * page_size)
         sort = sort or SortSpec()
 

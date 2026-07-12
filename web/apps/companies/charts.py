@@ -7,10 +7,10 @@ Pure geometry, no I/O and no financial logic — mirrors the Streamlit dashboard
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
-from repositories.dtos import QuarterGrid, Statement
+from repositories.dtos import PricePoint, QuarterGrid, Statement
 
 # Editorial tokens (kept in sync with static/css/app.css).
 _ACCENT = "#185FA5"
@@ -178,6 +178,95 @@ def quarterly_chart(grid: QuarterGrid) -> TabChart | None:
         return None
     labels = tuple(reversed(grid.columns))
     return TabChart(_bar_chart_svg(labels, [("Revenue", revenue, _ACCENT)]), (("Revenue", _ACCENT),))
+
+
+# ── price tab: adjusted close + SMA 20/50/200, value axis + date axis + legend ──────────────
+
+# (label, value-getter, color, stroke-width, opacity) — Price is the primary series (heavier,
+# fully opaque); the SMAs are supporting context (thinner, dimmed) — same visual hierarchy as
+# the Streamlit app's price_chart(). Plots adj_close (split-safe), not raw close — a stock split
+# would otherwise show as a fake cliff; PriceChart's headline stats (pricechart.py) still use
+# raw close separately, matching the Streamlit KPI strip's own real/adjusted split.
+_PRICE_SERIES: tuple[tuple[str, Callable[[PricePoint], float | None], str, float, float], ...] = (
+    ("Price",   lambda p: p.adj_close, "#1A1A18",  2.2, 1.0),
+    ("SMA 20",  lambda p: p.sma20,     "#C8881F",  1.3, 0.85),
+    ("SMA 50",  lambda p: p.sma50,     _POSITIVE,  1.3, 0.85),
+    ("SMA 200", lambda p: p.sma200,    _NEGATIVE,  1.3, 0.85),
+)
+_PRICE_W = 1000
+_PRICE_H = 320
+_PRICE_PAD = (46, 8, 10, 24)  # left, right, top, bottom — left is wider for the value-axis labels
+
+
+def price_line_chart(series: Sequence[PricePoint]) -> TabChart | None:
+    """Adjusted close + SMA 20/50/200 as an inline multi-series ``<svg>``, with value-axis
+    gridlines/labels, a handful of date-axis ticks, and a legend (#231) — mirrors the Streamlit
+    app's Altair price chart, minus interactivity (pan/zoom/tooltips), which a static
+    server-rendered SVG can't offer; the axis/legend/trend content is the same.
+
+    ``None`` if no series has at least 2 plottable points (e.g. a ticker with only a couple of
+    days of price history, or with no adj_close at all).
+    """
+    n = len(series)
+    if n < 2:
+        return None
+
+    all_vals = [v for _, get, *_ in _PRICE_SERIES for p in series if (v := get(p)) is not None]
+    if len(all_vals) < 2:
+        return None
+    lo, hi = min(all_vals), max(all_vals)
+    span = (hi - lo) or 1.0
+
+    pad_l, pad_r, pad_t, pad_b = _PRICE_PAD
+    plot_w, plot_h = _PRICE_W - pad_l - pad_r, _PRICE_H - pad_t - pad_b
+
+    def px(i: int) -> float:
+        return pad_l + i * plot_w / (n - 1)
+
+    def py(v: float) -> float:
+        return pad_t + plot_h * (hi - v) / span
+
+    parts: list[str] = []
+    for frac in (0.0, 1 / 3, 2 / 3, 1.0):
+        v = lo + frac * span
+        y = py(v)
+        parts.append(
+            f'<line x1="{pad_l}" y1="{y:.1f}" x2="{_PRICE_W - pad_r}" y2="{y:.1f}" '
+            f'stroke="{_RULE}" stroke-width="1"/>'
+        )
+        parts.append(
+            f'<text x="{pad_l - 6}" y="{y + 3:.1f}" text-anchor="end" font-size="10.5" '
+            f'fill="{_INK3}" font-family="JetBrains Mono, monospace">{v:,.0f}</text>'
+        )
+
+    tick_idxs = sorted({round(i * (n - 1) / 4) for i in range(5)})
+    for i in tick_idxs:
+        # The first/last tick would otherwise overflow past the plot edge under "middle"
+        # anchoring — anchor those two to the inside instead.
+        anchor = "start" if i == 0 else "end" if i == tick_idxs[-1] else "middle"
+        parts.append(
+            f'<text x="{px(i):.1f}" y="{_PRICE_H - 6}" text-anchor="{anchor}" font-size="10.5" '
+            f'fill="{_INK3}" font-family="JetBrains Mono, monospace">{series[i].date[:10]}</text>'
+        )
+
+    legend: list[tuple[str, str]] = []
+    for name, get, color, stroke_w, opacity in _PRICE_SERIES:
+        pts = [(px(i), py(v)) for i, p in enumerate(series) if (v := get(p)) is not None]
+        if len(pts) < 2:
+            continue
+        poly = " ".join(f"{x:.1f},{y:.1f}" for x, y in pts)
+        parts.append(
+            f'<polyline points="{poly}" fill="none" stroke="{color}" stroke-width="{stroke_w}" '
+            f'stroke-opacity="{opacity}" stroke-linejoin="round" stroke-linecap="round"/>'
+        )
+        legend.append((name, color))
+
+    svg = (
+        f'<svg class="tab-chart" viewBox="0 0 {_PRICE_W} {_PRICE_H}" width="100%" '
+        f'preserveAspectRatio="xMidYMid meet" role="img" '
+        f'aria-label="Price trend with moving averages">' + "".join(parts) + "</svg>"
+    )
+    return TabChart(svg, tuple(legend))
 
 
 # ── balance-sheet composition (single year, stacked twin bars) ───────────────────────────

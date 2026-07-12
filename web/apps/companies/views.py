@@ -31,7 +31,13 @@ def company_page(request: HttpRequest, ticker: str) -> HttpResponse:
         raise Http404(f"unknown ticker {ticker!r}")
     statements = services.get_company_statements(ticker)
     headline = services.headline_kpis(statements)
-    price_chart = pricechart.build_price_chart(services.get_price_series(ticker))
+    price_windows = services.price_windows()
+    price_window = request.GET.get("window", "").strip()
+    if price_window not in price_windows:
+        price_window = services.PRICE_WINDOW_DEFAULT
+    price_series = services.get_price_series(ticker, window=price_window)
+    price_chart = pricechart.build_price_chart(price_series)
+    price_tab_chart = charts.price_line_chart(price_series)
     quarterly = services.get_quarterly(ticker)
     # Income/Cash-flow get a headline bar chart; the Balance Sheet gets a single-year
     # composition (rendered below), so it's excluded from the per-statement bar-chart map.
@@ -76,6 +82,9 @@ def company_page(request: HttpRequest, ticker: str) -> HttpResponse:
             "statement_panes": statement_panes,
             "headline": headline,
             "price_chart": price_chart,
+            "price_tab_chart": price_tab_chart,
+            "price_windows": price_windows,
+            "price_window": price_window,
             "price_currency": price_currency,
             "show_usd_toggle": show_usd_toggle,
             "usd_lens": usd_lens,

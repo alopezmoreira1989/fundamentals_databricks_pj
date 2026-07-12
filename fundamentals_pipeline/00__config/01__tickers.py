@@ -69,7 +69,11 @@ INCOME_STATEMENT = {
     "Revenue (sales services)":   ("SalesRevenueServicesNet",                                                                   "flow_additive"),
     "Revenue (bank)":             ("InterestAndDividendIncomeOperating",                                                        "flow_additive"),
     "Revenue (oil & gas)":        ("OilAndGasRevenue",                                                                          "flow_additive"),
-    "Cost of Revenue":            ("CostOfRevenue",                                                                             "flow_additive"),
+    "Cost of Revenue":            (["CostOfRevenue",                        # generic, most filers
+                                    "CostOfGoodsAndServicesSold",           # AAPL and other mixed goods+services filers
+                                    "CostOfGoodsSold",                      # pure-goods manufacturers
+                                    "CostOfServices"],                      # pure-services filers
+                                   "flow_additive"),
     "Gross Profit":               ("GrossProfit",                                                                               "flow_additive"),
     "Operating Expenses":         ("OperatingExpenses",                                                                         "flow_additive"),
     "R&D Expense":                ("ResearchAndDevelopmentExpense",                                                             "flow_additive"),

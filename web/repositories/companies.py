@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Any
 
 import duckdb
+from fundamentals_pipeline.statement_layout import resolve_indent
+from fundamentals_pipeline.statement_layout import row_class as _row_class
 from infrastructure.storage import meta as load_meta
 
 from .base import DuckDBRepository
@@ -54,8 +57,11 @@ _FX_RATE_SQL = """
 
 # Reported financial-statement line items across fiscal years (the raw statements, not the
 # derived metrics). Ordered by the reporting hierarchy so the pivot below preserves line order.
+# `concept` (the raw XBRL-derived concept name, not the possibly-overridden display_name) drives
+# fundamentals_pipeline.statement_layout's row classification (subtotal/grand-total/headline) —
+# see get_statements()/get_quarterly() below.
 _STATEMENTS_SQL = """
-    SELECT stmt, section, "group", display_name, sort_order, fiscal_year, value
+    SELECT stmt, section, "group", concept, display_name, sort_order, fiscal_year, value
     FROM financials
     WHERE ticker = ?
       AND period_type = 'FY'
@@ -85,7 +91,7 @@ def _as_bool(value: Any) -> bool | None:
 
 # Quarterly line items for one statement (newest quarter first is applied after the fetch).
 _QUARTERLY_SQL = """
-    SELECT section, display_name, sort_order, period_type, period_end, fiscal_year, value
+    SELECT section, "group", concept, display_name, sort_order, period_type, period_end, fiscal_year, value
     FROM financials
     WHERE ticker = ?
       AND stmt = ?
@@ -94,8 +100,32 @@ _QUARTERLY_SQL = """
     ORDER BY sort_order, display_name, period_end
 """
 
-# Daily close series for the price chart.
-_PRICE_SERIES_SQL = "SELECT date, close FROM prices WHERE ticker = ? AND close IS NOT NULL ORDER BY date"
+# Daily close series for the price chart, with SMA 20/50/200 computed on adj_close (split-safe)
+# over the ticker's FULL history — the rolling window must see real trading days before any
+# window/downsample filtering, or an SMA near the start of a short window would be wrong
+# (starved of the lookback it needs). NULL until `rn` real trading days exist, matching the
+# Streamlit app's pandas .rolling(win).mean() semantics exactly (never a partial-window average).
+_PRICE_SERIES_SQL = """
+    WITH ordered AS (
+        SELECT date, close, adj_close, row_number() OVER (ORDER BY date) AS rn
+        FROM prices
+        WHERE ticker = ? AND close IS NOT NULL AND adj_close IS NOT NULL
+    )
+    SELECT date, close, adj_close,
+        CASE WHEN rn >= 20  THEN AVG(adj_close) OVER (ORDER BY date ROWS BETWEEN 19 PRECEDING AND CURRENT ROW) END AS sma20,
+        CASE WHEN rn >= 50  THEN AVG(adj_close) OVER (ORDER BY date ROWS BETWEEN 49 PRECEDING AND CURRENT ROW) END AS sma50,
+        CASE WHEN rn >= 200 THEN AVG(adj_close) OVER (ORDER BY date ROWS BETWEEN 199 PRECEDING AND CURRENT ROW) END AS sma200
+    FROM ordered
+    ORDER BY date
+"""
+
+# Quick-range windows (#231) — trailing day-count from the SERIES' OWN latest date (not "today",
+# which may lag real publish dates). "Max" is a pass-through (no filter). Approximate calendar
+# day-counts, not exact months/years — fine for a UI range button, avoids a date-arithmetic lib.
+PRICE_WINDOW_DAYS: dict[str, int | None] = {
+    "1M": 30, "3M": 91, "6M": 182, "1Y": 365, "5Y": 365 * 5, "Max": None,
+}
+PRICE_WINDOW_DEFAULT = "1Y"
 
 
 class CompanyRepository(DuckDBRepository):
@@ -157,7 +187,7 @@ class CompanyRepository(DuckDBRepository):
             return CompanyStatements(statements=())
 
         # Most recent `max_years` fiscal years, newest first → the display columns.
-        years = sorted({int(r[5]) for r in rows}, reverse=True)[:max_years]
+        years = sorted({int(r[6]) for r in rows}, reverse=True)[:max_years]
         col = {year: i for i, year in enumerate(years)}
 
         statements: list[Statement] = []
@@ -165,7 +195,8 @@ class CompanyRepository(DuckDBRepository):
             values: dict[str, list[float | None]] = {}
             sections: dict[str, str | None] = {}
             groups: dict[str, str | None] = {}
-            for _stmt, section, group, name, _sort, fiscal_year, value in rows:
+            concepts: dict[str, str] = {}
+            for _stmt, section, group, concept, name, _sort, fiscal_year, value in rows:
                 if _stmt != stmt or int(fiscal_year) not in col:
                     continue
                 line = values.get(name)
@@ -174,11 +205,16 @@ class CompanyRepository(DuckDBRepository):
                     values[name] = line
                     sections[name] = section
                     groups[name] = group
+                    concepts[name] = concept
                 line[col[int(fiscal_year)]] = value
             if not values:
                 continue
             lines = tuple(
-                StatementLine(display_name=name, section=sections[name], values=tuple(vals), group=groups[name])
+                StatementLine(
+                    display_name=name, section=sections[name], values=tuple(vals), group=groups[name],
+                    row_class=(cls := _row_class(stmt, concepts[name], name)),
+                    indent=resolve_indent(sections[name], groups[name], cls),
+                )
                 for name, vals in values.items()
             )
             statements.append(Statement(name=stmt, years=tuple(years), lines=lines))
@@ -198,14 +234,16 @@ class CompanyRepository(DuckDBRepository):
         # Apple's Q1 ending Dec 2025 reads "Q1 2026", ordering cleanly after Q4 2025).
         labels = {
             period_end: f"{period_type} {int(fiscal_year)}"
-            for _s, _n, _o, period_type, period_end, fiscal_year, _v in rows
+            for _s, _g, _c, _n, _o, period_type, period_end, fiscal_year, _v in rows
         }
         recent = sorted(labels, reverse=True)[:max_quarters]
         col = {period_end: i for i, period_end in enumerate(recent)}
 
         values: dict[str, list[float | None]] = {}
         sections: dict[str, str | None] = {}
-        for section, name, _sort, _ptype, period_end, _fy, value in rows:
+        groups: dict[str, str | None] = {}
+        concepts: dict[str, str] = {}
+        for section, group, concept, name, _sort, _ptype, period_end, _fy, value in rows:
             if period_end not in col:
                 continue
             line = values.get(name)
@@ -213,18 +251,30 @@ class CompanyRepository(DuckDBRepository):
                 line = [None] * len(recent)
                 values[name] = line
                 sections[name] = section
+                groups[name] = group
+                concepts[name] = concept
             line[col[period_end]] = value
         lines = tuple(
-            StatementLine(display_name=name, section=sections[name], values=tuple(vals))
+            StatementLine(
+                display_name=name, section=sections[name], values=tuple(vals), group=groups[name],
+                row_class=(cls := _row_class(statement, concepts[name], name)),
+                indent=resolve_indent(sections[name], groups[name], cls),
+            )
             for name, vals in values.items()
         )
         return QuarterGrid(name=statement, columns=tuple(labels[q] for q in recent), lines=lines)
 
-    def price_series(self, ticker: str, *, max_points: int = 260) -> tuple[PricePoint, ...]:
-        """Daily close series (ascending), downsampled to at most ``max_points`` for charting.
+    def price_series(
+        self, ticker: str, *, window: str = PRICE_WINDOW_DEFAULT, max_points: int = 500
+    ) -> tuple[PricePoint, ...]:
+        """Daily close series (ascending) with SMA 20/50/200, trimmed to the trailing ``window``
+        (#231) and downsampled to at most ``max_points`` for charting.
 
-        Returns ``()`` when the ticker has no prices or the optional prices view is absent —
-        the price tab then degrades to a "no data" state rather than erroring."""
+        SMAs are computed over the ticker's FULL history (see _PRICE_SERIES_SQL) before the
+        window/downsample filters below run — a rolling average needs real lookback data, which
+        a pre-filtered slice wouldn't have near its own start. Returns ``()`` when the ticker has
+        no prices or the optional prices view is absent — the price tab then degrades to a "no
+        data" state rather than erroring."""
         try:
             with self._connection() as con:
                 rows = con.execute(_PRICE_SERIES_SQL, [ticker]).fetchall()
@@ -232,6 +282,12 @@ class CompanyRepository(DuckDBRepository):
             return ()  # optional prices view not registered
         if not rows:
             return ()
+
+        days = PRICE_WINDOW_DAYS.get(window)
+        if days is not None:
+            cutoff = max(r[0] for r in rows) - timedelta(days=days)
+            rows = [r for r in rows if r[0] >= cutoff]
+
         count = len(rows)
         if count > max_points:
             stride = -(-count // max_points)  # ceil, so len(rows[::stride]) <= max_points
@@ -239,4 +295,13 @@ class CompanyRepository(DuckDBRepository):
             if sampled[-1] != rows[-1]:
                 sampled.append(rows[-1])  # always keep the latest close
             rows = sampled
-        return tuple(PricePoint(date=str(date), close=float(close)) for date, close in rows)
+        return tuple(
+            PricePoint(
+                date=str(date), close=float(close),
+                adj_close=float(adj) if adj is not None else None,
+                sma20=float(s20) if s20 is not None else None,
+                sma50=float(s50) if s50 is not None else None,
+                sma200=float(s200) if s200 is not None else None,
+            )
+            for date, close, adj, s20, s50, s200 in rows
+        )
