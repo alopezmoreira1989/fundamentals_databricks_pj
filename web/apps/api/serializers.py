@@ -18,6 +18,10 @@ class CompanySummarySerializer(serializers.Serializer):
     industry = serializers.CharField(allow_null=True)
     exchange = serializers.CharField(allow_null=True)
     country = serializers.CharField(allow_null=True)
+    market = serializers.CharField(allow_null=True)
+    reporting_currency = serializers.CharField(allow_null=True)
+    accounting_standard = serializers.CharField(allow_null=True)
+    in_tsx_composite = serializers.BooleanField(allow_null=True)
     description = serializers.CharField(allow_null=True)
     website = serializers.CharField(allow_null=True)
     employees = serializers.IntegerField(allow_null=True)
@@ -34,6 +38,7 @@ class MetricPointSerializer(serializers.Serializer):
     category = serializers.CharField(allow_null=True)
     subcategory = serializers.CharField(allow_null=True)
     sort_order = serializers.FloatField(allow_null=True)
+    period_end = serializers.CharField(allow_null=True)
 
 
 class CompanyDetailSerializer(serializers.Serializer):
@@ -53,6 +58,7 @@ class CompanyListRowSerializer(serializers.Serializer):
     sector = serializers.CharField(allow_null=True)
     industry = serializers.CharField(allow_null=True)
     country = serializers.CharField(allow_null=True)
+    market = serializers.CharField(allow_null=True)
     metric_value = serializers.FloatField(allow_null=True)
     fiscal_year = serializers.IntegerField(allow_null=True)
     has_logo = serializers.BooleanField(allow_null=True)

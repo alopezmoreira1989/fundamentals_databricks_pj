@@ -6,7 +6,6 @@ the data comes from DuckDB/parquet.
 
 from __future__ import annotations
 
-from fundamentals_pipeline.fx import convert_price
 from infrastructure.news import NewsItem, fetch_yahoo_news
 from repositories.companies import PRICE_WINDOW_DAYS, PRICE_WINDOW_DEFAULT, CompanyRepository
 from repositories.dtos import (
@@ -18,6 +17,8 @@ from repositories.dtos import (
     PricePoint,
     QuarterGrid,
 )
+
+from fundamentals_pipeline.fx import convert_price
 
 # Headline overview figures: (statement, line item, display label). The latest fiscal year's
 # value of each is shown in the overview KPI strip.
