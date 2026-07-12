@@ -30,17 +30,27 @@
       text-transform: uppercase; color: var(--accent-ink); background: var(--bg-subtle); padding-top: 12px; }
   table.fs-web th.spark, table.fs-web td.spark { width: 96px; text-align: center; }
   .sparkline { vertical-align: middle; display: inline-block; }
+  /* Statement row hierarchy (#231) — indented children + emphasized subtotal/grand-total/
+     headline rows, ported from the Streamlit app's styles.css so both frontends read the same
+     way. Classification comes from fundamentals_pipeline.statement_layout (shared, server-side). */
+  table.fs-web td.label.indent-1 { padding-left: 32px; }
+  table.fs-web tr.subtotal { background: var(--bg-subtle); }
+  table.fs-web tr.subtotal td.label { font-weight: 600; }
+  table.fs-web tr.subtotal td.label::before { content: "▸ "; color: var(--ink-3); }
+  table.fs-web tr.subtotal td.num { font-weight: 600; }
+  table.fs-web tr.grand-total td { background: var(--ink); color: var(--bg); border-top: 1px solid var(--ink); }
+  table.fs-web tr.grand-total td.label { color: var(--bg); font-family: var(--display); font-weight: 500;
+      text-transform: uppercase; letter-spacing: .04em; }
+  table.fs-web tr.grand-total td.num { color: var(--bg); font-weight: 500; }
+  table.fs-web tr.headline td { background: var(--accent-soft); border-top: 1px solid var(--accent); }
+  table.fs-web tr.headline td.label { color: var(--accent-ink); font-weight: 600; }
+  table.fs-web tr.headline td.label::before { content: "▸ "; color: var(--accent); }
+  table.fs-web tr.headline td.num { color: var(--accent-ink); font-weight: 600; }
   /* Tab headline charts */
   .tab-chart { display: block; width: 100%; height: auto; }
   .chart-legend { display: flex; flex-wrap: wrap; gap: 16px; font-family: var(--mono);
     font-size: .68rem; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2); }
   .chart-legend .dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
-  /* Price chart */
-  .price-svg { width: 100%; height: 260px; display: block; }
-  .price-svg .line { stroke: var(--accent); stroke-width: 2; vector-effect: non-scaling-stroke; }
-  .price-svg.up .line { stroke: var(--positive); } .price-svg.down .line { stroke: var(--negative); }
-  .price-svg .area { fill: var(--accent-soft); opacity: .5; }
-  .price-svg.up .area { fill: var(--positive-soft); } .price-svg.down .area { fill: var(--negative-soft); }
   .price-last { font-family: var(--display); font-size: 1.8rem; font-weight: 500; font-variation-settings: "opsz" 144; line-height: 1; }
   /* Valuation football field */
   .ff-track { position: relative; height: 1.6rem; background: var(--bg-subtle); border-radius: 3px; }
@@ -78,6 +88,17 @@
     document.querySelectorAll('.bs-year').forEach(function (el) { el.hidden = el.dataset.year !== year; });
   }
   document.addEventListener('DOMContentLoaded', function () {
+    // Re-select the tab named by the URL hash (e.g. #pane-price) after a full page reload —
+    // the Price tab's range-filter buttons are plain links (?window=...), and Bootstrap tabs
+    // otherwise reset to the first tab on every navigation, silently bouncing the user back to
+    // Overview after they click a range button.
+    if (window.location.hash) {
+      var trigger = document.querySelector('[data-bs-target="' + window.location.hash + '"]');
+      if (trigger && window.bootstrap) {
+        new bootstrap.Tab(trigger).show();
+      }
+    }
+
     var el = document.getElementById('news-list');
     if (!el) return;
     var esc = function (s) { var d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; };
@@ -266,12 +287,18 @@
             </div>
             <div class="eyebrow">{{ price_chart.first_date }} → {{ price_chart.last_date }}</div>
           </div>
-          <svg class="price-svg {% if price_chart.up %}up{% else %}down{% endif %}"
-               viewBox="0 0 {{ price_chart.width }} {{ price_chart.height }}" preserveAspectRatio="none"
-               role="img" aria-label="Daily close price history">
-            <path d="{{ price_chart.area }}" class="area"/>
-            <polyline points="{{ price_chart.polyline }}" class="line" fill="none"/>
-          </svg>
+          <div class="btn-group btn-group-sm mb-3" role="group" aria-label="Price chart range">
+            {% for w in price_windows %}
+              <a class="btn {% if w == price_window %}btn-dark{% else %}btn-outline-secondary{% endif %}"
+                 href="?window={{ w }}{% if usd_lens %}&amp;usd=1{% endif %}#pane-price">{{ w }}</a>
+            {% endfor %}
+          </div>
+          {% if price_tab_chart %}
+            <div class="chart-legend mb-2">
+              {% for name, color in price_tab_chart.legend %}<span><span class="dot" style="background:{{ color }}"></span>{{ name }}</span>{% endfor %}
+            </div>
+            {{ price_tab_chart.svg|safe }}
+          {% endif %}
           <div class="d-flex justify-content-between eyebrow mt-2">
             <span>Low {{ price_chart.min_close|metric_value:price_currency }}</span>
             <span>High {{ price_chart.max_close|metric_value:price_currency }}</span>
@@ -344,8 +371,8 @@
                   <tr class="section-head"><td colspan="{{ st.years|length|add:2 }}">{{ sec.grouper }}</td></tr>
                 {% endif %}
                 {% for line in sec.list %}
-                  <tr>
-                    <td>{{ line.display_name }}</td>
+                  <tr class="{{ line.row_class }}">
+                    <td class="label indent-{{ line.indent }}">{{ line.display_name }}</td>
                     {% for v in line.values %}<td class="num">{{ v|compact_money }}</td>{% endfor %}
                     <td class="spark">{{ line.values|sparkline }}</td>
                   </tr>
@@ -380,8 +407,8 @@
             </thead>
             <tbody>
               {% for line in quarterly.lines %}
-                <tr>
-                  <td>{{ line.display_name }}</td>
+                <tr class="{{ line.row_class }}">
+                  <td class="label indent-{{ line.indent }}">{{ line.display_name }}</td>
                   {% for v in line.values %}<td class="num">{{ v|compact_money }}</td>{% endfor %}
                   <td class="spark">{{ line.values|sparkline }}</td>
                 </tr>

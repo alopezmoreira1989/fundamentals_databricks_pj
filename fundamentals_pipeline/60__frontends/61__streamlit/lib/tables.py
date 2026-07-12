@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import pandas as pd
 
-from .colors import row_class as derive_row_class
+from fundamentals_pipeline.statement_layout import resolve_indent
+from fundamentals_pipeline.statement_layout import row_class as derive_row_class
+
 from .colors import section_class
 
 
@@ -83,12 +85,8 @@ def _decorate(pivot: pd.DataFrame) -> pd.DataFrame:
         cls = derive_row_class(stmt, concept, display_name)
         classes.append(cls)
 
-        # Indent rule: if the concept is inside a nested group (group != section
-        # and group is not null), it gets indent-1 — UNLESS it's a subtotal/grand-total.
-        has_inner_group = pd.notna(group) and group != section and group != ""
-        is_styled_row = cls in ("subtotal", "grand-total", "headline")
-        indent = 1 if has_inner_group and not is_styled_row else 0
-        indents.append(indent)
+        indents.append(resolve_indent(section if pd.notna(section) else None,
+                                      group if pd.notna(group) else None, cls))
 
     pivot["indent"] = indents
     pivot["row_class"] = classes

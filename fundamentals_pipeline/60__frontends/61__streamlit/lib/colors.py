@@ -2,6 +2,16 @@
 
 from __future__ import annotations
 
+# Row classification (grand-total/headline/subtotal + indent) is shared with the Django web
+# app — see fundamentals_pipeline/statement_layout.py's docstring for why it lives there and
+# not here.
+from fundamentals_pipeline.statement_layout import (
+    GRAND_TOTAL_CONCEPTS,
+    HEADLINE_CONCEPTS,
+    SUBTOTAL_CONCEPTS,
+)
+from fundamentals_pipeline.statement_layout import row_class  # noqa: F401 (re-exported)
+
 # Palette — must match the CSS variables in styles.css.
 GREEN   = "#0F6E56"   # --positive
 BLUE    = "#185FA5"   # --accent
@@ -59,41 +69,6 @@ def row_color(stmt: str, concept: str) -> str:
         return _CONCEPT_COLORS[concept]
     # Default: gray for everything else (cost lines, generic BS items).
     return GRAY
-
-
-# Concepts that render as a grand-total row (dark band, white text).
-GRAND_TOTAL_CONCEPTS = {
-    "Total Assets",
-    "Total Liabilities & Equity",
-}
-
-# Concepts that render as a headline row (accent-soft band).
-HEADLINE_CONCEPTS = {
-    ("Income Statement", "Net Income"),
-    ("Cash Flow", "Net Change in Cash"),
-}
-
-# Concepts that render as a subtotal row (light bg, bold ▸ label).
-SUBTOTAL_CONCEPTS = {
-    "Gross Profit",
-    "Operating Income",
-    "Operating Cash Flow",
-    "Investing Cash Flow",
-    "Financing Cash Flow",
-}
-
-
-def row_class(stmt: str, concept: str, display_name: str) -> str:
-    """Pick the CSS class for a regular concept row."""
-    if concept in GRAND_TOTAL_CONCEPTS:
-        return "grand-total"
-    if (stmt, concept) in HEADLINE_CONCEPTS:
-        return "headline"
-    if concept in SUBTOTAL_CONCEPTS:
-        return "subtotal"
-    if display_name.startswith("Total "):
-        return "subtotal"
-    return ""
 
 
 # Section-row color modifier per (stmt, section).

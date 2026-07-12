@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from fundamentals_pipeline.fx import convert_price
 from infrastructure.news import NewsItem, fetch_yahoo_news
-from repositories.companies import CompanyRepository
+from repositories.companies import PRICE_WINDOW_DAYS, PRICE_WINDOW_DEFAULT, CompanyRepository
 from repositories.dtos import (
     CompanyDetail,
     CompanyStatements,
@@ -48,9 +48,15 @@ def get_quarterly(ticker: str) -> QuarterGrid:
     return CompanyRepository().get_quarterly(ticker)
 
 
-def get_price_series(ticker: str) -> tuple[PricePoint, ...]:
-    """The ticker's daily close series (downsampled) for the price chart."""
-    return CompanyRepository().price_series(ticker)
+def get_price_series(ticker: str, *, window: str = PRICE_WINDOW_DEFAULT) -> tuple[PricePoint, ...]:
+    """The ticker's daily close series (downsampled) for the price chart, trimmed to the
+    trailing `window` (#231, e.g. "1Y") with SMA 20/50/200 already computed."""
+    return CompanyRepository().price_series(ticker, window=window)
+
+
+def price_windows() -> tuple[str, ...]:
+    """The quick-range window labels the Price tab's buttons offer, e.g. ``("1M", ..., "Max")``."""
+    return tuple(PRICE_WINDOW_DAYS)
 
 
 def get_company_news(ticker: str) -> tuple[NewsItem, ...]:

@@ -32,6 +32,15 @@
         </select>
       </div>
       <div class="col-6 col-md-4">
+        <label for="industry" class="form-label">Industry</label>
+        <select id="industry" name="industry" class="form-select">
+          <option value="">All industries</option>
+          {% for i in industries %}
+            <option value="{{ i }}" {% if i == industry %}selected{% endif %}>{{ i }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-6 col-md-4">
         <label for="country" class="form-label">Country</label>
         <select id="country" name="country" class="form-select">
           <option value="">All countries</option>

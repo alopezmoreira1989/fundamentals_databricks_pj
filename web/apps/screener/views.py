@@ -122,6 +122,12 @@ def screen_page(request: HttpRequest) -> HttpResponse:
     index = request.GET.get("index", "").strip()
     country = request.GET.get("country", "").strip()
     market = request.GET.get("market", "").strip()
+    industry = request.GET.get("industry", "").strip()
+    # Scoped to the active sector (#231) — Yahoo's ~145-value industry taxonomy is too large to
+    # show unscoped; mirrors the Streamlit screener's own sector-scoped industry picker.
+    industries = services.available_industries(sector=sector)
+    if industry not in industries:
+        industry = ""
     # Only meaningful once the universe actually has non-US tickers; otherwise there's nothing
     # for it to convert, so it isn't offered (mirrors the Streamlit app's own condition).
     markets = services.available_markets()
@@ -155,6 +161,7 @@ def screen_page(request: HttpRequest) -> HttpResponse:
         index=index,
         country=country,
         market=market,
+        industry=industry,
         columns=display_cols,
         filters=filters,
         sort=SortSpec(key=sort_key, descending=descending),
@@ -172,7 +179,8 @@ def screen_page(request: HttpRequest) -> HttpResponse:
     # other filter here.
     base_pairs: list[tuple[str, str]] = []
     for k, v in (
-        ("q", search), ("sector", sector), ("index", index), ("country", country), ("market", market)
+        ("q", search), ("sector", sector), ("index", index), ("country", country),
+        ("market", market), ("industry", industry),
     ):
         if v:
             base_pairs.append((k, v))
@@ -225,11 +233,13 @@ def screen_page(request: HttpRequest) -> HttpResponse:
             "sectors": services.available_sectors(),
             "countries": services.available_countries(),
             "markets": markets,
+            "industries": industries,
             "q": search,
             "sector": sector,
             "index": index,
             "country": country,
             "market": market,
+            "industry": industry,
             "show_usd_toggle": show_usd_toggle,
             "usd_lens": usd_lens,
             "cols": cols,

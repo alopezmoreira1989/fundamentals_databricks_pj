@@ -64,12 +64,20 @@ class CompanyDetail:
 @dataclass(frozen=True, slots=True)
 class StatementLine:
     """One financial-statement line item: its value across the displayed fiscal years, aligned
-    to :attr:`Statement.years` (``None`` where a year has no reported value)."""
+    to :attr:`Statement.years` (``None`` where a year has no reported value).
+
+    ``row_class``/``indent`` come from ``fundamentals_pipeline.statement_layout`` (shared with
+    the Streamlit app) — ``row_class`` is ``"grand-total"``/``"headline"``/``"subtotal"``/``""``
+    (plain line item); ``indent`` is 1 for a line nested under a concept_hierarchy.json group,
+    0 for section-level rows and for any styled row.
+    """
 
     display_name: str
     section: str | None
     values: tuple[float | None, ...]
     group: str | None = None
+    row_class: str = ""
+    indent: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,10 +109,16 @@ class QuarterGrid:
 
 @dataclass(frozen=True, slots=True)
 class PricePoint:
-    """One point on the price series: an ISO date and its close."""
+    """One point on the price series: an ISO date, its raw close, and (for the chart) the
+    split-adjusted close + SMA 20/50/200 (#231) — ``None`` until enough trading days exist to
+    seed that average, same as the Streamlit app's ``lib/prices.py``."""
 
     date: str
     close: float
+    adj_close: float | None = None
+    sma20: float | None = None
+    sma50: float | None = None
+    sma200: float | None = None
 
 
 @dataclass(frozen=True, slots=True)

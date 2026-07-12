@@ -100,7 +100,7 @@ def test_price_series_downsampled_and_chart_geometry(artifacts_from_fixtures):
     chart = build_price_chart(series)
     assert chart is not None
     assert chart.min_close <= chart.last_close <= chart.max_close
-    assert chart.polyline and chart.area.endswith("Z")
+    assert isinstance(chart.up, bool)
     assert build_price_chart(()) is None  # empty series → no chart
 
 
