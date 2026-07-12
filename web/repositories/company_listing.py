@@ -21,9 +21,9 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 import duckdb
-from fundamentals_pipeline.fx import convert_price
-
 from infrastructure.storage import meta as load_meta
+
+from fundamentals_pipeline.fx import convert_price
 
 from .base import DuckDBRepository
 from .dtos import CompanyListRow, ScreenColumn, ScreenTablePage, ScreenTableRow

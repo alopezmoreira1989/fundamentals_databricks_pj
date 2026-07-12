@@ -334,6 +334,9 @@ components:
         country:
           type: string
           nullable: true
+        market:
+          type: string
+          nullable: true
         metric_value:
           type: number
           format: double
@@ -349,6 +352,7 @@ components:
       - fiscal_year
       - has_logo
       - industry
+      - market
       - metric_value
       - name
       - sector
@@ -372,6 +376,18 @@ components:
         country:
           type: string
           nullable: true
+        market:
+          type: string
+          nullable: true
+        reporting_currency:
+          type: string
+          nullable: true
+        accounting_standard:
+          type: string
+          nullable: true
+        in_tsx_composite:
+          type: boolean
+          nullable: true
         description:
           type: string
           nullable: true
@@ -388,14 +404,18 @@ components:
           type: boolean
           nullable: true
       required:
+      - accounting_standard
       - country
       - description
       - employees
       - exchange
       - founded
       - has_logo
+      - in_tsx_composite
       - industry
+      - market
       - name
+      - reporting_currency
       - sector
       - ticker
       - website
@@ -480,10 +500,14 @@ components:
           type: number
           format: double
           nullable: true
+        period_end:
+          type: string
+          nullable: true
       required:
       - category
       - fiscal_year
       - metric
+      - period_end
       - sort_order
       - subcategory
       - ticker

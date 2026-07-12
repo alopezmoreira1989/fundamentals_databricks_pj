@@ -6,9 +6,10 @@ from datetime import timedelta
 from typing import Any
 
 import duckdb
+from infrastructure.storage import meta as load_meta
+
 from fundamentals_pipeline.statement_layout import resolve_indent
 from fundamentals_pipeline.statement_layout import row_class as _row_class
-from infrastructure.storage import meta as load_meta
 
 from .base import DuckDBRepository
 from .dtos import (

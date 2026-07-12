@@ -9,8 +9,8 @@ from fundamentals_pipeline.statement_layout import (
     GRAND_TOTAL_CONCEPTS,
     HEADLINE_CONCEPTS,
     SUBTOTAL_CONCEPTS,
+    row_class,  # noqa: F401 (re-exported)
 )
-from fundamentals_pipeline.statement_layout import row_class  # noqa: F401 (re-exported)
 
 # Palette — must match the CSS variables in styles.css.
 GREEN   = "#0F6E56"   # --positive
