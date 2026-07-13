@@ -69,9 +69,8 @@ NUM_BUCKETS         = 13    # weeks to cycle the full ~2,600-ticker universe (~1
 PROBE_WORKERS       = 8     # matches 02__tickers_master.py's _INDUSTRY_PROBE_WORKERS — same flaky .info endpoint
 LIVE_METRIC_TOL_PCT = 0.15  # should_match_live metrics: flag likely_bug beyond this rel-diff
 
-checked_at     = datetime.now(timezone.utc)
-checked_at_sql = checked_at.strftime("%Y-%m-%d %H:%M:%S")
-run_id         = checked_at.strftime("%Y%m%d%H%M%S")
+checked_at = datetime.now(timezone.utc)
+run_id     = checked_at.strftime("%Y%m%d%H%M%S")
 print(f"run_id = {run_id}  ({checked_at.isoformat(timespec='seconds')})")
 
 # COMMAND ----------
@@ -209,7 +208,7 @@ for _, row in our_pdf.iterrows():
             notes = ""
 
     findings.append({
-        "run_id": run_id, "checked_at": checked_at_sql, "ticker": ticker,
+        "run_id": run_id, "checked_at": checked_at, "ticker": ticker,
         "our_metric": metric, "yfinance_field": yf_field, "comparison_class": comparison_class,
         "our_value": our_value, "external_value": external_value,
         "abs_diff": abs_diff, "rel_diff": rel_diff, "tolerance_pct": LIVE_METRIC_TOL_PCT,
