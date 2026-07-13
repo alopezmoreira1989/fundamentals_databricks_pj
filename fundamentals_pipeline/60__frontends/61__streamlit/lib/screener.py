@@ -112,7 +112,10 @@ def build_screener_frame() -> tuple[pd.DataFrame, dict[str, str], list[str]]:
     metric_order = [MARKET_CAP] + [x for x in order if x != MARKET_CAP]
 
     # long → wide (in pandas; keeps the SQL simple).
-    wide = m.pivot_table(index="ticker", columns="metric", values="value", aggfunc="first")
+    # observed=True: ticker/metric are category dtype (data.py's _optimize_dtypes) — without
+    # it, pivot_table cross-joins EVERY category in the dtype (not just those present in `m`),
+    # ballooning memory across the full ~2,500-ticker universe and segfaulting Streamlit Cloud.
+    wide = m.pivot_table(index="ticker", columns="metric", values="value", aggfunc="first", observed=True)
     wide.columns.name = None
     fy = m.groupby("ticker", observed=True)["fiscal_year"].max().rename("fiscal_year")
     wide = wide.join(fy).reset_index()
