@@ -1,0 +1,17 @@
+{
+  "_comment": "Scope for 30__analysis/39__external_benchmark_check.py — cross-checks our published valuation metrics against yfinance for a sample of tickers, to catch calculation bugs (e.g. the MLI split-lag bug, #235) rather than relying on someone noticing by chance. Edit this file (no code change) to grow/shrink coverage or add/remove metrics.",
+  "_comment_always_check": "Tickers always included every run regardless of the rotating sample — known regressions + high-scrutiny names.",
+  "always_check": [
+    "MLI"
+  ],
+  "_comment_metrics": "comparison_class distinguishes VALID methodological divergence from a genuine error — see the discussion on issue #236. 'should_match_live': our metric is deliberately priced off TODAY's close (23__intrinsic_value.py's TTM live path), same as the yfinance field — divergence beyond tolerance is a real bug signal. 'methodology_different': our metric is deliberately priced at the FY period_end close (market_cap_asof's fiscal-close design, documented in web/templates/help.html) — logged for trend visibility only, NEVER flagged as a bug no matter how far it diverges from a live source.",
+  "metrics": [
+    { "our_metric": "P/E (TTM, live)",       "yfinance_field": "trailingPE",        "comparison_class": "should_match_live" },
+    { "our_metric": "P/B (TTM, live)",       "yfinance_field": "priceToBook",       "comparison_class": "should_match_live" },
+    { "our_metric": "EV/EBITDA (TTM, live)", "yfinance_field": "enterpriseToEbitda", "comparison_class": "should_match_live" },
+
+    { "our_metric": "P/E",        "yfinance_field": "trailingPE",  "comparison_class": "methodology_different" },
+    { "our_metric": "P/B",        "yfinance_field": "priceToBook", "comparison_class": "methodology_different" },
+    { "our_metric": "Market Cap", "yfinance_field": "marketCap",   "comparison_class": "methodology_different" }
+  ]
+}
