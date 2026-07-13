@@ -4,11 +4,12 @@
   "always_check": [
     "MLI"
   ],
-  "_comment_metrics": "comparison_class distinguishes VALID methodological divergence from a genuine error — see the discussion on issue #236. 'should_match_live': our metric is deliberately priced off TODAY's close (23__intrinsic_value.py's TTM live path), same as the yfinance field — divergence beyond tolerance is a real bug signal. 'methodology_different': our metric is deliberately priced at the FY period_end close (market_cap_asof's fiscal-close design, documented in web/templates/help.html) — logged for trend visibility only, NEVER flagged as a bug no matter how far it diverges from a live source.",
+  "_comment_metrics": "comparison_class distinguishes VALID methodological divergence from a genuine error — see the discussion on issues #236/#241. 'should_match_live': our metric is deliberately priced off TODAY's close (23__intrinsic_value.py's TTM live path), same as the yfinance field, AND the underlying $ inputs are directly comparable — divergence beyond tolerance is a real bug signal (this is what caught #235's MLI split-lag bug). 'methodology_different': logged for trend visibility only, NEVER flagged as a bug no matter how far it diverges from a live source. Two distinct reasons land a metric here — (a) deliberately priced at the FY period_end close (market_cap_asof's fiscal-close design, documented in web/templates/help.html), or (b) priced off today's close like should_match_live, but the underlying $ basis genuinely differs from yfinance's field (see #241: our Total Stockholders Equity vs yfinance bookValue differed by a real, non-clean ~29% on a sampled ticker with no split history, and our EBITDA proxy Operating Income + D&A is sensitive to one-time charges baked into GAAP operating income in a way yfinance's own ebitda figure isn't — confirmed via a ticker with two quarters of large real impairment-driven operating losses).",
   "metrics": [
-    { "our_metric": "P/E (TTM, live)",       "yfinance_field": "trailingPE",        "comparison_class": "should_match_live" },
-    { "our_metric": "P/B (TTM, live)",       "yfinance_field": "priceToBook",       "comparison_class": "should_match_live" },
-    { "our_metric": "EV/EBITDA (TTM, live)", "yfinance_field": "enterpriseToEbitda", "comparison_class": "should_match_live" },
+    { "our_metric": "P/E (TTM, live)", "yfinance_field": "trailingPE", "comparison_class": "should_match_live" },
+
+    { "our_metric": "P/B (TTM, live)",       "yfinance_field": "priceToBook",        "comparison_class": "methodology_different" },
+    { "our_metric": "EV/EBITDA (TTM, live)", "yfinance_field": "enterpriseToEbitda", "comparison_class": "methodology_different" },
 
     { "our_metric": "P/E",        "yfinance_field": "trailingPE",  "comparison_class": "methodology_different" },
     { "our_metric": "P/B",        "yfinance_field": "priceToBook", "comparison_class": "methodology_different" },
