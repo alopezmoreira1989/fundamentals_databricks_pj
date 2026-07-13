@@ -49,13 +49,15 @@ def render_kpi_strip(
     return f'<div class="kpi-strip">{"".join(cards)}</div>'
 
 
-def _latest_fy_metric(ticker: str, tmetrics: pd.DataFrame, metric: str) -> pd.DataFrame:
-    """Latest-FY rows (desc by fiscal_year) for one ticker + metric. May be empty."""
+def _latest_fy_metric(
+    ticker: str, tmetrics: pd.DataFrame, metric: str, period_type: str = "FY",
+) -> pd.DataFrame:
+    """Latest rows (desc by fiscal_year) for one ticker + metric + period_type. May be empty."""
     if tmetrics.empty:
         return tmetrics
     sub = tmetrics[
         (tmetrics["ticker"] == ticker)
-        & (tmetrics["period_type"] == "FY")
+        & (tmetrics["period_type"] == period_type)
         & (tmetrics["metric"] == metric)
     ]
     return sub.sort_values("fiscal_year", ascending=False)
@@ -157,7 +159,11 @@ def _employees_card(ticker: str, meta: dict) -> str:
 
 
 def _pe_card(ticker: str, tmetrics: pd.DataFrame) -> str:
-    series = _latest_fy_metric(ticker, tmetrics, "P/E")
+    # "P/E (TTM, live)" (23__intrinsic_value.py, period_type="TTM") prices off TODAY's close —
+    # the plain "P/E" metric prices off the FY period_end close (market_cap_asof's fiscal-close
+    # design), which can diverge sharply from a live-quote P/E after the stock has moved since
+    # that FY closed. This card is captioned "trailing twelve months", so it must be the live one.
+    series = _latest_fy_metric(ticker, tmetrics, "P/E (TTM, live)", period_type="TTM")
     if series.empty:
         return _empty_card("P/E RATIO")
 
