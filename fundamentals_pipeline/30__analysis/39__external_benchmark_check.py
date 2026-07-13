@@ -139,6 +139,16 @@ print(f"✓ Our metrics: {len(our_pdf):,} rows across {our_pdf['ticker'].nunique
 _YF_FIELDS = sorted({m["yfinance_field"] for m in METRIC_SPECS})
 
 
+def _clean_float(v):
+    """Coerce a yfinance numeric field to float, or None when missing/non-numeric — mirrors
+    02__tickers_master.py's _clean_int (yfinance `.info` occasionally returns a non-numeric
+    string, e.g. "Infinity", for a field instead of the expected number)."""
+    try:
+        return float(v) if v is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
 def _probe_yf(ticker: str) -> dict:
     """One ticker's yfinance fields from a SINGLE `.info` call. None on any error/missing field —
     same defensive shape as 02__tickers_master.py's _probe_company_info (the flakiest yfinance
@@ -148,7 +158,7 @@ def _probe_yf(ticker: str) -> dict:
         info = yf.Ticker(ticker).info or {}
     except Exception:
         return blank
-    return {f: info.get(f) for f in _YF_FIELDS}
+    return {f: _clean_float(info.get(f)) for f in _YF_FIELDS}
 
 
 with ThreadPoolExecutor(max_workers=PROBE_WORKERS) as ex:
