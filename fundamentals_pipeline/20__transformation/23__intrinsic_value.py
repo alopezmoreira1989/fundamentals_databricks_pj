@@ -429,6 +429,37 @@ _latest_cagr = (
 )
 ttm_wide = ttm_wide.join(_latest_cagr, on="ticker", how="left")
 
+# `shares` above is the most recent QUARTER's reported Diluted Shares, as of that quarter's own
+# period_end — but §5 below prices TTM at TODAY's live close, not that period_end. XBRL "Shares
+# Diluted" is filing-period data: a split executed AFTER the last 10-Q isn't reflected until the
+# NEXT quarterly filing, so pairing today's (already split-adjusted) live price with a stale
+# pre-split share count silently understates market_cap — and every multiple built on it
+# (P/E, P/B, EV/EBITDA (TTM, live), plus bvps and any TTM per-share intrinsic value) — by
+# exactly the split ratio. Same cumulative-product pattern as the EPS-CAGR adjustment above
+# (§3), anchored to THIS row's own period_end instead of a FY's; shares move the OPPOSITE
+# direction of a per-share $ quantity under a split, so we MULTIPLY (not divide) by the factor.
+try:
+    _ttm_splits = (spark.table(splits_table)
+                   .select("ticker", "split_date", "ratio").filter(F.col("ratio") > 0))
+    _ttm_split_factor = (
+        ttm_wide.select("ticker", "period_end")
+        .join(F.broadcast(_ttm_splits), on="ticker", how="left")
+        .withColumn("_lr", F.when(F.col("split_date") > F.col("period_end"), F.log(F.col("ratio"))))
+        .groupBy("ticker")
+        .agg(F.exp(F.sum("_lr")).alias("_f"))          # NULL when no qualifying split → 1.0
+        .withColumn("ttm_split_factor", F.coalesce(F.col("_f"), F.lit(1.0)))
+        .select("ticker", "ttm_split_factor")
+    )
+except Exception as _e:
+    print(f"⚠ stock_splits unavailable ({_e}); TTM live shares used as-filed (unadjusted).")
+    _ttm_split_factor = ttm_wide.select("ticker").withColumn("ttm_split_factor", F.lit(1.0))
+
+ttm_wide = (
+    ttm_wide.join(_ttm_split_factor, on="ticker", how="left")
+    .withColumn("shares", F.col("shares") * F.coalesce(F.col("ttm_split_factor"), F.lit(1.0)))
+    .drop("ttm_split_factor")
+)
+
 print(f"✓ TTM wide: {ttm_wide.count():,} ticker rows")
 
 # COMMAND ----------
@@ -441,7 +472,8 @@ print(f"✓ TTM wide: {ttm_wide.count():,} ticker rows")
 # MAGIC old behaviour (most recent `fiscal_year` row in `market_cap_asof`) could lag the real market
 # MAGIC price by up to ~12–15 months, since that table only updates when a new FY's `period_end`
 # MAGIC price gets backfilled. `market_cap` (TTM) = live price × the most recent quarter's diluted
-# MAGIC shares (`ttm_wide.shares`, already ticker-level and non-fiscal-year-gated).
+# MAGIC shares (`ttm_wide.shares`, already ticker-level and non-fiscal-year-gated, and already
+# MAGIC forward-adjusted in §4 above for any split between that quarter's filing and today).
 
 # COMMAND ----------
 
