@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fundamentals-screener"
+version = "0.1.0"
+description = "Installable Django app: a self-contained SEC EDGAR fundamentals screener, company detail, and valuation views, reading published Parquet artifacts via DuckDB. Extracted from fundamentals_databricks_pj's web/ Django app for reuse by external Django projects (originally: alopezm.xyz's /apps/screener/)."
+readme = "README.md"
+requires-python = ">=3.9"
+# duckdb/pandas pinned to exact versions VERIFIED (by the consuming project) to install and
+# run on Python 3.9.2, the target production host — their later releases dropped Python 3.9
+# support, so an unpinned >= range here would resolve to a version pip refuses to install
+# (or that breaks at import) on the actual host. pyarrow's floor is NOT independently
+# verified against 3.9.2 the same way — worth confirming/pinning the same way if an install
+# ever fails on it. fundamentals_pipeline (git dependency, no PyPI release) supplies
+# schemas/statement_layout/fx — its own pyproject.toml previously declared requires-python
+# >=3.10 and blocked `pip install` on Python 3.9.2 outright (pip rejects on the metadata
+# before ever looking at the code); lowered to >=3.9 there after confirming, by static
+# inspection (no 3.10-only syntax: no `match`/`case`, no runtime `X | Y` unions, no
+# `slots=True`), that every top-level module in that package — not just the three this
+# package imports — is 3.9-compatible. That inspection has NOT yet been exercised against a
+# real Python 3.9.2 interpreter (none was available to check with); the consuming project's
+# own isolated-venv retest against the real production host is what confirms it for real.
+dependencies = [
+    "Django>=4.2,<6",
+    "duckdb==1.4.5",
+    "pandas==2.3.3",
+    "pyarrow>=15",
+    "requests>=2.31,<3",
+    "fundamentals_pipeline @ git+https://github.com/alopezmoreira1989/fundamentals_databricks_pj.git",
+]
+
+# Explicit package list, not find: — mirrors the root fundamentals_pipeline/pyproject.toml
+# convention in this repo.
+[tool.setuptools]
+packages = [
+    "fundamentals_screener",
+    "fundamentals_screener.repositories",
+    "fundamentals_screener.templatetags",
+    "fundamentals_screener.management",
+    "fundamentals_screener.management.commands",
+]
+
+[tool.setuptools.package-data]
+fundamentals_screener = ["templates/fundamentals_screener/*.html", "static/fundamentals_screener/css/*.css"]

@@ -1,0 +1,69 @@
+"""Base class for the read-only DuckDB-backed repositories.
+
+Centralises the two things every analytical repository needs: the connection lifecycle and
+the row → immutable-DTO mapping. Subclasses write parameterized, explicit-column SQL and map
+each row straight into a frozen dataclass — callers never see a raw row, dict, or DataFrame.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
+from typing import Any, TypeVar
+
+import duckdb
+
+from ..repository import connection as _connect
+
+T = TypeVar("T")
+
+
+class DuckDBRepository:
+    """Read-only repository over the artifact views registered by
+    ``fundamentals_screener.repository.connection()``.
+
+    Pass a ``connection`` to reuse one across calls (tests, or a request-scoped connection);
+    otherwise each query opens and closes its own. Never exposes the connection upward.
+    """
+
+    def __init__(self, connection: duckdb.DuckDBPyConnection | None = None) -> None:
+        self._injected = connection
+
+    @contextmanager
+    def _connection(self) -> Iterator[duckdb.DuckDBPyConnection]:
+        if self._injected is not None:
+            yield self._injected
+        else:
+            con = _connect()
+            try:
+                yield con
+            finally:
+                con.close()
+
+    def _fetch(
+        self,
+        sql: str,
+        params: Sequence[Any],
+        factory: Callable[..., T],
+    ) -> tuple[T, ...]:
+        """Run a parameterized query and map each row into ``factory`` (a DTO).
+
+        The SELECT column aliases must match ``factory``'s field names exactly. Rows are
+        materialized once, straight into DTOs — no intermediate list-of-dicts is retained.
+        """
+        with self._connection() as con:
+            cursor = con.execute(sql, list(params))
+            columns = [d[0] for d in cursor.description]
+            return tuple(
+                factory(**dict(zip(columns, row, strict=True))) for row in cursor.fetchall()
+            )
+
+    def _fetch_column(self, sql: str, params: Sequence[Any] = ()) -> tuple[Any, ...]:
+        """Run a single-column query and return that column's values as a tuple.
+
+        For simple scalar lists (e.g. distinct metric names for a picker) where a DTO would
+        be overkill. The SELECT must project exactly one column.
+        """
+        with self._connection() as con:
+            cursor = con.execute(sql, list(params))
+            return tuple(row[0] for row in cursor.fetchall())

@@ -1,0 +1,84 @@
+{% extends "fundamentals_screener/base_screener.html" %}
+{% load fmt %}
+{% block title %}{{ ticker }} — Valuation{% endblock %}
+{% block content %}
+  <div class="p-4 bg-white rounded-3 shadow-sm mb-4">
+    <div class="d-flex align-items-baseline gap-3 flex-wrap">
+      <h1 class="h3 mb-0">Valuation</h1>
+      <span class="badge text-bg-dark fs-6">{{ ticker }}</span>
+      <a class="ms-auto" href="{% url 'fundamentals_screener:company_detail' ticker %}">Company detail →</a>
+    </div>
+    <p class="text-muted mb-0 mt-2">
+      Margin of safety = intrinsic value vs. price. Green is undervalued, red overvalued.
+      Values are precomputed upstream.
+    </p>
+  </div>
+
+  {% if chart %}
+    <div class="bg-white rounded-3 shadow-sm p-4 mb-4">
+      <div class="d-flex justify-content-between align-items-baseline mb-3">
+        <h2 class="h5 mb-0">Intrinsic Value <span class="text-muted fw-normal">(per share, TTM)</span></h2>
+        {% if chart.price is not None %}
+          <span class="small">Price <span class="font-monospace">{{ chart.price|metric_value:price_currency }}</span></span>
+        {% endif %}
+      </div>
+      {% for b in chart.bars %}
+        <div class="mb-3">
+          <div class="d-flex justify-content-between small mb-1">
+            <span>{{ b.method }} <span class="text-muted">· FY{{ b.fiscal_year }}</span></span>
+            <span class="font-monospace {% if b.covers_price %}text-muted{% endif %}">
+              {{ b.bear|metric_value:"usd" }} – {{ b.mid|metric_value:"usd" }} – {{ b.bull|metric_value:"usd" }}
+            </span>
+          </div>
+          <div class="position-relative bg-light rounded" style="height:1.5rem;">
+            {# bear→bull range bar #}
+            <div class="position-absolute top-0 bottom-0 rounded {% if b.covers_price %}bg-secondary{% else %}bg-primary{% endif %}"
+                 style="left:{{ b.left_pct }}%; width:{{ b.width_pct }}%; opacity:.35;"></div>
+            {# mid marker #}
+            <div class="position-absolute top-0 bottom-0"
+                 style="left:{{ b.mid_pct }}%; width:2px; background:#0B2545;"></div>
+            {# market price line #}
+            {% if chart.price_pct is not None %}
+              <div class="position-absolute top-0 bottom-0"
+                   style="left:{{ chart.price_pct }}%; width:2px; background:#B0301A;"></div>
+            {% endif %}
+          </div>
+        </div>
+      {% endfor %}
+      <p class="text-muted small mb-0 mt-2">
+        Blue = intrinsic-value range (bear–mid–bull); <span style="color:#B0301A;">red line</span> = market price.
+        A price left of the range implies undervaluation.
+      </p>
+    </div>
+  {% endif %}
+
+  <div class="bg-white rounded-3 shadow-sm p-4">
+    <h2 class="h5 mb-3">Margin of Safety <span class="text-muted small fw-normal">· by scenario</span></h2>
+    {% if scenarios %}
+      <div class="table-responsive">
+        <table class="table table-sm table-hover align-middle mb-0">
+          <thead>
+            <tr>
+              <th scope="col">Method</th>
+              <th scope="col" class="text-end">Bear</th>
+              <th scope="col" class="text-end">Mid</th>
+              <th scope="col" class="text-end">Bull</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in scenarios %}
+              <tr>
+                <td>{{ r.method }} <span class="text-muted small">· {{ r.basis }}</span></td>
+                <td class="text-end font-monospace {{ r.bear|sign_class }}">{{ r.bear|metric_value:"percent" }}</td>
+                <td class="text-end font-monospace {{ r.mid|sign_class }}">{{ r.mid|metric_value:"percent" }}</td>
+                <td class="text-end font-monospace {{ r.bull|sign_class }}">{{ r.bull|metric_value:"percent" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="text-muted mb-0">No valuation data available for {{ ticker }}.</p>
+    {% endif %}
+  </div>
+{% endblock %}

@@ -117,6 +117,7 @@ Databricks analytical pipeline that ingests SEC EDGAR XBRL filings (10-K/10-Q) f
   - `61__streamlit/` — public Streamlit Cloud app (Screener / Company / Backtest pages)
   - (The former `62__web/` Next.js frontend was removed — the decoupled web frontend is now the Django `web/` app below, not a `60__frontends/` static build.)
 - `web/` — Django presentation + application layer (auth, templates, REST API, user data), a **separate consumer** of the published Release artifacts, not a pipeline stage (so exempt from `NN__`). Imports `fundamentals_pipeline` as a normal dependency and never reimplements financial logic. **Strict, one-directional layering — enforce it on every change (see `docs/architecture.md`):** `views → services → repositories → infrastructure (DuckDB / PostgreSQL) → fundamentals_pipeline`. Every access to persistent data goes through the **repository** tier; views never execute SQL/read Parquet/hold business logic, services never execute raw SQL, repositories never implement financial/valuation/screening logic (that's `fundamentals_pipeline`). **Repositories are mandatory for analytical storage — DuckDB, Parquet artifacts, future Databricks SQL — always, no matter how simple the query.** But use judgment, not boilerplate: **trivial Django-ORM CRUD (e.g. CustomUser) may use the ORM directly from a service** rather than a pass-through repository; promote to a repository only when it adds real value (complex query, DTO mapping, aggregation, caching, multiple sources, storage/infra isolation). **Design goal (litmus test): swapping the storage engine (DuckDB → Databricks SQL / Postgres / Snowflake / BigQuery) must touch only `repositories/` + `infrastructure/` — never a view, service, or the pipeline.** Dirs: `apps/<name>/` (per-app views/urls/services, + models only when the app owns Postgres data), `services/` (cross-cutting use-case orchestration), `repositories/` (shared data gateway → DTOs), `infrastructure/` (`storage` = artifact fetch/cache, `duckdb` = query engine over the cached parquet). Reads artifacts via DuckDB; PostgreSQL holds only app data; no Databricks queries at request time. **Read-model rules:** repositories own ALL SQL (none elsewhere), return immutable DTOs/frozen dataclasses (never raw rows/dicts/DataFrames — views/services never touch SQL column names), parameterize every query, no `SELECT *` (list only needed columns), and push filter/aggregate/LIMIT into DuckDB (predicate+projection pushdown; never load a whole parquet to filter in Python). Services stay storage-agnostic. **New Django code must pass mypy + django-stubs** (`web/mypy.ini`, settings `config.settings.dev`); run from `web/`. **Every application model uses an explicit UUID primary key (`UUIDField(primary_key=True, default=uuid.uuid4, editable=False)`) — never Auto/BigAutoField** (`DEFAULT_AUTO_FIELD` stays BigAutoField only for framework tables). **Custom user model is live:** `apps/users` `User(AbstractUser)` with UUID pk + unique/required email + `AUTH_USER_MODEL="users.User"` (set before the first migration); users CRUD uses the ORM directly from the service layer, no repository. Web tests run on SQLite in-memory (`config.settings.test`), no Postgres needed.
+- `fundamentals_screener/` — a second, standalone installable Django app (own `pyproject.toml` at `fundamentals_screener/`, package code at `fundamentals_screener/fundamentals_screener/`), extracted from `web/`'s `apps/companies` + `apps/screener` + `apps/valuation` for reuse by an external Django project (originally alopezm.xyz's `/apps/screener/`). Not a pipeline stage (exempt from `NN__`), and not part of `web/`'s own INSTALLED_APPS — a fully separate distribution with its own README. See **External consumers** below for the versioning contract and the reasons its internals (view names, cache strategy, settings) deliberately diverge from `web/`'s.
 - `70__backtest/71__run_backtest.py` — applies `backtest_archetypes.json` screens to history (no look-ahead) → `backtest_results` + `backtest_summary`
 - `90__pipelines/` — `91__full_pipeline.py` orchestration entry point; `93__delta_maintenance.py` (OPTIMIZE/VACUUM, gated on `run_optimization`)
 - `tests/` — pytest suite (repo root) for the `fundamentals_pipeline` importable modules + Streamlit `lib/`; transversal tooling, intentionally unprefixed (not an `NN__` stage — see the naming-convention exception under Conventions)
@@ -147,3 +148,77 @@ GitHub `main` is the single source of truth. The Databricks Repo (synced by
 - The workflow is self-repairing: on `GIT_CONFLICT` it deletes and recreates the Repo from
   `main`, discarding the local state. If you had unsaved work in the synced
   Repo, it will be lost — that's why you must not work there.
+
+## External consumers
+
+`fundamentals_screener/` (see Layout above) is a separately-versioned installable Django app
+consumed by an external repo (the owner's personal site, not in this workspace) as
+`pip install git+https://github.com/alopezmoreira1989/fundamentals_databricks_pj.git#subdirectory=fundamentals_screener`.
+It reads this repo's published GitHub Release `latest` artifacts (the same 5
+`dashboard_*.parquet` + `dashboard_meta.json` files the Streamlit app and `web/` read) and
+depends on `fundamentals_pipeline` (for `schemas`/`statement_layout`/`fx`) the normal way,
+but is otherwise a fully independent codebase from `web/` — it does **not** import from
+`web/`, and changes to `web/`'s `apps/companies`/`apps/screener`/`apps/valuation` do not
+automatically propagate to it (they were extracted once, then diverged deliberately — see
+below).
+
+- **This is a public API contract.** `fundamentals_screener/fundamentals_screener/urls.py`'s
+  route names, the template filenames under
+  `fundamentals_screener/fundamentals_screener/templates/fundamentals_screener/`, and the
+  shape of `fundamentals_screener/fundamentals_screener/dtos.py` are what the consuming
+  project's own code/templates couple against. **Changing any of them is a breaking change**:
+  bump `fundamentals_screener/pyproject.toml`'s version and tag the commit *before* the
+  consumer updates its pinned `git+https://...@vX.Y.Z` install — never let the consumer track
+  a moving ref.
+- **Deliberately diverges from `web/`'s internals, on purpose, do not "fix" these to match
+  `web/`:**
+  - **Data layer**: `web/` fetches artifacts lazily on the request path (cache miss/stale
+    triggers a download, with a background-thread refresh) — correct for `web/`'s real WSGI
+    server, but wrong for `fundamentals_screener`'s reference deployment (plain CGI, no
+    persistent process between requests, so a background thread never survives to complete).
+    `fundamentals_screener` instead ships `manage.py sync_fundamentals_data` (a cron-driven
+    command) + a `data_source.py`/`repository.py` pair that only ever reads what's already on
+    disk — no network on the request path, ever. This split (`data_source.py` = fetch/cache/
+    validate, `repository.py` = bare `connection()` with views registered) mirrors what the
+    consuming project had already independently built and proven (2,627 tickers, 1.57M rows)
+    before this package existed; `fundamentals_screener` was built to match that proven
+    interface exactly, specifically so it can be a drop-in replacement for those three files
+    rather than a second, parallel implementation of the same job.
+  - **DuckDB view names**: `dashboard_data`/`dashboard_metrics`/`dashboard_prices`/
+    `dashboard_backtest`/`dashboard_fx` (the literal artifact names, sourced dynamically from
+    `fundamentals_pipeline.schemas.ARTIFACT_NAMES`) — not `web/`'s short aliases
+    (`financials`/`metrics`/`prices`/`backtest`/`fx`). Any SQL ported between the two packages
+    needs its table names translated, not copy-pasted verbatim.
+  - **Settings**: a single `FUNDAMENTALS_DATA_PATH` (a local directory), not `web/`'s
+    `ARTIFACTS_BASE_URL`/`ARTIFACTS_CACHE_DIR`/`ARTIFACTS_TTL`/`ARTIFACTS_LOCAL_DIR`/
+    `ARTIFACTS_REFRESH_ASYNC` five-variable scheme.
+  - **Python floor**: `>=3.9` (the real production constraint on the target host — Python
+    3.9.2, no compiler, so `duckdb`/`pandas` are pinned to exact versions
+    (`duckdb==1.4.5`/`pandas==2.3.3`) verified to still support 3.9; their later releases
+    dropped it), vs. `web/`'s `>=3.12`. Do not introduce Python ≥3.10-only syntax
+    (`dataclass(slots=True)`, `match`/`case`, etc.) anywhere in `fundamentals_screener/`. The
+    root `fundamentals_pipeline` package's own `pyproject.toml` `requires-python` is **also**
+    `>=3.9` for the same reason — `pip` enforces that metadata before even looking at the
+    code, so `fundamentals_screener`'s git dependency on it would hard-fail to install on
+    Python 3.9.2 if that floor were ever raised back to `>=3.10`, regardless of whether the
+    handful of modules `fundamentals_screener` actually imports (`schemas`/
+    `statement_layout`/`fx`, plus `backtest`/`periods`/`valuation` transitively via
+    `fundamentals_pipeline/__init__.py`'s eager imports) stayed 3.9-compatible. Keep the two
+    floors in lockstep; don't raise the root one without re-checking this.
+  - **No personalization, no i18n**: favorites/watchlists/history (all present in `web/`'s
+    `company_page`) are not ported — they depend on login-scoped apps this package doesn't
+    assume the host has. The async Yahoo Finance news widget IS ported (`/<ticker>/news/`,
+    cached via Django's generic `django.core.cache` API) — the host must configure a
+    persistent `CACHES` backend (e.g. `FileBasedCache`) for it to actually cache under CGI;
+    unconfigured it still works, just re-fetches Yahoo on every request (see the package
+    README). Every template is English-only with no `{% load i18n %}` anywhere, regardless of
+    the host project's own locale configuration (the target consumer is bilingual ES/EN; this
+    app's pages stay English by design).
+  - **Own base template**: ships `base_screener.html` (own `<head>`/CSS/JS, navy/cyan/orange
+    palette under `static/fundamentals_screener/css/app.css`) rather than extending a host
+    `base.html` — the opposite of the "inherit the host's layout" instruction the consumer
+    project states for its other `/apps/<name>/` sections, a deliberate, confirmed exception
+    for this one.
+- See `fundamentals_screener/README.md` for the full install/settings/scope writeup — that
+  file is the one a consumer's maintainer actually reads, so keep it, not just this section,
+  current when any of the above changes.
