@@ -46,6 +46,20 @@ ignore = [
 "fundamentals_pipeline/50__publish/**/*.py" = ["E701", "E702", "E731", "E741", "B007"]
 "fundamentals_pipeline/70__backtest/**/*.py" = ["E701", "E702", "E731", "E741", "B007"]
 "fundamentals_pipeline/90__pipelines/**/*.py" = ["E701", "E702", "E731", "E741", "B007"]
+# These specific top-level fundamentals_pipeline modules (unlike the rest of the repo, which
+# runs on 3.12+) must stay importable on Python 3.9 — fundamentals_screener's git dependency
+# on fundamentals_pipeline targets Python 3.9.2 CGI hosting (see CLAUDE.md's "Python floor"
+# note under External consumers). `target-version = "py310"` above makes ruff actively want to
+# reintroduce the two 3.10-only patterns already fixed here once for a real 3.9.2 runtime
+# failure: UP007 would rewrite `typing.Union[...]` back to `X | Y` (fails at import time pre-
+# 3.10, since `from __future__ import annotations` only defers *annotations*, not plain
+# assignments), and B905 would demand an explicit `zip(..., strict=...)`, whose `strict=`
+# kwarg itself doesn't exist before 3.10 regardless of True/False. Both ignored only here, not
+# repo-wide — every other zip()/type-union in the codebase should keep taking the 3.10+ lints.
+"fundamentals_pipeline/backtest.py" = ["UP007", "B905"]
+"fundamentals_pipeline/periods.py" = ["UP007"]
+"fundamentals_pipeline/valuation.py" = ["UP007"]
+"fundamentals_screener/fundamentals_screener/repositories/base.py" = ["B905"]
 
 [format]
 quote-style = "double"
