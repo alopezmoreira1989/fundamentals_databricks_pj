@@ -196,8 +196,21 @@ below).
     3.9.2, no compiler, so `duckdb`/`pandas` are pinned to exact versions
     (`duckdb==1.4.5`/`pandas==2.3.3`) verified to still support 3.9; their later releases
     dropped it), vs. `web/`'s `>=3.12`. Do not introduce Python ≥3.10-only syntax
-    (`dataclass(slots=True)`, `match`/`case`, etc.) anywhere in `fundamentals_screener/`. The
-    root `fundamentals_pipeline` package's own `pyproject.toml` `requires-python` is **also**
+    (`dataclass(slots=True)`, `match`/`case`, etc.) anywhere in `fundamentals_screener/`. Two
+    non-obvious 3.10-only patterns already caused real import-time/runtime failures on a real
+    Python 3.9.2 retest (both fixed, 2026-07-20) — watch for them in review, since a plain
+    `grep` for `match`/`case`/`slots=True` won't catch either: (1) a **module-level assignment**
+    of a PEP 604 union, e.g. `Number = float | int | None` — `from __future__ import
+    annotations` only defers *annotation* evaluation, not a normal assignment's right-hand
+    side, so this still raises `TypeError` at import time pre-3.10; use `typing.Union[...]`
+    instead. (2) `zip(..., strict=True)` (or `strict=False`) — the `strict=` keyword itself
+    doesn't exist before 3.10, regardless of its value; do a manual `len(a) != len(b)` check
+    and call plain `zip(a, b)` instead. `ruff.toml`'s `target-version = "py310"` makes ruff
+    actively suggest reintroducing both (`UP007`, `B905`) — the affected files
+    (`fundamentals_pipeline/{backtest,periods,valuation}.py`,
+    `fundamentals_screener/fundamentals_screener/repositories/base.py`) have targeted
+    per-file-ignores for exactly those two rules, nowhere else. The root `fundamentals_pipeline`
+    package's own `pyproject.toml` `requires-python` is **also**
     `>=3.9` for the same reason — `pip` enforces that metadata before even looking at the
     code, so `fundamentals_screener`'s git dependency on it would hard-fail to install on
     Python 3.9.2 if that floor were ever raised back to `>=3.10`, regardless of whether the

@@ -12,8 +12,12 @@ data-shape decision made in Spark and is out of scope for this scalar.
 from __future__ import annotations
 
 import math
+from typing import Union
 
-Number = float | int | None
+# `from __future__ import annotations` only defers *annotation* evaluation — this is a plain
+# assignment, so the RHS runs at import time. PEP 604 `float | int | None` needs `type.__or__`,
+# which doesn't exist before Python 3.10; `typing.Union` is the 3.9-safe equivalent.
+Number = Union[float, int, None]
 
 VALID_KINDS = ("flow_additive", "flow_nonadditive", "stock")
 

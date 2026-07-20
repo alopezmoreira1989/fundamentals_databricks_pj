@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fundamentals-screener"
-version = "0.1.0"
+version = "0.1.1"
 description = "Installable Django app: a self-contained SEC EDGAR fundamentals screener, company detail, and valuation views, reading published Parquet artifacts via DuckDB. Extracted from fundamentals_databricks_pj's web/ Django app for reuse by external Django projects (originally: alopezm.xyz's /apps/screener/)."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -16,12 +16,16 @@ requires-python = ">=3.9"
 # ever fails on it. fundamentals_pipeline (git dependency, no PyPI release) supplies
 # schemas/statement_layout/fx — its own pyproject.toml previously declared requires-python
 # >=3.10 and blocked `pip install` on Python 3.9.2 outright (pip rejects on the metadata
-# before ever looking at the code); lowered to >=3.9 there after confirming, by static
-# inspection (no 3.10-only syntax: no `match`/`case`, no runtime `X | Y` unions, no
-# `slots=True`), that every top-level module in that package — not just the three this
-# package imports — is 3.9-compatible. That inspection has NOT yet been exercised against a
-# real Python 3.9.2 interpreter (none was available to check with); the consuming project's
-# own isolated-venv retest against the real production host is what confirms it for real.
+# before ever looking at the code); lowered to >=3.9 there after a first static-inspection
+# pass (checked for `match`/`case` and `isinstance(x, A | B)`, found none). That first pass
+# was INCOMPLETE — it missed plain module-level assignments of a PEP 604 union
+# (`Number = float | int | None` in valuation.py/periods.py/backtest.py), which fail at
+# import time on <3.10 despite `from __future__ import annotations` (that future only defers
+# *annotation* evaluation, not a normal assignment's RHS). Also missed: `zip(..., strict=True)`
+# in backtest.py and in this package's own repositories/base.py (the `strict=` kwarg itself
+# doesn't exist before 3.10). Both bug classes were caught by the consuming project's real
+# Python 3.9.2 retest (the first one to actually run, not just install) and are now fixed —
+# see ruff.toml's per-file-ignores for why UP007/B905 are suppressed on the affected files.
 dependencies = [
     "Django>=4.2,<6",
     "duckdb==1.4.5",

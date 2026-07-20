@@ -54,9 +54,11 @@ class DuckDBRepository:
         with self._connection() as con:
             cursor = con.execute(sql, list(params))
             columns = [d[0] for d in cursor.description]
-            return tuple(
-                factory(**dict(zip(columns, row, strict=True))) for row in cursor.fetchall()
-            )
+            rows = cursor.fetchall()
+            for row in rows:
+                if len(columns) != len(row):
+                    raise ValueError(f"column/row length mismatch: {len(columns)} != {len(row)}")
+            return tuple(factory(**dict(zip(columns, row))) for row in rows)
 
     def _fetch_column(self, sql: str, params: Sequence[Any] = ()) -> tuple[Any, ...]:
         """Run a single-column query and return that column's values as a tuple.

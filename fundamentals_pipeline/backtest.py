@@ -15,10 +15,14 @@ from __future__ import annotations
 import math
 import operator
 from datetime import date, timedelta
+from typing import Union
 
 from .valuation import safe_div  # noqa: F401 — re-exported for the notebook's convenience
 
-Number = float | int | None
+# `from __future__ import annotations` only defers *annotation* evaluation — this is a plain
+# assignment, so the RHS runs at import time. PEP 604 `float | int | None` needs `type.__or__`,
+# which doesn't exist before Python 3.10; `typing.Union` is the 3.9-safe equivalent.
+Number = Union[float, int, None]
 
 # Comparison operators allowed in archetype predicates.
 _OPS = {
@@ -73,8 +77,10 @@ def latest_price_asof(
     """
     if as_of is None:
         return None
+    if len(dates) != len(prices):
+        raise ValueError(f"dates/prices length mismatch: {len(dates)} != {len(prices)}")
     candidates = [
-        (d, p) for d, p in zip(dates, prices, strict=True)
+        (d, p) for d, p in zip(dates, prices)
         if d is not None and d <= as_of and not _is_missing(p)
     ]
     if not candidates:
