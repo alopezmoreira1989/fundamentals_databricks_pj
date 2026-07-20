@@ -1,0 +1,258 @@
+/* ============================================================
+ * Self-contained theme for the fundamentals_screener package.
+ *
+ * Adapted from the editorial theme of fundamentals_databricks_pj's own web/ Django app
+ * (cream broadsheet ground, hairline rules, Fraunces display + Inter body + JetBrains Mono
+ * data) onto a navy/cyan/orange palette, since this package ships its own base_screener.html
+ * and does not inherit a host project's layout/theme (see the package README).
+ * Layered over Bootstrap 5.3 — we override its CSS variables where they take, and restyle
+ * the handful of components the templates actually use.
+ * ============================================================ */
+
+:root {
+  /* ---- editorial tokens ---- */
+  --bg: #F5F7FA;
+  --bg-card: #FFFFFF;
+  --bg-subtle: #EEF1F6;
+  --bg-hover: #E4E9F0;
+  --ink: #0B2545;
+  --ink-2: #3E5570;
+  --ink-3: #7C8DA6;
+  --rule: #D7DEE8;
+  --rule-soft: #E9EDF3;
+  --accent: #0EA5B0;
+  --accent-soft: #E3F6F8;
+  --accent-ink: #087680;
+  --orange: #E8702A;
+  --orange-soft: #FDEEE3;
+  --positive: #0F6E56;
+  --positive-soft: #E1F5EE;
+  --negative: #B0301A;
+  --negative-soft: #FBE9E4;
+  --warning: #E8702A;
+  --display: "Fraunces", "Times New Roman", serif;
+  --sans: "Inter", system-ui, sans-serif;
+  --mono: "JetBrains Mono", "SF Mono", Menlo, monospace;
+
+  /* ---- map Bootstrap's theme vars onto the tokens ---- */
+  --bs-body-bg: var(--bg);
+  --bs-body-color: var(--ink);
+  --bs-body-font-family: var(--sans);
+  --bs-emphasis-color: var(--ink);
+  --bs-secondary-color: var(--ink-2);
+  --bs-tertiary-color: var(--ink-3);
+  --bs-border-color: var(--rule);
+  --bs-border-radius: 4px;
+  --bs-border-radius-sm: 3px;
+  --bs-border-radius-lg: 6px;
+  --bs-link-color: var(--accent-ink);
+  --bs-link-color-rgb: 8, 118, 128;
+  --bs-link-hover-color: var(--ink);
+}
+
+body.fs-app { font-family: var(--sans); background: var(--bg); color: var(--ink); }
+
+@media (min-width: 1400px) {
+  .fs-app .container { max-width: 1600px; }
+}
+@media (min-width: 1800px) {
+  .fs-app .container { max-width: 1840px; }
+}
+
+/* Display typography — Fraunces for headings, tight and optical-size 144. */
+.fs-app h1, .fs-app h2, .fs-app h3, .fs-app h4, .fs-app h5, .fs-app h6, .fs-app .display-face {
+  font-family: var(--display);
+  font-weight: 500;
+  letter-spacing: -0.018em;
+  font-variation-settings: "opsz" 144;
+  color: var(--ink);
+}
+.fs-app .text-muted { color: var(--ink-3) !important; }
+.fs-app .text-success { color: var(--positive) !important; }
+.fs-app .text-danger { color: var(--negative) !important; }
+.fs-app a { text-underline-offset: 2px; }
+
+/* Mono eyebrow/label — the recurring editorial device. */
+.fs-app .eyebrow {
+  font-family: var(--mono);
+  font-size: .72rem;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.fs-app .eyebrow.accent { color: var(--accent-ink); }
+.fs-app .mono { font-family: var(--mono); }
+
+/* Visible keyboard focus everywhere. */
+.fs-app a:focus-visible, .fs-app button:focus-visible, .fs-app .btn:focus-visible,
+.fs-app .form-control:focus-visible, .fs-app .form-select:focus-visible {
+  outline: 3px solid var(--accent); outline-offset: 2px; box-shadow: none;
+}
+
+/* ---------- Masthead (navy) ---------- */
+.fs-masthead {
+  background: var(--ink);
+  border-bottom: 1px solid var(--ink);
+}
+.fs-brand {
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 1.35rem;
+  letter-spacing: -0.02em;
+  color: #F5F7FA;
+  text-decoration: none;
+  font-variation-settings: "opsz" 144;
+}
+.fs-brand .fs-brand-mark {
+  font-family: var(--mono);
+  font-size: .62rem;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: var(--accent);
+  display: block;
+  margin-bottom: -2px;
+}
+.fs-nav a {
+  color: #C7D2E0;
+  text-decoration: none;
+  font-size: .9rem;
+  font-weight: 500;
+  padding: .2rem 0;
+  border-bottom: 2px solid transparent;
+}
+.fs-nav a:hover { color: #FFFFFF; border-bottom-color: var(--accent); }
+
+/* ---------- Cards: the app's `bg-white rounded-3 shadow-sm` pattern ---------- */
+.fs-app .card, .fs-app .bg-white {
+  background: var(--bg-card) !important;
+  color: var(--ink);
+}
+.fs-app .shadow-sm {
+  box-shadow: none !important;
+  border: 1px solid var(--rule);
+}
+.fs-app .card { border: 1px solid var(--rule); }
+
+/* ---------- Buttons ---------- */
+.fs-app .btn { font-weight: 500; border-radius: var(--bs-border-radius); }
+.fs-app .btn-primary {
+  --bs-btn-bg: var(--accent); --bs-btn-border-color: var(--accent);
+  --bs-btn-hover-bg: var(--accent-ink); --bs-btn-hover-border-color: var(--accent-ink);
+  --bs-btn-active-bg: var(--accent-ink); --bs-btn-active-border-color: var(--accent-ink);
+  --bs-btn-disabled-bg: var(--accent); --bs-btn-disabled-border-color: var(--accent);
+}
+.fs-app .btn-outline-secondary, .fs-app .btn-outline-dark {
+  --bs-btn-color: var(--ink-2); --bs-btn-border-color: var(--rule);
+  --bs-btn-hover-bg: var(--ink); --bs-btn-hover-border-color: var(--ink); --bs-btn-hover-color: var(--bg);
+  --bs-btn-active-bg: var(--ink);
+}
+.fs-app .btn-dark {
+  --bs-btn-bg: var(--ink); --bs-btn-border-color: var(--ink);
+  --bs-btn-hover-bg: #071A33; --bs-btn-hover-border-color: #071A33; --bs-btn-active-bg: #071A33;
+}
+
+/* ---------- Forms ---------- */
+.fs-app .form-label {
+  font-family: var(--mono); font-size: .68rem; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--ink-3); font-weight: 400; margin-bottom: .3rem;
+}
+.fs-app .form-control, .fs-app .form-select {
+  background: var(--bg-card); border-color: var(--rule); color: var(--ink); border-radius: 4px;
+}
+.fs-app .form-control:focus, .fs-app .form-select:focus {
+  border-color: var(--accent); box-shadow: 0 0 0 .18rem var(--accent-soft);
+}
+.fs-app .form-control::placeholder { color: var(--ink-3); }
+
+/* ---------- Tables — editorial: tabular mono numbers, uppercase mono headers ---------- */
+.fs-app .table {
+  --bs-table-bg: var(--bg-card);
+  --bs-table-color: var(--ink);
+  --bs-table-border-color: var(--rule-soft);
+  --bs-table-hover-bg: var(--bg-subtle);
+  font-variant-numeric: tabular-nums;
+}
+.fs-app .table > thead th {
+  font-family: var(--mono); font-size: .66rem; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--ink-3); font-weight: 400; border-bottom: 1px solid var(--ink);
+}
+.fs-app .table > tbody td { font-size: .86rem; vertical-align: middle; }
+.fs-app .table .num, .fs-app .table td.text-end, .fs-app .table th.text-end {
+  font-family: var(--mono); font-variant-numeric: tabular-nums;
+}
+
+/* Native-currency label next to a figure that isn't USD (e.g. a CAD Market Cap or price). */
+.fs-app .ccy-badge {
+  font-size: .68rem;
+  font-family: var(--mono);
+  color: var(--ink-3);
+  margin-left: 4px;
+  letter-spacing: .04em;
+}
+
+/* ---------- Pagination ---------- */
+.fs-app .pagination {
+  --bs-pagination-color: var(--ink-2);
+  --bs-pagination-bg: var(--bg-card);
+  --bs-pagination-border-color: var(--rule);
+  --bs-pagination-hover-color: var(--accent-ink);
+  --bs-pagination-hover-bg: var(--bg-subtle);
+  --bs-pagination-hover-border-color: var(--rule);
+  --bs-pagination-focus-color: var(--accent-ink);
+  --bs-pagination-focus-bg: var(--bg-subtle);
+  --bs-pagination-focus-box-shadow: 0 0 0 .18rem var(--accent-soft);
+  --bs-pagination-active-bg: var(--accent);
+  --bs-pagination-active-border-color: var(--accent);
+  --bs-pagination-disabled-color: var(--ink-3);
+  --bs-pagination-disabled-bg: var(--bg-card);
+  --bs-pagination-disabled-border-color: var(--rule);
+  --bs-pagination-font-size: .85rem;
+}
+.fs-app .page-link { font-family: var(--mono); }
+
+/* ---------- Alerts — reuse the soft semantic tints ---------- */
+.fs-app .alert-warning {
+  --bs-alert-color: var(--warning);
+  --bs-alert-bg: color-mix(in srgb, var(--warning) 12%, var(--bg-card));
+  --bs-alert-border-color: color-mix(in srgb, var(--warning) 30%, var(--bg-card));
+}
+.fs-app .alert-danger {
+  --bs-alert-color: var(--negative); --bs-alert-bg: var(--negative-soft);
+  --bs-alert-border-color: color-mix(in srgb, var(--negative) 25%, var(--bg-card));
+}
+
+/* ---------- Tabs — editorial underline bar ---------- */
+.fs-app .nav-tabs {
+  border-bottom: 1px solid var(--rule);
+  --bs-nav-tabs-link-active-color: var(--accent-ink);
+}
+.fs-app .nav-tabs .nav-link {
+  color: var(--ink-3); font-weight: 500; font-size: .9rem;
+  border: none; border-bottom: 2px solid transparent; margin-bottom: -1px;
+  border-radius: 0; padding: .6rem 1.1rem;
+}
+.fs-app .nav-tabs .nav-link:hover { color: var(--ink); border-color: transparent transparent var(--rule); isolation: isolate; }
+.fs-app .nav-tabs .nav-link.active {
+  color: var(--accent-ink); background: transparent;
+  border-color: transparent transparent var(--accent);
+}
+
+/* ---------- Company logo (Logo.dev hotlink / monogram) ---------- */
+.fs-app .co-logo {
+  display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto;
+  background: var(--bg-card); border: 1px solid var(--rule); border-radius: 12px;
+  overflow: hidden; padding: 8px;
+}
+.fs-app .co-logo img { width: 100%; height: 100%; object-fit: contain; }
+.fs-app .co-logo .co-logo-mono { display: none; font-family: var(--display); font-weight: 600;
+  color: var(--accent-ink); font-size: 1.4rem; line-height: 1; }
+.fs-app .co-logo.is-monogram { background: var(--accent-soft); border-color: var(--accent-soft); }
+.fs-app .co-logo.is-monogram img { display: none; }
+.fs-app .co-logo.is-monogram .co-logo-mono { display: inline; }
+.fs-app .co-logo-sm { border-radius: 8px; padding: 4px; }
+.fs-app .co-logo-sm .co-logo-mono { font-size: .8rem; }
+
+/* ---------- Footer ---------- */
+.fs-footer { background: var(--bg-card); border-top: 1px solid var(--rule); color: var(--ink-3); }
+.fs-footer a { color: var(--ink-2); text-decoration: none; }
+.fs-footer a:hover { color: var(--accent-ink); }

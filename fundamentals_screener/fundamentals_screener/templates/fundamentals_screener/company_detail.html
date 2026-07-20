@@ -1,0 +1,469 @@
+{% extends "fundamentals_screener/base_screener.html" %}
+{% load fmt logos humanize %}
+{% block title %}{{ detail.summary.ticker }} — {{ detail.summary.name }}{% endblock %}
+
+{% block extra_head %}
+<style>
+  .co-masthead { border-bottom: 1px solid var(--ink); padding-bottom: 18px; margin-bottom: 4px; }
+  .co-masthead h1 { font-size: clamp(1.8rem, 4vw, 2.6rem); line-height: 1; }
+  .co-chip { font-family: var(--mono); font-size: .8rem; letter-spacing: .04em; padding: 3px 10px;
+             background: var(--ink); color: var(--bg); border-radius: 3px; }
+  /* KPI strip (overview) — hairline grid, Fraunces values. auto-fit so a 5th cell (Market
+     Cap, only present when the artifact has one for this ticker) doesn't leave an
+     awkward lone cell under a hardcoded 4-column layout. */
+  .kpi-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1px;
+               background: var(--rule); border: 1px solid var(--rule); border-radius: 4px; overflow: hidden; }
+  .kpi-cell { background: var(--bg-card); padding: 16px 18px; }
+  .kpi-cell .k { font-family: var(--mono); font-size: .6rem; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); }
+  .kpi-cell .v { font-family: var(--display); font-size: 1.5rem; font-weight: 500; font-variation-settings: "opsz" 144; line-height: 1; margin-top: 6px; }
+  .kpi-cell .fy { font-family: var(--mono); font-size: .62rem; color: var(--ink-3); margin-top: 5px; }
+  @media (max-width: 640px) { .kpi-strip { grid-template-columns: repeat(2, 1fr); } }
+  /* Info rows */
+  .info-row { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--rule-soft); }
+  .info-row:last-child { border-bottom: none; }
+  .info-row .k { font-family: var(--mono); font-size: .64rem; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); }
+  /* Statement table */
+  table.fs-web { font-variant-numeric: tabular-nums; }
+  table.fs-web thead th { position: sticky; top: 0; background: var(--bg-card); }
+  table.fs-web td.num, table.fs-web th.num { font-family: var(--mono); text-align: right; white-space: nowrap; }
+  table.fs-web tr.section-head td { font-family: var(--mono); font-size: .62rem; letter-spacing: .12em;
+      text-transform: uppercase; color: var(--accent-ink); background: var(--bg-subtle); padding-top: 12px; }
+  table.fs-web th.spark, table.fs-web td.spark { width: 96px; text-align: center; }
+  .sparkline { vertical-align: middle; display: inline-block; }
+  /* Statement row hierarchy — indented children + emphasized subtotal/grand-total/headline
+     rows. Classification comes from fundamentals_pipeline.statement_layout (row_class/
+     resolve_indent), applied in repositories/companies.py. */
+  table.fs-web td.label.indent-1 { padding-left: 32px; }
+  table.fs-web tr.subtotal { background: var(--bg-subtle); }
+  table.fs-web tr.subtotal td.label { font-weight: 600; }
+  table.fs-web tr.subtotal td.label::before { content: "▸ "; color: var(--ink-3); }
+  table.fs-web tr.subtotal td.num { font-weight: 600; }
+  table.fs-web tr.grand-total td { background: var(--ink); color: var(--bg); border-top: 1px solid var(--ink); }
+  table.fs-web tr.grand-total td.label { color: var(--bg); font-family: var(--display); font-weight: 500;
+      text-transform: uppercase; letter-spacing: .04em; }
+  table.fs-web tr.grand-total td.num { color: var(--bg); font-weight: 500; }
+  table.fs-web tr.headline td { background: var(--accent-soft); border-top: 1px solid var(--accent); }
+  table.fs-web tr.headline td.label { color: var(--accent-ink); font-weight: 600; }
+  table.fs-web tr.headline td.label::before { content: "▸ "; color: var(--accent); }
+  table.fs-web tr.headline td.num { color: var(--accent-ink); font-weight: 600; }
+  /* Tab headline charts */
+  .tab-chart { display: block; width: 100%; height: auto; }
+  .chart-legend { display: flex; flex-wrap: wrap; gap: 16px; font-family: var(--mono);
+    font-size: .68rem; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2); }
+  .chart-legend .dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+  .price-last { font-family: var(--display); font-size: 1.8rem; font-weight: 500; font-variation-settings: "opsz" 144; line-height: 1; }
+  /* Valuation football field */
+  .ff-track { position: relative; height: 1.6rem; background: var(--bg-subtle); border-radius: 3px; }
+  .ff-range { position: absolute; top: 0; bottom: 0; background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 3px; }
+  .ff-range.covers { background: var(--bg-hover); border-color: var(--ink-3); }
+  .ff-mid { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--ink); }
+  .ff-price { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--negative); }
+  /* Balance-sheet composition — twin stacked bars + legend */
+  .bs-comp { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
+  .bs-col-head { display: flex; justify-content: space-between; align-items: baseline;
+    font-family: var(--mono); font-size: .66rem; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--ink-3); padding-bottom: 8px; border-bottom: 1px solid var(--ink); margin-bottom: 10px; }
+  .bs-stack { height: 300px; display: flex; flex-direction: column; border: 1px solid var(--rule); border-radius: 4px; overflow: hidden; }
+  .bs-seg { min-height: 1px; }
+  .bs-seg.bs-boundary { border-top: 2px solid var(--ink); }  /* current / non-current divider */
+  .bs-legend { margin-top: 12px; }
+  .bs-leg-item { display: flex; justify-content: space-between; align-items: center; gap: 12px;
+    padding: 5px 0; font-size: .82rem; border-bottom: 1px solid var(--rule-soft); }
+  .bs-leg-item:last-child { border-bottom: none; }
+  .bs-leg-dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 8px; vertical-align: -1px; }
+  @media (max-width: 640px) { .bs-comp { grid-template-columns: 1fr; } }
+  /* News list */
+  .news-item { display: flex; justify-content: space-between; align-items: baseline; gap: 16px;
+    padding: 10px 0; border-bottom: 1px solid var(--rule-soft); text-decoration: none; }
+  .news-item:last-child { border-bottom: none; }
+  .news-item:hover .news-title { color: var(--accent-ink); }
+  .news-title { color: var(--ink); line-height: 1.45; }
+  .news-date { font-family: var(--mono); font-size: .72rem; color: var(--ink-3); white-space: nowrap; flex-shrink: 0; }
+</style>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+  function bsShowYear(year) {
+    document.querySelectorAll('.bs-year').forEach(function (el) { el.hidden = el.dataset.year !== year; });
+  }
+  document.addEventListener('DOMContentLoaded', function () {
+    // Re-select the tab named by the URL hash (e.g. #pane-price) after a full page reload —
+    // the Price tab's range-filter buttons are plain links (?window=...), and Bootstrap tabs
+    // otherwise reset to the first tab on every navigation, silently bouncing the user back to
+    // Overview after they click a range button.
+    if (window.location.hash) {
+      var trigger = document.querySelector('[data-bs-target="' + window.location.hash + '"]');
+      if (trigger && window.bootstrap) {
+        new bootstrap.Tab(trigger).show();
+      }
+    }
+
+    var el = document.getElementById('news-list');
+    if (!el) return;
+    var esc = function (s) { var d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; };
+    fetch(el.dataset.newsUrl)
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        var items = (d && d.news) || [];
+        if (!items.length) { el.innerHTML = '<p class="text-muted small mb-0">No recent news.</p>'; return; }
+        el.innerHTML = items.map(function (n) {
+          return '<a class="news-item" href="' + encodeURI(n.link) + '" target="_blank" rel="noopener noreferrer">'
+            + '<span class="news-title">' + esc(n.title) + '</span>'
+            + '<span class="news-date">' + esc(n.published) + '</span></a>';
+        }).join('');
+      })
+      .catch(function () { el.innerHTML = '<p class="text-muted small mb-0">News unavailable.</p>'; });
+  });
+</script>
+{% endblock %}
+
+{% block content %}
+  {% with s=detail.summary %}
+  <div class="co-masthead d-flex align-items-end justify-content-between flex-wrap gap-3">
+    <div class="d-flex align-items-center gap-3 flex-wrap">
+      {% company_logo s.ticker s.name s.has_logo 60 %}
+      <div class="d-flex align-items-center gap-3 flex-wrap">
+        <h1 class="mb-0">{{ s.name }}</h1>
+        <span class="co-chip">{{ s.ticker }}</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tab navigation -->
+  <ul class="nav nav-tabs company-tabs mb-4" role="tablist">
+    <li class="nav-item" role="presentation">
+      <button class="nav-link active" id="tab-overview" data-bs-toggle="tab" data-bs-target="#pane-overview"
+              type="button" role="tab" aria-controls="pane-overview" aria-selected="true">Overview</button>
+    </li>
+    {% if price_chart %}
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="tab-price" data-bs-toggle="tab" data-bs-target="#pane-price"
+                type="button" role="tab" aria-controls="pane-price" aria-selected="false">Price</button>
+      </li>
+    {% endif %}
+    {% for st in statements %}
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="tab-{{ st.name|slugify }}" data-bs-toggle="tab" data-bs-target="#pane-{{ st.name|slugify }}"
+                type="button" role="tab" aria-controls="pane-{{ st.name|slugify }}" aria-selected="false">{{ st.name }}</button>
+      </li>
+    {% endfor %}
+    {% if quarterly.lines %}
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="tab-quarterly" data-bs-toggle="tab" data-bs-target="#pane-quarterly"
+                type="button" role="tab" aria-controls="pane-quarterly" aria-selected="false">Quarterly</button>
+      </li>
+    {% endif %}
+    {% if iv_chart or mos_scenarios or valuation_metrics %}
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="tab-valuation" data-bs-toggle="tab" data-bs-target="#pane-valuation"
+                type="button" role="tab" aria-controls="pane-valuation" aria-selected="false">Valuation</button>
+      </li>
+    {% endif %}
+    {% if derived_metrics %}
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="tab-metrics" data-bs-toggle="tab" data-bs-target="#pane-metrics"
+                type="button" role="tab" aria-controls="pane-metrics" aria-selected="false">Derived metrics</button>
+      </li>
+    {% endif %}
+  </ul>
+
+  <div class="tab-content">
+    <!-- Overview -->
+    <div class="tab-pane fade show active" id="pane-overview" role="tabpanel" aria-labelledby="tab-overview" tabindex="0">
+      {% if show_usd_toggle %}
+        <div class="d-flex justify-content-end mb-2">
+          {% if usd_lens %}
+            <a class="small text-muted" href="{{ request.path }}">Viewing in USD · <span class="text-decoration-underline">show native currency</span></a>
+          {% else %}
+            <a class="small text-muted" href="?usd=1"><span class="text-decoration-underline">View in USD</span> (Market Cap only; other figures stay native)</a>
+          {% endif %}
+        </div>
+      {% endif %}
+      <div class="kpi-strip mb-4">
+        {% for k in headline %}
+          <div class="kpi-cell">
+            <div class="k">{{ k.label }}</div>
+            <div class="v">{{ k.value|compact_money_ccy:k.currency }}</div>
+            <div class="fy">{% if k.fiscal_year %}FY {{ k.fiscal_year }}{% endif %}</div>
+          </div>
+        {% endfor %}
+      </div>
+      <div class="row g-3">
+        <div class="col-lg-7">
+          <div class="card p-4 h-100">
+            <div class="eyebrow mb-2">About</div>
+            {% if s.description %}
+              <p class="mb-0" style="line-height:1.65; color:var(--ink-2)">{{ s.description }}</p>
+            {% else %}
+              <p class="text-muted mb-0">No company description available.</p>
+            {% endif %}
+          </div>
+        </div>
+        <div class="col-lg-5">
+          <div class="card p-4 h-100">
+            <div class="eyebrow mb-2">Company</div>
+            <div class="info-row"><span class="k">Sector</span><span>{{ s.sector|default:"—" }}</span></div>
+            <div class="info-row"><span class="k">Industry</span><span>{{ s.industry|default:"—" }}</span></div>
+            <div class="info-row"><span class="k">Exchange</span><span>{{ s.exchange|default:"—" }}</span></div>
+            <div class="info-row"><span class="k">Country</span><span>{{ s.country|default:"—" }}</span></div>
+            {% if s.employees %}<div class="info-row"><span class="k">Employees</span><span>{{ s.employees|intcomma }}</span></div>{% endif %}
+            {% if s.founded %}<div class="info-row"><span class="k">Founded</span><span>{{ s.founded }}</span></div>{% endif %}
+            {% if s.website %}<div class="info-row"><span class="k">Website</span><span><a href="{{ s.website }}" target="_blank" rel="noopener noreferrer">{{ s.website|cut:"https://"|cut:"http://" }}</a></span></div>{% endif %}
+          </div>
+        </div>
+      </div>
+
+      <!-- Latest news (fetched async from Yahoo Finance) -->
+      <div class="card p-4 mt-3">
+        <div class="eyebrow mb-2">Latest news</div>
+        <div id="news-list" data-news-url="{% url 'fundamentals_screener:company_news' s.ticker %}">
+          <p class="text-muted small mb-0">Loading news…</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Price -->
+    {% if price_chart %}
+      <div class="tab-pane fade" id="pane-price" role="tabpanel" aria-labelledby="tab-price" tabindex="0">
+        <div class="card p-4">
+          <div class="d-flex justify-content-between align-items-baseline mb-3 flex-wrap gap-2">
+            <div>
+              <div class="eyebrow">Close price</div>
+              <div class="price-last">{{ price_chart.last_close|metric_value:price_currency }}</div>
+            </div>
+            <div class="eyebrow">{{ price_chart.first_date }} → {{ price_chart.last_date }}</div>
+          </div>
+          <div class="btn-group btn-group-sm mb-3" role="group" aria-label="Price chart range">
+            {% for w in price_windows %}
+              <a class="btn {% if w == price_window %}btn-dark{% else %}btn-outline-secondary{% endif %}"
+                 href="?window={{ w }}{% if usd_lens %}&amp;usd=1{% endif %}#pane-price">{{ w }}</a>
+            {% endfor %}
+          </div>
+          {% if price_tab_chart %}
+            <div class="chart-legend mb-2">
+              {% for name, color in price_tab_chart.legend %}<span><span class="dot" style="background:{{ color }}"></span>{{ name }}</span>{% endfor %}
+            </div>
+            {{ price_tab_chart.svg|safe }}
+          {% endif %}
+          <div class="d-flex justify-content-between eyebrow mt-2">
+            <span>Low {{ price_chart.min_close|metric_value:price_currency }}</span>
+            <span>High {{ price_chart.max_close|metric_value:price_currency }}</span>
+          </div>
+        </div>
+      </div>
+    {% endif %}
+
+    <!-- Statement tabs -->
+    {% for st, chart in statement_panes %}
+      <div class="tab-pane fade" id="pane-{{ st.name|slugify }}" role="tabpanel" aria-labelledby="tab-{{ st.name|slugify }}" tabindex="0">
+        {% if st.name == "Balance Sheet" and bs_compositions %}
+          <div class="card p-4 mb-3">
+            <div class="d-flex justify-content-between align-items-baseline mb-3 flex-wrap gap-2">
+              <div class="eyebrow">Balance sheet composition</div>
+              <select class="form-select form-select-sm w-auto" aria-label="Fiscal year" onchange="bsShowYear(this.value)">
+                {% for c in bs_compositions %}<option value="{{ c.year }}">FY {{ c.year }}</option>{% endfor %}
+              </select>
+            </div>
+            {% for c in bs_compositions %}
+              <div class="bs-year" data-year="{{ c.year }}" {% if not forloop.first %}hidden{% endif %}>
+                <div class="bs-comp">
+                  <div class="bs-col">
+                    <div class="bs-col-head"><span>{{ c.assets.title }}</span><span class="mono">${{ c.assets.total|compact_money }}</span></div>
+                    <div class="bs-stack">
+                      {% for s in c.assets.segments %}<div class="bs-seg{% if s.boundary %} bs-boundary{% endif %}" style="height:{{ s.pct|floatformat:3 }}%; background:{{ s.color }}" title="{{ s.name }}"></div>{% endfor %}
+                    </div>
+                    <div class="bs-legend">
+                      {% for s in c.assets.segments %}
+                        <div class="bs-leg-item"><span><span class="bs-leg-dot" style="background:{{ s.color }}"></span>{{ s.name }}</span><span class="mono">${{ s.value|compact_money }}</span></div>
+                      {% endfor %}
+                    </div>
+                  </div>
+                  <div class="bs-col">
+                    <div class="bs-col-head"><span>{{ c.liabilities_equity.title }}</span><span class="mono">${{ c.liabilities_equity.total|compact_money }}</span></div>
+                    <div class="bs-stack">
+                      {% for s in c.liabilities_equity.segments %}<div class="bs-seg{% if s.boundary %} bs-boundary{% endif %}" style="height:{{ s.pct|floatformat:3 }}%; background:{{ s.color }}" title="{{ s.name }}"></div>{% endfor %}
+                    </div>
+                    <div class="bs-legend">
+                      {% for s in c.liabilities_equity.segments %}
+                        <div class="bs-leg-item"><span><span class="bs-leg-dot" style="background:{{ s.color }}"></span>{{ s.name }}</span><span class="mono">${{ s.value|compact_money }}</span></div>
+                      {% endfor %}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+        {% elif chart %}
+          <div class="card p-4 mb-3">
+            <div class="chart-legend mb-2">
+              {% for name, color in chart.legend %}<span><span class="dot" style="background:{{ color }}"></span>{{ name }}</span>{% endfor %}
+            </div>
+            {{ chart.svg|safe }}
+          </div>
+        {% endif %}
+        <div class="card p-0 table-responsive">
+          <table class="table table-hover fs-web align-middle mb-0">
+            <thead>
+              <tr>
+                <th scope="col">Line item</th>
+                {% for y in st.years %}<th scope="col" class="num">FY {{ y }}</th>{% endfor %}
+                <th scope="col" class="spark">Trend</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% regroup st.lines by section as sections %}
+              {% for sec in sections %}
+                {% if sec.grouper %}
+                  <tr class="section-head"><td colspan="{{ st.years|length|add:2 }}">{{ sec.grouper }}</td></tr>
+                {% endif %}
+                {% for line in sec.list %}
+                  <tr class="{{ line.row_class }}">
+                    <td class="label indent-{{ line.indent }}">{{ line.display_name }}</td>
+                    {% for v in line.values %}<td class="num">{{ v|compact_money }}</td>{% endfor %}
+                    <td class="spark">{{ line.values|sparkline }}</td>
+                  </tr>
+                {% endfor %}
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    {% endfor %}
+
+    <!-- Quarterly (Income Statement by fiscal quarter) -->
+    {% if quarterly.lines %}
+      <div class="tab-pane fade" id="pane-quarterly" role="tabpanel" aria-labelledby="tab-quarterly" tabindex="0">
+        {% if quarterly_chart %}
+          <div class="card p-4 mb-3">
+            <div class="chart-legend mb-2">
+              {% for name, color in quarterly_chart.legend %}<span><span class="dot" style="background:{{ color }}"></span>{{ name }}</span>{% endfor %}
+            </div>
+            {{ quarterly_chart.svg|safe }}
+          </div>
+        {% endif %}
+        <div class="eyebrow mb-2">{{ quarterly.name }} · by fiscal quarter</div>
+        <div class="card p-0 table-responsive">
+          <table class="table table-hover fs-web align-middle mb-0">
+            <thead>
+              <tr>
+                <th scope="col">Line item</th>
+                {% for c in quarterly.columns %}<th scope="col" class="num">{{ c }}</th>{% endfor %}
+                <th scope="col" class="spark">Trend</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for line in quarterly.lines %}
+                <tr class="{{ line.row_class }}">
+                  <td class="label indent-{{ line.indent }}">{{ line.display_name }}</td>
+                  {% for v in line.values %}<td class="num">{{ v|compact_money }}</td>{% endfor %}
+                  <td class="spark">{{ line.values|sparkline }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    {% endif %}
+
+    <!-- Valuation (intrinsic-value football field + MoS + multiples) -->
+    {% if iv_chart or mos_scenarios or valuation_metrics %}
+      <div class="tab-pane fade" id="pane-valuation" role="tabpanel" aria-labelledby="tab-valuation" tabindex="0">
+        {% if iv_chart %}
+          <div class="card p-4 mb-4">
+            <div class="d-flex justify-content-between align-items-baseline mb-3 flex-wrap gap-2">
+              <div>
+                <div class="eyebrow">Intrinsic value</div>
+                <h2 class="h6 mb-0 mt-1">Per share · bear – mid – bull</h2>
+              </div>
+              {% if iv_chart.price is not None %}<span class="mono small">Price {{ iv_chart.price|metric_value:price_currency }}</span>{% endif %}
+            </div>
+            {% for b in iv_chart.bars %}
+              <div class="mb-3">
+                <div class="d-flex justify-content-between small mb-1">
+                  <span>{{ b.method }} <span class="text-muted">· FY{{ b.fiscal_year }}</span></span>
+                  <span class="mono">{{ b.bear|metric_value:"usd" }} – {{ b.mid|metric_value:"usd" }} – {{ b.bull|metric_value:"usd" }}</span>
+                </div>
+                <div class="ff-track">
+                  <div class="ff-range {% if b.covers_price %}covers{% endif %}" style="left:{{ b.left_pct }}%; width:{{ b.width_pct }}%"></div>
+                  <div class="ff-mid" style="left:{{ b.mid_pct }}%"></div>
+                  {% if iv_chart.price_pct is not None %}<div class="ff-price" style="left:{{ iv_chart.price_pct }}%"></div>{% endif %}
+                </div>
+              </div>
+            {% endfor %}
+            <p class="text-muted small mb-0 mt-2">Shaded = intrinsic-value range (bear–mid–bull);
+              <span style="color:var(--negative)">red line</span> = market price. A price left of the range implies undervaluation.</p>
+          </div>
+        {% endif %}
+        <div class="row g-3 row-cols-1 row-cols-lg-2">
+          {% if mos_scenarios %}
+            <div class="col"><div class="card p-4 h-100">
+              <h2 class="h6 mb-3">Margin of safety <span class="text-muted small fw-normal">· by scenario</span></h2>
+              <table class="table table-sm table-hover align-middle mb-0">
+                <thead><tr>
+                  <th scope="col">Method</th>
+                  <th scope="col" class="num">Bear</th>
+                  <th scope="col" class="num">Mid</th>
+                  <th scope="col" class="num">Bull</th>
+                </tr></thead>
+                <tbody>
+                  {% for r in mos_scenarios %}
+                    <tr>
+                      <td>{{ r.method }} <span class="text-muted small">· {{ r.basis }}</span></td>
+                      <td class="num {{ r.bear|sign_class }}">{{ r.bear|metric_value:"percent" }}</td>
+                      <td class="num {{ r.mid|sign_class }}">{{ r.mid|metric_value:"percent" }}</td>
+                      <td class="num {{ r.bull|sign_class }}">{{ r.bull|metric_value:"percent" }}</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+              <p class="text-muted small mb-0 mt-2">Positive = intrinsic value above price (a discount); negative = market pays more.</p>
+            </div></div>
+          {% endif %}
+          {% if valuation_metrics %}
+            <div class="col"><div class="card p-4 h-100">
+              <h2 class="h6 mb-3">Multiples &amp; yields</h2>
+              <table class="table table-sm table-hover align-middle mb-0"><tbody>
+                {% for m in valuation_metrics %}
+                  <tr>
+                    <td>{{ m.metric }}</td>
+                    <td class="num">{{ m.value|metric_value:m.unit }}</td>
+                    <td class="text-muted small text-end">FY {{ m.fiscal_year }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody></table>
+            </div></div>
+          {% endif %}
+        </div>
+      </div>
+    {% endif %}
+
+    <!-- Derived metrics (valuation categories excluded — see the Valuation tab) -->
+    {% if derived_metrics %}
+      <div class="tab-pane fade" id="pane-metrics" role="tabpanel" aria-labelledby="tab-metrics" tabindex="0">
+        {% regroup derived_metrics by category as metric_groups %}
+        <div class="row g-3 row-cols-1 row-cols-lg-2">
+          {% for group in metric_groups %}
+            <div class="col">
+              <div class="card p-4 h-100">
+                <h2 class="h6 mb-3">{{ group.grouper }}</h2>
+                <table class="table table-sm table-hover align-middle mb-0">
+                  <tbody>
+                    {% for m in group.list %}
+                      <tr>
+                        <td>{{ m.metric }}</td>
+                        <td class="num">{{ m.value|metric_value:m.unit }}</td>
+                        <td class="text-muted small text-end">FY {{ m.fiscal_year }}</td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+    {% endif %}
+  </div>
+  {% endwith %}
+{% endblock %}
