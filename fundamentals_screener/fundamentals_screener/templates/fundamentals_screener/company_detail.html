@@ -1,5 +1,5 @@
 {% extends "fundamentals_screener/base_screener.html" %}
-{% load fmt logos humanize %}
+{% load fmt logos humanize l10n %}
 {% block title %}{{ detail.summary.ticker }} — {{ detail.summary.name }}{% endblock %}
 
 {% block extra_head %}
@@ -119,6 +119,17 @@
 {% endblock %}
 
 {% block content %}
+  {# Force period-decimal numbers regardless of the host's active locale — several places
+     below inject a raw or floatformat-ed percentage directly into a CSS style="...%" value
+     (balance-sheet segment heights, the valuation football field). Django's default number
+     rendering is locale-aware, so on a host with e.g. Spanish active (comma decimal
+     separator) "10.003" renders as "10,003", which is invalid CSS and silently drops the
+     whole declaration — confirmed live (alopezm.xyz, es locale) as the cause of both the
+     "squished" balance-sheet and valuation charts. Every OTHER number on this page already
+     goes through fmt.py's plain-Python-string filters (metric_value/compact_money/…), which
+     were never affected — only these two chart areas render a number Django itself
+     stringifies. #}
+  {% localize off %}
   {% with s=detail.summary %}
   <div class="co-masthead d-flex align-items-end justify-content-between flex-wrap gap-3">
     <div class="d-flex align-items-center gap-3 flex-wrap">
@@ -271,7 +282,7 @@
                   <div class="bs-col">
                     <div class="bs-col-head"><span>{{ c.assets.title }}</span><span class="mono">${{ c.assets.total|compact_money }}</span></div>
                     <div class="bs-stack">
-                      {% for s in c.assets.segments %}<div class="bs-seg{% if s.boundary %} bs-boundary{% endif %}" style="height:{{ s.pct|floatformat:3 }}%; background:{{ s.color }}" title="{{ s.name }}"></div>{% endfor %}
+                      {% for s in c.assets.segments %}<div class="bs-seg{% if s.boundary %} bs-boundary{% endif %}" style="height:{{ s.pct|floatformat:"3u" }}%; background:{{ s.color }}" title="{{ s.name }}"></div>{% endfor %}
                     </div>
                     <div class="bs-legend">
                       {% for s in c.assets.segments %}
@@ -282,7 +293,7 @@
                   <div class="bs-col">
                     <div class="bs-col-head"><span>{{ c.liabilities_equity.title }}</span><span class="mono">${{ c.liabilities_equity.total|compact_money }}</span></div>
                     <div class="bs-stack">
-                      {% for s in c.liabilities_equity.segments %}<div class="bs-seg{% if s.boundary %} bs-boundary{% endif %}" style="height:{{ s.pct|floatformat:3 }}%; background:{{ s.color }}" title="{{ s.name }}"></div>{% endfor %}
+                      {% for s in c.liabilities_equity.segments %}<div class="bs-seg{% if s.boundary %} bs-boundary{% endif %}" style="height:{{ s.pct|floatformat:"3u" }}%; background:{{ s.color }}" title="{{ s.name }}"></div>{% endfor %}
                     </div>
                     <div class="bs-legend">
                       {% for s in c.liabilities_equity.segments %}
@@ -399,6 +410,11 @@
           {% if mos_scenarios %}
             <div class="col"><div class="card p-4 h-100">
               <h2 class="h6 mb-3">Margin of safety <span class="text-muted small fw-normal">· by scenario</span></h2>
+              <p class="text-muted small mb-3">Bear/Mid/Bull are three complete assumption profiles per
+                method — not a simple haircut on one number. Each scenario pairs a more conservative
+                (Bear) to more optimistic (Bull) discount rate/WACC, growth rate, and valuation multiple;
+                Mid is the conservative Buffett/Graham base case. Computed upstream from
+                <code class="small">valuation_assumptions.json</code>, consistently across every ticker.</p>
               <table class="table table-sm table-hover align-middle mb-0">
                 <thead><tr>
                   <th scope="col">Method</th>
@@ -466,4 +482,5 @@
     {% endif %}
   </div>
   {% endwith %}
+  {% endlocalize %}
 {% endblock %}

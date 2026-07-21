@@ -6,6 +6,7 @@ Pure geometry, no I/O and no financial logic. Kept unit-testable, like
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
@@ -13,11 +14,46 @@ from .dtos import PricePoint, QuarterGrid, Statement
 
 # Editorial tokens (kept in sync with static/fundamentals_screener/css/app.css).
 _ACCENT = "#0EA5B0"
+_ACCENT_SOFT = "#E3F6F8"
 _POSITIVE = "#0F6E56"
 _NEGATIVE = "#B0301A"
-_WARNING = "#E8702A"
 _INK3 = "#7C8DA6"
 _RULE = "#D7DEE8"
+_MONO = "JetBrains Mono, monospace"
+
+
+def _compact(v: float) -> str:
+    """Axis-tick label: ``391B`` / ``15.3M`` / ``6.1K`` / a bare number under 1,000."""
+    magnitude = abs(v)
+    if magnitude >= 1e12:
+        return f"{v / 1e12:,.1f}T"
+    if magnitude >= 1e9:
+        return f"{v / 1e9:,.1f}B"
+    if magnitude >= 1e6:
+        return f"{v / 1e6:,.1f}M"
+    if magnitude >= 1e3:
+        return f"{v / 1e3:,.1f}K"
+    return f"{v:,.0f}"
+
+
+def _nice_ceil(val: float) -> float:
+    """Round up to a "nice" chart bound (multiples of 1.5/2/3/5/7.5/10 at the value's
+    magnitude), so axis ticks land on round numbers instead of the raw data max."""
+    if val <= 0:
+        return 10.0
+    magnitude = 10 ** math.floor(math.log10(val))
+    residual = val / magnitude
+    for cap, mult in ((1.5, 1.5), (2, 2), (3, 3), (5, 5), (7.5, 7.5)):
+        if residual <= cap:
+            return mult * magnitude
+    return 10 * magnitude
+
+
+def _nice_ticks(lo: float, hi: float, n_ticks: int = 5) -> list[float]:
+    """``n_ticks`` evenly spaced values from ``lo`` to ``hi`` inclusive."""
+    span = hi - lo
+    step = span / (n_ticks - 1) if n_ticks > 1 else span
+    return [lo + i * step for i in range(n_ticks)]
 
 
 def sparkline_svg(
@@ -79,19 +115,26 @@ def _bar_chart_svg(
     height: int = 300,
 ) -> str:
     """Grouped vertical bars (one group per label) with an optional overlaid line, on a shared
-    axis with a zero baseline. Negative values draw below the baseline. Numbers only → safe."""
+    value axis (gridlines + compact labels) with a zero baseline. Negative values draw below
+    the baseline. Numbers only → safe."""
     numbers = [v for _, vals, _ in series for v in vals if v is not None]
     if line:
         numbers += [v for v in line[1] if v is not None]
     if not numbers or not labels:
         return ""
     lo, hi = min(numbers + [0.0]), max(numbers + [0.0])
-    span = (hi - lo) or 1.0
-    pad_l, pad_r, pad_t, pad_b = 8, 8, 14, 26
+    # Round the axis bounds out to "nice" numbers so gridline labels are round, not the raw
+    # data max — matches the axis this project's Streamlit app already draws for the same data.
+    axis_hi = _nice_ceil(hi) if hi > 0 else 0.0
+    axis_lo = -_nice_ceil(abs(lo)) if lo < 0 else 0.0
+    if axis_hi == 0 and axis_lo == 0:
+        axis_hi = 10.0
+    span = (axis_hi - axis_lo) or 1.0
+    pad_l, pad_r, pad_t, pad_b = 52, 8, 14, 26
     plot_w, plot_h = width - pad_l - pad_r, height - pad_t - pad_b
 
     def py(v: float) -> float:
-        return pad_t + plot_h * (hi - v) / span
+        return pad_t + plot_h * (axis_hi - v) / span
 
     y0 = py(0.0)
     n = len(labels)
@@ -101,7 +144,15 @@ def _bar_chart_svg(
     bar_w = group_w / nb
     gx0 = (slot - group_w) / 2
 
-    parts = [f'<line x1="{pad_l}" y1="{y0:.1f}" x2="{width - pad_r}" y2="{y0:.1f}" stroke="{_RULE}" stroke-width="1"/>']
+    parts: list[str] = []
+    for tick in _nice_ticks(axis_lo, axis_hi, n_ticks=5):
+        y = py(tick)
+        parts.append(f'<line x1="{pad_l}" y1="{y:.1f}" x2="{width - pad_r}" y2="{y:.1f}" stroke="{_RULE}" stroke-width="1"/>')
+        parts.append(
+            f'<text x="{pad_l - 8}" y="{y + 3:.1f}" text-anchor="end" font-size="11" '
+            f'fill="{_INK3}" font-family="{_MONO}">{_compact(tick)}</text>'
+        )
+    parts.append(f'<line x1="{pad_l}" y1="{y0:.1f}" x2="{width - pad_r}" y2="{y0:.1f}" stroke="{_INK3}" stroke-width="1"/>')
     for si, (_name, vals, color) in enumerate(series):
         for i, v in enumerate(vals):
             if v is None:
@@ -156,18 +207,92 @@ def income_statement_chart(statement: Statement) -> TabChart | None:
     return TabChart(_bar_chart_svg(labels, series, line=line), legend)
 
 
-def cash_flow_chart(statement: Statement) -> TabChart | None:
-    """Operating / Investing / Financing cash-flow grouped bars, across fiscal years."""
-    specs = (
-        ("Operating", "Operating CF", _POSITIVE),
-        ("Investing", "Investing CF", _WARNING),
-        ("Financing", "Financing CF", _NEGATIVE),
+def _ocf_fcf_chart_svg(
+    labels: Sequence[str],
+    ocf: Sequence[float | None],
+    fcf: Sequence[float | None],
+    *,
+    width: int = 1000,
+    height: int = 300,
+) -> str:
+    """Operating Cash Flow (wide, soft-filled bar) with Free Cash Flow = OCF − |CapEx| (a
+    narrower bar in front); the OCF→FCF gap reads visually as CapEx. A year missing CapEx
+    draws no front bar (never shows FCF == OCF, which would misstate a real gap as none)."""
+    numbers = [v for v in (*ocf, *fcf) if v is not None]
+    if not numbers or not labels:
+        return ""
+    lo, hi = min(numbers + [0.0]), max(numbers + [0.0])
+    axis_hi = _nice_ceil(hi) if hi > 0 else 0.0
+    axis_lo = -_nice_ceil(abs(lo)) if lo < 0 else 0.0
+    if axis_hi == 0 and axis_lo == 0:
+        axis_hi = 10.0
+    span = (axis_hi - axis_lo) or 1.0
+    pad_l, pad_r, pad_t, pad_b = 52, 8, 14, 26
+    plot_w, plot_h = width - pad_l - pad_r, height - pad_t - pad_b
+
+    def py(v: float) -> float:
+        return pad_t + plot_h * (axis_hi - v) / span
+
+    y0 = py(0.0)
+    n = len(labels)
+    slot = plot_w / n
+    ocf_w = slot * 0.68
+    fcf_w = ocf_w * 0.5
+    ox0 = (slot - ocf_w) / 2
+    fx0 = (slot - fcf_w) / 2
+
+    parts: list[str] = []
+    for tick in _nice_ticks(axis_lo, axis_hi, n_ticks=5):
+        y = py(tick)
+        parts.append(f'<line x1="{pad_l}" y1="{y:.1f}" x2="{width - pad_r}" y2="{y:.1f}" stroke="{_RULE}" stroke-width="1"/>')
+        parts.append(
+            f'<text x="{pad_l - 8}" y="{y + 3:.1f}" text-anchor="end" font-size="11" '
+            f'fill="{_INK3}" font-family="{_MONO}">{_compact(tick)}</text>'
+        )
+    parts.append(f'<line x1="{pad_l}" y1="{y0:.1f}" x2="{width - pad_r}" y2="{y0:.1f}" stroke="{_INK3}" stroke-width="1"/>')
+
+    for i, v in enumerate(ocf):
+        if v is None:
+            continue
+        x = pad_l + i * slot + ox0
+        yv = py(v)
+        parts.append(
+            f'<rect x="{x:.1f}" y="{min(yv, y0):.1f}" width="{ocf_w:.1f}" height="{abs(yv - y0):.1f}" '
+            f'fill="{_ACCENT_SOFT}" stroke="{_ACCENT}" stroke-width="1" rx="1"/>'
+        )
+    for i, v in enumerate(fcf):
+        if v is None:
+            continue
+        x = pad_l + i * slot + fx0
+        yv = py(v)
+        parts.append(
+            f'<rect x="{x:.1f}" y="{min(yv, y0):.1f}" width="{fcf_w:.1f}" height="{abs(yv - y0):.1f}" '
+            f'fill="{_POSITIVE}" rx="1"/>'
+        )
+    for i, lab in enumerate(labels):
+        parts.append(
+            f'<text x="{pad_l + i * slot + slot / 2:.1f}" y="{height - 8}" text-anchor="middle" '
+            f'font-size="11" fill="{_INK3}" font-family="{_MONO}">{lab}</text>'
+        )
+    return (
+        f'<svg class="tab-chart" viewBox="0 0 {width} {height}" width="100%" '
+        f'preserveAspectRatio="xMidYMid meet" role="img">' + "".join(parts) + "</svg>"
     )
-    series = [(label, vals, color) for label, name, color in specs if (vals := _line_of(statement.lines, name))]
-    if not series:
+
+
+def cash_flow_chart(statement: Statement) -> TabChart | None:
+    """Operating Cash Flow vs Free Cash Flow (= OCF − |CapEx|), across fiscal years — the
+    OCF→FCF gap reads as CapEx. ``None`` when the statement has no Operating CF line."""
+    ocf = _line_of(statement.lines, "Operating CF")
+    if ocf is None or all(v is None for v in ocf):
         return None
-    legend = tuple((label, color) for label, vals, color in series)
-    return TabChart(_bar_chart_svg(_year_labels(statement.years), series), legend)
+    capex = _line_of(statement.lines, "CapEx")
+    if capex is None:
+        fcf: tuple[float | None, ...] = tuple(None for _ in ocf)
+    else:
+        fcf = tuple(None if (o is None or c is None) else o - abs(c) for o, c in zip(ocf, capex))
+    legend = (("Operating CF", _ACCENT), ("Free CF (= OCF − CapEx)", _POSITIVE))
+    return TabChart(_ocf_fcf_chart_svg(_year_labels(statement.years), ocf, fcf), legend)
 
 
 def quarterly_chart(grid: QuarterGrid) -> TabChart | None:

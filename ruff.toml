@@ -60,6 +60,7 @@ ignore = [
 "fundamentals_pipeline/periods.py" = ["UP007"]
 "fundamentals_pipeline/valuation.py" = ["UP007"]
 "fundamentals_screener/fundamentals_screener/repositories/base.py" = ["B905"]
+"fundamentals_screener/fundamentals_screener/charts.py" = ["B905"]
 
 [format]
 quote-style = "double"
