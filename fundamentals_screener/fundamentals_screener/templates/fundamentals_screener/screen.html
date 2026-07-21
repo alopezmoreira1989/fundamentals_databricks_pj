@@ -61,7 +61,17 @@
   .scr-chip-grid input { accent-color: var(--accent); width: 15px; height: 15px; }
   .scr-no-match { padding: 4px 2px 0; }
 
-  .scr-filter-rule { display: grid; grid-template-columns: 1.4fr .8fr .8fr; gap: 8px; margin-bottom: 8px; }
+  .scr-filter-rule { display: grid; grid-template-columns: 1.4fr .8fr .8fr auto; gap: 8px; margin-bottom: 8px; align-items: center; }
+  .scr-rm-filter {
+    background: none; border: none; color: var(--ink-3); cursor: pointer;
+    font-size: 1.1rem; line-height: 1; padding: 2px 6px; border-radius: 4px;
+  }
+  .scr-rm-filter:hover { color: var(--negative); background: var(--rule-soft); }
+  .scr-add-filter {
+    background: none; border: none; color: var(--accent-ink); cursor: pointer;
+    font-size: .8rem; font-weight: 500; padding: 4px 0; margin-top: 2px;
+  }
+  .scr-add-filter:hover { text-decoration: underline; }
 
   .scr-usd-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: .82rem; color: var(--ink-2); white-space: nowrap; }
   .scr-usd-toggle input { accent-color: var(--accent); width: 15px; height: 15px; }
@@ -161,20 +171,39 @@
           <summary>Metric filters {% if active_filter_count %}<span class="scr-count">{{ active_filter_count }}</span>{% endif %} <span class="scr-chev">▾</span></summary>
           <div class="scr-panel" style="min-width:440px">
             <div class="scr-panel-title">Leave blank to ignore</div>
-            {% for f in filter_rows %}
+            <div class="scr-filter-rows">
+              {% for f in filter_rows %}
+                <div class="scr-filter-rule">
+                  <select name="fmetric" class="form-select form-select-sm" aria-label="Filter metric">
+                    <option value="">— metric —</option>
+                    {% for m in metrics %}
+                      <option value="{{ m }}" {% if m == f.metric %}selected{% endif %}>{{ m }}</option>
+                    {% endfor %}
+                  </select>
+                  <input type="text" inputmode="decimal" name="fmin" value="{{ f.min }}"
+                         class="form-control form-control-sm" placeholder="min" aria-label="Minimum">
+                  <input type="text" inputmode="decimal" name="fmax" value="{{ f.max }}"
+                         class="form-control form-control-sm" placeholder="max" aria-label="Maximum">
+                  <button type="button" class="scr-rm-filter" aria-label="Remove this filter">×</button>
+                </div>
+              {% endfor %}
+            </div>
+            <button type="button" class="scr-add-filter">+ Add another filter</button>
+            <template class="scr-filter-row-template">
               <div class="scr-filter-rule">
                 <select name="fmetric" class="form-select form-select-sm" aria-label="Filter metric">
                   <option value="">— metric —</option>
                   {% for m in metrics %}
-                    <option value="{{ m }}" {% if m == f.metric %}selected{% endif %}>{{ m }}</option>
+                    <option value="{{ m }}">{{ m }}</option>
                   {% endfor %}
                 </select>
-                <input type="text" inputmode="decimal" name="fmin" value="{{ f.min }}"
+                <input type="text" inputmode="decimal" name="fmin"
                        class="form-control form-control-sm" placeholder="min" aria-label="Minimum">
-                <input type="text" inputmode="decimal" name="fmax" value="{{ f.max }}"
+                <input type="text" inputmode="decimal" name="fmax"
                        class="form-control form-control-sm" placeholder="max" aria-label="Maximum">
+                <button type="button" class="scr-rm-filter" aria-label="Remove this filter">×</button>
               </div>
-            {% endfor %}
+            </template>
           </div>
         </details>
 
@@ -310,6 +339,23 @@
     details.addEventListener('toggle', function () {
       if (details.open) search.focus();
     });
+
+    // Metric filters: add/remove rows client-side. The server already accepts any number of
+    // fmetric/fmin/fmax triplets (no hardcoded cap) — this only adds the UI to grow past the
+    // 3 rows rendered by default.
+    var addBtn = document.querySelector('.scr-add-filter');
+    if (addBtn) {
+      var rowsContainer = document.querySelector('.scr-filter-rows');
+      var rowTemplate = document.querySelector('.scr-filter-row-template');
+      addBtn.addEventListener('click', function () {
+        rowsContainer.appendChild(rowTemplate.content.cloneNode(true));
+      });
+      rowsContainer.addEventListener('click', function (e) {
+        var btn = e.target.closest('.scr-rm-filter');
+        if (!btn) return;
+        btn.closest('.scr-filter-rule').remove();
+      });
+    }
   });
 </script>
 {% endblock %}
