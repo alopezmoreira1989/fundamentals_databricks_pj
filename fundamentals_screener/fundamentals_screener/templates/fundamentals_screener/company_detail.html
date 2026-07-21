@@ -119,16 +119,17 @@
 {% endblock %}
 
 {% block content %}
-  {# Force period-decimal numbers regardless of the host's active locale — several places
-     below inject a raw or floatformat-ed percentage directly into a CSS style="...%" value
-     (balance-sheet segment heights, the valuation football field). Django's default number
-     rendering is locale-aware, so on a host with e.g. Spanish active (comma decimal
-     separator) "10.003" renders as "10,003", which is invalid CSS and silently drops the
-     whole declaration — confirmed live (alopezm.xyz, es locale) as the cause of both the
-     "squished" balance-sheet and valuation charts. Every OTHER number on this page already
-     goes through fmt.py's plain-Python-string filters (metric_value/compact_money/…), which
-     were never affected — only these two chart areas render a number Django itself
-     stringifies. #}
+  {% comment %}
+    Force period-decimal numbers regardless of the host's active locale. Several places below
+    inject a raw or floatformat-ed percentage directly into a CSS percent-width style value
+    (balance-sheet segment heights, the valuation football field). Django's default number
+    rendering is locale-aware, so on a host with e.g. Spanish active (comma decimal
+    separator), "10.003" renders as "10,003" — invalid CSS, silently dropping the whole
+    declaration. Confirmed live (alopezm.xyz, es locale) as the cause of both the "squished"
+    balance-sheet and valuation charts. Every OTHER number on this page already goes through
+    fmt.py's plain-Python-string filters (metric_value/compact_money/etc), which were never
+    affected — only these two chart areas render a number Django itself stringifies.
+  {% endcomment %}
   {% localize off %}
   {% with s=detail.summary %}
   <div class="co-masthead d-flex align-items-end justify-content-between flex-wrap gap-3">
@@ -410,11 +411,9 @@
           {% if mos_scenarios %}
             <div class="col"><div class="card p-4 h-100">
               <h2 class="h6 mb-3">Margin of safety <span class="text-muted small fw-normal">· by scenario</span></h2>
-              <p class="text-muted small mb-3">Bear/Mid/Bull are three complete assumption profiles per
-                method — not a simple haircut on one number. Each scenario pairs a more conservative
-                (Bear) to more optimistic (Bull) discount rate/WACC, growth rate, and valuation multiple;
-                Mid is the conservative Buffett/Graham base case. Computed upstream from
-                <code class="small">valuation_assumptions.json</code>, consistently across every ticker.</p>
+              <p class="text-muted small mb-3">Bear, Mid, and Bull picture three different futures for the
+                company, not the same estimate nudged up or down. Bear assumes slower growth and more risk;
+                Bull assumes faster growth and less risk; Mid is the balanced, middle-of-the-road case.</p>
               <table class="table table-sm table-hover align-middle mb-0">
                 <thead><tr>
                   <th scope="col">Method</th>

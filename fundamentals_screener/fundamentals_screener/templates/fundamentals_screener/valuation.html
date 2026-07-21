@@ -56,11 +56,9 @@
   <div class="bg-white rounded-3 shadow-sm p-4">
     <h2 class="h5 mb-3">Margin of Safety <span class="text-muted small fw-normal">· by scenario</span></h2>
     {% if scenarios %}
-      <p class="text-muted small mb-3">Bear/Mid/Bull are three complete assumption profiles per
-        method — not a simple haircut on one number. Each scenario pairs a more conservative
-        (Bear) to more optimistic (Bull) discount rate/WACC, growth rate, and valuation multiple;
-        Mid is the conservative Buffett/Graham base case. Computed upstream from
-        <code class="small">valuation_assumptions.json</code>, consistently across every ticker.</p>
+      <p class="text-muted small mb-3">Bear, Mid, and Bull picture three different futures for the
+        company, not the same estimate nudged up or down. Bear assumes slower growth and more risk;
+        Bull assumes faster growth and less risk; Mid is the balanced, middle-of-the-road case.</p>
       <div class="table-responsive">
         <table class="table table-sm table-hover align-middle mb-0">
           <thead>
