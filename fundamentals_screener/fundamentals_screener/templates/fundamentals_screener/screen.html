@@ -1,106 +1,187 @@
 {% extends "fundamentals_screener/base_screener.html" %}
 {% load fmt logos %}
 {% block title %}Screener — Fundamentals Screener{% endblock %}
+
+{% block extra_head %}
+<style>
+  /* Compact filter toolbar — a dense CSS grid instead of Bootstrap's row/col breakpoints,
+     which left dead cells whenever a row's items didn't sum to 12 at every breakpoint (the
+     "View Market Cap in USD" checkbox stranding a bare col-md-4 was the visible symptom). */
+  .scr-filter-row {
+    display: grid; grid-template-columns: 1.6fr repeat(5, 1fr); gap: 12px;
+  }
+  @media (max-width: 1080px) { .scr-filter-row { grid-template-columns: repeat(3, 1fr); } }
+  @media (max-width: 640px) { .scr-filter-row { grid-template-columns: repeat(2, 1fr); } }
+
+  .scr-toolbar {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--rule-soft);
+  }
+  .scr-toolbar-spacer { flex: 1; }
+
+  /* Columns / Metric filters — collapsed by default so they don't occupy permanent vertical
+     space; open automatically when they carry active state (see the `open` attrs below). */
+  .scr-disclosure { position: relative; }
+  .scr-disclosure > summary {
+    list-style: none; cursor: pointer; user-select: none;
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: .82rem; font-weight: 500; color: var(--ink-2);
+    border: 1px solid var(--rule); border-radius: 4px; padding: 7px 12px; background: var(--bg-card);
+  }
+  .scr-disclosure > summary::-webkit-details-marker { display: none; }
+  .scr-disclosure > summary:hover { border-color: var(--ink-3); color: var(--ink); }
+  .scr-disclosure[open] > summary {
+    border-color: var(--accent); color: var(--accent-ink); background: var(--accent-soft);
+  }
+  .scr-disclosure > summary .scr-count {
+    font-family: var(--mono); font-size: .68rem; background: var(--accent); color: #fff;
+    border-radius: 10px; padding: 1px 7px;
+  }
+  .scr-disclosure > summary .scr-chev { font-size: .6rem; color: var(--ink-3); transition: transform .15s ease; }
+  .scr-disclosure[open] > summary .scr-chev { transform: rotate(180deg); }
+
+  .scr-panel {
+    position: absolute; top: calc(100% + 6px); left: 0; z-index: 20;
+    background: var(--bg-card); border: 1px solid var(--rule); border-radius: 6px;
+    box-shadow: 0 8px 24px rgba(11, 37, 69, .14); padding: 14px;
+    min-width: 360px; max-width: calc(100vw - 48px);
+  }
+  @media (max-width: 480px) { .scr-panel { min-width: min(360px, calc(100vw - 48px)); } }
+  .scr-panel-title {
+    font-family: var(--mono); font-size: .64rem; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--ink-3); margin-bottom: 10px;
+  }
+  .scr-chip-grid {
+    display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px 16px;
+    max-height: 240px; overflow-y: auto;
+  }
+  .scr-chip-grid label { display: flex; align-items: center; gap: 7px; font-size: .84rem; padding: 3px 0; color: var(--ink-2); }
+  .scr-chip-grid input { accent-color: var(--accent); width: 15px; height: 15px; }
+
+  .scr-filter-rule { display: grid; grid-template-columns: 1.4fr .8fr .8fr; gap: 8px; margin-bottom: 8px; }
+
+  .scr-usd-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: .82rem; color: var(--ink-2); white-space: nowrap; }
+  .scr-usd-toggle input { accent-color: var(--accent); width: 15px; height: 15px; }
+
+  /* Table-columns toggle — its own small auto-submitting form, replicating the filter form's
+     current state as hidden fields so toggling a column never loses the active search/filters. */
+  .scr-table-cols { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; font-size: .78rem; color: var(--ink-3); margin-bottom: 12px; }
+  .scr-table-cols .scr-label { font-family: var(--mono); text-transform: uppercase; letter-spacing: .08em; font-size: .64rem; }
+  .scr-table-cols label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; color: var(--ink-2); }
+  .scr-table-cols input { accent-color: var(--accent); width: 13px; height: 13px; }
+</style>
+{% endblock %}
+
 {% block content %}
   <div class="p-4 bg-white rounded-3 shadow-sm mb-4">
     <h1 class="h3 mb-3">Screener</h1>
-    <form method="get" class="row g-3 align-items-end">
+    <form method="get">
       {# Keep the active sort when the filter form is re-submitted. #}
       <input type="hidden" name="sort" value="{{ sort_key }}">
       <input type="hidden" name="dir" value="{{ sort_dir }}">
-      <div class="col-12 col-md-4">
-        <label for="q" class="form-label">Search</label>
-        <input type="text" id="q" name="q" value="{{ q }}" class="form-control"
-               placeholder="Ticker or company…">
-      </div>
-      <div class="col-6 col-md-4">
-        <label for="sector" class="form-label">Sector</label>
-        <select id="sector" name="sector" class="form-select">
-          <option value="">All sectors</option>
-          {% for s in sectors %}
-            <option value="{{ s }}" {% if s == sector %}selected{% endif %}>{{ s }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="col-6 col-md-4">
-        <label for="index" class="form-label">Index</label>
-        <select id="index" name="index" class="form-select">
-          <option value="">Any</option>
-          <option value="sp500" {% if index == "sp500" %}selected{% endif %}>S&amp;P 500</option>
-          <option value="r3000" {% if index == "r3000" %}selected{% endif %}>Russell 3000</option>
-          <option value="tsx" {% if index == "tsx" %}selected{% endif %}>S&amp;P/TSX Composite</option>
-        </select>
-      </div>
-      <div class="col-6 col-md-4">
-        <label for="industry" class="form-label">Industry</label>
-        <select id="industry" name="industry" class="form-select">
-          <option value="">All industries</option>
-          {% for i in industries %}
-            <option value="{{ i }}" {% if i == industry %}selected{% endif %}>{{ i }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="col-6 col-md-4">
-        <label for="country" class="form-label">Country</label>
-        <select id="country" name="country" class="form-select">
-          <option value="">All countries</option>
-          {% for c in countries %}
-            <option value="{{ c }}" {% if c == country %}selected{% endif %}>{{ c }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="col-6 col-md-4">
-        <label for="market" class="form-label">Market</label>
-        <select id="market" name="market" class="form-select">
-          <option value="">All markets</option>
-          {% for m in markets %}
-            <option value="{{ m }}" {% if m == market %}selected{% endif %}>{{ m }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      {% if show_usd_toggle %}
-        <div class="col-12 col-md-4 form-check">
-          <input type="checkbox" class="form-check-input" id="usd" name="usd" value="1" {% if usd_lens %}checked{% endif %}>
-          <label class="form-check-label" for="usd">View Market Cap in USD <span class="text-muted small">(other figures stay native)</span></label>
-        </div>
+      {# Carry the table-columns choice through Apply too, once the user has made one. #}
+      {% if desc_explicit %}
+        <input type="hidden" name="desc_on" value="1">
+        {% for k in visible_desc %}<input type="hidden" name="desc" value="{{ k }}">{% endfor %}
       {% endif %}
 
-      <div class="col-12 col-lg-5">
-        <label for="col" class="form-label">Columns <span class="text-muted small">(ctrl/⌘-click for several)</span></label>
-        <select id="col" name="col" class="form-select" multiple size="6">
-          {% for m in metrics %}
-            <option value="{{ m }}" {% if m in cols %}selected{% endif %}>{{ m }}</option>
-          {% endfor %}
-        </select>
+      <div class="scr-filter-row">
+        <div>
+          <label for="q" class="form-label">Search</label>
+          <input type="text" id="q" name="q" value="{{ q }}" class="form-control"
+                 placeholder="Ticker or company…">
+        </div>
+        <div>
+          <label for="sector" class="form-label">Sector</label>
+          <select id="sector" name="sector" class="form-select">
+            <option value="">All sectors</option>
+            {% for s in sectors %}
+              <option value="{{ s }}" {% if s == sector %}selected{% endif %}>{{ s }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label for="index" class="form-label">Index</label>
+          <select id="index" name="index" class="form-select">
+            <option value="">Any</option>
+            <option value="sp500" {% if index == "sp500" %}selected{% endif %}>S&amp;P 500</option>
+            <option value="r3000" {% if index == "r3000" %}selected{% endif %}>Russell 3000</option>
+            <option value="tsx" {% if index == "tsx" %}selected{% endif %}>S&amp;P/TSX Composite</option>
+          </select>
+        </div>
+        <div>
+          <label for="industry" class="form-label">Industry</label>
+          <select id="industry" name="industry" class="form-select">
+            <option value="">All industries</option>
+            {% for i in industries %}
+              <option value="{{ i }}" {% if i == industry %}selected{% endif %}>{{ i }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label for="country" class="form-label">Country</label>
+          <select id="country" name="country" class="form-select">
+            <option value="">All countries</option>
+            {% for c in countries %}
+              <option value="{{ c }}" {% if c == country %}selected{% endif %}>{{ c }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label for="market" class="form-label">Market</label>
+          <select id="market" name="market" class="form-select">
+            <option value="">All markets</option>
+            {% for m in markets %}
+              <option value="{{ m }}" {% if m == market %}selected{% endif %}>{{ m }}</option>
+            {% endfor %}
+          </select>
+        </div>
       </div>
 
-      <div class="col-12 col-lg-7">
-        <label class="form-label">Metric filters <span class="text-muted small">(leave blank to ignore)</span></label>
-        {% for f in filter_rows %}
-          <div class="row g-2 mb-2 align-items-center">
-            <div class="col-6">
-              <select name="fmetric" class="form-select form-select-sm" aria-label="Filter metric">
-                <option value="">— metric —</option>
-                {% for m in metrics %}
-                  <option value="{{ m }}" {% if m == f.metric %}selected{% endif %}>{{ m }}</option>
-                {% endfor %}
-              </select>
-            </div>
-            <div class="col-3">
-              <input type="text" inputmode="decimal" name="fmin" value="{{ f.min }}"
-                     class="form-control form-control-sm" placeholder="min" aria-label="Minimum">
-            </div>
-            <div class="col-3">
-              <input type="text" inputmode="decimal" name="fmax" value="{{ f.max }}"
-                     class="form-control form-control-sm" placeholder="max" aria-label="Maximum">
+      <div class="scr-toolbar">
+        <details class="scr-disclosure" name="scr_toggle" {% if cols %}open{% endif %}>
+          <summary>Columns {% if cols %}<span class="scr-count">{{ cols|length }}</span>{% endif %} <span class="scr-chev">▾</span></summary>
+          <div class="scr-panel">
+            <div class="scr-panel-title">Metric columns to display</div>
+            <div class="scr-chip-grid">
+              {% for m in metrics %}
+                <label><input type="checkbox" name="col" value="{{ m }}" {% if m in cols %}checked{% endif %}> {{ m }}</label>
+              {% endfor %}
             </div>
           </div>
-        {% endfor %}
-      </div>
+        </details>
 
-      <div class="col-12 d-flex gap-2">
-        <button type="submit" class="btn btn-dark">Apply filters</button>
+        <details class="scr-disclosure" name="scr_toggle" {% if has_active_filters %}open{% endif %}>
+          <summary>Metric filters {% if active_filter_count %}<span class="scr-count">{{ active_filter_count }}</span>{% endif %} <span class="scr-chev">▾</span></summary>
+          <div class="scr-panel" style="min-width:440px">
+            <div class="scr-panel-title">Leave blank to ignore</div>
+            {% for f in filter_rows %}
+              <div class="scr-filter-rule">
+                <select name="fmetric" class="form-select form-select-sm" aria-label="Filter metric">
+                  <option value="">— metric —</option>
+                  {% for m in metrics %}
+                    <option value="{{ m }}" {% if m == f.metric %}selected{% endif %}>{{ m }}</option>
+                  {% endfor %}
+                </select>
+                <input type="text" inputmode="decimal" name="fmin" value="{{ f.min }}"
+                       class="form-control form-control-sm" placeholder="min" aria-label="Minimum">
+                <input type="text" inputmode="decimal" name="fmax" value="{{ f.max }}"
+                       class="form-control form-control-sm" placeholder="max" aria-label="Maximum">
+              </div>
+            {% endfor %}
+          </div>
+        </details>
+
+        {% if show_usd_toggle %}
+          <label class="scr-usd-toggle">
+            <input type="checkbox" name="usd" value="1" {% if usd_lens %}checked{% endif %}>
+            View Market Cap in USD <span class="text-muted">(other figures stay native)</span>
+          </label>
+        {% endif %}
+
+        <div class="scr-toolbar-spacer"></div>
         <a href="{% url 'fundamentals_screener:screen' %}" class="btn btn-outline-secondary">Reset</a>
+        <button type="submit" class="btn btn-dark">Apply filters</button>
       </div>
     </form>
   </div>
@@ -116,6 +197,20 @@
         {{ total }} match{{ total|pluralize:"es" }}{% if num_pages > 1 %} · page {{ page }} of {{ num_pages }}{% endif %}
       </span>
     </div>
+
+    <form method="get" class="scr-table-cols">
+      {% for k, v in desc_form_hidden %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+      <input type="hidden" name="desc_on" value="1">
+      <span class="scr-label">Table columns</span>
+      {% for key, label in optional_desc_columns %}
+        <label>
+          <input type="checkbox" name="desc" value="{{ key }}"
+                 {% if key in visible_desc %}checked{% endif %} onchange="this.form.submit()">
+          {{ label }}
+        </label>
+      {% endfor %}
+    </form>
+
     {% if rows %}
       <div class="table-responsive">
         <table class="table table-sm table-hover align-middle mb-0">
@@ -138,10 +233,9 @@
                   </a>
                 </td>
                 <td>{{ item.row.name|default:"—" }}</td>
-                <td class="text-muted">{{ item.row.sector|default:"—" }}</td>
-                <td class="text-muted">{{ item.row.industry|default:"—" }}</td>
-                <td class="text-muted">{{ item.row.country|default:"—" }}</td>
-                <td class="text-muted">{{ item.row.market|default:"—" }}</td>
+                {% for v in item.desc_cells %}
+                  <td class="text-muted">{{ v|default:"—" }}</td>
+                {% endfor %}
                 {% for cell in item.cells %}
                   <td class="text-end font-monospace">{{ cell.0|metric_value:cell.1 }}</td>
                 {% endfor %}

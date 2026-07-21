@@ -40,6 +40,15 @@ _DESC_COLUMNS = (("ticker", "Ticker"), ("name", "Company"), ("sector", "Sector")
                  ("industry", "Industry"), ("country", "Country"), ("market", "Market"))
 _SORT_KEYS_DESC = frozenset(k for k, _ in _DESC_COLUMNS)
 
+# Ticker/Company always show; these four are independently toggleable in the table (default:
+# all shown, matching the table's original always-on behaviour, so old bookmarked URLs render
+# unchanged). `desc_on` is a hidden marker submitted alongside `desc` — its presence is what
+# distinguishes "user unchecked every optional column" (desc_on present, desc absent) from "URL
+# never mentioned column visibility at all" (both absent), which plain GET checkbox semantics
+# can't otherwise tell apart.
+_OPTIONAL_DESC_COLUMNS = (("sector", "Sector"), ("industry", "Industry"),
+                          ("country", "Country"), ("market", "Market"))
+
 
 # ── screener ─────────────────────────────────────────────────────────────────────────────
 def _parse_optional_float(raw: str | None) -> tuple[float | None, bool]:
@@ -154,6 +163,15 @@ def screen(request: HttpRequest) -> HttpResponse:
     usd_lens = show_usd_toggle and request.GET.get("usd") == "1"
     page = _parse_page(request.GET.get("page"))
 
+    desc_explicit = "desc_on" in request.GET
+    if desc_explicit:
+        # Reorder to the canonical order rather than trusting the querystring/form-submission
+        # order — a hand-edited URL could list them in any order.
+        requested_desc = frozenset(request.GET.getlist("desc"))
+        visible_desc = [k for k, _ in _OPTIONAL_DESC_COLUMNS if k in requested_desc]
+    else:
+        visible_desc = [k for k, _ in _OPTIONAL_DESC_COLUMNS]
+
     # Selected display columns + metric filters, with the legacy single-metric URL folded in.
     cols = [c for c in (c.strip() for c in request.GET.getlist("col")) if c]
     filters, ok_filters = _parse_filters(request)
@@ -163,6 +181,7 @@ def screen(request: HttpRequest) -> HttpResponse:
     error = None if (ok_filters and ok_legacy) else "Filter bounds must be numbers."
     if error:  # drop the unparseable bounds so the table still renders
         filters = [MetricFilter(metric=f.metric) for f in filters]
+    has_active_filters = bool(filters)
 
     # Display every selected column plus any filtered metric (so the user sees what they bound
     # on), filters first-seen order preserved.
@@ -203,10 +222,23 @@ def screen(request: HttpRequest) -> HttpResponse:
         base_pairs.append(("fmax", "" if f.max_value is None else _num(f.max_value)))
     if usd_lens:
         base_pairs.append(("usd", "1"))
+    # Snapshot before `desc`/`desc_on` are appended — this is state the table-columns toggle
+    # (a second, small GET form near the table, see the template) replicates as hidden fields,
+    # since its own checkboxes supply desc/desc_on themselves; duplicating them would conflict.
+    filter_pairs = list(base_pairs)
+    if desc_explicit:
+        base_pairs.append(("desc_on", "1"))
+        for k in visible_desc:
+            base_pairs.append(("desc", k))
     state_pairs = [*base_pairs, ("sort", sort_key), ("dir", "desc" if descending else "asc")]
+    # The table-columns toggle form must also carry the active sort/page forward (they aren't
+    # in filter_pairs — sort/dir/page are appended separately everywhere else in this view too).
+    desc_form_hidden = [*filter_pairs, ("sort", sort_key), ("dir", "desc" if descending else "asc"),
+                        ("page", str(page))]
 
     desc_headers = _sort_headers(
-        [(k, label, None) for k, label in _DESC_COLUMNS], sort_key, descending, base_pairs
+        [(k, label, None) for k, label in _DESC_COLUMNS if k in ("ticker", "name") or k in visible_desc],
+        sort_key, descending, base_pairs,
     )
     metric_headers = _sort_headers(
         [(c.key, c.key, c.unit or "") for c in result.columns], sort_key, descending, base_pairs
@@ -215,7 +247,11 @@ def screen(request: HttpRequest) -> HttpResponse:
     # cell's unit comes from the ROW, not the column — Market Cap's unit is per-ticker (its own
     # native currency), so a column-wide unit would mislabel every non-USD ticker's cell.
     rows = [
-        {"row": r, "cells": [(r.values.get(c.key), r.units.get(c.key) or c.unit) for c in result.columns]}
+        {
+            "row": r,
+            "desc_cells": [getattr(r, k) for k in visible_desc],
+            "cells": [(r.values.get(c.key), r.units.get(c.key) or c.unit) for c in result.columns],
+        }
         for r in result.rows
     ]
 
@@ -257,6 +293,12 @@ def screen(request: HttpRequest) -> HttpResponse:
             "sort_key": sort_key,
             "sort_dir": "desc" if descending else "asc",
             "filter_rows": filter_rows,
+            "has_active_filters": has_active_filters,
+            "active_filter_count": len(filters),
+            "optional_desc_columns": _OPTIONAL_DESC_COLUMNS,
+            "visible_desc": visible_desc,
+            "desc_explicit": desc_explicit,
+            "desc_form_hidden": desc_form_hidden,
             "desc_headers": desc_headers,
             "metric_headers": metric_headers,
             "rows": rows,
