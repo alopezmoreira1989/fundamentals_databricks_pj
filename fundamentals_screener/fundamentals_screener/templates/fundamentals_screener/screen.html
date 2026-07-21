@@ -1,5 +1,4 @@
 {% extends "fundamentals_screener/base_screener.html" %}
-{% load fmt logos %}
 {% block title %}Screener — Fundamentals Screener{% endblock %}
 
 {% block extra_head %}
@@ -82,13 +81,18 @@
   .scr-table-cols .scr-label { font-family: var(--mono); text-transform: uppercase; letter-spacing: .08em; font-size: .64rem; }
   .scr-table-cols label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; color: var(--ink-2); }
   .scr-table-cols input { accent-color: var(--accent); width: 13px; height: 13px; }
+
+  /* Auto-apply: dim the results briefly while a background fetch is in flight, instead of a
+     full page reload. Delayed by .15s so a fast local response never visibly flickers. */
+  #scr-results.scr-loading { opacity: .45; transition: opacity .15s ease .15s; pointer-events: none; }
+  #scr-results { transition: opacity .1s ease; }
 </style>
 {% endblock %}
 
 {% block content %}
   <div class="p-4 bg-white rounded-3 shadow-sm mb-4">
     <h1 class="h3 mb-3">Screener</h1>
-    <form method="get">
+    <form method="get" id="scr-filter-form">
       {# Keep the active sort when the filter form is re-submitted. #}
       <input type="hidden" name="sort" value="{{ sort_key }}">
       <input type="hidden" name="dir" value="{{ sort_dir }}">
@@ -221,93 +225,8 @@
     </form>
   </div>
 
-  {% if error %}
-    <div class="alert alert-warning" role="alert">{{ error }}</div>
-  {% endif %}
-
-  <div class="bg-white rounded-3 shadow-sm p-4">
-    <div class="d-flex justify-content-between align-items-baseline mb-3">
-      <h2 class="h5 mb-0">Companies</h2>
-      <span class="text-muted small">
-        {{ total }} match{{ total|pluralize:"es" }}{% if num_pages > 1 %} · page {{ page }} of {{ num_pages }}{% endif %}
-      </span>
-    </div>
-
-    <form method="get" class="scr-table-cols">
-      {% for k, v in desc_form_hidden %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
-      <input type="hidden" name="desc_on" value="1">
-      <span class="scr-label">Table columns</span>
-      {% for key, label in optional_desc_columns %}
-        <label>
-          <input type="checkbox" name="desc" value="{{ key }}"
-                 {% if key in visible_desc %}checked{% endif %} onchange="this.form.submit()">
-          {{ label }}
-        </label>
-      {% endfor %}
-    </form>
-
-    {% if rows %}
-      <div class="table-responsive">
-        <table class="table table-sm table-hover align-middle mb-0">
-          <thead>
-            <tr>
-              {% for h in desc_headers %}
-                <th scope="col"><a class="text-decoration-none text-reset" href="{{ h.sort_url }}">{{ h.label }} <span class="text-muted">{{ h.indicator }}</span></a></th>
-              {% endfor %}
-              {% for h in metric_headers %}
-                <th scope="col" class="text-end"><a class="text-decoration-none text-reset" href="{{ h.sort_url }}">{{ h.label }} <span class="text-muted">{{ h.indicator }}</span></a></th>
-              {% endfor %}
-            </tr>
-          </thead>
-          <tbody>
-            {% for item in rows %}
-              <tr>
-                <td>
-                  <a class="d-inline-flex align-items-center gap-2 text-decoration-none" href="{% url 'fundamentals_screener:company_detail' item.row.ticker %}">
-                    {% company_logo item.row.ticker item.row.name item.row.has_logo 24 %}<span class="fw-semibold">{{ item.row.ticker }}</span>
-                  </a>
-                </td>
-                <td>{{ item.row.name|default:"—" }}</td>
-                {% for v in item.desc_cells %}
-                  <td class="text-muted">{{ v|default:"—" }}</td>
-                {% endfor %}
-                {% for cell in item.cells %}
-                  <td class="text-end font-monospace">{{ cell.0|metric_value:cell.1 }}</td>
-                {% endfor %}
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-
-      {% if num_pages > 1 %}
-        <nav class="mt-3" aria-label="Company table pages">
-          <ul class="pagination pagination-sm justify-content-center mb-0">
-            <li class="page-item {% if not has_prev %}disabled{% endif %}">
-              <a class="page-link" href="?{{ querystring }}{% if querystring %}&amp;{% endif %}page={{ page|add:'-1' }}">‹ Prev</a>
-            </li>
-            {% if page_range.0 > 1 %}
-              <li class="page-item"><a class="page-link" href="?{{ querystring }}{% if querystring %}&amp;{% endif %}page=1">1</a></li>
-              <li class="page-item disabled"><span class="page-link">…</span></li>
-            {% endif %}
-            {% for p in page_range %}
-              <li class="page-item {% if p == page %}active{% endif %}">
-                <a class="page-link" href="?{{ querystring }}{% if querystring %}&amp;{% endif %}page={{ p }}">{{ p }}</a>
-              </li>
-            {% endfor %}
-            {% if page_range|last < num_pages %}
-              <li class="page-item disabled"><span class="page-link">…</span></li>
-              <li class="page-item"><a class="page-link" href="?{{ querystring }}{% if querystring %}&amp;{% endif %}page={{ num_pages }}">{{ num_pages }}</a></li>
-            {% endif %}
-            <li class="page-item {% if not has_next %}disabled{% endif %}">
-              <a class="page-link" href="?{{ querystring }}{% if querystring %}&amp;{% endif %}page={{ page|add:'1' }}">Next ›</a>
-            </li>
-          </ul>
-        </nav>
-      {% endif %}
-    {% else %}
-      <p class="text-muted mb-0">No companies match these filters.</p>
-    {% endif %}
+  <div id="scr-results">
+    {% include "fundamentals_screener/_screen_results.html" %}
   </div>
 {% endblock %}
 
@@ -315,47 +234,138 @@
 <script>
   document.addEventListener('DOMContentLoaded', function () {
     var search = document.querySelector('.scr-col-search');
-    if (!search) return;
-    var grid = search.nextElementSibling;
-    var labels = Array.prototype.slice.call(grid.querySelectorAll('label'));
-    var noMatch = grid.nextElementSibling;
+    var rowsContainer = document.querySelector('.scr-filter-rows');
 
-    search.addEventListener('input', function () {
-      var q = search.value.trim().toLowerCase();
-      var visible = 0;
-      labels.forEach(function (label) {
-        var match = !q || label.textContent.toLowerCase().indexOf(q) !== -1;
-        label.classList.toggle('scr-hidden', !match);
-        if (match) visible++;
+    if (search) {
+      var grid = search.nextElementSibling;
+      var labels = Array.prototype.slice.call(grid.querySelectorAll('label'));
+      var noMatch = grid.nextElementSibling;
+
+      search.addEventListener('input', function () {
+        var q = search.value.trim().toLowerCase();
+        var visible = 0;
+        labels.forEach(function (label) {
+          var match = !q || label.textContent.toLowerCase().indexOf(q) !== -1;
+          label.classList.toggle('scr-hidden', !match);
+          if (match) visible++;
+        });
+        noMatch.hidden = visible !== 0;
       });
-      noMatch.hidden = visible !== 0;
-    });
 
-    // Land focus in the search box whenever the Columns disclosure opens, so typing works
-    // immediately. `toggle` only fires on an actual open/close interaction, never just from
-    // the page loading with `open` already set server-side, so this never steals focus
-    // unexpectedly on first render.
-    var details = search.closest('details');
-    details.addEventListener('toggle', function () {
-      if (details.open) search.focus();
-    });
+      // Land focus in the search box whenever the Columns disclosure opens, so typing works
+      // immediately. `toggle` only fires on an actual open/close interaction, never just from
+      // the page loading with `open` already set server-side, so this never steals focus
+      // unexpectedly on first render.
+      var details = search.closest('details');
+      details.addEventListener('toggle', function () {
+        if (details.open) search.focus();
+      });
+    }
 
     // Metric filters: add/remove rows client-side. The server already accepts any number of
     // fmetric/fmin/fmax triplets (no hardcoded cap) — this only adds the UI to grow past the
     // 3 rows rendered by default.
     var addBtn = document.querySelector('.scr-add-filter');
-    if (addBtn) {
-      var rowsContainer = document.querySelector('.scr-filter-rows');
+    if (addBtn && rowsContainer) {
       var rowTemplate = document.querySelector('.scr-filter-row-template');
       addBtn.addEventListener('click', function () {
         rowsContainer.appendChild(rowTemplate.content.cloneNode(true));
       });
+    }
+
+    // ---- Auto-apply: every filter change fetches the results fragment in the background and
+    // swaps it in, instead of a full-page reload behind an "Apply filters" click. The filter
+    // form/URL contract itself is unchanged — this is a progressive enhancement, not a
+    // rewrite: without JS the same <form method="get"> still submits normally, and every
+    // resulting URL (search, sort, page, columns, …) stays exactly as bookmarkable as before,
+    // kept in sync here via history.pushState. ----
+    var form = document.getElementById('scr-filter-form');
+    var results = document.getElementById('scr-results');
+    if (!form || !results) return;
+
+    var controller = null;
+    var debounceTimer = null;
+
+    function applyUrl(url, push) {
+      if (controller) controller.abort();
+      controller = new AbortController();
+      results.classList.add('scr-loading');
+      fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' }, signal: controller.signal })
+        .then(function (r) {
+          if (!r.ok) throw new Error('bad response: ' + r.status);
+          return r.text();
+        })
+        .then(function (html) {
+          results.innerHTML = html;
+          results.classList.remove('scr-loading');
+          if (push) history.pushState(null, '', url);
+        })
+        .catch(function (err) {
+          if (err.name === 'AbortError') return;  // superseded by a newer request — expected
+          results.classList.remove('scr-loading');
+          // Leave the previous results showing rather than a blank page; a stale table beats
+          // no table. The failure still needs to be visible somewhere for debugging.
+          console.error('Screener update failed:', err);
+        });
+    }
+
+    function applyForm() {
+      var params = new URLSearchParams(new FormData(form));
+      applyUrl(window.location.pathname + '?' + params.toString(), true);
+    }
+
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      clearTimeout(debounceTimer);
+      applyForm();
+    });
+
+    form.addEventListener('change', function (e) {
+      if (e.target.matches('input[type="text"]')) return;  // debounced on 'input' instead
+      applyForm();
+    });
+
+    form.addEventListener('input', function (e) {
+      // .scr-col-search is a purely client-side filter over the already-rendered checkbox
+      // list (see above) — it must never trigger a server round-trip.
+      if (e.target.type !== 'text' || e.target.classList.contains('scr-col-search')) return;
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(applyForm, 400);
+    });
+
+    // Removing a metric-filter row changes the active filter set immediately — re-apply like
+    // any other change. Adding a blank row doesn't: nothing to apply until a metric is picked.
+    if (rowsContainer) {
       rowsContainer.addEventListener('click', function (e) {
-        var btn = e.target.closest('.scr-rm-filter');
-        if (!btn) return;
-        btn.closest('.scr-filter-rule').remove();
+        if (e.target.closest('.scr-rm-filter')) applyForm();
       });
     }
+
+    // Sort-header links, pagination links, and the table-columns toggle all live inside
+    // #scr-results and get replaced on every swap — delegate from the container itself
+    // (which persists across swaps) rather than binding elements that won't exist after the
+    // next one.
+    results.addEventListener('click', function (e) {
+      var a = e.target.closest('.pagination a, thead a');
+      if (!a) return;
+      e.preventDefault();
+      applyUrl(a.href, true);
+    });
+
+    results.addEventListener('change', function (e) {
+      var box = e.target.closest('.scr-table-cols input[type="checkbox"]');
+      if (!box) return;
+      var params = new URLSearchParams(new FormData(box.closest('form')));
+      applyUrl(window.location.pathname + '?' + params.toString(), true);
+    });
+
+    // Back/forward: the filter form's own field values (search text, selected dropdowns,
+    // checked columns) live outside #scr-results and are never touched by an AJAX swap, so a
+    // full reload is the simplest way to guarantee they end up back in sync with whichever
+    // URL the user navigated to.
+    window.addEventListener('popstate', function () {
+      window.location.reload();
+    });
   });
 </script>
 {% endblock %}

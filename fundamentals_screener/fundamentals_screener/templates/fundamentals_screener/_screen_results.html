@@ -1,0 +1,88 @@
+{% load fmt logos %}
+{% if error %}
+  <div class="alert alert-warning" role="alert">{{ error }}</div>
+{% endif %}
+
+<div class="bg-white rounded-3 shadow-sm p-4">
+  <div class="d-flex justify-content-between align-items-baseline mb-3">
+    <h2 class="h5 mb-0">Companies</h2>
+    <span class="text-muted small">
+      {{ total }} match{{ total|pluralize:"es" }}{% if num_pages > 1 %} · page {{ page }} of {{ num_pages }}{% endif %}
+    </span>
+  </div>
+
+  <form method="get" class="scr-table-cols">
+    {% for k, v in desc_form_hidden %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+    <input type="hidden" name="desc_on" value="1">
+    <span class="scr-label">Table columns</span>
+    {% for key, label in optional_desc_columns %}
+      <label>
+        <input type="checkbox" name="desc" value="{{ key }}" {% if key in visible_desc %}checked{% endif %}>
+        {{ label }}
+      </label>
+    {% endfor %}
+  </form>
+
+  {% if rows %}
+    <div class="table-responsive">
+      <table class="table table-sm table-hover align-middle mb-0">
+        <thead>
+          <tr>
+            {% for h in desc_headers %}
+              <th scope="col"><a class="text-decoration-none text-reset" href="{{ h.sort_url }}">{{ h.label }} <span class="text-muted">{{ h.indicator }}</span></a></th>
+            {% endfor %}
+            {% for h in metric_headers %}
+              <th scope="col" class="text-end"><a class="text-decoration-none text-reset" href="{{ h.sort_url }}">{{ h.label }} <span class="text-muted">{{ h.indicator }}</span></a></th>
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in rows %}
+            <tr>
+              <td>
+                <a class="d-inline-flex align-items-center gap-2 text-decoration-none" href="{% url 'fundamentals_screener:company_detail' item.row.ticker %}">
+                  {% company_logo item.row.ticker item.row.name item.row.has_logo 24 %}<span class="fw-semibold">{{ item.row.ticker }}</span>
+                </a>
+              </td>
+              <td>{{ item.row.name|default:"—" }}</td>
+              {% for v in item.desc_cells %}
+                <td class="text-muted">{{ v|default:"—" }}</td>
+              {% endfor %}
+              {% for cell in item.cells %}
+                <td class="text-end font-monospace">{{ cell.0|metric_value:cell.1 }}</td>
+              {% endfor %}
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    {% if num_pages > 1 %}
+      <nav class="mt-3" aria-label="Company table pages">
+        <ul class="pagination pagination-sm justify-content-center mb-0">
+          <li class="page-item {% if not has_prev %}disabled{% endif %}">
+            <a class="page-link" href="?{{ querystring }}{% if querystring %}&amp;{% endif %}page={{ page|add:'-1' }}">‹ Prev</a>
+          </li>
+          {% if page_range.0 > 1 %}
+            <li class="page-item"><a class="page-link" href="?{{ querystring }}{% if querystring %}&amp;{% endif %}page=1">1</a></li>
+            <li class="page-item disabled"><span class="page-link">…</span></li>
+          {% endif %}
+          {% for p in page_range %}
+            <li class="page-item {% if p == page %}active{% endif %}">
+              <a class="page-link" href="?{{ querystring }}{% if querystring %}&amp;{% endif %}page={{ p }}">{{ p }}</a>
+            </li>
+          {% endfor %}
+          {% if page_range|last < num_pages %}
+            <li class="page-item disabled"><span class="page-link">…</span></li>
+            <li class="page-item"><a class="page-link" href="?{{ querystring }}{% if querystring %}&amp;{% endif %}page={{ num_pages }}">{{ num_pages }}</a></li>
+          {% endif %}
+          <li class="page-item {% if not has_next %}disabled{% endif %}">
+            <a class="page-link" href="?{{ querystring }}{% if querystring %}&amp;{% endif %}page={{ page|add:'1' }}">Next ›</a>
+          </li>
+        </ul>
+      </nav>
+    {% endif %}
+  {% else %}
+    <p class="text-muted mb-0">No companies match these filters.</p>
+  {% endif %}
+</div>

@@ -272,9 +272,14 @@ def screen(request: HttpRequest) -> HttpResponse:
     while len(filter_rows) < 3:
         filter_rows.append({"metric": "", "min": "", "max": ""})
 
+    # Auto-apply filters (see screen.html's fetch() calls): an AJAX request only wants the
+    # results fragment re-rendered, not the whole page with masthead/filter form again — same
+    # context, same template code path either way, just a different entry point into it.
+    is_fragment = request.headers.get("X-Requested-With") == "XMLHttpRequest"
+    template = "fundamentals_screener/_screen_results.html" if is_fragment else "fundamentals_screener/screen.html"
     return render(
         request,
-        "fundamentals_screener/screen.html",
+        template,
         {
             "metrics": services.available_metrics(),
             "sectors": services.available_sectors(),
