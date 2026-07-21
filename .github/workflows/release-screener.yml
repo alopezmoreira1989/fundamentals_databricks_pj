@@ -1,0 +1,74 @@
+name: Release fundamentals_screener
+
+# Whenever a merge to main bumps fundamentals_screener/pyproject.toml's version, tag the
+# release (fundamentals-screener-vX.Y.Z) and notify the consuming site's repo so it can pick
+# up the new version — replaces the manual `git tag` + "go bump the pin over there" steps.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "fundamentals_screener/pyproject.toml"
+
+permissions:
+  contents: write
+
+jobs:
+  tag-and-notify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read version from pyproject.toml
+        id: version
+        run: |
+          set -euo pipefail
+          version=$(grep -m1 -oP '(?<=^version = ")[^"]+' fundamentals_screener/pyproject.toml)
+          if [ -z "$version" ]; then
+            echo "::error::Could not read version= from fundamentals_screener/pyproject.toml"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=fundamentals-screener-v$version" >> "$GITHUB_OUTPUT"
+
+      # Idempotent: a push that touches this file without actually bumping the version (e.g.
+      # a reformat, or this workflow re-running) must not fail on "tag already exists".
+      - name: Check whether this version is already tagged
+        id: check
+        run: |
+          set -euo pipefail
+          if git ls-remote --tags origin | grep -q "refs/tags/${{ steps.version.outputs.tag }}$"; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create and push the release tag
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ steps.version.outputs.tag }}" -m "fundamentals_screener ${{ steps.version.outputs.tag }}"
+          git push origin "${{ steps.version.outputs.tag }}"
+
+      # Fires a repository_dispatch event on the consuming site's repo. That repo's own
+      # receiving workflow (not this one — see fundamentals_screener/README.md) owns bumping
+      # its pinned dependency and pushing to its main, which its existing CI already deploys
+      # (test + lint + a real health-check against the live site) — this step only announces
+      # the new version, it never touches the other repo's files directly.
+      # Requires a fine-grained PAT (contents: write, on alopezmoreira1989/alopezm_my_website
+      # only) stored as the SCREENER_NOTIFY_PAT secret. If that secret is missing or the
+      # target repo has no matching receiving workflow yet, this step fails loudly — the tag
+      # above still lands either way, so a broken notify never blocks the release itself.
+      - name: Notify alopezm_my_website of the new release
+        if: steps.check.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.SCREENER_NOTIFY_PAT }}
+        run: |
+          set -euo pipefail
+          gh api repos/alopezmoreira1989/alopezm_my_website/dispatches \
+            -f event_type=screener-released \
+            -F "client_payload[tag]=${{ steps.version.outputs.tag }}" \
+            -F "client_payload[version]=${{ steps.version.outputs.version }}"
