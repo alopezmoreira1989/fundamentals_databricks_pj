@@ -1,7 +1,8 @@
 {% extends "fundamentals_screener/base_screener.html" %}
-{% load fmt %}
+{% load fmt l10n %}
 {% block title %}{{ ticker }} — Valuation{% endblock %}
 {% block content %}
+{% localize off %}{# see company_detail.html for why: raw floats in style="...%" break under a comma-decimal host locale #}
   <div class="p-4 bg-white rounded-3 shadow-sm mb-4">
     <div class="d-flex align-items-baseline gap-3 flex-wrap">
       <h1 class="h3 mb-0">Valuation</h1>
@@ -55,6 +56,11 @@
   <div class="bg-white rounded-3 shadow-sm p-4">
     <h2 class="h5 mb-3">Margin of Safety <span class="text-muted small fw-normal">· by scenario</span></h2>
     {% if scenarios %}
+      <p class="text-muted small mb-3">Bear/Mid/Bull are three complete assumption profiles per
+        method — not a simple haircut on one number. Each scenario pairs a more conservative
+        (Bear) to more optimistic (Bull) discount rate/WACC, growth rate, and valuation multiple;
+        Mid is the conservative Buffett/Graham base case. Computed upstream from
+        <code class="small">valuation_assumptions.json</code>, consistently across every ticker.</p>
       <div class="table-responsive">
         <table class="table table-sm table-hover align-middle mb-0">
           <thead>
@@ -81,4 +87,5 @@
       <p class="text-muted mb-0">No valuation data available for {{ ticker }}.</p>
     {% endif %}
   </div>
+{% endlocalize %}
 {% endblock %}
