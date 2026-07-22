@@ -66,6 +66,40 @@ class CompanyDetail:
 
 
 @dataclass(frozen=True)
+class MetricSeries:
+    """One derived metric's recent fiscal-year history for a ticker, for the Derived-metrics
+    tab's sparkline + industry/sector benchmark columns.
+
+    ``fiscal_years``/``values`` are newest-first and index-aligned (``values[0]`` is the latest
+    value, at ``fiscal_years[0]``) — pass ``values`` straight to the ``|sparkline`` filter,
+    which reverses to chronological order itself. ``peer_median``/``peer_count`` are ``None``/0
+    until the service layer merges in the industry-or-sector benchmark (this DTO alone doesn't
+    know the ticker's industry/sector — see ``services.get_metric_history``).
+    """
+
+    ticker: str
+    metric: str
+    unit: str | None
+    category: str | None
+    subcategory: str | None
+    sort_order: float | None
+    fiscal_years: tuple[int, ...]
+    values: tuple[float | None, ...]
+    peer_median: float | None = None
+    peer_count: int = 0
+
+
+@dataclass(frozen=True)
+class PeerBenchmark:
+    """One metric's peer-group median (across a ticker's industry-or-sector peers, each at
+    their own latest reported fiscal year) — see ``CompanyRepository.industry_benchmark``."""
+
+    metric: str
+    peer_median: float
+    peer_count: int
+
+
+@dataclass(frozen=True)
 class StatementLine:
     """One financial-statement line item: its value across the displayed fiscal years, aligned
     to :attr:`Statement.years` (``None`` where a year has no reported value).

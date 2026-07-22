@@ -28,7 +28,7 @@
   table.fs-web td.num, table.fs-web th.num { font-family: var(--mono); text-align: right; white-space: nowrap; }
   table.fs-web tr.section-head td { font-family: var(--mono); font-size: .62rem; letter-spacing: .12em;
       text-transform: uppercase; color: var(--accent-ink); background: var(--bg-subtle); padding-top: 12px; }
-  table.fs-web th.spark, table.fs-web td.spark { width: 96px; text-align: center; }
+  th.spark, td.spark { width: 96px; text-align: center; }
   .sparkline { vertical-align: middle; display: inline-block; }
   /* Statement row hierarchy — indented children + emphasized subtotal/grand-total/headline
      rows. Classification comes from fundamentals_pipeline.statement_layout (row_class/
@@ -456,6 +456,11 @@
     <!-- Derived metrics (valuation categories excluded — see the Valuation tab) -->
     {% if derived_metrics %}
       <div class="tab-pane fade" id="pane-metrics" role="tabpanel" aria-labelledby="tab-metrics" tabindex="0">
+        {% if benchmark_basis %}
+          <p class="text-muted small mb-3">
+            "vs. peers" compares against the median across {{ peer_count }} {{ benchmark_basis }} peer{{ peer_count|pluralize }}, each at their own latest reported fiscal year.
+          </p>
+        {% endif %}
         {% regroup derived_metrics by category as metric_groups %}
         <div class="row g-3 row-cols-1 row-cols-lg-2">
           {% for group in metric_groups %}
@@ -463,12 +468,28 @@
               <div class="card p-4 h-100">
                 <h2 class="h6 mb-3">{{ group.grouper }}</h2>
                 <table class="table table-sm table-hover align-middle mb-0">
+                  <thead>
+                    <tr>
+                      <th>Metric</th>
+                      <th class="spark">Trend</th>
+                      <th class="text-end">Latest</th>
+                      {% if benchmark_basis %}<th class="text-end">vs. peers</th>{% endif %}
+                    </tr>
+                  </thead>
                   <tbody>
                     {% for m in group.list %}
                       <tr>
                         <td>{{ m.metric }}</td>
-                        <td class="num">{{ m.value|metric_value:m.unit }}</td>
-                        <td class="text-muted small text-end">FY {{ m.fiscal_year }}</td>
+                        <td class="spark">{{ m.values|sparkline }}</td>
+                        <td class="num text-end">
+                          {{ m.values.0|metric_value:m.unit }}
+                          <span class="text-muted small d-block">FY {{ m.fiscal_years.0 }}</span>
+                        </td>
+                        {% if benchmark_basis %}
+                          <td class="num text-end text-muted">
+                            {% if m.peer_median is not None %}{{ m.peer_median|metric_value:m.unit }}{% else %}—{% endif %}
+                          </td>
+                        {% endif %}
                       </tr>
                     {% endfor %}
                   </tbody>
