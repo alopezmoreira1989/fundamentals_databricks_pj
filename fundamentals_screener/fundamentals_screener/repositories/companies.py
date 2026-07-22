@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import timedelta
 from typing import Any
 
@@ -17,6 +18,7 @@ from ..dtos import (
     MetricPoint,
     MetricSeries,
     PeerBenchmark,
+    PeerCompany,
     PricePoint,
     QuarterGrid,
     Statement,
@@ -147,6 +149,46 @@ def _industry_peers(
             return peers, "sector"
     return (), None
 
+
+def _resolve_peers(
+    ticker: str, industry: str | None, sector: str | None, *, basis: str = "auto", min_peers: int = 3
+) -> tuple[tuple[str, ...], str | None]:
+    """Peer tickers for `ticker` under the requested `basis`.
+
+    "auto": today's exact cascade via `_industry_peers` (industry if it has >= min_peers other
+    tickers, else sector if any, else none) — unchanged behavior when no basis is forced.
+    "industry"/"sector": that basis only, whatever the count — an explicit user choice overrides
+    the auto quality gate; returns ((), None) if that basis isn't recorded for this ticker or has
+    zero other tickers, rather than falling back to the other basis.
+
+    Compare mode never reaches this function — see `CompanyRepository.compare_benchmark`.
+    """
+    if basis == "industry":
+        if not industry:
+            return (), None
+        peers = tuple(
+            r["ticker"] for r in load_meta().get("tickers", [])
+            if r.get("industry") == industry and r.get("ticker") != ticker
+        )
+        return (peers, "industry") if peers else ((), None)
+    if basis == "sector":
+        if not sector:
+            return (), None
+        peers = tuple(
+            r["ticker"] for r in load_meta().get("tickers", [])
+            if r.get("sector") == sector and r.get("ticker") != ticker
+        )
+        return (peers, "sector") if peers else ((), None)
+    return _industry_peers(ticker, industry, sector, min_peers=min_peers)
+
+
+def _peer_roster(peers: Sequence[str]) -> tuple[PeerCompany, ...]:
+    """ticker+name pairs for the "Show peers" chip disclosure, alphabetical by ticker. Only ever
+    called for the "industry" basis (small counts) — never for "sector" (hundreds of tickers,
+    which would mean building hundreds of PeerCompany objects nobody displays)."""
+    names = {r.get("ticker"): r.get("company", "") for r in load_meta().get("tickers", [])}
+    return tuple(PeerCompany(ticker=t, name=names.get(t, "")) for t in sorted(peers))
+
 # Quarterly line items for one statement (newest quarter first is applied after the fetch).
 _QUARTERLY_SQL = """
     SELECT section, "group", concept, display_name, sort_order, period_type, period_end, fiscal_year, value
@@ -252,18 +294,60 @@ class CompanyRepository(DuckDBRepository):
         )
 
     def industry_benchmark(
-        self, ticker: str, industry: str | None, sector: str | None, *, min_peers: int = 3
-    ) -> tuple[tuple[PeerBenchmark, ...], str | None, int]:
-        """Per-metric peer median for `ticker`'s industry (falling back to sector — see
-        `_industry_peers`). Returns (per-metric benchmarks, basis "industry"/"sector"/``None``,
-        peer-universe size) — an empty result with basis ``None`` when the ticker has neither
-        industry nor sector recorded, not a silent zero benchmark.
+        self, ticker: str, industry: str | None, sector: str | None, *, min_peers: int = 3, basis: str = "auto"
+    ) -> tuple[tuple[PeerBenchmark, ...], str | None, int, tuple[PeerCompany, ...]]:
+        """Per-metric peer median for `ticker`'s industry/sector, under the requested `basis`
+        (see `_resolve_peers`: "auto" cascades industry-then-sector as before; "industry"/
+        "sector" force that basis only). Returns (per-metric benchmarks, resolved basis
+        "industry"/"sector"/``None``, peer-universe size, peer roster) — the roster is only
+        ever non-empty when the resolved basis is "industry" (sector sets are always too large
+        to name individually). An empty result with basis ``None`` means no peers on that
+        basis, not a silent zero benchmark.
         """
-        peers, basis = _industry_peers(ticker, industry, sector, min_peers=min_peers)
+        peers, resolved = _resolve_peers(ticker, industry, sector, basis=basis, min_peers=min_peers)
         if not peers:
-            return (), None, 0
+            return (), None, 0, ()
         benchmarks = self._fetch(_PEER_BENCHMARK_SQL, [list(peers)], PeerBenchmark)
-        return benchmarks, basis, len(peers)
+        roster = _peer_roster(peers) if resolved == "industry" else ()
+        return benchmarks, resolved, len(peers), roster
+
+    def compare_benchmark(
+        self, ticker: str, compare_ticker: str
+    ) -> tuple[tuple[PeerBenchmark, ...], PeerCompany | None]:
+        """Per-metric "peer group" of size 1: `compare_ticker`'s own latest value, reusing
+        `_PEER_BENCHMARK_SQL` verbatim with a one-ticker list (a single-element list's median IS
+        that element, count=1 — no new SQL). Returns ((), None) when `compare_ticker` is blank,
+        unknown, or `ticker` itself — never a crash."""
+        candidate = (compare_ticker or "").strip().upper()
+        if not candidate or candidate == ticker:
+            return (), None
+        match = next((r for r in load_meta().get("tickers", []) if r.get("ticker") == candidate), None)
+        if match is None:
+            return (), None
+        benchmarks = self._fetch(_PEER_BENCHMARK_SQL, [[candidate]], PeerBenchmark)
+        return benchmarks, PeerCompany(ticker=candidate, name=match.get("company", ""))
+
+    def peer_counts(self, ticker: str, industry: str | None, sector: str | None) -> tuple[int, int]:
+        """(industry_peer_count, sector_peer_count) — always both, regardless of which basis is
+        active, so the Derived-metrics tab's switch can badge both pills simultaneously. Pure
+        meta iteration, no DuckDB round trip."""
+        records = load_meta().get("tickers", [])
+        industry_n = sum(
+            1 for r in records if industry and r.get("industry") == industry and r.get("ticker") != ticker
+        )
+        sector_n = sum(
+            1 for r in records if sector and r.get("sector") == sector and r.get("ticker") != ticker
+        )
+        return industry_n, sector_n
+
+    def all_companies(self) -> tuple[PeerCompany, ...]:
+        """Every known ticker + company name, alphabetical by ticker — the "Compare to a
+        company" <datalist> source."""
+        return tuple(
+            PeerCompany(ticker=r["ticker"], name=r.get("company", ""))
+            for r in sorted(load_meta().get("tickers", []), key=lambda r: r.get("ticker", ""))
+            if r.get("ticker")
+        )
 
     def usd_fx_rate(self, currency: str, as_of: str) -> float | None:
         """Most recent `currency`->USD rate on or before `as_of`, or ``None`` if the `fx` view

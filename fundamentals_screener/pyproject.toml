@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fundamentals-screener"
-version = "0.3.0"
+version = "0.4.0"
 description = "Installable Django app: a self-contained SEC EDGAR fundamentals screener, company detail, and valuation views, reading published Parquet artifacts via DuckDB. Extracted from fundamentals_databricks_pj's web/ Django app for reuse by external Django projects (originally: alopezm.xyz's /apps/screener/)."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -34,6 +34,9 @@ dependencies = [
     "requests>=2.31,<3",
     "fundamentals_pipeline @ git+https://github.com/alopezmoreira1989/fundamentals_databricks_pj.git",
 ]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<9"]
 
 # Explicit package list, not find: — mirrors the root fundamentals_pipeline/pyproject.toml
 # convention in this repo.

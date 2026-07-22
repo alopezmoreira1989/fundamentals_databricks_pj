@@ -88,6 +88,26 @@ def compact_money_ccy(value: float | None, currency: str | None = None) -> str:
 
 
 @register.filter
+def delta_chip(metric) -> str:
+    """Small ▲/▼ chip (signed pp magnitude, e.g. "+8.3pp") next to a percent-unit metric's own
+    Latest value, vs. the active benchmark. Empty for non-percent metrics (unit == "percent" is
+    the exact gate — matches metric_value's own check) or when either side is missing. Reuses
+    the existing text-success/text-danger convention (see sign_class below, used on this same
+    page's Valuation tab) rather than introducing new color classes."""
+    if (metric.unit or "").lower() != "percent" or metric.peer_median is None or not metric.values or metric.values[0] is None:
+        return ""
+    diff = metric.values[0] - metric.peer_median
+    if abs(diff) < 0.05:
+        return ""
+    arrow = "▲" if diff >= 0 else "▼"
+    css = "text-success" if diff >= 0 else "text-danger"
+    magnitude = f"{diff:+.1f}pp"  # format the spec here — format_html escapes args to plain
+    # strings before .format() runs, so a format spec like {:+.1f} on an already-escaped arg
+    # would raise ValueError (numeric specs are invalid on str); pass a pre-formatted string.
+    return format_html(' <span class="small {}">{} {}</span>', css, arrow, magnitude)
+
+
+@register.filter
 def sign_class(value: float | None) -> str:
     """Bootstrap text colour for a signed value: green ≥ 0, red < 0, empty for missing.
 

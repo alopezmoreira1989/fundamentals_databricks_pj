@@ -79,6 +79,10 @@
   .news-item:hover .news-title { color: var(--accent-ink); }
   .news-title { color: var(--ink); line-height: 1.45; }
   .news-date { font-family: var(--mono); font-size: .72rem; color: var(--ink-3); white-space: nowrap; flex-shrink: 0; }
+  /* Derived-metrics benchmark switch — auto-apply via AJAX (mirrors the screener's
+     _screen_results.html pattern), dim briefly while a background fetch is in flight. */
+  #derived-metrics-wrapper.dm-loading { opacity: .45; transition: opacity .15s ease .15s; pointer-events: none; }
+  #derived-metrics-wrapper { transition: opacity .1s ease; }
 </style>
 {% endblock %}
 
@@ -115,6 +119,51 @@
       })
       .catch(function () { el.innerHTML = '<p class="text-muted small mb-0">News unavailable.</p>'; });
   });
+
+  document.addEventListener('DOMContentLoaded', function () {
+    // Derived-metrics benchmark switch: auto-apply via AJAX (mirrors _screen_results.html's
+    // fetch/AbortController/pushState pattern). Every link/form here is a plain GET
+    // (?bench=.../ compare form) and works standalone with zero JS — this is progressive
+    // enhancement only, not a rewrite.
+    var wrapper = document.getElementById('derived-metrics-wrapper');
+    if (!wrapper) return;
+    var controller = null;
+
+    function applyUrl(url, push) {
+      if (controller) controller.abort();
+      controller = new AbortController();
+      wrapper.classList.add('dm-loading');
+      fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' }, signal: controller.signal })
+        .then(function (r) { if (!r.ok) throw new Error('bad response: ' + r.status); return r.text(); })
+        .then(function (html) {
+          wrapper.innerHTML = html;
+          wrapper.classList.remove('dm-loading');
+          if (push) history.pushState(null, '', url);
+        })
+        .catch(function (err) {
+          if (err.name === 'AbortError') return;
+          wrapper.classList.remove('dm-loading');
+          console.error('Benchmark switch update failed:', err);
+        });
+    }
+
+    wrapper.addEventListener('click', function (e) {
+      var a = e.target.closest('a.btn');
+      if (!a) return;
+      e.preventDefault();
+      applyUrl(a.href, true);
+    });
+
+    wrapper.addEventListener('submit', function (e) {
+      var form = e.target.closest('#compare-form');
+      if (!form) return;
+      e.preventDefault();
+      var params = new URLSearchParams(new FormData(form));
+      applyUrl(window.location.pathname + '?' + params.toString(), true);
+    });
+
+    window.addEventListener('popstate', function () { window.location.reload(); });
+  });
 </script>
 {% endblock %}
 
@@ -141,6 +190,10 @@
       </div>
     </div>
   </div>
+
+  <datalist id="peer-companies-datalist">
+    {% for c in compare_options %}<option value="{{ c.ticker }}" label="{{ c.name }}"></option>{% endfor %}
+  </datalist>
 
   <!-- Tab navigation -->
   <ul class="nav nav-tabs company-tabs mb-4" role="tablist">
@@ -456,47 +509,8 @@
     <!-- Derived metrics (valuation categories excluded — see the Valuation tab) -->
     {% if derived_metrics %}
       <div class="tab-pane fade" id="pane-metrics" role="tabpanel" aria-labelledby="tab-metrics" tabindex="0">
-        {% if benchmark_basis %}
-          <p class="text-muted small mb-3">
-            "vs. peers" compares against the median across {{ peer_count }} {{ benchmark_basis }} peer{{ peer_count|pluralize }}, each at their own latest reported fiscal year.
-          </p>
-        {% endif %}
-        {% regroup derived_metrics by category as metric_groups %}
-        <div class="row g-3 row-cols-1 row-cols-lg-2">
-          {% for group in metric_groups %}
-            <div class="col">
-              <div class="card p-4 h-100">
-                <h2 class="h6 mb-3">{{ group.grouper }}</h2>
-                <table class="table table-sm table-hover align-middle mb-0">
-                  <thead>
-                    <tr>
-                      <th>Metric</th>
-                      <th class="spark">Trend</th>
-                      <th class="text-end">Latest</th>
-                      {% if benchmark_basis %}<th class="text-end">vs. peers</th>{% endif %}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {% for m in group.list %}
-                      <tr>
-                        <td>{{ m.metric }}</td>
-                        <td class="spark">{{ m.values|sparkline }}</td>
-                        <td class="num text-end">
-                          {{ m.values.0|metric_value:m.unit }}
-                          <span class="text-muted small d-block">FY {{ m.fiscal_years.0 }}</span>
-                        </td>
-                        {% if benchmark_basis %}
-                          <td class="num text-end text-muted">
-                            {% if m.peer_median is not None %}{{ m.peer_median|metric_value:m.unit }}{% else %}—{% endif %}
-                          </td>
-                        {% endif %}
-                      </tr>
-                    {% endfor %}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          {% endfor %}
+        <div id="derived-metrics-wrapper">
+          {% include "fundamentals_screener/_derived_metrics.html" %}
         </div>
       </div>
     {% endif %}
