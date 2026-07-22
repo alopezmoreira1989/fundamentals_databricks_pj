@@ -14,6 +14,7 @@ cover.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import replace
 
 from fundamentals_pipeline.fx import convert_price
 
@@ -24,6 +25,7 @@ from .dtos import (
     CompanySummary,
     HeadlineKpi,
     MetricPoint,
+    MetricSeries,
     PricePoint,
     QuarterGrid,
     ScreenRow,
@@ -91,6 +93,36 @@ def price_windows() -> tuple[str, ...]:
 def get_company_news(ticker: str) -> tuple[NewsItem, ...]:
     """Latest Yahoo Finance headlines for the ticker (cached; empty on any error)."""
     return fetch_yahoo_news(ticker)
+
+
+def get_metric_history(
+    ticker: str, *, years: int = 5
+) -> tuple[tuple[MetricSeries, ...], str | None, int]:
+    """The Derived-metrics tab's data: each metric's recent `years`-year history (for the
+    sparkline), merged with the ticker's industry-or-sector peer-median benchmark.
+
+    Valuation/Intrinsic-Value categories are excluded here for the same reason as
+    ``split_metrics`` (they're portrayed by the Valuation tab instead). Returns
+    ``(series, benchmark_basis, peer_count)`` — `benchmark_basis` is ``"industry"``/``"sector"``/
+    ``None`` (the last when the ticker has neither recorded) and drives the tab's caption; a
+    metric with no peer data of its own still shows up, just with ``peer_median=None``.
+    """
+    repo = CompanyRepository()
+    series = tuple(
+        s for s in repo.metric_history(ticker, years=years)
+        if s.category not in (_INTRINSIC_CATEGORY, _VALUATION_CATEGORY)
+    )
+    summary = repo.get_summary(ticker)
+    if summary is None or not series:
+        return series, None, 0
+    benchmarks, basis, peer_count = repo.industry_benchmark(ticker, summary.industry, summary.sector)
+    by_metric = {b.metric: b for b in benchmarks}
+    merged = tuple(
+        replace(s, peer_median=bm.peer_median, peer_count=bm.peer_count) if (bm := by_metric.get(s.metric))
+        else s
+        for s in series
+    )
+    return merged, basis, peer_count
 
 
 def split_metrics(

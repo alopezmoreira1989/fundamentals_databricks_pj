@@ -371,8 +371,11 @@ def company_detail(request: HttpRequest, ticker: str) -> HttpResponse:
     quarterly_chart_svg = quarterly_chart(quarterly) if quarterly.lines else None
     # Valuation section: intrinsic-value football field + MoS + price multiples. Intrinsic-
     # value metrics are dropped from the derived-metrics list to avoid duplicating the
-    # football field.
-    derived_metrics, valuation_metrics = services.split_metrics(detail.metrics)
+    # football field. The Derived-metrics tab itself gets its own 5-year-history + peer-
+    # benchmark fetch (get_metric_history) rather than reusing detail.metrics' single latest
+    # value — valuation_metrics still comes from the latter (unchanged, single-value display).
+    _, valuation_metrics = services.split_metrics(detail.metrics)
+    derived_metrics, benchmark_basis, peer_count = services.get_metric_history(ticker, years=5)
     iv_chart = football.build_chart(services.get_intrinsic_value_field(ticker))
     mos_scenarios = services.get_margin_of_safety_scenarios(ticker)
     price_currency = quote_currency(detail.summary.market).lower()
@@ -401,6 +404,8 @@ def company_detail(request: HttpRequest, ticker: str) -> HttpResponse:
             "quarterly_chart": quarterly_chart_svg,
             "bs_compositions": bs_compositions,
             "derived_metrics": derived_metrics,
+            "benchmark_basis": benchmark_basis,
+            "peer_count": peer_count,
             "valuation_metrics": valuation_metrics,
             "iv_chart": iv_chart,
             "mos_scenarios": mos_scenarios,

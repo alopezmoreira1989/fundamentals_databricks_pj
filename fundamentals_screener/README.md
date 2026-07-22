@@ -102,9 +102,11 @@ Ported from `web/`'s `apps/companies`, `apps/screener`, `apps/valuation`:
   market) company table, every column sortable, state in the URL (bookmarkable).
 - **Company detail** (`/<ticker>/`): overview KPIs, financial statements (Income/Balance
   Sheet/Cash Flow, with row hierarchy — subtotals/grand-totals/headline rows indented and
-  styled), quarterly Income Statement, derived metrics, valuation football field + Margin of
-  Safety table, price chart with SMA 20/50/200, a "Latest news" card (async Yahoo Finance
-  headlines, `/<ticker>/news/`, cached — see the `CACHES` recommendation above).
+  styled), quarterly Income Statement, derived metrics (5-year sparkline trend per metric,
+  plus a peer-median benchmark — the ticker's industry if it has at least 3 other tickers,
+  else its GICS sector), valuation football field + Margin of Safety table, price chart with
+  SMA 20/50/200, a "Latest news" card (async Yahoo Finance headlines, `/<ticker>/news/`,
+  cached — see the `CACHES` recommendation above).
 - **Valuation** (`/<ticker>/valuation/`): a standalone version of the same football field +
   MoS table.
 - JSON siblings of all three (`/data/`, `/<ticker>/data/`, `/<ticker>/valuation/data/`).

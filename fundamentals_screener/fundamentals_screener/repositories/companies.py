@@ -15,6 +15,8 @@ from ..dtos import (
     CompanyStatements,
     CompanySummary,
     MetricPoint,
+    MetricSeries,
+    PeerBenchmark,
     PricePoint,
     QuarterGrid,
     Statement,
@@ -35,6 +37,36 @@ _LATEST_METRICS_SQL = """
     QUALIFY row_number() OVER (PARTITION BY metric ORDER BY fiscal_year DESC) = 1
     ORDER BY sort_order, metric
     LIMIT ?
+"""
+
+# Each derived metric's most recent `years` fiscal-year values (newest first) — the Derived-
+# metrics tab's sparkline + latest-value display. Unlike _LATEST_METRICS_SQL's QUALIFY ... = 1,
+# this keeps up to `years` rows per metric.
+_METRIC_HISTORY_SQL = """
+    SELECT ticker, metric, unit, fiscal_year, value, category, subcategory, sort_order
+    FROM dashboard_metrics
+    WHERE ticker = ?
+      AND period_type = 'FY'
+      AND category IS NOT NULL
+    QUALIFY row_number() OVER (PARTITION BY metric ORDER BY fiscal_year DESC) <= ?
+    ORDER BY sort_order, metric, fiscal_year DESC
+"""
+
+# Peer-group median per metric: each peer ticker's own latest reported value (not a shared
+# fiscal year — peers' fiscal year-ends differ), aggregated with MEDIAN (robust to outliers,
+# same convention as the Streamlit dashboard's Sectors page). `list_contains(?, ticker)` binds
+# the peer-ticker list directly as a DuckDB LIST parameter.
+_PEER_BENCHMARK_SQL = """
+    WITH latest AS (
+        SELECT ticker, metric, value
+        FROM dashboard_metrics
+        WHERE period_type = 'FY' AND category IS NOT NULL AND value IS NOT NULL
+          AND list_contains(?, ticker)
+        QUALIFY row_number() OVER (PARTITION BY ticker, metric ORDER BY fiscal_year DESC) = 1
+    )
+    SELECT metric, median(value) AS peer_median, count(*) AS peer_count
+    FROM latest
+    GROUP BY metric
 """
 
 # Market Cap's category is NULL in the artifact by design (screener-only, invisible in the
@@ -88,6 +120,32 @@ def _as_int(value: Any) -> int | None:
 def _as_bool(value: Any) -> bool | None:
     text = str(value).strip().lower() if value is not None else ""
     return True if text == "true" else False if text == "false" else None
+
+
+def _industry_peers(
+    ticker: str, industry: str | None, sector: str | None, *, min_peers: int = 3
+) -> tuple[tuple[str, ...], str | None]:
+    """Peer tickers to benchmark `ticker` against (excluding itself), and which basis was used.
+
+    Prefers the ticker's industry (Yahoo's finer sub-sector taxonomy) when it has at least
+    `min_peers` other tickers; falls back to the coarser GICS sector when the industry is too
+    thin (or absent) so the benchmark stays meaningful rather than near-single-company. Returns
+    ``((), None)`` when neither industry nor sector is known for this ticker.
+    """
+    records = load_meta().get("tickers", [])
+    if industry:
+        peers = tuple(
+            r["ticker"] for r in records if r.get("industry") == industry and r.get("ticker") != ticker
+        )
+        if len(peers) >= min_peers:
+            return peers, "industry"
+    if sector:
+        peers = tuple(
+            r["ticker"] for r in records if r.get("sector") == sector and r.get("ticker") != ticker
+        )
+        if peers:
+            return peers, "sector"
+    return (), None
 
 # Quarterly line items for one statement (newest quarter first is applied after the fetch).
 _QUARTERLY_SQL = """
@@ -161,6 +219,51 @@ class CompanyRepository(DuckDBRepository):
         for why this bypasses latest_metrics())."""
         rows = self._fetch(_MARKET_CAP_SQL, [ticker], MetricPoint)
         return rows[0] if rows else None
+
+    def metric_history(self, ticker: str, *, years: int = 5) -> tuple[MetricSeries, ...]:
+        """Each derived metric's most recent `years` fiscal-year values (newest first).
+
+        Peer-benchmark fields are left at their defaults (``None``/0) here — this repository
+        has no notion of industry/sector (that lives in the meta artifact, not `dashboard_
+        metrics`); ``services.get_metric_history`` merges in ``industry_benchmark`` below.
+        """
+        with self._connection() as con:
+            rows = con.execute(_METRIC_HISTORY_SQL, [ticker, years]).fetchall()
+        series: dict[str, dict[str, Any]] = {}
+        order: list[str] = []
+        for _ticker, metric, unit, fiscal_year, value, category, subcategory, sort_order in rows:
+            if metric not in series:
+                series[metric] = {
+                    "unit": unit, "category": category, "subcategory": subcategory,
+                    "sort_order": sort_order, "fiscal_years": [], "values": [],
+                }
+                order.append(metric)
+            series[metric]["fiscal_years"].append(int(fiscal_year))
+            series[metric]["values"].append(value)
+        return tuple(
+            MetricSeries(
+                ticker=ticker, metric=metric, unit=series[metric]["unit"],
+                category=series[metric]["category"], subcategory=series[metric]["subcategory"],
+                sort_order=series[metric]["sort_order"],
+                fiscal_years=tuple(series[metric]["fiscal_years"]),
+                values=tuple(series[metric]["values"]),
+            )
+            for metric in order
+        )
+
+    def industry_benchmark(
+        self, ticker: str, industry: str | None, sector: str | None, *, min_peers: int = 3
+    ) -> tuple[tuple[PeerBenchmark, ...], str | None, int]:
+        """Per-metric peer median for `ticker`'s industry (falling back to sector — see
+        `_industry_peers`). Returns (per-metric benchmarks, basis "industry"/"sector"/``None``,
+        peer-universe size) — an empty result with basis ``None`` when the ticker has neither
+        industry nor sector recorded, not a silent zero benchmark.
+        """
+        peers, basis = _industry_peers(ticker, industry, sector, min_peers=min_peers)
+        if not peers:
+            return (), None, 0
+        benchmarks = self._fetch(_PEER_BENCHMARK_SQL, [list(peers)], PeerBenchmark)
+        return benchmarks, basis, len(peers)
 
     def usd_fx_rate(self, currency: str, as_of: str) -> float | None:
         """Most recent `currency`->USD rate on or before `as_of`, or ``None`` if the `fx` view
