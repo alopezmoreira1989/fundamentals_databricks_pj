@@ -1,0 +1,98 @@
+{% load fmt %}
+{% if bench_ctx.basis == "industry" %}
+  <p class="text-muted small mb-1">
+    "vs. benchmark" compares against the median across {{ bench_ctx.peer_count }} industry peer{{ bench_ctx.peer_count|pluralize }}, each at their own latest reported fiscal year.
+  </p>
+{% elif bench_ctx.basis == "sector" %}
+  <p class="text-muted small mb-1">
+    "vs. benchmark" compares against the median across {{ bench_ctx.peer_count }} sector peer{{ bench_ctx.peer_count|pluralize }}, each at their own latest reported fiscal year.
+  </p>
+{% elif bench_ctx.basis == "compare" %}
+  <p class="text-muted small mb-1">"vs. benchmark" shows {{ bench_ctx.compare.name }}'s own latest reported value for each metric.</p>
+{% elif bench_ctx.mode == "compare" %}
+  <p class="text-muted small mb-1">Pick a company above to compare against.</p>
+{% else %}
+  <p class="text-muted small mb-1">No {{ bench_ctx.mode }} peers found for this company{% if bench_ctx.mode == "industry" %} — try Sector{% endif %}.</p>
+{% endif %}
+
+<div class="btn-group btn-group-sm mb-2" role="group" aria-label="Benchmark against">
+  <a class="btn {% if bench_ctx.mode == 'industry' %}btn-dark{% else %}btn-outline-secondary{% endif %}"
+     href="?bench=industry{% if usd_lens %}&amp;usd=1{% endif %}#pane-metrics">
+    Industry <span class="badge text-bg-secondary">{{ bench_ctx.industry_peer_count }}</span>
+  </a>
+  <a class="btn {% if bench_ctx.mode == 'sector' %}btn-dark{% else %}btn-outline-secondary{% endif %}"
+     href="?bench=sector{% if usd_lens %}&amp;usd=1{% endif %}#pane-metrics">
+    Sector <span class="badge text-bg-secondary">{{ bench_ctx.sector_peer_count }}</span>
+  </a>
+  <a class="btn {% if bench_ctx.mode == 'compare' %}btn-dark{% else %}btn-outline-secondary{% endif %}"
+     href="?bench=compare{% if usd_lens %}&amp;usd=1{% endif %}#pane-metrics">
+    Compare to a company
+  </a>
+</div>
+
+{% if bench_ctx.mode == "compare" %}
+  <form method="get" id="compare-form" class="d-flex align-items-center gap-2 mb-3">
+    <input type="hidden" name="bench" value="compare">
+    {% if usd_lens %}<input type="hidden" name="usd" value="1">{% endif %}
+    <input type="text" name="compare" list="peer-companies-datalist" autocomplete="off"
+           class="form-control form-control-sm" style="max-width:280px"
+           placeholder="Search ticker or company…" value="{{ compare_query }}">
+    <button type="submit" class="btn btn-sm btn-dark">Compare</button>
+    {% if bench_ctx.compare %}
+      <span class="text-muted small">vs. {{ bench_ctx.compare.name }} ({{ bench_ctx.compare.ticker }})</span>
+    {% elif compare_query %}
+      <span class="text-danger small">"{{ compare_query }}" not found — pick a company from the list.</span>
+    {% endif %}
+  </form>
+{% endif %}
+
+{% if bench_ctx.basis == "industry" and bench_ctx.peers %}
+  <details class="mb-3">
+    <summary class="small text-muted" style="cursor:pointer">Show peers</summary>
+    <div class="d-flex flex-wrap gap-2 mt-2">
+      {% for p in bench_ctx.peers %}<span class="badge text-bg-light border" title="{{ p.name }}">{{ p.ticker }}</span>{% endfor %}
+    </div>
+  </details>
+{% elif bench_ctx.basis == "sector" %}
+  <p class="text-muted small mb-3">
+    {{ bench_ctx.peer_count }} compan{{ bench_ctx.peer_count|pluralize:"y,ies" }} in the {{ summary.sector }} sector — too many to list individually.
+  </p>
+{% endif %}
+
+{% regroup derived_metrics by category as metric_groups %}
+<div class="row g-3 row-cols-1 row-cols-lg-2">
+  {% for group in metric_groups %}
+    <div class="col">
+      <div class="card p-4 h-100">
+        <h2 class="h6 mb-3">{{ group.grouper }}</h2>
+        <table class="table table-sm table-hover align-middle mb-0">
+          <thead>
+            <tr>
+              <th>Metric</th>
+              <th class="spark">Trend</th>
+              <th class="text-end">Latest</th>
+              {% if bench_ctx.basis %}<th class="text-end">vs. benchmark</th>{% endif %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for m in group.list %}
+              <tr>
+                <td>{{ m.metric }}</td>
+                <td class="spark">{{ m.values|sparkline }}</td>
+                <td class="num text-end">
+                  {{ m.values.0|metric_value:m.unit }}{{ m|delta_chip }}
+                  <span class="text-muted small d-block">FY {{ m.fiscal_years.0 }}</span>
+                </td>
+                {% if bench_ctx.basis %}
+                  <td class="num text-end text-muted">
+                    {% if m.peer_median is not None %}{{ m.peer_median|metric_value:m.unit }}{% else %}—{% endif %}
+                  </td>
+                {% endif %}
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  {% endfor %}
+</div>

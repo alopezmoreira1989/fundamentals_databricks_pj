@@ -19,6 +19,7 @@ from dataclasses import replace
 from fundamentals_pipeline.fx import convert_price
 
 from .dtos import (
+    BenchmarkContext,
     CompanyDetail,
     CompanyPage,
     CompanyStatements,
@@ -26,6 +27,8 @@ from .dtos import (
     HeadlineKpi,
     MetricPoint,
     MetricSeries,
+    PeerBenchmark,
+    PeerCompany,
     PricePoint,
     QuarterGrid,
     ScreenRow,
@@ -95,17 +98,33 @@ def get_company_news(ticker: str) -> tuple[NewsItem, ...]:
     return fetch_yahoo_news(ticker)
 
 
+def _merge_peer_medians(
+    series: tuple[MetricSeries, ...], benchmarks: tuple[PeerBenchmark, ...]
+) -> tuple[MetricSeries, ...]:
+    """Fold each metric's peer-group median/count into its MetricSeries row (a metric with no
+    matching benchmark keeps its default peer_median=None/peer_count=0 — still shows up, just
+    without a benchmark column value)."""
+    by_metric = {b.metric: b for b in benchmarks}
+    return tuple(
+        replace(s, peer_median=bm.peer_median, peer_count=bm.peer_count) if (bm := by_metric.get(s.metric))
+        else s
+        for s in series
+    )
+
+
 def get_metric_history(
-    ticker: str, *, years: int = 5
-) -> tuple[tuple[MetricSeries, ...], str | None, int]:
+    ticker: str, *, years: int = 5, bench: str = "", compare: str = ""
+) -> tuple[tuple[MetricSeries, ...], BenchmarkContext]:
     """The Derived-metrics tab's data: each metric's recent `years`-year history (for the
-    sparkline), merged with the ticker's industry-or-sector peer-median benchmark.
+    sparkline), merged with the requested benchmark.
 
     Valuation/Intrinsic-Value categories are excluded here for the same reason as
-    ``split_metrics`` (they're portrayed by the Valuation tab instead). Returns
-    ``(series, benchmark_basis, peer_count)`` — `benchmark_basis` is ``"industry"``/``"sector"``/
-    ``None`` (the last when the ticker has neither recorded) and drives the tab's caption; a
-    metric with no peer data of its own still shows up, just with ``peer_median=None``.
+    ``split_metrics`` (they're portrayed by the Valuation tab instead).
+
+    `bench`: ``""`` (auto — today's silent industry-then-sector cascade) | ``"industry"`` |
+    ``"sector"`` | ``"compare"``. `compare`: a ticker symbol, consulted only when
+    ``bench == "compare"``. Returns ``(series, BenchmarkContext)`` — preserves today's exact
+    output when `bench`/`compare` are both left blank.
     """
     repo = CompanyRepository()
     series = tuple(
@@ -114,15 +133,39 @@ def get_metric_history(
     )
     summary = repo.get_summary(ticker)
     if summary is None or not series:
-        return series, None, 0
-    benchmarks, basis, peer_count = repo.industry_benchmark(ticker, summary.industry, summary.sector)
-    by_metric = {b.metric: b for b in benchmarks}
-    merged = tuple(
-        replace(s, peer_median=bm.peer_median, peer_count=bm.peer_count) if (bm := by_metric.get(s.metric))
-        else s
-        for s in series
+        return series, BenchmarkContext(mode="industry", basis=None, peer_count=0)
+
+    industry_n, sector_n = repo.peer_counts(ticker, summary.industry, summary.sector)
+
+    if bench == "compare":
+        benchmarks, compare_company = repo.compare_benchmark(ticker, compare)
+        merged = _merge_peer_medians(series, benchmarks)
+        ctx = BenchmarkContext(
+            mode="compare",
+            basis="compare" if compare_company else None,
+            peer_count=1 if compare_company else 0,
+            industry_peer_count=industry_n,
+            sector_peer_count=sector_n,
+            compare=compare_company,
+        )
+        return merged, ctx
+
+    forced = bench if bench in ("industry", "sector") else "auto"
+    benchmarks, basis, peer_count, peers = repo.industry_benchmark(
+        ticker, summary.industry, summary.sector, basis=forced,
     )
-    return merged, basis, peer_count
+    merged = _merge_peer_medians(series, benchmarks)
+    mode = basis or (forced if forced in ("industry", "sector") else "industry")
+    ctx = BenchmarkContext(
+        mode=mode, basis=basis, peer_count=peer_count,
+        industry_peer_count=industry_n, sector_peer_count=sector_n, peers=peers,
+    )
+    return merged, ctx
+
+
+def all_companies() -> tuple[PeerCompany, ...]:
+    """Every ticker+name in the universe, for the "Compare to a company" <datalist>."""
+    return CompanyRepository().all_companies()
 
 
 def split_metrics(

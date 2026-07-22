@@ -162,6 +162,28 @@ but is otherwise a fully independent codebase from `web/` — it does **not** im
 automatically propagate to it (they were extracted once, then diverged deliberately — see
 below).
 
+- **Release/deploy pipeline is automatic end-to-end, except for one manual approval gate —
+  check for it every time a `fundamentals_screener` version is cut.** Merging a
+  `fundamentals_screener/pyproject.toml` version bump into this repo's `main` fires
+  `.github/workflows/release-screener.yml`, which tags `fundamentals-screener-vX.Y.Z` and
+  fires a `repository_dispatch` (`screener-released`, via the `SCREENER_NOTIFY_PAT` secret) at
+  `alopezmoreira1989/alopezm_my_website`. That repo's own
+  `.github/workflows/bump-fundamentals-screener.yml` catches it and opens a PR there
+  (`chore: bump fundamentals-screener to fundamentals-screener-vX.Y.Z`) bumping its
+  `requirements.txt` pin. **That PR's CI/CD run routinely lands as `action_required` and just
+  sits there — it is waiting on a manual workflow-run approval, not failing.** Nothing deploys
+  until a human (or Claude, if asked) does, in order: (1) `gh run list -R
+  alopezmoreira1989/alopezm_my_website --workflow=ci.yml` to find the stuck run for that PR's
+  branch, (2) `gh api -X POST
+  repos/alopezmoreira1989/alopezm_my_website/actions/runs/<id>/approve` to let its test/lint
+  jobs actually execute, (3) once green, `gh pr merge <n> -R alopezmoreira1989/alopezm_my_website
+  --merge --delete-branch`. Merging to that repo's `main` triggers its CI/CD's real `deploy` job
+  (SSH to Dinahosting + health check) — that is the step that actually ships the new version
+  live. **Whenever you cut a new `fundamentals_screener` release, always check `gh pr list -R
+  alopezmoreira1989/alopezm_my_website --state open` for a stuck bump PR** — the notify/tag side
+  on this repo can succeed while the consumer-side deploy never happens if that approval step is
+  missed (this has already happened once, 2026-07, across a laptop switch — the tag existed but
+  the live site was still on the prior version until the bump PR was manually approved+merged).
 - **This is a public API contract.** `fundamentals_screener/fundamentals_screener/urls.py`'s
   route names, the template filenames under
   `fundamentals_screener/fundamentals_screener/templates/fundamentals_screener/`, and the

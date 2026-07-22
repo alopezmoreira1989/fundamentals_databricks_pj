@@ -34,6 +34,10 @@ from .repositories.company_listing import MetricFilter, SortSpec
 
 PAGE_SIZE = 50
 
+# Valid ?bench= values for the Derived-metrics tab's benchmark switch. Anything else (missing,
+# blank, garbage) falls back to the historic silent industry-then-sector auto-cascade.
+_BENCH_MODES = ("industry", "sector", "compare")
+
 # Descriptive (non-metric) columns that can be sorted on, as (sort key, header label). The
 # sort keys match what CompanyListingRepository whitelists for the scope table.
 _DESC_COLUMNS = (("ticker", "Ticker"), ("name", "Company"), ("sector", "Sector"),
@@ -343,8 +347,45 @@ def company_detail(request: HttpRequest, ticker: str) -> HttpResponse:
     """Server-rendered company detail page: overview KPIs, financial statements, derived
     metrics, valuation football field, price chart."""
     ticker = ticker.upper()
+    summary = services.get_company_summary(ticker)
+    if summary is None:
+        raise Http404(f"unknown ticker {ticker!r}")
+
+    # Moved up from its old spot (right before market_cap_kpi) — only needs `summary`, so both
+    # the fragment and full-page branches below can share it without needing statements/price
+    # data first.
+    price_currency = quote_currency(summary.market).lower()
+    reporting_currency = (summary.reporting_currency or "USD").upper()
+    show_usd_toggle = price_currency != "usd" or reporting_currency != "USD"
+    usd_lens = show_usd_toggle and request.GET.get("usd") == "1"
+
+    bench = request.GET.get("bench", "").strip().lower()
+    if bench not in _BENCH_MODES:
+        bench = ""
+    compare = request.GET.get("compare", "").strip().upper()
+    derived_metrics, bench_ctx = services.get_metric_history(ticker, years=5, bench=bench, compare=compare)
+
+    # Benchmark-switch AJAX partial-swap (mirrors screen()'s is_fragment branch), scoped to just
+    # the Derived-metrics tab. Deliberately does NOT mirror screen()'s "same context either way"
+    # — unlike screen(), this view also computes statements/price/quarterly/valuation below, none
+    # of which the fragment needs, so this returns before any of that work runs.
+    is_fragment = request.headers.get("X-Requested-With") == "XMLHttpRequest"
+    if is_fragment:
+        return render(
+            request,
+            "fundamentals_screener/_derived_metrics.html",
+            {
+                "derived_metrics": derived_metrics,
+                "bench_ctx": bench_ctx,
+                "bench": bench,
+                "compare_query": compare,
+                "summary": summary,
+                "usd_lens": usd_lens,
+            },
+        )
+
     detail = services.get_company_detail(ticker)
-    if detail is None:
+    if detail is None:  # defensive only — `summary` above already confirmed the ticker exists
         raise Http404(f"unknown ticker {ticker!r}")
     statements = services.get_company_statements(ticker)
     headline = services.headline_kpis(statements)
@@ -371,20 +412,14 @@ def company_detail(request: HttpRequest, ticker: str) -> HttpResponse:
     quarterly_chart_svg = quarterly_chart(quarterly) if quarterly.lines else None
     # Valuation section: intrinsic-value football field + MoS + price multiples. Intrinsic-
     # value metrics are dropped from the derived-metrics list to avoid duplicating the
-    # football field. The Derived-metrics tab itself gets its own 5-year-history + peer-
-    # benchmark fetch (get_metric_history) rather than reusing detail.metrics' single latest
-    # value — valuation_metrics still comes from the latter (unchanged, single-value display).
+    # football field. valuation_metrics comes from detail.metrics (unchanged, single-value
+    # display) — derived_metrics/bench_ctx were already fetched above the fragment branch.
     _, valuation_metrics = services.split_metrics(detail.metrics)
-    derived_metrics, benchmark_basis, peer_count = services.get_metric_history(ticker, years=5)
     iv_chart = football.build_chart(services.get_intrinsic_value_field(ticker))
     mos_scenarios = services.get_margin_of_safety_scenarios(ticker)
-    price_currency = quote_currency(detail.summary.market).lower()
-    # Only offer the toggle for a ticker that actually has something non-USD to convert.
-    reporting_currency = (detail.summary.reporting_currency or "USD").upper()
-    show_usd_toggle = price_currency != "usd" or reporting_currency != "USD"
-    usd_lens = show_usd_toggle and request.GET.get("usd") == "1"
     market_cap_kpi = services.get_market_cap_kpi(ticker, usd_lens=usd_lens)
     headline = (*headline, market_cap_kpi) if market_cap_kpi else headline
+    compare_options = services.all_companies()
     return render(
         request,
         "fundamentals_screener/company_detail.html",
@@ -404,8 +439,11 @@ def company_detail(request: HttpRequest, ticker: str) -> HttpResponse:
             "quarterly_chart": quarterly_chart_svg,
             "bs_compositions": bs_compositions,
             "derived_metrics": derived_metrics,
-            "benchmark_basis": benchmark_basis,
-            "peer_count": peer_count,
+            "bench_ctx": bench_ctx,
+            "bench": bench,
+            "compare_query": compare,
+            "summary": summary,
+            "compare_options": compare_options,
             "valuation_metrics": valuation_metrics,
             "iv_chart": iv_chart,
             "mos_scenarios": mos_scenarios,

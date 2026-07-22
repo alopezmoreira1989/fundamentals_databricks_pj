@@ -100,6 +100,42 @@ class PeerBenchmark:
 
 
 @dataclass(frozen=True)
+class PeerCompany:
+    """A ticker + display name pair — used for the peer-chip roster, the selected "compare to"
+    company, and the Compare-picker's <datalist> options."""
+
+    ticker: str
+    name: str
+
+
+@dataclass(frozen=True)
+class BenchmarkContext:
+    """Everything the Derived-metrics tab's "Benchmark against" switch needs beyond the
+    per-metric peer_median/peer_count already merged into each MetricSeries row (see
+    services.get_metric_history).
+
+    ``mode`` is always "industry"/"sector"/"compare" — which pill is shown active, even on a
+    plain page load with no ?bench= (the historic silent auto-cascade still runs then; ``mode``
+    reflects whichever basis it resolved to, defaulting to "industry" if neither basis had any
+    peers). ``basis`` is what was actually merged into the metric rows — same three values, or
+    ``None`` when there's nothing to show (a forced basis with zero peers, or "compare" with no
+    ticker chosen / an unknown ticker) — callers degrade to a plain empty caption then, never a
+    crash. ``industry_peer_count``/``sector_peer_count`` are ALWAYS both populated so both pills
+    can show their own badge. ``peers`` (the chip roster) is populated only when
+    ``basis == "industry"``; ``compare`` carries the single Compare target instead of duplicating
+    it into ``peers``.
+    """
+
+    mode: str
+    basis: str | None
+    peer_count: int = 0
+    industry_peer_count: int = 0
+    sector_peer_count: int = 0
+    peers: tuple[PeerCompany, ...] = ()
+    compare: PeerCompany | None = None
+
+
+@dataclass(frozen=True)
 class StatementLine:
     """One financial-statement line item: its value across the displayed fiscal years, aligned
     to :attr:`Statement.years` (``None`` where a year has no reported value).
