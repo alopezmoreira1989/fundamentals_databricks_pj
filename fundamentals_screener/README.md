@@ -99,7 +99,26 @@ sync command via cron/deploy-hook — there's no reason not to.
 Ported from `web/`'s `apps/companies`, `apps/screener`, `apps/valuation`:
 
 - **Screener** (`/`): paginated, multi-metric, filterable (sector/industry/index/country/
-  market) company table, every column sortable, state in the URL (bookmarkable).
+  market) company table, every column sortable, state in the URL (bookmarkable). Two **modes**
+  behind one route/`?mode=` param — **General Screener** (the table above, default) and
+  **Net-Net Finder** (`?mode=netnet`, below) — sharing only the sector/country/market filters,
+  switched via a plain full-reload mode-nav tab bar. First of a planned family of curated
+  screener modes (see the "Net-Net Finder" milestone's description); follow its established
+  pattern (one route/one `?mode=`, a shared mode-nav partial, full-reload-not-AJAX for the mode
+  and any mode-specific controls, Python-side pagination once a mode's own result set can
+  plausibly exceed ~50 rows) for the next one rather than inventing a new shape.
+- **Net-Net Finder** (`?mode=netnet`): Graham-style deep-value screen — companies trading below
+  their net current asset value (NCAV), at three liquidation-conservatism levels (**Relaxed** /
+  **Moderate** / **Strict** — Relaxed counts every current asset at full face value, the
+  stricter levels apply a per-line-item haircut; see the root repo's `README.md` for the exact
+  formulas). A hero card shows the level switch, headline stats (universe size, positive-NCAV
+  count, count trading below value, count at Graham's classic ≤ 0.67× net-net threshold), and a
+  "hide likely value traps" filter (Piotroski F-Score < 4). The results table shows Price,
+  NCAV/Share, a discount bar+chip, an F-Score dot row, an Altman Z-Score zone pill (safe/grey/
+  distress), and Market Cap. The same NCAV/Share-vs-price card also appears on **Company
+  detail**'s Valuation tab and the standalone **Valuation** page (below) for any ticker with NCAV
+  data at any level — including a negative one, shown deliberately (a company's own numbers,
+  not a screened/filtered view).
 - **Company detail** (`/<ticker>/`): overview KPIs, financial statements (Income/Balance
   Sheet/Cash Flow, with row hierarchy — subtotals/grand-totals/headline rows indented and
   styled), quarterly Income Statement, derived metrics (5-year sparkline trend per metric,
@@ -111,10 +130,10 @@ Ported from `web/`'s `apps/companies`, `apps/screener`, `apps/valuation`:
   a small AJAX partial-swap (`?bench=industry|sector|compare&compare=TICKER`, degrades to a full
   reload with JS disabled). A ▲/▼ delta chip rides next to each percent-unit metric's own Latest
   value, showing the signed gap vs. the active benchmark), valuation football field + Margin of
-  Safety table, price chart with SMA 20/50/200, a "Latest news" card (async Yahoo Finance
-  headlines, `/<ticker>/news/`, cached — see the `CACHES` recommendation above).
-- **Valuation** (`/<ticker>/valuation/`): a standalone version of the same football field +
-  MoS table.
+  Safety table + Net-Net card, price chart with SMA 20/50/200, a "Latest news" card (async Yahoo
+  Finance headlines, `/<ticker>/news/`, cached — see the `CACHES` recommendation above).
+- **Valuation** (`/<ticker>/valuation/`): a standalone version of the same football field + MoS
+  table + Net-Net card.
 - JSON siblings of all three (`/data/`, `/<ticker>/data/`, `/<ticker>/valuation/data/`).
 
 **Not ported** — these existed in the source app but depend on things this package
