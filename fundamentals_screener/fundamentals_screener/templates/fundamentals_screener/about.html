@@ -1,0 +1,44 @@
+{% extends "fundamentals_screener/base_screener.html" %}
+{% block title %}About{% endblock %}
+{% block meta_description %}About Fundamentals Screener — the value-investing approach behind the app, and what it is not.{% endblock %}
+{% block content %}
+  <div class="card p-4 mb-4">
+    <div class="eyebrow mb-2">About</div>
+    <h1 class="h3 mb-3">A value-investing screener</h1>
+    <p class="mb-3" style="line-height:1.65; color:var(--ink-2)">
+      This screener is built around the value-investing tradition of Benjamin Graham,
+      Warren Buffett, and Peter Lynch: buy businesses, not tickers, and only with a
+      <strong>margin of safety</strong> — a price meaningfully below a conservative estimate of
+      intrinsic value, so the estimate can be wrong and the investment still hold up.
+    </p>
+    <p class="mb-3" style="line-height:1.65; color:var(--ink-2)">
+      The metrics on this site favor <strong>balance-sheet discipline</strong> over growth
+      narratives — debt levels, liquidity, and the durability of returns on capital — because a
+      company that survives a downturn is worth more than one that merely grows fast through
+      one. <strong>Quality is treated as a filter, not a story</strong>: profitability,
+      consistency, and financial strength are used to screen candidates in or out before any
+      valuation judgment is made.
+    </p>
+    <p class="mb-0" style="line-height:1.65; color:var(--ink-2)">
+      Every figure shown is derived <strong>mechanically</strong> from SEC-filed financials and
+      market prices, following the same formulas for every company. Nothing here is opinion,
+      narrative, or a house view on any individual stock.
+    </p>
+  </div>
+
+  <div class="card p-4">
+    <div class="eyebrow mb-2 accent">Disclaimer</div>
+    <h2 class="h5 mb-3">What this is not</h2>
+    <ul class="mb-0" style="line-height:1.65; color:var(--ink-2)">
+      <li>This is <strong>not investment advice</strong>. Nothing on this site is a
+        recommendation to buy, hold, or sell any security.</li>
+      <li>This is <strong>not a substitute for professional advice</strong>. Consult a
+        licensed financial advisor before making investment decisions.</li>
+      <li>Data is <strong>not guaranteed to be accurate, complete, or current</strong>. It is
+        derived from SEC EDGAR filings and third-party market data, which can lag, be restated,
+        or contain errors.</li>
+      <li>No metric, score, or screen result on this site is <strong>a signal</strong> to act.
+        Every number is a mechanically computed data point, not a conclusion.</li>
+    </ul>
+  </div>
+{% endblock %}

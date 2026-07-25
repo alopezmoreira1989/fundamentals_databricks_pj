@@ -323,6 +323,11 @@ def screen(request: HttpRequest) -> HttpResponse:
     )
 
 
+def about(request: HttpRequest) -> HttpResponse:
+    """Static About page: value-investing framing + legal disclaimer. No dynamic context."""
+    return render(request, "fundamentals_screener/about.html")
+
+
 def screen_data(request: HttpRequest) -> JsonResponse:
     metric = request.GET.get("metric", "").strip()
     if not metric:
