@@ -140,7 +140,10 @@ def test_unrecognized_level_falls_back_to_relaxed(patch_repo):
 def test_descriptive_filters_pass_through_to_both_repo_calls(patch_repo):
     fake = patch_repo((_row("A", price=5.0, relaxed=10.0),))
     get_net_net_screen(level="relaxed", sector="Industrials", country="United States", market="US")
-    assert fake.scope_calls[0] == {"sector": "Industrials", "country": "United States", "market": "US"}
+    assert fake.scope_calls[0] == {
+        "sector": "Industrials", "index": "", "country": "United States", "market": "US",
+        "industry": "",
+    }
     assert fake.screen_calls[0]["sector"] == "Industrials"
     assert fake.screen_calls[0]["country"] == "United States"
     assert fake.screen_calls[0]["market"] == "US"

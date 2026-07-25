@@ -41,6 +41,24 @@
         </select>
       </div>
       <div>
+        <label for="nn-index" class="form-label">Index</label>
+        <select id="nn-index" name="index" class="form-select">
+          <option value="">Any</option>
+          <option value="sp500" {% if index == "sp500" %}selected{% endif %}>S&amp;P 500</option>
+          <option value="r3000" {% if index == "r3000" %}selected{% endif %}>Russell 3000</option>
+          <option value="tsx" {% if index == "tsx" %}selected{% endif %}>S&amp;P/TSX Composite</option>
+        </select>
+      </div>
+      <div>
+        <label for="nn-industry" class="form-label">Industry</label>
+        <select id="nn-industry" name="industry" class="form-select">
+          <option value="">All industries</option>
+          {% for i in industries %}
+            <option value="{{ i }}" {% if i == industry %}selected{% endif %}>{{ i }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
         <label for="nn-country" class="form-label">Country</label>
         <select id="nn-country" name="country" class="form-select">
           <option value="">All countries</option>
@@ -75,15 +93,15 @@
         <table class="table table-sm table-hover align-middle mb-0">
           <thead>
             <tr>
-              <th scope="col">Ticker</th>
-              <th scope="col">Company</th>
-              <th scope="col">Sector</th>
-              <th scope="col" class="text-end">Price</th>
-              <th scope="col" class="text-end">NCAV/Share</th>
-              <th scope="col">Discount</th>
-              <th scope="col">F-Score</th>
-              <th scope="col">Altman Zone</th>
-              <th scope="col" class="text-end">Market Cap</th>
+              <th scope="col"><a class="text-decoration-none text-reset" href="{{ headers.ticker.sort_url }}">Ticker <span class="text-muted">{{ headers.ticker.indicator }}</span></a></th>
+              <th scope="col"><a class="text-decoration-none text-reset" href="{{ headers.name.sort_url }}">Company <span class="text-muted">{{ headers.name.indicator }}</span></a></th>
+              <th scope="col"><a class="text-decoration-none text-reset" href="{{ headers.sector.sort_url }}">Sector <span class="text-muted">{{ headers.sector.indicator }}</span></a></th>
+              <th scope="col" class="text-end"><a class="text-decoration-none text-reset" href="{{ headers.price.sort_url }}">Price <span class="text-muted">{{ headers.price.indicator }}</span></a></th>
+              <th scope="col" class="text-end"><a class="text-decoration-none text-reset" href="{{ headers.ncav_per_share.sort_url }}">NCAV/Share <span class="text-muted">{{ headers.ncav_per_share.indicator }}</span></a></th>
+              <th scope="col"><a class="text-decoration-none text-reset" href="{{ headers.discount.sort_url }}">Discount <span class="text-muted">{{ headers.discount.indicator }}</span></a></th>
+              <th scope="col"><a class="text-decoration-none text-reset" href="{{ headers.f_score.sort_url }}">F-Score <span class="text-muted">{{ headers.f_score.indicator }}</span></a></th>
+              <th scope="col"><a class="text-decoration-none text-reset" href="{{ headers.z_score.sort_url }}">Altman Zone <span class="text-muted">{{ headers.z_score.indicator }}</span></a></th>
+              <th scope="col" class="text-end"><a class="text-decoration-none text-reset" href="{{ headers.market_cap.sort_url }}">Market Cap <span class="text-muted">{{ headers.market_cap.indicator }}</span></a></th>
             </tr>
           </thead>
           <tbody>
