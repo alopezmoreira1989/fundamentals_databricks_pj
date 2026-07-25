@@ -27,7 +27,7 @@
 
   {% include "fundamentals_screener/_netnet_hero.html" %}
 
-  <div class="p-4 bg-white rounded-3 shadow-sm mb-4">
+  <div class="nn-filters p-4 bg-white rounded-3 shadow-sm mb-4">
     <form method="get" id="nn-filter-form" class="d-flex flex-wrap align-items-end gap-3">
       <input type="hidden" name="mode" value="netnet">
       <input type="hidden" name="level" value="{{ level }}">
@@ -64,8 +64,8 @@
 
   <div class="bg-white rounded-3 shadow-sm p-4">
     <div class="d-flex justify-content-between align-items-baseline mb-3">
-      <h2 class="h5 mb-0">Candidates</h2>
-      <span class="text-muted small">
+      <h2 class="h5 mb-0">Net-Net candidates</h2>
+      <span class="text-muted small mono">
         {{ total }} match{{ total|pluralize:"es" }}{% if num_pages > 1 %} · page {{ page }} of {{ num_pages }}{% endif %}
       </span>
     </div>
@@ -90,11 +90,11 @@
             {% for item in rows %}
               <tr>
                 <td>
-                  <a class="d-inline-flex align-items-center gap-2 text-decoration-none" href="{% url 'fundamentals_screener:company_detail' item.row.ticker %}">
+                  <a class="nn-ticker-link d-inline-flex align-items-center gap-2 text-decoration-none" href="{% url 'fundamentals_screener:company_detail' item.row.ticker %}">
                     {% company_logo item.row.ticker item.row.name item.row.has_logo 24 %}<span class="fw-semibold">{{ item.row.ticker }}</span>
                   </a>
                 </td>
-                <td>{{ item.row.name|default:"—" }}</td>
+                <td class="text-body-secondary">{{ item.row.name|default:"—" }}</td>
                 <td class="text-muted">{{ item.row.sector|default:"—" }}</td>
                 <td class="text-end font-monospace">{{ item.row.price|metric_value:"usd" }}</td>
                 <td class="text-end font-monospace">{{ item.ncav_per_share|metric_value:"usd" }}</td>
@@ -111,11 +111,12 @@
                     <span class="text-muted">—</span>
                   {% endif %}
                 </td>
-                <td>
+                <td class="text-nowrap">
                   {% if item.row.f_score is not None %}
                     <span class="nn-fscore" title="Piotroski F-Score: {{ item.row.f_score|floatformat:0 }}/9">
                       {% for i in "123456789" %}<span class="nn-fscore-dot{% if forloop.counter <= item.row.f_score %} nn-fscore-dot--filled{% endif %}"></span>{% endfor %}
                     </span>
+                    {{ item.row.f_score|floatformat:0 }}
                   {% else %}
                     <span class="text-muted">—</span>
                   {% endif %}

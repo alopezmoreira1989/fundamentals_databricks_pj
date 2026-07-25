@@ -177,7 +177,7 @@ body.fs-app { font-family: var(--sans); background: var(--bg); color: var(--ink)
 }
 .fs-app .table > thead th {
   font-family: var(--mono); font-size: .66rem; letter-spacing: .1em; text-transform: uppercase;
-  color: var(--ink-3); font-weight: 400; border-bottom: 1px solid var(--ink);
+  color: var(--ink-3); font-weight: 400; border-bottom: 1px solid var(--ink); white-space: nowrap;
 }
 .fs-app .table > tbody td { font-size: .86rem; vertical-align: middle; }
 .fs-app .table .num, .fs-app .table td.text-end, .fs-app .table th.text-end {
@@ -256,12 +256,37 @@ body.fs-app { font-family: var(--sans); background: var(--bg); color: var(--ink)
 .fs-app .co-logo-sm .co-logo-mono { font-size: .8rem; }
 
 /* ---------- Net-Net Finder (issue #260) ---------- */
+/* Hero card: editorial header — italic display title + intro text on the left, right-aligned
+   headline stats on the right, matching the approved mockup's layout exactly. */
+.fs-app .nn-hero {
+  background: var(--bg-card); border: 1px solid var(--rule); border-radius: 8px; padding: 26px 28px;
+}
+.fs-app .nn-hero-top {
+  display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; flex-wrap: wrap;
+}
+.fs-app .nn-title {
+  font-family: var(--display); font-style: italic; font-variation-settings: "opsz" 144;
+  font-weight: 500; font-size: 26px; letter-spacing: -.01em; margin: 6px 0 0; color: var(--ink);
+}
+.fs-app .nn-sub { color: var(--ink-2); font-size: .92rem; max-width: 560px; margin-top: 8px; line-height: 1.5; }
+.fs-app .nn-stats { display: flex; gap: 36px; flex-shrink: 0; }
+.fs-app .nn-stat { text-align: right; }
+.fs-app .nn-stat .v {
+  font-family: var(--display); font-variation-settings: "opsz" 144; font-weight: 500;
+  font-size: 30px; color: var(--ink); line-height: 1;
+}
+.fs-app .nn-stat .v.hi { color: var(--positive); }
+.fs-app .nn-stat .l {
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--ink-3); margin-top: 5px;
+}
+
 /* Discount bar + chip: how far below (or above) NCAV/share a ticker trades. The fill color is
    3-tier semantic (classic net-net / merely below value / not below value), matching the same
    safe/grey/distress framing the Altman zone pill uses below — not the app's cyan --accent,
    since this is a status signal, not a brand accent. */
 .fs-app .nn-bar {
-  width: 84px; height: 6px; border-radius: 3px; background: var(--bg-subtle);
+  width: 46px; height: 6px; border-radius: 3px; background: var(--bg-subtle);
   overflow: hidden; display: inline-block; vertical-align: middle;
 }
 .fs-app .nn-bar-fill { height: 100%; border-radius: 3px; background: var(--ink-3); }
@@ -289,6 +314,14 @@ body.fs-app { font-family: var(--sans); background: var(--bg); color: var(--ink)
 .fs-app .nn-zone--distress { background: var(--negative-soft); color: var(--negative); }
 .fs-app .nn-zone--unknown { background: var(--bg-subtle); color: var(--ink-3); }
 
+/* Ticker link in the Net-Net results table — accent-colored and bolder than a plain body link. */
+.fs-app .nn-ticker-link { color: var(--accent-ink); font-weight: 600; }
+.fs-app .nn-ticker-link:hover { color: var(--ink); }
+
+/* Net-Net filter row: subtler select background than the app-wide form-select default, matching
+   the approved mockup — scoped to this card only, not a global form-select restyle. */
+.fs-app .nn-filters .form-select { background: var(--bg-subtle); }
+
 /* Discount chip: percentage below (or above) NCAV/share, replacing a raw "0.67x" ratio with a
    readable "-33%" figure. Same pill shape/mono font as .nn-zone above, 3-tier semantic keyed off
    discount_pct rather than the Altman zone: >=45% deep discount, 25-44% moderate, below that a
@@ -314,20 +347,35 @@ body.fs-app { font-family: var(--sans); background: var(--bg); color: var(--ink)
 .fs-app .level-btn--active {
   background: var(--bg-card); color: var(--ink); box-shadow: 0 1px 2px rgba(11, 37, 69, .12);
 }
+.fs-app .level-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 7px; vertical-align: middle; }
+.fs-app .level-dot--relaxed { background: var(--accent); }
+.fs-app .level-dot--moderate { background: var(--orange); }
+.fs-app .level-dot--strict { background: var(--negative); }
 
-/* Formula-note box: the haircut-methodology disclaimer, set off from the hero card body. */
-.fs-app .formula-note { background: var(--bg-subtle); border-radius: 8px; padding: 12px 16px; }
+/* Real toggle-switch component (checkbox-driven, no JS) — an editorial upgrade over a plain
+   checkbox, used for "hide likely value traps". <label class="switch"><input type="checkbox">
+   <span class="switch-track"></span></label>. */
+.fs-app .switch { position: relative; display: inline-block; width: 36px; height: 20px; cursor: pointer; }
+.fs-app .switch input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.fs-app .switch-track { position: absolute; inset: 0; background: var(--rule); border-radius: 10px; transition: background .15s; }
+.fs-app .switch-track::after {
+  content: ""; position: absolute; width: 16px; height: 16px; background: #fff; border-radius: 50%;
+  top: 2px; left: 2px; transition: left .15s; box-shadow: 0 1px 2px rgba(11, 37, 69, .25);
+}
+.fs-app .switch input:checked + .switch-track { background: var(--accent); }
+.fs-app .switch input:checked + .switch-track::after { left: 18px; }
+.fs-app .switch input:focus-visible + .switch-track { outline: 3px solid var(--accent); outline-offset: 2px; }
 
-/* Distribution histogram (2 bins, below the hero stats): classic net-net vs. merely-below-value
-   counts, same fill colors as the discount bar/pill above for the same two tiers. */
-.fs-app .nn-hist { display: flex; flex-direction: column; gap: 8px; }
-.fs-app .nn-hist-row { display: grid; grid-template-columns: 200px 1fr 48px; align-items: center; gap: 12px; }
-.fs-app .nn-hist-label { font-size: .8rem; color: var(--ink-2); }
-.fs-app .nn-hist-bar { height: 8px; border-radius: 4px; background: var(--bg-subtle); overflow: hidden; }
-.fs-app .nn-hist-bar-fill { height: 100%; border-radius: 4px; }
-.fs-app .nn-hist-bar-fill--classic { background: var(--positive); }
-.fs-app .nn-hist-bar-fill--below { background: var(--orange); }
-.fs-app .nn-hist-count { font-family: var(--mono); font-size: .8rem; text-align: right; color: var(--ink-2); }
+/* Formula-note box: the haircut-methodology disclaimer, set off from the hero card body. Bold
+   mono formula name inline, then a separate smaller muted "caveat" line below it. */
+.fs-app .formula-note {
+  background: var(--bg-subtle); border-radius: 8px; padding: 12px 16px; font-size: .82rem;
+  color: var(--ink-2); line-height: 1.5;
+}
+.fs-app .formula-note b { font-family: var(--mono); color: var(--ink); }
+.fs-app .formula-note .caveat {
+  display: block; margin-top: 6px; font-family: var(--mono); font-size: 10px; color: var(--ink-3);
+}
 
 /* ---------- Footer ---------- */
 .fs-footer { background: var(--bg-card); border-top: 1px solid var(--rule); color: var(--ink-3); }

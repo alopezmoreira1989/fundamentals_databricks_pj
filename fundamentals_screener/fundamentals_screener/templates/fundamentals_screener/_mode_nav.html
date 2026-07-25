@@ -6,13 +6,17 @@ links, no JS: the two modes' content differs enough (different hero, different c
 different filter set) that a fragment swap wouldn't save much — see views.screen()'s
 docstring.
 {% endcomment %}
-<div class="btn-group btn-group-sm mb-4" role="group" aria-label="Screener mode">
-  <a class="btn {% if mode == 'general' %}btn-dark{% else %}btn-outline-secondary{% endif %}"
-     href="{% url 'fundamentals_screener:screen' %}{% if shared_qs %}?{{ shared_qs }}{% endif %}">
-    General Screener
-  </a>
-  <a class="btn {% if mode == 'netnet' %}btn-dark{% else %}btn-outline-secondary{% endif %}"
-     href="{% url 'fundamentals_screener:screen' %}?mode=netnet{% if shared_qs %}&{{ shared_qs }}{% endif %}">
-    Net-Net Finder
-  </a>
-</div>
+<ul class="nav nav-tabs mb-4">
+  <li class="nav-item">
+    <a class="nav-link {% if mode == 'general' %}active{% endif %}"
+       href="{% url 'fundamentals_screener:screen' %}{% if shared_qs %}?{{ shared_qs }}{% endif %}">
+      General Screener
+    </a>
+  </li>
+  <li class="nav-item">
+    <a class="nav-link {% if mode == 'netnet' %}active{% endif %}"
+       href="{% url 'fundamentals_screener:screen' %}?mode=netnet{% if shared_qs %}&{{ shared_qs }}{% endif %}">
+      Net-Net Finder
+    </a>
+  </li>
+</ul>

@@ -1,93 +1,78 @@
 {% comment %}
-Included by netnet.html. Context needed: level, stats (NetNetStats), moderate_below_count,
-classic_bar_pct, moderate_bar_pct (the 2-bin distribution histogram — see _netnet_screen),
-hide_value_traps, shared_qs, sector, country, market (for the level pills to carry the rest
-of the state forward, since they're plain full-reload links, not part of the filter <form>
-below).
+Included by netnet.html. Context needed: level, stats (NetNetStats), hide_value_traps,
+shared_qs, sector, country, market (for the level pills to carry the rest of the state
+forward, since they're plain full-reload links, not part of the filter <form> below).
 {% endcomment %}
-<div class="card p-4 mb-4">
-  <div class="eyebrow mb-2">Net-Net Finder</div>
-  <h1 class="h4 mb-2">Graham-style deep value screener</h1>
-  <p class="text-muted mb-4" style="max-width: 70ch">
-    Net current asset value (NCAV) estimates what a company would be worth if it stopped
-    operating today and turned every current asset into cash to pay off every liability. A
-    stock trading below its NCAV/share is arguably backed by more liquid value than its market
-    price reflects — Graham's classic "cigar butt" opportunity.
-  </p>
-
-  <div class="row g-3 text-center mb-4">
-    <div class="col-6 col-md-3">
-      <div class="h3 mb-0">{{ stats.universe_size }}</div>
-      <div class="small text-muted">In scope</div>
+{% load humanize %}
+<div class="nn-hero mb-4">
+  <div class="nn-hero-top">
+    <div class="nn-hero-intro">
+      <span class="eyebrow accent">Graham &middot; Deep Value</span>
+      <h1 class="nn-title">Companies trading below liquidation value</h1>
+      <p class="nn-sub">
+        Net Current Asset Value (NCAV) estimates what's left for shareholders if the company
+        stopped operating and sold off its current assets tomorrow. How much of that book value
+        you actually trust to realize is a judgment call — pick a level below.
+      </p>
     </div>
-    <div class="col-6 col-md-3">
-      <div class="h3 mb-0">{{ stats.eligible_count }}</div>
-      <div class="small text-muted">Positive NCAV ({{ level|title }})</div>
-    </div>
-    <div class="col-6 col-md-3">
-      <div class="h3 mb-0">{{ stats.below_value_count }}</div>
-      <div class="small text-muted">Trading below value</div>
-    </div>
-    <div class="col-6 col-md-3">
-      <div class="h3 mb-0">{{ stats.classic_net_net_count }}</div>
-      <div class="small text-muted">Classic net-nets (&le; 0.67&times;)</div>
-    </div>
-  </div>
-
-  <div class="nn-hist mb-4">
-    <div class="nn-hist-row">
-      <div class="nn-hist-label">Classic net-net (&le; 0.67&times;)</div>
-      <div class="nn-hist-bar"><div class="nn-hist-bar-fill nn-hist-bar-fill--classic" style="width: {{ classic_bar_pct|floatformat:'1u' }}%"></div></div>
-      <div class="nn-hist-count">{{ stats.classic_net_net_count }}</div>
-    </div>
-    <div class="nn-hist-row">
-      <div class="nn-hist-label">Net-net (0.67&ndash;1.0&times;)</div>
-      <div class="nn-hist-bar"><div class="nn-hist-bar-fill nn-hist-bar-fill--below" style="width: {{ moderate_bar_pct|floatformat:'1u' }}%"></div></div>
-      <div class="nn-hist-count">{{ moderate_below_count }}</div>
+    <div class="nn-stats">
+      <div class="nn-stat">
+        <div class="v hi">{{ stats.below_value_count|intcomma }}</div>
+        <div class="l">Trading below value</div>
+      </div>
+      <div class="nn-stat">
+        <div class="v">{{ stats.classic_net_net_count|intcomma }}</div>
+        <div class="l">Classic net-net (&le; 0.67&times;)</div>
+      </div>
+      <div class="nn-stat">
+        <div class="v">{{ stats.universe_size|intcomma }}</div>
+        <div class="l">Universe screened</div>
+      </div>
     </div>
   </div>
 
   {% with base_qs=shared_qs %}
-  <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
-    <div>
-      <div class="form-label mb-1">Conservatism level</div>
-      <div class="levels" role="group" aria-label="NCAV conservatism level">
-        <a class="level-btn {% if level == 'relaxed' %}level-btn--active{% endif %}"
-           href="?mode=netnet&amp;level=relaxed{% if base_qs %}&amp;{{ base_qs }}{% endif %}{% if hide_value_traps %}&amp;hide_value_traps=1{% endif %}">
-          Relaxed
-        </a>
-        <a class="level-btn {% if level == 'moderate' %}level-btn--active{% endif %}"
-           href="?mode=netnet&amp;level=moderate{% if base_qs %}&amp;{{ base_qs }}{% endif %}{% if hide_value_traps %}&amp;hide_value_traps=1{% endif %}">
-          Moderate
-        </a>
-        <a class="level-btn {% if level == 'strict' %}level-btn--active{% endif %}"
-           href="?mode=netnet&amp;level=strict{% if base_qs %}&amp;{{ base_qs }}{% endif %}{% if hide_value_traps %}&amp;hide_value_traps=1{% endif %}">
-          Strict
-        </a>
-      </div>
+  <div class="d-flex flex-wrap align-items-center gap-3 mt-3">
+    <div class="levels" role="group" aria-label="NCAV conservatism level">
+      <a class="level-btn {% if level == 'relaxed' %}level-btn--active{% endif %}"
+         href="?mode=netnet&amp;level=relaxed{% if base_qs %}&amp;{{ base_qs }}{% endif %}{% if hide_value_traps %}&amp;hide_value_traps=1{% endif %}">
+        <span class="level-dot level-dot--relaxed"></span>Relaxed
+      </a>
+      <a class="level-btn {% if level == 'moderate' %}level-btn--active{% endif %}"
+         href="?mode=netnet&amp;level=moderate{% if base_qs %}&amp;{{ base_qs }}{% endif %}{% if hide_value_traps %}&amp;hide_value_traps=1{% endif %}">
+        <span class="level-dot level-dot--moderate"></span>Moderate
+      </a>
+      <a class="level-btn {% if level == 'strict' %}level-btn--active{% endif %}"
+         href="?mode=netnet&amp;level=strict{% if base_qs %}&amp;{{ base_qs }}{% endif %}{% if hide_value_traps %}&amp;hide_value_traps=1{% endif %}">
+        <span class="level-dot level-dot--strict"></span>Strict
+      </a>
     </div>
-    <label class="d-flex align-items-center gap-2 small mb-0">
-      {# form="nn-filter-form" submits with netnet.html's filter <form> despite living outside it #}
-      <input type="checkbox" id="nn-hide-traps" name="hide_value_traps" value="1"
-             form="nn-filter-form" {% if hide_value_traps %}checked{% endif %}
-             class="form-check-input mt-0">
-      Hide likely value traps (F-Score &lt; 4)
-    </label>
+    <div class="d-flex align-items-center gap-2 ms-auto">
+      <label for="nn-hide-traps" class="small text-muted mb-0">Hide likely value traps (F-Score &lt; 4)</label>
+      <label class="switch mb-0">
+        {# form="nn-filter-form" submits with netnet.html's filter <form> despite living outside it #}
+        <input type="checkbox" id="nn-hide-traps" name="hide_value_traps" value="1"
+               form="nn-filter-form" {% if hide_value_traps %}checked{% endif %}>
+        <span class="switch-track"></span>
+      </label>
+    </div>
   </div>
   {% endwith %}
 
   <div class="formula-note mt-3">
-    <p class="small text-muted mb-0">
-      {% if level == "relaxed" %}
-        Relaxed counts every current asset at full face value — Graham's classic NCAV baseline.
-      {% elif level == "moderate" %}
-        Moderate: cash &amp; short-term investments at 100%, receivables at 75%, inventory at 50%.
-      {% else %}
-        Strict: cash at 100%, short-term investments at 90%, receivables at 50%, inventory at 33%.
-      {% endif %}
-      These haircuts are a practitioner convention approximating how much of each asset class
-      would realistically be recoverable in a liquidation — not a literal historical Graham
-      formula.
-    </p>
+    {% if level == "relaxed" %}
+      <b>NCAV</b> = Total Current Assets (100%) &minus; Total Liabilities. The textbook formula
+      — assumes every dollar of inventory and every dollar of receivables is fully recoverable.
+    {% elif level == "moderate" %}
+      <b>NCAV (Moderate)</b> = Cash + ST Investments (100%) + Receivables (75%) + Inventory (50%)
+      + Other (0%) &minus; Total Liabilities. Common haircuts among net-net investors, not a
+      literal Graham quote.
+    {% else %}
+      <b>NCAV (Strict)</b> = Cash (100%) + ST Investments (90%) + Receivables (50%) + Inventory
+      (33%) + Other (0%) &minus; Total Liabilities. Forced-liquidation value — the toughest
+      filter, fewest false positives.
+    {% endif %}
+    <span class="caveat">These haircut percentages are a practitioner convention, not an
+      "official" formula — Graham himself varied them across editions of his own writing.</span>
   </div>
 </div>
