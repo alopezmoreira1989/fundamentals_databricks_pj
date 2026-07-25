@@ -330,6 +330,16 @@ def get_net_net_screen(
     return NetNetScreen(rows=sorted_rows, stats=stats)
 
 
+def get_net_net_snapshot(ticker: str) -> NetNetRow | None:
+    """A single ticker's own price, NCAV/Share at all three levels, and quality overlay, for
+    the company Valuation page's Net-Net card (issue #262) — ``None`` for an unknown ticker.
+    Unlike ``get_net_net_screen``, this never filters on eligibility: a company with negative
+    NCAV at every level still gets a snapshot (with those fields ``None``), since the Valuation
+    page always shows a company's own numbers rather than screening a universe.
+    """
+    return CompanyRepository().net_net_snapshot(ticker)
+
+
 def available_sectors() -> tuple[str, ...]:
     """Sector names the user can filter on (for the picker)."""
     return CompanyListingRepository().available_sectors()

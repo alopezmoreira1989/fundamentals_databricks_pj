@@ -151,6 +151,43 @@ _NET_NET_LEVEL_FIELD = {
     "moderate": "ncav_per_share_moderate",
     "strict": "ncav_per_share_strict",
 }
+# Display order + label for the Valuation page's Net-Net card (issue #262), which shows all
+# three levels side by side rather than one user-selected level like the Net-Net Finder does.
+_NET_NET_CARD_LEVELS = (("Relaxed", "relaxed"), ("Moderate", "moderate"), ("Strict", "strict"))
+
+
+def _net_net_card_context(ticker: str) -> dict | None:
+    """Shared by ``valuation()`` and ``company_detail()``: the Net-Net card's context, or
+    ``None`` when the ticker has no NCAV data at any level at all (unknown ticker, or every
+    level's NCAV/share is null) — nothing to show then, so the card doesn't render rather than
+    showing three dashes. A NEGATIVE NCAV/share (common — most companies aren't net-nets) still
+    renders, deliberately: the Valuation page always shows a company's own numbers, unlike the
+    Net-Net Finder screener which only lists NCAV-positive eligible tickers. ``ratio``/
+    ``bar_pct`` are left ``None``/0 for a non-positive NCAV/share, though — dividing price by a
+    negative or zero NCAV produces a meaningless "ratio" (confirmed as a real bug during
+    testing: a negative ratio like -34.4x satisfied the "classic net-net" bar-color threshold
+    check, painting AAPL's deeply-negative NCAV bright green as if it were a bargain).
+
+    ``snapshot.price`` comes from ``net_net_snapshot``'s own latest-close lookup — deliberately
+    NOT the caller's football-field chart price (confirmed as a second real gap during testing:
+    that price is unavailable for tickers lacking EPS/BVPS data even when a real close and real
+    NCAV both exist, e.g. an unprofitable clinical-stage biotech).
+    """
+    snapshot = services.get_net_net_snapshot(ticker)
+    if snapshot is None:
+        return None
+    price = snapshot.price
+    levels = []
+    for label, level in _NET_NET_CARD_LEVELS:
+        ncav_per_share = getattr(snapshot, _NET_NET_LEVEL_FIELD[level])
+        has_ratio = price is not None and ncav_per_share is not None and ncav_per_share > 0
+        ratio = price / ncav_per_share if has_ratio else None
+        discount_pct = (1 - ratio) * 100 if ratio is not None else None
+        bar_pct = max(0.0, min(discount_pct, 100.0)) if discount_pct is not None else 0.0
+        levels.append({"label": label, "ncav_per_share": ncav_per_share, "ratio": ratio, "bar_pct": bar_pct})
+    if not any(lv["ncav_per_share"] is not None for lv in levels):
+        return None
+    return {"net_net": snapshot, "net_net_levels": levels}
 
 
 def screen(request: HttpRequest) -> HttpResponse:
@@ -539,35 +576,35 @@ def company_detail(request: HttpRequest, ticker: str) -> HttpResponse:
     market_cap_kpi = services.get_market_cap_kpi(ticker, usd_lens=usd_lens)
     headline = (*headline, market_cap_kpi) if market_cap_kpi else headline
     compare_options = services.all_companies()
-    return render(
-        request,
-        "fundamentals_screener/company_detail.html",
-        {
-            "detail": detail,
-            "statements": statements.statements,
-            "statement_panes": statement_panes,
-            "headline": headline,
-            "price_chart": price_chart,
-            "price_tab_chart": price_tab_chart,
-            "price_windows": price_windows,
-            "price_window": price_window,
-            "price_currency": price_currency,
-            "show_usd_toggle": show_usd_toggle,
-            "usd_lens": usd_lens,
-            "quarterly": quarterly,
-            "quarterly_chart": quarterly_chart_svg,
-            "bs_compositions": bs_compositions,
-            "derived_metrics": derived_metrics,
-            "bench_ctx": bench_ctx,
-            "bench": bench,
-            "compare_query": compare,
-            "summary": summary,
-            "compare_options": compare_options,
-            "valuation_metrics": valuation_metrics,
-            "iv_chart": iv_chart,
-            "mos_scenarios": mos_scenarios,
-        },
-    )
+    context = {
+        "detail": detail,
+        "statements": statements.statements,
+        "statement_panes": statement_panes,
+        "headline": headline,
+        "price_chart": price_chart,
+        "price_tab_chart": price_tab_chart,
+        "price_windows": price_windows,
+        "price_window": price_window,
+        "price_currency": price_currency,
+        "show_usd_toggle": show_usd_toggle,
+        "usd_lens": usd_lens,
+        "quarterly": quarterly,
+        "quarterly_chart": quarterly_chart_svg,
+        "bs_compositions": bs_compositions,
+        "derived_metrics": derived_metrics,
+        "bench_ctx": bench_ctx,
+        "bench": bench,
+        "compare_query": compare,
+        "summary": summary,
+        "compare_options": compare_options,
+        "valuation_metrics": valuation_metrics,
+        "iv_chart": iv_chart,
+        "mos_scenarios": mos_scenarios,
+    }
+    net_net_ctx = _net_net_card_context(ticker)
+    if net_net_ctx:
+        context.update(net_net_ctx)
+    return render(request, "fundamentals_screener/company_detail.html", context)
 
 
 def company_news(request: HttpRequest, ticker: str) -> JsonResponse:
@@ -609,17 +646,17 @@ def valuation(request: HttpRequest, ticker: str) -> HttpResponse:
     chart = football.build_chart(services.get_intrinsic_value_field(ticker))
     summary = services.get_company_summary(ticker)
     price_currency = quote_currency(summary.market if summary else None).lower()
-    return render(
-        request,
-        "fundamentals_screener/valuation.html",
-        {
-            "ticker": ticker,
-            "points": points,
-            "scenarios": scenarios,
-            "chart": chart,
-            "price_currency": price_currency,
-        },
-    )
+    context = {
+        "ticker": ticker,
+        "points": points,
+        "scenarios": scenarios,
+        "chart": chart,
+        "price_currency": price_currency,
+    }
+    net_net_ctx = _net_net_card_context(ticker)
+    if net_net_ctx:
+        context.update(net_net_ctx)
+    return render(request, "fundamentals_screener/valuation.html", context)
 
 
 def valuation_data(request: HttpRequest, ticker: str) -> JsonResponse:

@@ -460,6 +460,7 @@
               <span style="color:var(--negative)">red line</span> = market price. A price left of the range implies undervaluation.</p>
           </div>
         {% endif %}
+        {% if net_net %}{% include "fundamentals_screener/_netnet_card.html" %}{% endif %}
         <div class="row g-3 row-cols-1 row-cols-lg-2">
           {% if mos_scenarios %}
             <div class="col"><div class="card p-4 h-100">

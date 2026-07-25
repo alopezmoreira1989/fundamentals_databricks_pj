@@ -53,6 +53,8 @@
     </div>
   {% endif %}
 
+  {% if net_net %}{% include "fundamentals_screener/_netnet_card.html" %}{% endif %}
+
   <div class="bg-white rounded-3 shadow-sm p-4">
     <h2 class="h5 mb-3">Margin of Safety <span class="text-muted small fw-normal">· by scenario</span></h2>
     {% if scenarios %}
