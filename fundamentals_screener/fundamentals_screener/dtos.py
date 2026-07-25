@@ -290,6 +290,67 @@ class ScreenTablePage:
 
 
 @dataclass(frozen=True)
+class NetNetRow:
+    """One Net-Net Finder screener row: a ticker's latest close price, NCAV/Share at all three
+    liquidation-conservatism levels (relaxed/moderate/strict — see
+    CompanyListingRepository.net_net_screen), and its Piotroski/Altman quality overlay.
+
+    ``f_score`` is Piotroski's 0–9 composite (higher = healthier). ``z_score_zone`` is
+    ``"safe"`` (Altman Z > 3.0) / ``"grey"`` (1.8–3.0) / ``"distress"`` (< 1.8) / ``None`` (no
+    Z-Score) — the same two-threshold classification `fundamentals_pipeline`'s Streamlit lib
+    (``60__frontends/61__streamlit/lib/signals.py``) already uses, duplicated as constants in
+    the repository rather than imported (that directory is digit-prefixed — not a valid Python
+    module path — and isn't part of the installed `fundamentals_pipeline` distribution anyway).
+    """
+
+    ticker: str
+    name: str
+    sector: str | None
+    industry: str | None
+    country: str | None
+    market: str | None
+    price: float | None
+    market_cap: float | None
+    ncav_per_share_relaxed: float | None
+    ncav_per_share_moderate: float | None
+    ncav_per_share_strict: float | None
+    f_score: float | None
+    z_score: float | None
+    z_score_zone: str | None
+    has_logo: bool | None = None
+
+
+@dataclass(frozen=True)
+class NetNetStats:
+    """Hero-stat counts for the Net-Net Finder's selected level, all computed under the SAME
+    descriptive filters (and ``hide_value_traps``, if on) as the rows they accompany — so the
+    numbers always agree with what's on screen, never a stale/unfiltered count next to a
+    filtered table.
+
+    ``universe_size``: companies matching the descriptive filters, before any net-net-specific
+    filtering — the denominator for "how rare is this". ``eligible_count``: the subset with a
+    positive NCAV at this level (``len(rows)`` before sorting). ``below_value_count``: the
+    subset actually trading below their NCAV/share (price/NCAV-per-share < 1). ``classic_net_
+    net_count``: the subset at or below Graham's classic net-net rule-of-thumb margin of safety,
+    trading at ≤ 0.67× NCAV/share.
+    """
+
+    universe_size: int
+    eligible_count: int
+    below_value_count: int
+    classic_net_net_count: int
+
+
+@dataclass(frozen=True)
+class NetNetScreen:
+    """The Net-Net Finder's full result for one level: rows sorted by discount to NCAV
+    (descending — cheapest first), plus the hero stats for that same filtered set."""
+
+    rows: tuple[NetNetRow, ...]
+    stats: NetNetStats
+
+
+@dataclass(frozen=True)
 class FootballBar:
     """One intrinsic-value estimate as a bear→bull range with a mid point (per-share, USD)."""
 

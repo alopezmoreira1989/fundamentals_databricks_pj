@@ -21,7 +21,9 @@
 
 # COMMAND ----------
 
+import json
 from datetime import datetime
+from pathlib import Path
 
 from pyspark.sql import functions as F
 from pyspark.sql.types import StringType, StructField, StructType, TimestampType
@@ -172,6 +174,33 @@ _inv_expr = F.col("Inventory")         if "Inventory"         in wide.columns el
 _tl_expr  = F.col("Total Liabilities") if "Total Liabilities" in wide.columns else F.lit(None)
 _gw_expr     = F.col("Goodwill")           if "Goodwill"           in wide.columns else F.lit(None)
 _intang_expr = F.col("Intangible Assets")  if "Intangible Assets"  in wide.columns else F.lit(None)
+# Accounts Receivable has no prior usage in this file (unlike the four above) — same guard idiom.
+_ar_expr = F.col("Accounts Receivable") if "Accounts Receivable" in wide.columns else F.lit(None)
+
+# Net-Net haircut percentages (Moderate/Strict conservatism levels, used by the NCAV (Moderate)/
+# NCAV (Strict) columns below) — read from valuation_assumptions.json instead of hardcoding, so a
+# policy change never needs a notebook edit. Same tolerant-loader convention (// comment lines,
+# _-prefixed doc keys stripped) as 23__intrinsic_value.py's _load_assumptions — duplicated here
+# rather than shared, matching this repo's existing per-notebook-loader convention (each pipeline
+# notebook stage is self-contained; there's no shared config-loading util module).
+def _load_json_config(path: str) -> dict:
+    raw = Path(path).read_text(encoding="utf-8")
+    lines = [line for line in raw.splitlines() if not line.strip().startswith("//")]
+    data = json.loads("\n".join(lines))
+
+    def _clean(obj):
+        if isinstance(obj, dict):
+            return {k: _clean(v) for k, v in obj.items() if not k.startswith("_")}
+        if isinstance(obj, list):
+            return [_clean(x) for x in obj]
+        return obj
+
+    return _clean(data)
+
+
+_NET_NET_HAIRCUTS = _load_json_config("../00__config/valuation_assumptions.json")["net_net_haircuts"]
+_moderate_haircut = _NET_NET_HAIRCUTS["moderate"]
+_strict_haircut   = _NET_NET_HAIRCUTS["strict"]
 
 metrics_wide = (
     wide
@@ -332,6 +361,62 @@ metrics_wide = (
             & (F.col("Shares Diluted") != 0),
             F.col("NCAV") / F.col("Shares Diluted"),
         ))
+    # Other Current Assets: residual current-asset bucket not captured by the four named line
+    # items below — needed so the haircut levels' 0%-weighted "everything else" term below is a
+    # real, inspectable column rather than an implicit assumption. NULL (not 0) when Total
+    # Current Assets itself is missing, matching NCAV's own gate.
+    .withColumn("Other Current Assets",
+        F.when(
+            F.col("Total Current Assets").isNotNull(),
+            F.col("Total Current Assets")
+            - F.coalesce(F.col("Cash & Equivalents"),     F.lit(0))
+            - F.coalesce(F.col("Short-term Investments"), F.lit(0))
+            - F.coalesce(_ar_expr,                        F.lit(0))
+            - F.coalesce(_inv_expr,                       F.lit(0))
+        ))
+    # NCAV (Moderate) / NCAV (Strict): more conservative liquidation-value estimates than the
+    # plain NCAV above — instead of counting every current-asset line item at 100% face value,
+    # apply a per-line-item haircut (Moderate: AR 75% / Inventory 50%; Strict: ST-Investments
+    # 90% / AR 50% / Inventory 33%), then subtract the same Total-Liabilities fallback (`_ncav_liab`)
+    # NCAV already uses. Gated on the same condition as NCAV itself (not just `_ncav_liab`) so all
+    # three levels are non-null on exactly the same tickers. Other Current Assets carries a 0%
+    # weight today (see issue #255 — moves these percentages into valuation_assumptions.json);
+    # written out explicitly rather than omitted so that follow-up only swaps literals, not
+    # formula structure.
+    .withColumn("NCAV (Moderate)",
+        F.when(
+            F.col("Total Current Assets").isNotNull() & F.col("_ncav_liab").isNotNull(),
+            F.coalesce(F.col("Cash & Equivalents"),     F.lit(0)) * _moderate_haircut["cash_and_equivalents"]
+            + F.coalesce(F.col("Short-term Investments"), F.lit(0)) * _moderate_haircut["short_term_investments"]
+            + F.coalesce(_ar_expr,  F.lit(0)) * _moderate_haircut["accounts_receivable"]
+            + F.coalesce(_inv_expr, F.lit(0)) * _moderate_haircut["inventory"]
+            + F.coalesce(F.col("Other Current Assets"), F.lit(0)) * _moderate_haircut["other_current_assets"]
+            - F.col("_ncav_liab")
+        ))
+    .withColumn("NCAV (Moderate) / Share",
+        F.when(
+            F.col("NCAV (Moderate)").isNotNull()
+            & F.col("Shares Diluted").isNotNull()
+            & (F.col("Shares Diluted") != 0),
+            F.col("NCAV (Moderate)") / F.col("Shares Diluted"),
+        ))
+    .withColumn("NCAV (Strict)",
+        F.when(
+            F.col("Total Current Assets").isNotNull() & F.col("_ncav_liab").isNotNull(),
+            F.coalesce(F.col("Cash & Equivalents"), F.lit(0)) * _strict_haircut["cash_and_equivalents"]
+            + F.coalesce(F.col("Short-term Investments"), F.lit(0)) * _strict_haircut["short_term_investments"]
+            + F.coalesce(_ar_expr,  F.lit(0)) * _strict_haircut["accounts_receivable"]
+            + F.coalesce(_inv_expr, F.lit(0)) * _strict_haircut["inventory"]
+            + F.coalesce(F.col("Other Current Assets"), F.lit(0)) * _strict_haircut["other_current_assets"]
+            - F.col("_ncav_liab")
+        ))
+    .withColumn("NCAV (Strict) / Share",
+        F.when(
+            F.col("NCAV (Strict)").isNotNull()
+            & F.col("Shares Diluted").isNotNull()
+            & (F.col("Shares Diluted") != 0),
+            F.col("NCAV (Strict)") / F.col("Shares Diluted"),
+        ))
 
     # ── Tangible Value & Goodwill Risk (base; no market data) ───────────────────
     # Re-materialize Goodwill/Intangible Assets as guaranteed-present columns (guards above
@@ -486,8 +571,11 @@ base_metric_cols = [
     "Payout / FCF", "Dividend Coverage (FCF)", "Net Buyback Yield %",
     # Quality & Risk — base (Altman Z is market-gated → val block / val_metric_cols)
     "Piotroski F-Score", "Accruals Ratio",
-    # Net-Net — base (NCAV Ratio is market-gated → val block / val_metric_cols)
+    # Net-Net — base (ratios are market-gated → val block / val_metric_cols)
     "NCAV", "NCAV / Share",
+    "Other Current Assets",
+    "NCAV (Moderate)", "NCAV (Moderate) / Share",
+    "NCAV (Strict)", "NCAV (Strict) / Share",
     # Tangible Value & Goodwill Risk
     "Tangible Book Value", "Tangible Book Value / Share",
     "Goodwill / Total Assets %", "Goodwill / Tangible Equity %",
@@ -887,7 +975,7 @@ if pe_mcap is not None:
         "Op Cash Flow Yield %", "Book Yield %", "EBITDA Yield %",
         "Dividend Yield %", "Buyback Yield %", "Shareholder Yield %",
         "Altman Z-Score",
-        "NCAV Ratio",
+        "NCAV Ratio", "NCAV (Moderate) Ratio", "NCAV (Strict) Ratio",
         "Price / Tangible Book Value", "Goodwill / Market Cap %",
     ]
 
@@ -982,6 +1070,34 @@ if pe_mcap is not None:
             ))
         .withColumn("NCAV Ratio",
             F.when(F.col("_ncav") > 0, F.col("market_cap") / F.col("_ncav")))
+        # NCAV (Moderate) Ratio / NCAV (Strict) Ratio: same per-line-item haircuts as the base
+        # block's NCAV (Moderate)/NCAV (Strict) (see 22__derived_metrics.py's base block for the
+        # rationale) — recomputed locally here since val_wide is a separate lineage that doesn't
+        # see the base block's columns, same reason `_ncav`/`NCAV Ratio` above recompute rather
+        # than reuse `NCAV`. No Other Current Assets term — val_wide never has that column, and
+        # its weight is 0% either way, so omitting it changes nothing numerically.
+        .withColumn("_ncav_moderate",
+            F.when(
+                F.col("Total Current Assets").isNotNull(),
+                F.coalesce(F.col("Cash & Equivalents"),     F.lit(0)) * _moderate_haircut["cash_and_equivalents"]
+                + F.coalesce(F.col("Short-term Investments"), F.lit(0)) * _moderate_haircut["short_term_investments"]
+                + F.coalesce(_ar_expr,  F.lit(0)) * _moderate_haircut["accounts_receivable"]
+                + F.coalesce(_inv_expr, F.lit(0)) * _moderate_haircut["inventory"]
+                - F.col("_total_liab"),
+            ))
+        .withColumn("NCAV (Moderate) Ratio",
+            F.when(F.col("_ncav_moderate") > 0, F.col("market_cap") / F.col("_ncav_moderate")))
+        .withColumn("_ncav_strict",
+            F.when(
+                F.col("Total Current Assets").isNotNull(),
+                F.coalesce(F.col("Cash & Equivalents"), F.lit(0)) * _strict_haircut["cash_and_equivalents"]
+                + F.coalesce(F.col("Short-term Investments"), F.lit(0)) * _strict_haircut["short_term_investments"]
+                + F.coalesce(_ar_expr,  F.lit(0)) * _strict_haircut["accounts_receivable"]
+                + F.coalesce(_inv_expr, F.lit(0)) * _strict_haircut["inventory"]
+                - F.col("_total_liab"),
+            ))
+        .withColumn("NCAV (Strict) Ratio",
+            F.when(F.col("_ncav_strict") > 0, F.col("market_cap") / F.col("_ncav_strict")))
     )
 
     # Filter EV/EBITDA outliers (|x| > 500)

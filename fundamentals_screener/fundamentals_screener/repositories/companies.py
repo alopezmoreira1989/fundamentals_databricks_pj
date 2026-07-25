@@ -17,6 +17,7 @@ from ..dtos import (
     CompanySummary,
     MetricPoint,
     MetricSeries,
+    NetNetRow,
     PeerBenchmark,
     PeerCompany,
     PricePoint,
@@ -25,6 +26,7 @@ from ..dtos import (
     StatementLine,
 )
 from .base import DuckDBRepository
+from .company_listing import _altman_zone
 
 # Latest available value per metric (the most recent FY is often a partial/TTM year that only
 # carries intrinsic-value metrics, so per-metric — not single-year — gives the full picture).
@@ -81,6 +83,16 @@ _MARKET_CAP_SQL = """
     WHERE ticker = ? AND metric = 'Market Cap' AND period_type = 'FY' AND value IS NOT NULL
     ORDER BY fiscal_year DESC
     LIMIT 1
+"""
+
+# Latest close for one ticker — deliberately NOT the football-field/intrinsic-value chart's own
+# price (FootballField.price), which is unavailable for tickers lacking the EPS/BVPS data those
+# methods need (confirmed as a real gap during testing: a clinical-stage biotech with a real,
+# positive NCAV and a real daily close had no intrinsic-value price at all, silently blanking
+# the Net-Net card's "vs. Price" column). Same source `CompanyListingRepository.net_net_screen`
+# already uses in bulk (`_LATEST_PRICE_SQL`); this is the single-ticker equivalent.
+_LATEST_CLOSE_SQL = """
+    SELECT close FROM dashboard_prices WHERE ticker = ? ORDER BY date DESC LIMIT 1
 """
 
 # Most recent currency->USD rate on or before `as_of` — never today's spot rate, never the
@@ -261,6 +273,40 @@ class CompanyRepository(DuckDBRepository):
         for why this bypasses latest_metrics())."""
         rows = self._fetch(_MARKET_CAP_SQL, [ticker], MetricPoint)
         return rows[0] if rows else None
+
+    def net_net_snapshot(self, ticker: str) -> NetNetRow | None:
+        """This ticker's OWN NCAV/Share at all three levels + the Piotroski/Altman quality
+        overlay, regardless of whether it's NCAV-positive at any level — unlike
+        ``CompanyListingRepository.net_net_screen`` (which only lists *eligible*,
+        positive-NCAV tickers for a multi-ticker screen), the Valuation page always wants to
+        show a company's own numbers, even negative/absent ones. ``price`` is this ticker's own
+        latest close (``_LATEST_CLOSE_SQL`` — the same source `net_net_screen` uses in bulk),
+        not the football-field chart's intrinsic-value price, which is unavailable for tickers
+        lacking EPS/BVPS data even when a real close and real NCAV both exist. Returns ``None``
+        for an unknown ticker.
+        """
+        summary = self.get_summary(ticker)
+        if summary is None:
+            return None
+        values = {p.metric: p.value for p in self.latest_metrics(ticker)}
+        mc = self.market_cap(ticker)
+        try:
+            price_rows = self._fetch_column(_LATEST_CLOSE_SQL, [ticker])
+        except duckdb.Error:
+            price_rows = ()  # dashboard_prices view unavailable — degrade to no price
+        price = float(price_rows[0]) if price_rows and price_rows[0] is not None else None
+        z_score = values.get("Altman Z-Score")
+        return NetNetRow(
+            ticker=ticker, name=summary.name, sector=summary.sector, industry=summary.industry,
+            country=summary.country, market=summary.market, has_logo=summary.has_logo,
+            price=price, market_cap=mc.value if mc else None,
+            ncav_per_share_relaxed=values.get("NCAV / Share"),
+            ncav_per_share_moderate=values.get("NCAV (Moderate) / Share"),
+            ncav_per_share_strict=values.get("NCAV (Strict) / Share"),
+            f_score=values.get("Piotroski F-Score"),
+            z_score=z_score,
+            z_score_zone=_altman_zone(z_score),
+        )
 
     def metric_history(self, ticker: str, *, years: int = 5) -> tuple[MetricSeries, ...]:
         """Each derived metric's most recent `years` fiscal-year values (newest first).

@@ -25,7 +25,7 @@ import duckdb
 from fundamentals_pipeline.fx import convert_price
 
 from ..data_source import get_meta as load_meta
-from ..dtos import CompanyListRow, ScreenColumn, ScreenTablePage, ScreenTableRow
+from ..dtos import CompanyListRow, NetNetRow, ScreenColumn, ScreenTablePage, ScreenTableRow
 from .base import DuckDBRepository
 
 # Latest-FY value per scoped ticker for one metric, bounded + ordered + paged inside DuckDB.
@@ -65,6 +65,53 @@ _MARKET_CAP_FX_SQL = """
     LEFT JOIN dashboard_fx AS fx ON fx.base = UPPER(mc.unit) AND fx.quote = 'USD' AND fx.date <= mc.period_end
     QUALIFY row_number() OVER (PARTITION BY mc.ticker ORDER BY fx.date DESC) = 1
 """
+
+
+# Net-Net Finder: which NCAV Ratio metric gates inclusion for each conservatism level (the
+# per-share value columns below are always all three, regardless of which level is active).
+# "Market Cap" is already a bulk-friendly metric row (injected at export time from
+# market_cap_asof specifically so screener-style listings never need the daily price series
+# for it — see CompanyRepository._MARKET_CAP_SQL's own comment) so it rides along in this same
+# pivot; unlike per-share Price, it needs no separate dashboard_prices join.
+_NET_NET_VALUE_METRICS = (
+    "NCAV / Share", "NCAV (Moderate) / Share", "NCAV (Strict) / Share",
+    "Piotroski F-Score", "Altman Z-Score", "Market Cap",
+)
+_NET_NET_LEVEL_RATIO = {
+    "relaxed":  "NCAV Ratio",
+    "moderate": "NCAV (Moderate) Ratio",
+    "strict":   "NCAV (Strict) Ratio",
+}
+
+# Latest close per ticker, scoped to the tickers that already passed the NCAV-ratio filter (a
+# small subset of the universe — genuine net-nets are rare) — cheaper than pricing the whole
+# scope up front. dashboard_prices is the daily OHLC-ish store (see CompanyRepository's own
+# _PRICE_SERIES_SQL for the single-ticker equivalent); this is the bulk "latest value" variant.
+_LATEST_PRICE_SQL = """
+    SELECT ticker, close FROM dashboard_prices
+    WHERE list_contains(?, ticker)
+    QUALIFY row_number() OVER (PARTITION BY ticker ORDER BY date DESC) = 1
+"""
+
+# Altman Z-Score traffic-light thresholds — duplicated from fundamentals_pipeline's Streamlit
+# lib (60__frontends/61__streamlit/lib/signals.py's _HIGHER_IS_BETTER["Altman Z-Score"] =
+# (3.0, 1.8)), not imported: that directory is digit-prefixed (not a valid Python module path)
+# and isn't part of the installed fundamentals_pipeline distribution anyway. Keep these two
+# numbers in sync with signals.py by hand if that ever changes.
+_ALTMAN_SAFE_MIN = 3.0
+_ALTMAN_DISTRESS_MAX = 1.8
+
+
+def _altman_zone(z_score: float | None) -> str | None:
+    """Classify an Altman Z-Score into "safe" (> 3.0) / "grey" (1.8-3.0) / "distress" (< 1.8),
+    or None when the score itself is missing."""
+    if z_score is None:
+        return None
+    if z_score > _ALTMAN_SAFE_MIN:
+        return "safe"
+    if z_score < _ALTMAN_DISTRESS_MAX:
+        return "distress"
+    return "grey"
 
 
 @dataclass(frozen=True)
@@ -158,6 +205,16 @@ class CompanyListingRepository(DuckDBRepository):
             rows.append(rec)
         rows.sort(key=lambda r: r.get("ticker", ""))
         return rows
+
+    def scope_size(
+        self, *, search: str = "", sector: str = "", index: str = "", country: str = "",
+        market: str = "", industry: str = "",
+    ) -> int:
+        """Count of tickers passing the descriptive filters, with no metric fetch at all (pure
+        in-memory meta filtering via `_scope`) — for hero stats like "N net-nets out of M
+        companies in scope" without paying for a DuckDB round trip just to count."""
+        return len(self._scope(search=search, sector=sector, index=index, country=country,
+                                market=market, industry=industry))
 
     def list_page(
         self,
@@ -370,6 +427,105 @@ class CompanyListingRepository(DuckDBRepository):
             ScreenColumn(key=m, unit=units.get(m)) for m in display_metrics
         )
         return ScreenTablePage(rows=rows, total=total, columns=columns_meta)
+
+    # ── Net-Net Finder ───────────────────────────────────────────────────────────────────
+    def net_net_screen(
+        self,
+        *,
+        level: str,
+        search: str = "",
+        sector: str = "",
+        index: str = "",
+        country: str = "",
+        market: str = "",
+        industry: str = "",
+    ) -> tuple[NetNetRow, ...]:
+        """Every ticker in scope whose `level` NCAV Ratio is non-null (i.e. NCAV > 0 for that
+        level — genuine liquidation-value candidates only), with NCAV/Share at all three levels,
+        latest close price, and the Piotroski/Altman quality overlay.
+
+        `level`: ``"relaxed"`` | ``"moderate"`` | ``"strict"`` — picks which NCAV Ratio metric
+        gates inclusion; falls back to ``"relaxed"`` for an unrecognized value. The three
+        NCAV/Share values are always all three, regardless of `level`.
+
+        Every value comes from the SAME fiscal year as the selected level's own latest non-null
+        Ratio — deliberately NOT each metric's own independently-latest FY (unlike
+        ``_pivot_cte``, used by the general screener for arbitrary metric combinations, which
+        picks each column's latest FY independently). That independence is fine when the
+        columns are unrelated user-picked metrics, but wrong here: a ticker can have a more
+        recent FY with e.g. ``NCAV / Share`` computed but no ``NCAV Ratio`` yet (market_cap not
+        available for that FY), so picking each column's own latest would silently pair a
+        non-null ratio from one year with an NCAV/Share from a DIFFERENT, possibly negative-NCAV
+        year — confirmed as a real bug by running this against real data before fixing it.
+
+        No pagination — genuine net-nets are a small fraction of the universe (unlike the
+        general screener, which can match thousands of rows), so the whole filtered set is
+        returned; the caller (``services.get_net_net_screen``) sorts in Python.
+        """
+        ratio_metric = _NET_NET_LEVEL_RATIO.get(level, _NET_NET_LEVEL_RATIO["relaxed"])
+
+        scope = self._scope(search=search, sector=sector, index=index, country=country,
+                             market=market, industry=industry)
+        if not scope:
+            return ()
+        by_ticker = {rec.get("ticker", ""): rec for rec in scope}
+        tickers = list(by_ticker)
+
+        value_filters = ", ".join(
+            f"max(value) FILTER (WHERE metric = ?) AS m{i}"
+            for i in range(len(_NET_NET_VALUE_METRICS))
+        )
+        sql = f"""
+            WITH ratio_fy AS (
+                SELECT ticker, fiscal_year FROM dashboard_metrics
+                WHERE metric = ? AND period_type = 'FY' AND value IS NOT NULL
+                  AND list_contains(?, ticker)
+                QUALIFY row_number() OVER (PARTITION BY ticker ORDER BY fiscal_year DESC) = 1
+            ), vals AS (
+                SELECT m.ticker, m.metric, m.value
+                FROM dashboard_metrics m
+                JOIN ratio_fy r ON r.ticker = m.ticker AND r.fiscal_year = m.fiscal_year
+                WHERE m.period_type = 'FY' AND list_contains(?, m.metric)
+            )
+            SELECT ticker, {value_filters}
+            FROM vals GROUP BY ticker
+        """
+        params = [
+            ratio_metric, tickers,               # ratio_fy
+            list(_NET_NET_VALUE_METRICS),        # vals's list_contains(?, m.metric)
+            *_NET_NET_VALUE_METRICS,              # the 6 FILTER (WHERE metric = ?) params
+        ]
+
+        with self._connection() as con:
+            hits = con.execute(sql, params).fetchall()
+            if not hits:
+                return ()
+
+            matched_tickers = [row[0] for row in hits]
+            price_rows = con.execute(_LATEST_PRICE_SQL, [matched_tickers]).fetchall()
+            price_by_ticker = dict(price_rows)
+
+        rows = []
+        for ticker, ncav_relaxed, ncav_moderate, ncav_strict, f_score, z_score, market_cap in hits:
+            rec = by_ticker.get(ticker, {})
+            rows.append(NetNetRow(
+                ticker=ticker,
+                name=rec.get("company", ""),
+                sector=rec.get("sector"),
+                industry=rec.get("industry"),
+                country=rec.get("country"),
+                market=rec.get("market"),
+                has_logo=_has_logo(rec),
+                price=price_by_ticker.get(ticker),
+                market_cap=market_cap,
+                ncav_per_share_relaxed=ncav_relaxed,
+                ncav_per_share_moderate=ncav_moderate,
+                ncav_per_share_strict=ncav_strict,
+                f_score=f_score,
+                z_score=z_score,
+                z_score_zone=_altman_zone(z_score),
+            ))
+        return tuple(rows)
 
     @staticmethod
     def _apply_usd_lens(con: Any, rows: tuple[ScreenTableRow, ...]) -> tuple[ScreenTableRow, ...]:

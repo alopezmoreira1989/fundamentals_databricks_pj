@@ -71,6 +71,43 @@ Databricks analytical pipeline that ingests SEC EDGAR XBRL filings (10-K/10-Q) f
   Canadian ingestion — see the currency-alignment entry above — has since been fixed; that
   was a correctness gate, not a "dual-currency" feature, and is not reopened by this note.)
 - **`market_data` is frozen legacy** — no longer rebuilt. It was the calendar-year-aligned (last raw `close` per **calendar** year × FY `Shares Diluted`) price/cap table; its 0–11mo fiscal offset distorted multiples for non-December filers, so `12` no longer writes it and all consumers were migrated to `market_cap_asof`. The table is left in place for ad-hoc back-compat queries but receives no new data. Don't add new dependencies on it.
+- **Screener "modes" (`fundamentals_screener`) share one route + one nav pattern — established by
+  the Net-Net Finder (milestone "Net-Net Finder", issues #257–262), the first of a planned family
+  (later: Graham Defensive Checklist, Compounders — see that milestone's description). Follow
+  this same shape for the next mode rather than inventing a new one:**
+  - **One URL, one `?mode=` query param** on the existing `screen` view (`?mode=general` is the
+    default/omittable; a new mode gets its own value, e.g. `?mode=checklist`) — never a separate
+    URL route per mode. `views.screen()` branches on `mode` right at the top and delegates to a
+    private `_<mode>_screen(request)` function; the general screener's own logic is untouched
+    below that branch.
+  - **A shared `_mode_nav.html` partial** (two-or-more-tab pill bar, `<a href="?mode=...">`,
+    active state via a `mode` context key every mode's view must set) — included at the top of
+    every mode's template, carrying forward only the descriptive filters that mode genuinely
+    shares with the others (a precomputed `shared_qs` context key, built the same way in every
+    mode's view — see `views.screen()`'s own `shared_qs` construction — never assembled ad hoc in
+    a template with nested `{% if %}` chains).
+  - **Full-page reload, not AJAX, for both the mode switch and any mode-specific filter/level
+    control** — confirmed with the repo owner before building the Net-Net Finder specifically
+    because each mode's content differs far more (different hero, different columns, different
+    filter set) than the general screener's own auto-apply-filters fragment swap (`86ba440`) was
+    built for, so a partial-swap wouldn't save much. Every control stays a plain
+    `<a href="?...">` or `<form method="get">`, degrading correctly with JS disabled; an
+    `onchange="this.form.submit()"`-style auto-submit is fine as a convenience layered on top,
+    never a requirement.
+  - **Each mode gets its own dedicated template(s) and — if its own results list can plausibly
+    exceed ~50 rows — Python-side pagination**, mirroring `views.PAGE_SIZE`/the general
+    screener's own pagination-control markup. Confirmed the hard way on the Net-Net Finder: an
+    assumption that "results are always a small handful" turned out false for its loosest level
+    (positive-NCAV alone matched roughly a third of the universe against real data), and shipping
+    that unpaginated produced a multi-megabyte response — verify the actual row-count order of
+    magnitude against real data before assuming a new mode's results list is naturally small
+    enough to skip pagination.
+  - **A repository method built for a bulk/filtered LIST (e.g. `net_net_screen`) is not
+    automatically reusable for a single-ticker DETAIL view** (e.g. surfacing the same signal on
+    the company Valuation page) — the list version's eligibility gate usually doesn't apply
+    (a detail page shows a company's own numbers regardless), so a companion single-ticker method
+    (e.g. `net_net_snapshot`) is typically warranted rather than filtering the bulk list down to
+    one row.
 
 ## Operational gotchas
 

@@ -98,6 +98,31 @@
     "_doc":           "Scenario-independent. Informational only — the dashboard may colour rows by these thresholds."
   },
 
+  "net_net_haircuts": {
+    "_doc": "Graham-style NCAV liquidation-conservatism levels for the Net-Net Finder screener mode (fundamentals_screener), read by 22__derived_metrics.py. Scenario-independent (unlike 'scenarios' above — no bull/mid/bear, no per-ticker overrides). Each value is the fraction of that current-asset line item counted toward liquidation value (1.0 = 100%, i.e. full face value). 'relaxed' documents the weights the plain NCAV column already uses (100% on everything, computed as its own simple Total Current Assets − Total Liabilities formula, NOT read from this block) so all three levels' weights are visible together in one place; 'moderate' and 'strict' are the two additional NCAV (Moderate)/NCAV (Strict) columns actually computed from these numbers.",
+    "relaxed": {
+      "cash_and_equivalents":    1.0,
+      "short_term_investments":  1.0,
+      "accounts_receivable":     1.0,
+      "inventory":               1.0,
+      "other_current_assets":    1.0
+    },
+    "moderate": {
+      "cash_and_equivalents":    1.0,
+      "short_term_investments":  1.0,
+      "accounts_receivable":     0.75,
+      "inventory":               0.50,
+      "other_current_assets":    0.0
+    },
+    "strict": {
+      "cash_and_equivalents":    1.0,
+      "short_term_investments":  0.90,
+      "accounts_receivable":     0.50,
+      "inventory":               0.33,
+      "other_current_assets":    0.0
+    }
+  },
+
   "overrides": {
     "_doc": "Each key is a ticker. List only the parameters that change vs the scenario profile; the rest is inherited. A leaf may be a flat scalar (all scenarios) or {bull, mid, bear}. Parameters that vary by scenario MUST use the {bull, mid, bear} form (see _units._override_leaf); structural flags (skip, horizon_years) stay flat scalars.",
 

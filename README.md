@@ -616,9 +616,37 @@ efficiency. See also the *Goodwill Risk* and *Tangible Value* metrics below.
 
 | Metric | Formula | Notes |
 |---|---|---|
-| `NCAV` | `Total Current Assets − Total Liabilities` | net current asset value, USD |
+| `NCAV` | `Total Current Assets − Total Liabilities` | net current asset value, USD — every current-asset line item at 100% face value (the "Relaxed" level) |
 | `NCAV / Share` | `NCAV / Shares Diluted` | per-share net-net value |
 | `NCAV Ratio` | `Market Cap / NCAV` *(only when NCAV > 0)* | price-over-NCAV; lower = cheaper, `< 1` = cap below net current assets, net-net buy ≈ `≤ 0.67`. NULL for negative-NCAV firms. *requires `market_cap_asof`* |
+
+**Moderate / Strict — additional liquidation-conservatism levels.** `NCAV` above counts every
+current-asset line item at full face value, which is optimistic: not every dollar of receivables
+or inventory a company reports is actually recoverable in a real liquidation. `NCAV (Moderate)`
+and `NCAV (Strict)` apply a per-line-item haircut instead, discounting each component to a more
+realistic recovery estimate — the same three-level framing (Relaxed / Moderate / Strict) the
+`fundamentals_screener` Net-Net Finder screener mode lets a user switch between. **These
+percentages are a practitioner convention approximating typical liquidation recovery rates, not
+a literal formula from Graham's own writing** — Graham's own NCAV test was the single, undiscounted
+version above. `Other Current Assets` is the residual current-asset bucket not captured by the
+four named line items (Cash & Equivalents, Short-term Investments, Accounts Receivable,
+Inventory); it's published as its own metric — genuinely useful transparency, since a large
+"other" residual is itself worth an analyst's scrutiny before trusting a net-net read — and
+carries a 0% weight in both haircut levels (an unclassified asset isn't assumed recoverable at all).
+
+| Metric | Formula | Notes |
+|---|---|---|
+| `Other Current Assets` | `Total Current Assets − Cash & Equivalents − Short-term Investments − Accounts Receivable − Inventory` | USD residual; each subtracted term coalesces a missing value to 0 |
+| `NCAV (Moderate)` | `(Cash & Equivalents + Short-term Investments) × 100% + Accounts Receivable × 75% + Inventory × 50% + Other Current Assets × 0% − Total Liabilities` | USD |
+| `NCAV (Moderate) / Share` | `NCAV (Moderate) / Shares Diluted` | per-share |
+| `NCAV (Moderate) Ratio` | `Market Cap / NCAV (Moderate)` *(only when NCAV (Moderate) > 0)* | same NULL discipline as `NCAV Ratio`. *requires `market_cap_asof`* |
+| `NCAV (Strict)` | `Cash & Equivalents × 100% + Short-term Investments × 90% + Accounts Receivable × 50% + Inventory × 33% + Other Current Assets × 0% − Total Liabilities` | USD |
+| `NCAV (Strict) / Share` | `NCAV (Strict) / Shares Diluted` | per-share |
+| `NCAV (Strict) Ratio` | `Market Cap / NCAV (Strict)` *(only when NCAV (Strict) > 0)* | same NULL discipline as `NCAV Ratio`. *requires `market_cap_asof`* |
+
+The haircut percentages themselves live in `valuation_assumptions.json`'s `net_net_haircuts`
+block (`relaxed`/`moderate`/`strict`, one 0–1 decimal per line item), not hardcoded in
+`22__derived_metrics.py` — see that file's own comments for the exact config-loading pattern.
 
 ### Valuation — Tangible Value
 

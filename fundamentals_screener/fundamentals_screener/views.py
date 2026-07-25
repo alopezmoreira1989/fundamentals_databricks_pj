@@ -145,10 +145,65 @@ def _num(value: float) -> str:
     return str(int(value)) if value == int(value) else str(value)
 
 
-def screen(request: HttpRequest) -> HttpResponse:
-    """HTML screener: the full company table narrowed by the descriptive filters, with the
-    user-chosen metric columns and metric filters, every column sortable, state in the URL.
+_NET_NET_LEVELS = ("relaxed", "moderate", "strict")
+_NET_NET_LEVEL_FIELD = {
+    "relaxed": "ncav_per_share_relaxed",
+    "moderate": "ncav_per_share_moderate",
+    "strict": "ncav_per_share_strict",
+}
+# Display order + label for the Valuation page's Net-Net card (issue #262), which shows all
+# three levels side by side rather than one user-selected level like the Net-Net Finder does.
+_NET_NET_CARD_LEVELS = (("Relaxed", "relaxed"), ("Moderate", "moderate"), ("Strict", "strict"))
+
+
+def _net_net_card_context(ticker: str) -> dict | None:
+    """Shared by ``valuation()`` and ``company_detail()``: the Net-Net card's context, or
+    ``None`` when the ticker has no NCAV data at any level at all (unknown ticker, or every
+    level's NCAV/share is null) — nothing to show then, so the card doesn't render rather than
+    showing three dashes. A NEGATIVE NCAV/share (common — most companies aren't net-nets) still
+    renders, deliberately: the Valuation page always shows a company's own numbers, unlike the
+    Net-Net Finder screener which only lists NCAV-positive eligible tickers. ``ratio``/
+    ``bar_pct`` are left ``None``/0 for a non-positive NCAV/share, though — dividing price by a
+    negative or zero NCAV produces a meaningless "ratio" (confirmed as a real bug during
+    testing: a negative ratio like -34.4x satisfied the "classic net-net" bar-color threshold
+    check, painting AAPL's deeply-negative NCAV bright green as if it were a bargain).
+
+    ``snapshot.price`` comes from ``net_net_snapshot``'s own latest-close lookup — deliberately
+    NOT the caller's football-field chart price (confirmed as a second real gap during testing:
+    that price is unavailable for tickers lacking EPS/BVPS data even when a real close and real
+    NCAV both exist, e.g. an unprofitable clinical-stage biotech).
     """
+    snapshot = services.get_net_net_snapshot(ticker)
+    if snapshot is None:
+        return None
+    price = snapshot.price
+    levels = []
+    for label, level in _NET_NET_CARD_LEVELS:
+        ncav_per_share = getattr(snapshot, _NET_NET_LEVEL_FIELD[level])
+        has_ratio = price is not None and ncav_per_share is not None and ncav_per_share > 0
+        ratio = price / ncav_per_share if has_ratio else None
+        discount_pct = (1 - ratio) * 100 if ratio is not None else None
+        bar_pct = max(0.0, min(discount_pct, 100.0)) if discount_pct is not None else 0.0
+        levels.append({"label": label, "ncav_per_share": ncav_per_share, "ratio": ratio, "bar_pct": bar_pct})
+    if not any(lv["ncav_per_share"] is not None for lv in levels):
+        return None
+    return {"net_net": snapshot, "net_net_levels": levels}
+
+
+def screen(request: HttpRequest) -> HttpResponse:
+    """HTML screener — two modes sharing one route (``?mode=general|netnet``, default
+    ``general``). ``general`` is the full multi-metric company table (this function's
+    original scope, below). ``netnet`` is the Net-Net Finder — a fixed-column liquidation-
+    value screen delegated to ``_netnet_screen``, since its filters/columns/template are
+    almost entirely disjoint from the general screener's (only sector/country/market are
+    shared — see issue #259). Deliberately a plain full-page reload on every filter/level
+    change, not an AJAX partial-swap like the general screener's auto-apply: the two modes'
+    content differs far more (different hero, different columns, different filter set) than
+    the general screener's single-column benchmark switch did, so a fragment swap wouldn't
+    save much.
+    """
+    if request.GET.get("mode", "general").strip().lower() == "netnet":
+        return _netnet_screen(request)
     search = request.GET.get("q", "").strip()
     sector = request.GET.get("sector", "").strip()
     index = request.GET.get("index", "").strip()
@@ -285,6 +340,13 @@ def screen(request: HttpRequest) -> HttpResponse:
         request,
         template,
         {
+            "mode": "general",
+            # The mode-nav bar carries sector/country/market across to Net-Net Finder (the
+            # only filters the two modes share) — precomputed here rather than in the template,
+            # matching this view's own "querystring" key just below.
+            "shared_qs": urlencode({
+                k: v for k, v in (("sector", sector), ("country", country), ("market", market)) if v
+            }),
             "metrics": services.available_metrics(),
             "sectors": services.available_sectors(),
             "countries": services.available_countries(),
@@ -319,6 +381,95 @@ def screen(request: HttpRequest) -> HttpResponse:
             "has_next": page < num_pages,
             "page_range": range(max(1, page - 2), min(num_pages, page + 2) + 1),
             "querystring": urlencode(state_pairs),
+        },
+    )
+
+
+def _netnet_screen(request: HttpRequest) -> HttpResponse:
+    """The Net-Net Finder: Graham-style deep-value screen at a user-chosen liquidation-
+    conservatism level (see ``services.get_net_net_screen``), sharing only the sector/country/
+    market descriptive filters with the general screener. Precomputes each row's price/NCAV-
+    per-share ratio and a clamped 0-100 bar percentage here (not in the template) — the same
+    "view builds a small per-row dict, template stays dumb" convention `screen()` itself uses
+    for its own ``rows`` context key.
+
+    Paginated in Python (the service has no LIMIT/OFFSET — it always returns the whole filtered
+    set): confirmed by an actual smoke test that "Relaxed" alone (base NCAV, no haircut) matches
+    ~1 in 3 tickers, not the "small fraction of the universe" a genuine net-net is — a plain
+    positive-NCAV filter is a much weaker bar than "trading below value". Rendering ~1,000
+    rows unpaginated produced a multi-megabyte response; slicing here (matching PAGE_SIZE) is
+    cheap since the full set is already in memory.
+    """
+    level = request.GET.get("level", "relaxed").strip().lower()
+    if level not in _NET_NET_LEVELS:
+        level = "relaxed"
+    hide_value_traps = request.GET.get("hide_value_traps") == "1"
+    sector = request.GET.get("sector", "").strip()
+    country = request.GET.get("country", "").strip()
+    market = request.GET.get("market", "").strip()
+    page = _parse_page(request.GET.get("page"))
+
+    result = services.get_net_net_screen(
+        level=level, hide_value_traps=hide_value_traps,
+        sector=sector, country=country, market=market,
+    )
+    total = len(result.rows)
+    num_pages = max(1, math.ceil(total / PAGE_SIZE))
+    page = min(page, num_pages)
+    offset = (page - 1) * PAGE_SIZE
+    window = result.rows[offset : offset + PAGE_SIZE]
+
+    field = _NET_NET_LEVEL_FIELD[level]
+    rows = []
+    for r in window:
+        ncav_per_share = getattr(r, field)
+        ratio = r.price / ncav_per_share if r.price is not None and ncav_per_share else None
+        discount_pct = (1 - ratio) * 100 if ratio is not None else None
+        bar_pct = max(0.0, min(discount_pct, 100.0)) if discount_pct is not None else 0.0
+        rows.append({
+            "row": r,
+            "ncav_per_share": ncav_per_share,
+            "ratio": ratio,
+            "discount_pct": discount_pct,
+            "bar_pct": bar_pct,
+        })
+
+    shared_qs = urlencode({
+        k: v for k, v in (("sector", sector), ("country", country), ("market", market)) if v
+    })
+    # Pagination-link querystring: every current param except `page` (appended by the template,
+    # matching _screen_results.html's own convention) so Prev/Next/page-N preserve state.
+    nn_qs = urlencode({
+        k: v for k, v in (
+            ("mode", "netnet"), ("level", level),
+            ("hide_value_traps", "1" if hide_value_traps else ""),
+            ("sector", sector), ("country", country), ("market", market),
+        ) if v
+    })
+
+    return render(
+        request,
+        "fundamentals_screener/netnet.html",
+        {
+            "mode": "netnet",
+            "shared_qs": shared_qs,
+            "querystring": nn_qs,
+            "level": level,
+            "hide_value_traps": hide_value_traps,
+            "sector": sector,
+            "country": country,
+            "market": market,
+            "sectors": services.available_sectors(),
+            "countries": services.available_countries(),
+            "markets": services.available_markets(),
+            "rows": rows,
+            "total": total,
+            "stats": result.stats,
+            "page": page,
+            "num_pages": num_pages,
+            "has_prev": page > 1,
+            "has_next": page < num_pages,
+            "page_range": range(max(1, page - 2), min(num_pages, page + 2) + 1),
         },
     )
 
@@ -425,35 +576,35 @@ def company_detail(request: HttpRequest, ticker: str) -> HttpResponse:
     market_cap_kpi = services.get_market_cap_kpi(ticker, usd_lens=usd_lens)
     headline = (*headline, market_cap_kpi) if market_cap_kpi else headline
     compare_options = services.all_companies()
-    return render(
-        request,
-        "fundamentals_screener/company_detail.html",
-        {
-            "detail": detail,
-            "statements": statements.statements,
-            "statement_panes": statement_panes,
-            "headline": headline,
-            "price_chart": price_chart,
-            "price_tab_chart": price_tab_chart,
-            "price_windows": price_windows,
-            "price_window": price_window,
-            "price_currency": price_currency,
-            "show_usd_toggle": show_usd_toggle,
-            "usd_lens": usd_lens,
-            "quarterly": quarterly,
-            "quarterly_chart": quarterly_chart_svg,
-            "bs_compositions": bs_compositions,
-            "derived_metrics": derived_metrics,
-            "bench_ctx": bench_ctx,
-            "bench": bench,
-            "compare_query": compare,
-            "summary": summary,
-            "compare_options": compare_options,
-            "valuation_metrics": valuation_metrics,
-            "iv_chart": iv_chart,
-            "mos_scenarios": mos_scenarios,
-        },
-    )
+    context = {
+        "detail": detail,
+        "statements": statements.statements,
+        "statement_panes": statement_panes,
+        "headline": headline,
+        "price_chart": price_chart,
+        "price_tab_chart": price_tab_chart,
+        "price_windows": price_windows,
+        "price_window": price_window,
+        "price_currency": price_currency,
+        "show_usd_toggle": show_usd_toggle,
+        "usd_lens": usd_lens,
+        "quarterly": quarterly,
+        "quarterly_chart": quarterly_chart_svg,
+        "bs_compositions": bs_compositions,
+        "derived_metrics": derived_metrics,
+        "bench_ctx": bench_ctx,
+        "bench": bench,
+        "compare_query": compare,
+        "summary": summary,
+        "compare_options": compare_options,
+        "valuation_metrics": valuation_metrics,
+        "iv_chart": iv_chart,
+        "mos_scenarios": mos_scenarios,
+    }
+    net_net_ctx = _net_net_card_context(ticker)
+    if net_net_ctx:
+        context.update(net_net_ctx)
+    return render(request, "fundamentals_screener/company_detail.html", context)
 
 
 def company_news(request: HttpRequest, ticker: str) -> JsonResponse:
@@ -495,17 +646,17 @@ def valuation(request: HttpRequest, ticker: str) -> HttpResponse:
     chart = football.build_chart(services.get_intrinsic_value_field(ticker))
     summary = services.get_company_summary(ticker)
     price_currency = quote_currency(summary.market if summary else None).lower()
-    return render(
-        request,
-        "fundamentals_screener/valuation.html",
-        {
-            "ticker": ticker,
-            "points": points,
-            "scenarios": scenarios,
-            "chart": chart,
-            "price_currency": price_currency,
-        },
-    )
+    context = {
+        "ticker": ticker,
+        "points": points,
+        "scenarios": scenarios,
+        "chart": chart,
+        "price_currency": price_currency,
+    }
+    net_net_ctx = _net_net_card_context(ticker)
+    if net_net_ctx:
+        context.update(net_net_ctx)
+    return render(request, "fundamentals_screener/valuation.html", context)
 
 
 def valuation_data(request: HttpRequest, ticker: str) -> JsonResponse:

@@ -252,6 +252,40 @@ body.fs-app { font-family: var(--sans); background: var(--bg); color: var(--ink)
 .fs-app .co-logo-sm { border-radius: 8px; padding: 4px; }
 .fs-app .co-logo-sm .co-logo-mono { font-size: .8rem; }
 
+/* ---------- Net-Net Finder (issue #260) ---------- */
+/* Discount bar + chip: how far below (or above) NCAV/share a ticker trades. The fill color is
+   3-tier semantic (classic net-net / merely below value / not below value), matching the same
+   safe/grey/distress framing the Altman zone pill uses below — not the app's cyan --accent,
+   since this is a status signal, not a brand accent. */
+.fs-app .nn-bar {
+  width: 84px; height: 6px; border-radius: 3px; background: var(--bg-subtle);
+  overflow: hidden; display: inline-block; vertical-align: middle;
+}
+.fs-app .nn-bar-fill { height: 100%; border-radius: 3px; background: var(--ink-3); }
+.fs-app .nn-bar-fill--classic { background: var(--positive); }
+.fs-app .nn-bar-fill--below { background: var(--orange); }
+.fs-app .nn-bar-fill--none { background: var(--ink-3); }
+
+/* F-Score dot row (Piotroski, 0-9): filled = healthier. One consistent color rather than a
+   per-dot gradient — the COUNT of filled dots already carries the signal. */
+.fs-app .nn-fscore { display: inline-flex; gap: 2px; vertical-align: middle; }
+.fs-app .nn-fscore-dot {
+  width: 7px; height: 7px; border-radius: 50%; background: var(--bg-subtle);
+  border: 1px solid var(--rule);
+}
+.fs-app .nn-fscore-dot--filled { background: var(--positive); border-color: var(--positive); }
+
+/* Altman Z-Score zone pill — same 3-tier semantic as the discount bar above, plus a neutral
+   "unknown" state for a missing score (never silently blank). */
+.fs-app .nn-zone {
+  display: inline-block; font-family: var(--mono); font-size: .68rem; letter-spacing: .04em;
+  text-transform: uppercase; padding: 2px 8px; border-radius: 10px; white-space: nowrap;
+}
+.fs-app .nn-zone--safe { background: var(--positive-soft); color: var(--positive); }
+.fs-app .nn-zone--grey { background: var(--orange-soft); color: var(--orange); }
+.fs-app .nn-zone--distress { background: var(--negative-soft); color: var(--negative); }
+.fs-app .nn-zone--unknown { background: var(--bg-subtle); color: var(--ink-3); }
+
 /* ---------- Footer ---------- */
 .fs-footer { background: var(--bg-card); border-top: 1px solid var(--rule); color: var(--ink-3); }
 .fs-footer a { color: var(--ink-2); text-decoration: none; }
