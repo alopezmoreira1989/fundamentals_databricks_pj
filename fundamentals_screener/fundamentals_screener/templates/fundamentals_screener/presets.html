@@ -1,132 +1,79 @@
 {% extends "fundamentals_screener/base_screener.html" %}
-{% load fmt logos %}
 {% block title %}Investor Presets — Fundamentals Screener{% endblock %}
 {% block meta_description %}Screen companies against the classic criteria of Graham, Buffett and Lynch — one preset at a time.{% endblock %}
 
+{% block extra_head %}
+<style>
+  #presets-content.presets-loading { opacity: .45; transition: opacity .15s ease .15s; pointer-events: none; }
+</style>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    // Auto-apply: every preset/filter/sort/pagination change fetches the content fragment in
+    // the background and swaps it in, instead of a full-page reload — same convention
+    // netnet.html/screen.html already use. Mode-switching (General/Net-Net/Presets) stays a
+    // real navigation — only within-mode interactions are swapped (see _presets_content.html's
+    // own comment).
+    var content = document.getElementById('presets-content');
+    if (!content) return;
+
+    var controller = null;
+
+    function applyUrl(url, push) {
+      if (controller) controller.abort();
+      controller = new AbortController();
+      content.classList.add('presets-loading');
+      fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' }, signal: controller.signal })
+        .then(function (r) {
+          if (!r.ok) throw new Error('bad response: ' + r.status);
+          return r.text();
+        })
+        .then(function (html) {
+          content.innerHTML = html;
+          content.classList.remove('presets-loading');
+          if (push) history.pushState(null, '', url);
+        })
+        .catch(function (err) {
+          if (err.name === 'AbortError') return;  // superseded by a newer request — expected
+          content.classList.remove('presets-loading');
+          console.error('Investor Presets update failed:', err);
+        });
+    }
+
+    // Sector/Index/Industry/Country/Market selects.
+    content.addEventListener('change', function (e) {
+      if (!e.target.matches('#presets-sector, #presets-index, #presets-industry, #presets-country, #presets-market')) return;
+      var form = document.getElementById('presets-filter-form');
+      if (!form) return;
+      var params = new URLSearchParams(new FormData(form));
+      applyUrl(window.location.pathname + '?' + params.toString(), true);
+    });
+
+    // Preset pills, sort-header links, and pagination links all live inside #presets-content
+    // and get replaced on every swap — delegate from the container itself (which persists
+    // across swaps) rather than binding elements that won't exist after the next one.
+    content.addEventListener('click', function (e) {
+      var a = e.target.closest('.levels a, thead a, .pagination a');
+      if (!a) return;
+      e.preventDefault();
+      applyUrl(a.href, true);
+    });
+
+    // Back/forward: the filter form's own field values live outside the pushed URL's own
+    // reach once swapped, so a full reload is the simplest way to guarantee they end up back
+    // in sync with whichever URL the user navigated to — same convention screen.html uses.
+    window.addEventListener('popstate', function () {
+      window.location.reload();
+    });
+  });
+</script>
+{% endblock %}
+
 {% block content %}
   {% include "fundamentals_screener/_mode_nav.html" %}
-
-  {% include "fundamentals_screener/_presets_hero.html" %}
-
-  <div class="p-4 bg-white rounded-3 shadow-sm mb-4">
-    <form method="get" id="presets-filter-form" class="d-flex flex-wrap align-items-end gap-3">
-      <input type="hidden" name="mode" value="presets">
-      <input type="hidden" name="preset" value="{{ preset }}">
-      <div>
-        <label for="presets-sector" class="form-label">Sector</label>
-        <select id="presets-sector" name="sector" class="form-select">
-          <option value="">All sectors</option>
-          {% for s in sectors %}
-            <option value="{{ s }}" {% if s == sector %}selected{% endif %}>{{ s }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div>
-        <label for="presets-index" class="form-label">Index</label>
-        <select id="presets-index" name="index" class="form-select">
-          <option value="">Any</option>
-          <option value="sp500" {% if index == "sp500" %}selected{% endif %}>S&amp;P 500</option>
-          <option value="r3000" {% if index == "r3000" %}selected{% endif %}>Russell 3000</option>
-          <option value="tsx" {% if index == "tsx" %}selected{% endif %}>S&amp;P/TSX Composite</option>
-        </select>
-      </div>
-      <div>
-        <label for="presets-industry" class="form-label">Industry</label>
-        <select id="presets-industry" name="industry" class="form-select">
-          <option value="">All industries</option>
-          {% for i in industries %}
-            <option value="{{ i }}" {% if i == industry %}selected{% endif %}>{{ i }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div>
-        <label for="presets-country" class="form-label">Country</label>
-        <select id="presets-country" name="country" class="form-select">
-          <option value="">All countries</option>
-          {% for c in countries %}
-            <option value="{{ c }}" {% if c == country %}selected{% endif %}>{{ c }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div>
-        <label for="presets-market" class="form-label">Market</label>
-        <select id="presets-market" name="market" class="form-select">
-          <option value="">All markets</option>
-          {% for m in markets %}
-            <option value="{{ m }}" {% if m == market %}selected{% endif %}>{{ m }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <noscript><button type="submit" class="btn btn-dark btn-sm ms-auto">Apply</button></noscript>
-    </form>
-  </div>
-
-  <div class="bg-white rounded-3 shadow-sm p-4">
-    <div class="d-flex justify-content-between align-items-baseline mb-3">
-      <h2 class="h5 mb-0">{{ definition.name }} candidates</h2>
-      <span class="text-muted small mono">
-        {{ total }} match{{ total|pluralize:"es" }}{% if num_pages > 1 %} · page {{ page }} of {{ num_pages }}{% endif %}
-      </span>
-    </div>
-
-    {% if rows %}
-      <div class="table-responsive">
-        <table class="table table-sm table-hover align-middle mb-0">
-          <thead>
-            <tr>
-              {% for h in headers %}
-                <th scope="col" class="{% if h.numeric %}text-end{% endif %}">
-                  <a class="text-decoration-none text-reset" href="{{ h.sort_url }}">{{ h.label }} <span class="text-muted">{{ h.indicator }}</span></a>
-                </th>
-              {% endfor %}
-            </tr>
-          </thead>
-          <tbody>
-            {% for item in rows %}
-              <tr>
-                <td>
-                  <a class="nn-ticker-link d-inline-flex align-items-center gap-2 text-decoration-none" href="{% url 'fundamentals_screener:company_detail' item.row.ticker %}">
-                    {% company_logo item.row.ticker item.row.name item.row.has_logo 24 %}<span class="fw-semibold">{{ item.row.ticker }}</span>
-                  </a>
-                </td>
-                <td class="text-body-secondary">{{ item.row.name|default:"—" }}</td>
-                <td class="text-muted">{{ item.row.sector|default:"—" }}</td>
-                {% for value, unit in item.cells %}
-                  <td class="text-end font-monospace">{{ value|metric_value:unit }}</td>
-                {% endfor %}
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-
-      {% if num_pages > 1 %}
-        <nav aria-label="Candidates pages" class="mt-3">
-          <ul class="pagination pagination-sm justify-content-center mb-0">
-            <li class="page-item {% if not has_prev %}disabled{% endif %}">
-              <a class="page-link" href="?{{ querystring }}{% if querystring %}&amp;{% endif %}page={{ page|add:'-1' }}">‹ Prev</a>
-            </li>
-            {% if page_range.0 > 1 %}
-              <li class="page-item"><a class="page-link" href="?{{ querystring }}{% if querystring %}&amp;{% endif %}page=1">1</a></li>
-              <li class="page-item disabled"><span class="page-link">…</span></li>
-            {% endif %}
-            {% for p in page_range %}
-              <li class="page-item {% if p == page %}active{% endif %}">
-                <a class="page-link" href="?{{ querystring }}{% if querystring %}&amp;{% endif %}page={{ p }}">{{ p }}</a>
-              </li>
-            {% endfor %}
-            {% if page_range|last < num_pages %}
-              <li class="page-item disabled"><span class="page-link">…</span></li>
-              <li class="page-item"><a class="page-link" href="?{{ querystring }}{% if querystring %}&amp;{% endif %}page={{ num_pages }}">{{ num_pages }}</a></li>
-            {% endif %}
-            <li class="page-item {% if not has_next %}disabled{% endif %}">
-              <a class="page-link" href="?{{ querystring }}{% if querystring %}&amp;{% endif %}page={{ page|add:'1' }}">Next ›</a>
-            </li>
-          </ul>
-        </nav>
-      {% endif %}
-    {% else %}
-      <p class="text-muted mb-0">No companies match {{ definition.name }}'s criteria under this filter combination — try clearing a filter.</p>
-    {% endif %}
+  <div id="presets-content">
+    {% include "fundamentals_screener/_presets_content.html" %}
   </div>
 {% endblock %}

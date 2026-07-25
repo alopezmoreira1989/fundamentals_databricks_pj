@@ -494,9 +494,14 @@ def _netnet_screen(request: HttpRequest) -> HttpResponse:
     # matching _screen_results.html's own convention) so Prev/Next/page-N preserve state.
     nn_qs = urlencode([*base_pairs, ("sort", sort_key), ("dir", "desc" if descending else "asc")])
 
+    # Auto-apply (see netnet.html's fetch() calls): an AJAX request only wants the content
+    # fragment re-rendered, not the whole page with masthead/mode-nav again — same context,
+    # same template code path either way, matching screen()'s own is_fragment convention.
+    is_fragment = request.headers.get("X-Requested-With") == "XMLHttpRequest"
+    template = "fundamentals_screener/_netnet_content.html" if is_fragment else "fundamentals_screener/netnet.html"
     return render(
         request,
-        "fundamentals_screener/netnet.html",
+        template,
         {
             "mode": "netnet",
             "shared_qs": shared_qs,
@@ -595,9 +600,14 @@ def _presets_screen(request: HttpRequest) -> HttpResponse:
     })
     presets_qs = urlencode([*base_pairs, ("sort", sort_key), ("dir", "desc" if descending else "asc")])
 
+    # Auto-apply (see presets.html's fetch() calls): an AJAX request only wants the content
+    # fragment re-rendered, not the whole page with masthead/mode-nav again — same context,
+    # same template code path either way, matching screen()'s own is_fragment convention.
+    is_fragment = request.headers.get("X-Requested-With") == "XMLHttpRequest"
+    template = "fundamentals_screener/_presets_content.html" if is_fragment else "fundamentals_screener/presets.html"
     return render(
         request,
-        "fundamentals_screener/presets.html",
+        template,
         {
             "mode": "presets",
             "shared_qs": shared_qs,
