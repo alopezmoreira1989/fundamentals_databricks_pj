@@ -1,5 +1,5 @@
 {% extends "fundamentals_screener/base_screener.html" %}
-{% load fmt logos %}
+{% load fmt logos l10n %}
 {% block title %}Net-Net Finder — Fundamentals Screener{% endblock %}
 {% block meta_description %}Graham-style deep value screener: companies trading below their net current asset value (NCAV), at three liquidation-conservatism levels.{% endblock %}
 
@@ -22,6 +22,7 @@
 {% endblock %}
 
 {% block content %}
+{% localize off %}{# see valuation.html for raw-value interpolation; floatformat ignores this entirely (hardcodes use_l10n=True) so bar-fill widths use floatformat's own 'u' suffix instead #}
   {% include "fundamentals_screener/_mode_nav.html" %}
 
   {% include "fundamentals_screener/_netnet_hero.html" %}
@@ -101,9 +102,11 @@
                   {% if item.ratio is not None %}
                     <div class="nn-bar" title="{{ item.ratio|floatformat:2 }}&times; NCAV/share">
                       <div class="nn-bar-fill {% if item.ratio <= 0.67 %}nn-bar-fill--classic{% elif item.ratio < 1.0 %}nn-bar-fill--below{% else %}nn-bar-fill--none{% endif %}"
-                           style="width: {{ item.bar_pct|floatformat:1 }}%"></div>
+                           style="width: {{ item.bar_pct|floatformat:'1u' }}%"></div>
                     </div>
-                    <span class="small font-monospace text-muted">{{ item.ratio|floatformat:2 }}&times;</span>
+                    <span class="nn-discount nn-discount--{% if item.discount_pct >= 45 %}strong{% elif item.discount_pct >= 25 %}moderate{% else %}weak{% endif %}">
+                      {{ item.discount_pct|metric_value:"percent" }}
+                    </span>
                   {% else %}
                     <span class="text-muted">—</span>
                   {% endif %}
@@ -158,4 +161,5 @@
       <p class="text-muted mb-0">No companies match this level and filter combination — try a looser conservatism level or clearing a filter.</p>
     {% endif %}
   </div>
+{% endlocalize %}
 {% endblock %}

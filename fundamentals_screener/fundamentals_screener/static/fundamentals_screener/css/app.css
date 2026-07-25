@@ -59,8 +59,11 @@ body.fs-app { font-family: var(--sans); background: var(--bg); color: var(--ink)
   .fs-app .container { max-width: 1840px; }
 }
 
-/* Display typography — Fraunces for headings, tight and optical-size 144. */
-.fs-app h1, .fs-app h2, .fs-app h3, .fs-app h4, .fs-app h5, .fs-app h6, .fs-app .display-face {
+/* Display typography — Fraunces for headings, tight and optical-size 144. Also covers Bootstrap's
+   .h1-.h6 utility classes (e.g. a <div class="h3">), which the element selectors above never
+   match on their own — any page using that utility-class-on-a-div pattern gets this for free. */
+.fs-app h1, .fs-app h2, .fs-app h3, .fs-app h4, .fs-app h5, .fs-app h6, .fs-app .display-face,
+.fs-app .h1, .fs-app .h2, .fs-app .h3, .fs-app .h4, .fs-app .h5, .fs-app .h6 {
   font-family: var(--display);
   font-weight: 500;
   letter-spacing: -0.018em;
@@ -285,6 +288,46 @@ body.fs-app { font-family: var(--sans); background: var(--bg); color: var(--ink)
 .fs-app .nn-zone--grey { background: var(--orange-soft); color: var(--orange); }
 .fs-app .nn-zone--distress { background: var(--negative-soft); color: var(--negative); }
 .fs-app .nn-zone--unknown { background: var(--bg-subtle); color: var(--ink-3); }
+
+/* Discount chip: percentage below (or above) NCAV/share, replacing a raw "0.67x" ratio with a
+   readable "-33%" figure. Same pill shape/mono font as .nn-zone above, 3-tier semantic keyed off
+   discount_pct rather than the Altman zone: >=45% deep discount, 25-44% moderate, below that a
+   neutral tier (covers both a thin discount and a negative one — trading above NCAV/share). */
+.fs-app .nn-discount {
+  display: inline-block; font-family: var(--mono); font-size: .68rem; letter-spacing: .04em;
+  padding: 2px 8px; border-radius: 10px; white-space: nowrap; margin-left: 4px;
+}
+.fs-app .nn-discount--strong { background: var(--positive-soft); color: var(--positive); }
+.fs-app .nn-discount--moderate { background: var(--orange-soft); color: var(--orange); }
+.fs-app .nn-discount--weak { background: var(--bg-subtle); color: var(--ink-3); }
+
+/* Conservatism-level segmented control — an editorial pill switch replacing Bootstrap's generic
+   .btn-group, matching the approved mockup. */
+.fs-app .levels {
+  display: inline-flex; gap: 2px; background: var(--bg-subtle); border-radius: 8px; padding: 3px;
+}
+.fs-app .level-btn {
+  padding: 5px 14px; border-radius: 6px; font-size: .82rem; font-weight: 500;
+  color: var(--ink-2); text-decoration: none; transition: background .12s, color .12s, box-shadow .12s;
+}
+.fs-app .level-btn:hover { color: var(--ink); }
+.fs-app .level-btn--active {
+  background: var(--bg-card); color: var(--ink); box-shadow: 0 1px 2px rgba(11, 37, 69, .12);
+}
+
+/* Formula-note box: the haircut-methodology disclaimer, set off from the hero card body. */
+.fs-app .formula-note { background: var(--bg-subtle); border-radius: 8px; padding: 12px 16px; }
+
+/* Distribution histogram (2 bins, below the hero stats): classic net-net vs. merely-below-value
+   counts, same fill colors as the discount bar/pill above for the same two tiers. */
+.fs-app .nn-hist { display: flex; flex-direction: column; gap: 8px; }
+.fs-app .nn-hist-row { display: grid; grid-template-columns: 200px 1fr 48px; align-items: center; gap: 12px; }
+.fs-app .nn-hist-label { font-size: .8rem; color: var(--ink-2); }
+.fs-app .nn-hist-bar { height: 8px; border-radius: 4px; background: var(--bg-subtle); overflow: hidden; }
+.fs-app .nn-hist-bar-fill { height: 100%; border-radius: 4px; }
+.fs-app .nn-hist-bar-fill--classic { background: var(--positive); }
+.fs-app .nn-hist-bar-fill--below { background: var(--orange); }
+.fs-app .nn-hist-count { font-family: var(--mono); font-size: .8rem; text-align: right; color: var(--ink-2); }
 
 /* ---------- Footer ---------- */
 .fs-footer { background: var(--bg-card); border-top: 1px solid var(--rule); color: var(--ink-3); }

@@ -1,7 +1,9 @@
 {% comment %}
-Included by netnet.html. Context needed: level, stats (NetNetStats), hide_value_traps,
-shared_qs, sector, country, market (for the level pills to carry the rest of the state
-forward, since they're plain full-reload links, not part of the filter <form> below).
+Included by netnet.html. Context needed: level, stats (NetNetStats), moderate_below_count,
+classic_bar_pct, moderate_bar_pct (the 2-bin distribution histogram — see _netnet_screen),
+hide_value_traps, shared_qs, sector, country, market (for the level pills to carry the rest
+of the state forward, since they're plain full-reload links, not part of the filter <form>
+below).
 {% endcomment %}
 <div class="card p-4 mb-4">
   <div class="eyebrow mb-2">Net-Net Finder</div>
@@ -32,20 +34,33 @@ forward, since they're plain full-reload links, not part of the filter <form> be
     </div>
   </div>
 
+  <div class="nn-hist mb-4">
+    <div class="nn-hist-row">
+      <div class="nn-hist-label">Classic net-net (&le; 0.67&times;)</div>
+      <div class="nn-hist-bar"><div class="nn-hist-bar-fill nn-hist-bar-fill--classic" style="width: {{ classic_bar_pct|floatformat:'1u' }}%"></div></div>
+      <div class="nn-hist-count">{{ stats.classic_net_net_count }}</div>
+    </div>
+    <div class="nn-hist-row">
+      <div class="nn-hist-label">Net-net (0.67&ndash;1.0&times;)</div>
+      <div class="nn-hist-bar"><div class="nn-hist-bar-fill nn-hist-bar-fill--below" style="width: {{ moderate_bar_pct|floatformat:'1u' }}%"></div></div>
+      <div class="nn-hist-count">{{ moderate_below_count }}</div>
+    </div>
+  </div>
+
   {% with base_qs=shared_qs %}
   <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
     <div>
       <div class="form-label mb-1">Conservatism level</div>
-      <div class="btn-group btn-group-sm" role="group" aria-label="NCAV conservatism level">
-        <a class="btn {% if level == 'relaxed' %}btn-dark{% else %}btn-outline-secondary{% endif %}"
+      <div class="levels" role="group" aria-label="NCAV conservatism level">
+        <a class="level-btn {% if level == 'relaxed' %}level-btn--active{% endif %}"
            href="?mode=netnet&amp;level=relaxed{% if base_qs %}&amp;{{ base_qs }}{% endif %}{% if hide_value_traps %}&amp;hide_value_traps=1{% endif %}">
           Relaxed
         </a>
-        <a class="btn {% if level == 'moderate' %}btn-dark{% else %}btn-outline-secondary{% endif %}"
+        <a class="level-btn {% if level == 'moderate' %}level-btn--active{% endif %}"
            href="?mode=netnet&amp;level=moderate{% if base_qs %}&amp;{{ base_qs }}{% endif %}{% if hide_value_traps %}&amp;hide_value_traps=1{% endif %}">
           Moderate
         </a>
-        <a class="btn {% if level == 'strict' %}btn-dark{% else %}btn-outline-secondary{% endif %}"
+        <a class="level-btn {% if level == 'strict' %}level-btn--active{% endif %}"
            href="?mode=netnet&amp;level=strict{% if base_qs %}&amp;{{ base_qs }}{% endif %}{% if hide_value_traps %}&amp;hide_value_traps=1{% endif %}">
           Strict
         </a>
@@ -61,16 +76,18 @@ forward, since they're plain full-reload links, not part of the filter <form> be
   </div>
   {% endwith %}
 
-  <p class="small text-muted mt-3 mb-0">
-    {% if level == "relaxed" %}
-      Relaxed counts every current asset at full face value — Graham's classic NCAV baseline.
-    {% elif level == "moderate" %}
-      Moderate: cash &amp; short-term investments at 100%, receivables at 75%, inventory at 50%.
-    {% else %}
-      Strict: cash at 100%, short-term investments at 90%, receivables at 50%, inventory at 33%.
-    {% endif %}
-    These haircuts are a practitioner convention approximating how much of each asset class
-    would realistically be recoverable in a liquidation — not a literal historical Graham
-    formula.
-  </p>
+  <div class="formula-note mt-3">
+    <p class="small text-muted mb-0">
+      {% if level == "relaxed" %}
+        Relaxed counts every current asset at full face value — Graham's classic NCAV baseline.
+      {% elif level == "moderate" %}
+        Moderate: cash &amp; short-term investments at 100%, receivables at 75%, inventory at 50%.
+      {% else %}
+        Strict: cash at 100%, short-term investments at 90%, receivables at 50%, inventory at 33%.
+      {% endif %}
+      These haircuts are a practitioner convention approximating how much of each asset class
+      would realistically be recoverable in a liquidation — not a literal historical Graham
+      formula.
+    </p>
+  </div>
 </div>

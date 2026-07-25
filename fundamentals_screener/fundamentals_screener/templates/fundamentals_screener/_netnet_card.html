@@ -1,9 +1,10 @@
 {% comment %}
 Included by valuation.html and company_detail.html's Valuation tab. Context needed: net_net
-(a NetNetRow) and net_net_levels (a list of {label, ncav_per_share, ratio, bar_pct} dicts,
-one per level) — see views._net_net_card_context. Only rendered when that context key was
-actually set (the view omits it entirely when the ticker has no NCAV data at any level), so
-this partial doesn't need its own "nothing to show" branch.
+(a NetNetRow) and net_net_levels (a list of {label, ncav_per_share, ratio, discount_pct,
+bar_pct} dicts, one per level) — see views._net_net_card_context. Only rendered when that
+context key was actually set (the view omits it entirely when the ticker has no NCAV data
+at any level), so this partial doesn't need its own "nothing to show" branch. No {% localize
+off %} needed here — both callers already wrap their whole content block in one.
 {% endcomment %}
 {% load fmt %}
 <div class="bg-white rounded-3 shadow-sm p-4 mb-4">
@@ -40,9 +41,11 @@ this partial doesn't need its own "nothing to show" branch.
               {% if lv.ratio is not None %}
                 <div class="nn-bar" title="{{ lv.ratio|floatformat:2 }}&times; NCAV/share">
                   <div class="nn-bar-fill {% if lv.ratio <= 0.67 %}nn-bar-fill--classic{% elif lv.ratio < 1.0 %}nn-bar-fill--below{% else %}nn-bar-fill--none{% endif %}"
-                       style="width: {{ lv.bar_pct|floatformat:1 }}%"></div>
+                       style="width: {{ lv.bar_pct|floatformat:'1u' }}%"></div>
                 </div>
-                <span class="small font-monospace text-muted">{{ lv.ratio|floatformat:2 }}&times;</span>
+                <span class="nn-discount nn-discount--{% if lv.discount_pct >= 45 %}strong{% elif lv.discount_pct >= 25 %}moderate{% else %}weak{% endif %}">
+                  {{ lv.discount_pct|metric_value:"percent" }}
+                </span>
               {% else %}
                 <span class="text-muted">—</span>
               {% endif %}
