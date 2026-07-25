@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import replace
+from typing import Any
 
 from fundamentals_pipeline.fx import convert_price
 
@@ -289,6 +290,18 @@ _CLASSIC_NET_NET_THRESHOLD = 0.67
 # lib uses for its own F-Score "weak" classification).
 _VALUE_TRAP_F_SCORE_FLOOR = 4.0
 
+# Net-Net Finder table's sortable column keys, in header order. "discount" is the default
+# (price/NCAV-per-share ratio, ascending — biggest discount first, this table's original and
+# only behaviour before column-header sorting existed); every other key lets a column-header
+# click override it. Sorting happens here in Python (not DuckDB, unlike the general screener
+# and Investor Presets) because `net_net_screen` already returns its whole filtered set
+# unpaginated — see its own docstring on why ("genuine net-nets are a small fraction of the
+# universe").
+_NET_NET_SORT_KEYS = (
+    "ticker", "name", "sector", "price", "ncav_per_share", "discount", "f_score", "z_score",
+    "market_cap",
+)
+
 
 def _price_to_ncav_ratio(row: NetNetRow, level: str) -> float | None:
     """price / NCAV-per-share for `level` — None when either side is missing, or the level's
@@ -301,28 +314,67 @@ def _price_to_ncav_ratio(row: NetNetRow, level: str) -> float | None:
     return row.price / ncav_per_share
 
 
+def _net_net_sort_value(row: NetNetRow, ratio: float | None, level: str, key: str) -> Any:
+    if key == "ticker":
+        return row.ticker
+    if key == "name":
+        return row.name or ""
+    if key == "sector":
+        return row.sector or ""
+    if key == "price":
+        return row.price
+    if key == "ncav_per_share":
+        return getattr(row, _NET_NET_NCAV_FIELD.get(level, "ncav_per_share_relaxed"))
+    if key == "f_score":
+        return row.f_score
+    if key == "z_score":
+        return row.z_score
+    if key == "market_cap":
+        return row.market_cap
+    return ratio  # "discount" (default) and any unrecognized key
+
+
+def _sort_net_net_rows(
+    rows: tuple[NetNetRow, ...], ratios: dict[str, float | None], level: str,
+    sort_key: str, descending: bool,
+) -> tuple[NetNetRow, ...]:
+    """Sort by `sort_key` (a column a user clicked), nulls always last regardless of direction —
+    the same convention a database `ORDER BY ... NULLS LAST` would apply, needed here because
+    Python's `sorted()` can't compare `None` to a number/string and `reverse=True` would put
+    nulls first if they were merely coalesced to +/-inf."""
+    if sort_key not in _NET_NET_SORT_KEYS:
+        sort_key = "discount"
+    values = {row.ticker: _net_net_sort_value(row, ratios.get(row.ticker), level, sort_key) for row in rows}
+    with_value = sorted((r for r in rows if values[r.ticker] is not None),
+                         key=lambda r: values[r.ticker], reverse=descending)
+    without_value = [r for r in rows if values[r.ticker] is None]
+    return tuple(with_value + without_value)
+
+
 def get_net_net_screen(
     *, level: str = "relaxed", hide_value_traps: bool = False,
-    sector: str = "", country: str = "", market: str = "",
+    sector: str = "", index: str = "", country: str = "", market: str = "", industry: str = "",
+    sort_key: str = "discount", descending: bool = False,
 ) -> NetNetScreen:
     """The Net-Net Finder's full result for `level` ("relaxed"/"moderate"/"strict", falls back
-    to "relaxed" for anything else): rows sorted by discount to NCAV (descending — cheapest
-    first, i.e. ascending price/NCAV-per-share), optionally excluding likely value traps
+    to "relaxed" for anything else): rows sorted by `sort_key` (defaults to discount to NCAV,
+    ascending — cheapest first, i.e. ascending price/NCAV-per-share, this table's original
+    behaviour before column-header sorting existed), optionally excluding likely value traps
     (Piotroski F-Score < 4), plus hero stats for that SAME filtered set — so the counts always
     agree with what's on screen, never a stale/unfiltered number next to a filtered table.
     """
     if level not in _NET_NET_LEVELS:
         level = "relaxed"
     repo = CompanyListingRepository()
-    universe_size = repo.scope_size(sector=sector, country=country, market=market)
-    rows = repo.net_net_screen(level=level, sector=sector, country=country, market=market)
+    universe_size = repo.scope_size(sector=sector, index=index, country=country, market=market,
+                                     industry=industry)
+    rows = repo.net_net_screen(level=level, sector=sector, index=index, country=country,
+                                market=market, industry=industry)
     if hide_value_traps:
         rows = tuple(r for r in rows if r.f_score is None or r.f_score >= _VALUE_TRAP_F_SCORE_FLOOR)
 
     ratios = {row.ticker: _price_to_ncav_ratio(row, level) for row in rows}
-    sorted_rows = tuple(
-        sorted(rows, key=lambda r: ratios[r.ticker] if ratios[r.ticker] is not None else float("inf"))
-    )
+    sorted_rows = _sort_net_net_rows(rows, ratios, level, sort_key, descending)
 
     valid_ratios = [r for r in ratios.values() if r is not None]
     stats = NetNetStats(
@@ -430,22 +482,23 @@ def get_preset_definition(preset: str) -> PresetDefinition:
 
 
 def get_preset_screen(
-    preset: str, *, sector: str = "", country: str = "", market: str = "",
-    page: int = 1, page_size: int = 50,
+    preset: str, *, sector: str = "", index: str = "", country: str = "", market: str = "",
+    industry: str = "", sort: SortSpec | None = None, page: int = 1, page_size: int = 50,
 ) -> PresetScreen:
     """The Investor Presets screener's full result for one school ("graham"/"buffett"/"lynch",
-    falls back to "graham" for anything else): one page of matching companies (paginated in
-    DuckDB — see ``CompanyListingRepository.preset_screen``), plus hero stats computed under
-    the SAME descriptive filters (universe size, and the definition's own live/pending
+    falls back to "graham" for anything else): one page of matching companies (paginated AND
+    sorted in DuckDB — see ``CompanyListingRepository.preset_screen``), plus hero stats computed
+    under the SAME descriptive filters (universe size, and the definition's own live/pending
     criteria counts, so the numbers always agree with what's on screen).
     """
     if preset not in _PRESET_DEFINITIONS:
         preset = "graham"
     repo = CompanyListingRepository()
-    universe_size = repo.scope_size(sector=sector, country=country, market=market)
+    universe_size = repo.scope_size(sector=sector, index=index, country=country, market=market,
+                                     industry=industry)
     rows, total, columns = repo.preset_screen(
-        preset=preset, sector=sector, country=country, market=market,
-        page=page, page_size=page_size,
+        preset=preset, sector=sector, index=index, country=country, market=market,
+        industry=industry, sort=sort, page=page, page_size=page_size,
     )
     definition = _PRESET_DEFINITIONS[preset]
     stats = PresetStats(

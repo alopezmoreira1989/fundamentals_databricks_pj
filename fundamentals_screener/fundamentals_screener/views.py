@@ -345,11 +345,15 @@ def screen(request: HttpRequest) -> HttpResponse:
         template,
         {
             "mode": "general",
-            # The mode-nav bar carries sector/country/market across to Net-Net Finder (the
-            # only filters the two modes share) — precomputed here rather than in the template,
-            # matching this view's own "querystring" key just below.
+            # The mode-nav bar carries sector/index/country/market/industry across to Net-Net
+            # Finder and Investor Presets (the descriptive filters all three modes share) —
+            # precomputed here rather than in the template, matching this view's own
+            # "querystring" key just below.
             "shared_qs": urlencode({
-                k: v for k, v in (("sector", sector), ("country", country), ("market", market)) if v
+                k: v for k, v in (
+                    ("sector", sector), ("index", index), ("country", country),
+                    ("market", market), ("industry", industry),
+                ) if v
             }),
             "metrics": services.available_metrics(),
             "sectors": services.available_sectors(),
@@ -389,33 +393,61 @@ def screen(request: HttpRequest) -> HttpResponse:
     )
 
 
+# Net-Net Finder's table columns, (sort key, header label, unit-or-None) — unit drives the
+# header's own right-alignment via `_sort_headers`' "numeric" flag; the None-unit columns
+# (Ticker/Company/Sector/F-Score/Altman Zone) render left-aligned like every other descriptive
+# column. Sorting itself happens in `services._sort_net_net_rows` (Python, not DuckDB) since
+# `net_net_screen` already returns its whole filtered set unpaginated.
+_NET_NET_HEADER_COLUMNS: list[tuple[str, str, str | None]] = [
+    ("ticker", "Ticker", None),
+    ("name", "Company", None),
+    ("sector", "Sector", None),
+    ("price", "Price", "usd"),
+    ("ncav_per_share", "NCAV/Share", "usd"),
+    ("discount", "Discount", "percent"),
+    ("f_score", "F-Score", None),
+    ("z_score", "Altman Zone", None),
+    ("market_cap", "Market Cap", "usd"),
+]
+
+
 def _netnet_screen(request: HttpRequest) -> HttpResponse:
     """The Net-Net Finder: Graham-style deep-value screen at a user-chosen liquidation-
-    conservatism level (see ``services.get_net_net_screen``), sharing only the sector/country/
-    market descriptive filters with the general screener. Precomputes each row's price/NCAV-
-    per-share ratio and a clamped 0-100 bar percentage here (not in the template) — the same
-    "view builds a small per-row dict, template stays dumb" convention `screen()` itself uses
-    for its own ``rows`` context key.
+    conservatism level (see ``services.get_net_net_screen``), sharing the sector/index/country/
+    market/industry descriptive filters with the general screener. Precomputes each row's
+    price/NCAV-per-share ratio and a clamped 0-100 bar percentage here (not in the template) —
+    the same "view builds a small per-row dict, template stays dumb" convention `screen()`
+    itself uses for its own ``rows`` context key.
 
     Paginated in Python (the service has no LIMIT/OFFSET — it always returns the whole filtered
     set): confirmed by an actual smoke test that "Relaxed" alone (base NCAV, no haircut) matches
     ~1 in 3 tickers, not the "small fraction of the universe" a genuine net-net is — a plain
     positive-NCAV filter is a much weaker bar than "trading below value". Rendering ~1,000
     rows unpaginated produced a multi-megabyte response; slicing here (matching PAGE_SIZE) is
-    cheap since the full set is already in memory.
+    cheap since the full set is already in memory. Column-header sorting (see
+    ``_NET_NET_HEADER_COLUMNS``) reuses ``screen()``'s own ``_sort_headers`` helper, but the
+    sort itself happens in the service (Python), not via a DuckDB ``ORDER BY``.
     """
     level = request.GET.get("level", "relaxed").strip().lower()
     if level not in _NET_NET_LEVELS:
         level = "relaxed"
     hide_value_traps = request.GET.get("hide_value_traps") == "1"
     sector = request.GET.get("sector", "").strip()
+    index = request.GET.get("index", "").strip()
     country = request.GET.get("country", "").strip()
     market = request.GET.get("market", "").strip()
+    industry = request.GET.get("industry", "").strip()
+    industries = services.available_industries(sector=sector)
+    if industry not in industries:
+        industry = ""
+    sort_key = request.GET.get("sort", "discount").strip() or "discount"
+    descending = request.GET.get("dir", "asc").strip().lower() == "desc"
     page = _parse_page(request.GET.get("page"))
 
     result = services.get_net_net_screen(
         level=level, hide_value_traps=hide_value_traps,
-        sector=sector, country=country, market=market,
+        sector=sector, index=index, country=country, market=market, industry=industry,
+        sort_key=sort_key, descending=descending,
     )
     total = len(result.rows)
     stats = result.stats
@@ -439,18 +471,28 @@ def _netnet_screen(request: HttpRequest) -> HttpResponse:
             "bar_pct": bar_pct,
         })
 
+    base_pairs: list[tuple[str, str]] = [
+        p for p in (
+            ("mode", "netnet"), ("level", level),
+            ("hide_value_traps", "1" if hide_value_traps else ""),
+            ("sector", sector), ("index", index), ("country", country), ("market", market),
+            ("industry", industry),
+        ) if p[1]
+    ]
+    headers = {
+        h["key"]: h
+        for h in _sort_headers(_NET_NET_HEADER_COLUMNS, sort_key, descending, base_pairs)
+    }
+
     shared_qs = urlencode({
-        k: v for k, v in (("sector", sector), ("country", country), ("market", market)) if v
+        k: v for k, v in (
+            ("sector", sector), ("index", index), ("country", country), ("market", market),
+            ("industry", industry),
+        ) if v
     })
     # Pagination-link querystring: every current param except `page` (appended by the template,
     # matching _screen_results.html's own convention) so Prev/Next/page-N preserve state.
-    nn_qs = urlencode({
-        k: v for k, v in (
-            ("mode", "netnet"), ("level", level),
-            ("hide_value_traps", "1" if hide_value_traps else ""),
-            ("sector", sector), ("country", country), ("market", market),
-        ) if v
-    })
+    nn_qs = urlencode([*base_pairs, ("sort", sort_key), ("dir", "desc" if descending else "asc")])
 
     return render(
         request,
@@ -462,11 +504,15 @@ def _netnet_screen(request: HttpRequest) -> HttpResponse:
             "level": level,
             "hide_value_traps": hide_value_traps,
             "sector": sector,
+            "index": index,
             "country": country,
             "market": market,
+            "industry": industry,
             "sectors": services.available_sectors(),
             "countries": services.available_countries(),
             "markets": services.available_markets(),
+            "industries": industries,
+            "headers": headers,
             "rows": rows,
             "total": total,
             "stats": stats,
@@ -483,25 +529,36 @@ def _presets_screen(request: HttpRequest) -> HttpResponse:
     """Investor Presets: a name-only pill selector (Graham/Buffett/Lynch) revealing that
     school's static philosophy panel (portrait, tagline, criteria list) plus a company table
     filtered on that school's latest-FY-only criteria (see ``services.get_preset_screen``) —
-    sharing only the sector/country/market descriptive filters with the general screener,
-    the same pattern as the Net-Net Finder.
+    sharing the sector/index/country/market/industry descriptive filters with the general
+    screener, the same pattern as the Net-Net Finder.
 
-    Paginated in DuckDB, unlike the Net-Net Finder's Python-side pagination: a preset's
-    matches aren't guaranteed to be a small fraction of the universe the way a genuine
-    net-net is, so pushing LIMIT/OFFSET into the query (``CompanyListingRepository.
-    preset_screen``) avoids ever materializing an unbounded result set in Python.
+    Paginated AND sorted in DuckDB, unlike the Net-Net Finder's Python-side pagination/sort: a
+    preset's matches aren't guaranteed to be a small fraction of the universe the way a genuine
+    net-net is, so pushing LIMIT/OFFSET/ORDER BY into the query (``CompanyListingRepository.
+    preset_screen``) avoids ever materializing an unbounded result set in Python. No sort-key
+    whitelist needed here (unlike ``screen()``'s own): ``_order_clause`` already falls back
+    safely to ``s.ticker`` for anything not a descriptive column or one of the preset's own
+    display columns.
     """
     presets = services.preset_keys()
     preset = request.GET.get("preset", presets[0]).strip().lower()
     if preset not in presets:
         preset = presets[0]
     sector = request.GET.get("sector", "").strip()
+    index = request.GET.get("index", "").strip()
     country = request.GET.get("country", "").strip()
     market = request.GET.get("market", "").strip()
+    industry = request.GET.get("industry", "").strip()
+    industries = services.available_industries(sector=sector)
+    if industry not in industries:
+        industry = ""
+    sort_key = request.GET.get("sort", "ticker").strip() or "ticker"
+    descending = request.GET.get("dir", "asc").strip().lower() == "desc"
     page = _parse_page(request.GET.get("page"))
 
     result = services.get_preset_screen(
-        preset, sector=sector, country=country, market=market, page=page, page_size=PAGE_SIZE,
+        preset, sector=sector, index=index, country=country, market=market, industry=industry,
+        sort=SortSpec(key=sort_key, descending=descending), page=page, page_size=PAGE_SIZE,
     )
     num_pages = max(1, math.ceil(result.total / PAGE_SIZE))
     page = min(page, num_pages)
@@ -517,15 +574,26 @@ def _presets_screen(request: HttpRequest) -> HttpResponse:
         for r in result.rows
     ]
 
-    shared_qs = urlencode({
-        k: v for k, v in (("sector", sector), ("country", country), ("market", market)) if v
-    })
-    presets_qs = urlencode({
-        k: v for k, v in (
+    base_pairs: list[tuple[str, str]] = [
+        p for p in (
             ("mode", "presets"), ("preset", preset),
-            ("sector", sector), ("country", country), ("market", market),
+            ("sector", sector), ("index", index), ("country", country), ("market", market),
+            ("industry", industry),
+        ) if p[1]
+    ]
+    headers = _sort_headers(
+        [("ticker", "Ticker", None), ("name", "Company", None), ("sector", "Sector", None),
+         *[(c.key, c.key, c.unit or "") for c in result.columns]],
+        sort_key, descending, base_pairs,
+    )
+
+    shared_qs = urlencode({
+        k: v for k, v in (
+            ("sector", sector), ("index", index), ("country", country), ("market", market),
+            ("industry", industry),
         ) if v
     })
+    presets_qs = urlencode([*base_pairs, ("sort", sort_key), ("dir", "desc" if descending else "asc")])
 
     return render(
         request,
@@ -539,11 +607,15 @@ def _presets_screen(request: HttpRequest) -> HttpResponse:
             "definition": definition,
             "portrait_path": f"fundamentals_screener/portraits/{preset}.png",
             "sector": sector,
+            "index": index,
             "country": country,
             "market": market,
+            "industry": industry,
             "sectors": services.available_sectors(),
             "countries": services.available_countries(),
             "markets": services.available_markets(),
+            "industries": industries,
+            "headers": headers,
             "columns": result.columns,
             "rows": rows,
             "total": result.total,

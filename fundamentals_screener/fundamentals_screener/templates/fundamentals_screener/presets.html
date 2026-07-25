@@ -22,6 +22,24 @@
         </select>
       </div>
       <div>
+        <label for="presets-index" class="form-label">Index</label>
+        <select id="presets-index" name="index" class="form-select">
+          <option value="">Any</option>
+          <option value="sp500" {% if index == "sp500" %}selected{% endif %}>S&amp;P 500</option>
+          <option value="r3000" {% if index == "r3000" %}selected{% endif %}>Russell 3000</option>
+          <option value="tsx" {% if index == "tsx" %}selected{% endif %}>S&amp;P/TSX Composite</option>
+        </select>
+      </div>
+      <div>
+        <label for="presets-industry" class="form-label">Industry</label>
+        <select id="presets-industry" name="industry" class="form-select">
+          <option value="">All industries</option>
+          {% for i in industries %}
+            <option value="{{ i }}" {% if i == industry %}selected{% endif %}>{{ i }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
         <label for="presets-country" class="form-label">Country</label>
         <select id="presets-country" name="country" class="form-select">
           <option value="">All countries</option>
@@ -56,11 +74,10 @@
         <table class="table table-sm table-hover align-middle mb-0">
           <thead>
             <tr>
-              <th scope="col">Ticker</th>
-              <th scope="col">Company</th>
-              <th scope="col">Sector</th>
-              {% for c in columns %}
-                <th scope="col" class="text-end">{{ c.key }}</th>
+              {% for h in headers %}
+                <th scope="col" class="{% if h.numeric %}text-end{% endif %}">
+                  <a class="text-decoration-none text-reset" href="{{ h.sort_url }}">{{ h.label }} <span class="text-muted">{{ h.indicator }}</span></a>
+                </th>
               {% endfor %}
             </tr>
           </thead>

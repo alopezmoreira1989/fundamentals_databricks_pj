@@ -577,8 +577,11 @@ class CompanyListingRepository(DuckDBRepository):
         *,
         preset: str,
         sector: str = "",
+        index: str = "",
         country: str = "",
         market: str = "",
+        industry: str = "",
+        sort: SortSpec | None = None,
         page: int = 1,
         page_size: int = 50,
     ) -> tuple[tuple[ScreenTableRow, ...], int, tuple[ScreenColumn, ...]]:
@@ -590,14 +593,18 @@ class CompanyListingRepository(DuckDBRepository):
         NULL pivot value always fails a plain ``MetricFilter`` bound — see ``_filter_clause`` —
         which is wrong for Buffett's MoS: Energy/Financials/Real Estate tickers have it NULL by
         design, not failing, so they must still be evaluated on their other three criteria).
-        Falls back to an empty result for an unrecognized `preset`.
+        Falls back to an empty result for an unrecognized `preset`. ``sort`` reuses
+        ``_order_clause`` — a descriptive column or one of the preset's own display columns;
+        defaults to ``s.ticker`` for anything else (same safe fallback ``screen_table`` relies
+        on).
         """
         columns = list(_PRESET_COLUMNS.get(preset, ()))
         if not columns:
             return (), 0, ()
-        scope = self._scope(search="", sector=sector, index="", country=country, market=market,
-                             industry="")
+        scope = self._scope(search="", sector=sector, index=index, country=country, market=market,
+                             industry=industry)
         offset = max(0, (page - 1) * page_size)
+        sort = sort or SortSpec()
         if not scope:
             return (), 0, tuple(ScreenColumn(key=m) for m in columns)
 
@@ -633,10 +640,8 @@ class CompanyListingRepository(DuckDBRepository):
             count_row = con.execute(count_sql, cte_params).fetchone()
             total = int(count_row[0]) if count_row else 0
 
-            page_sql = (
-                f"{cte}SELECT {projection} FROM {from_join}{where}"
-                " ORDER BY s.ticker LIMIT ? OFFSET ?"
-            )
+            order_sql = self._order_clause(sort, alias)
+            page_sql = f"{cte}SELECT {projection} FROM {from_join}{where}{order_sql} LIMIT ? OFFSET ?"
             cursor = con.execute(page_sql, cte_params + [page_size, offset])
             hits = cursor.fetchall()
 
