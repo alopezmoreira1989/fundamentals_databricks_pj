@@ -6,13 +6,17 @@
 {% block extra_scripts %}
 <script>
   document.addEventListener('DOMContentLoaded', function () {
-    // Auto-submit on change for the sector/country/market/hide-value-traps filter row — a
-    // plain full-page GET reload (no AJAX, see views.screen()'s docstring), just triggered
-    // automatically instead of needing an explicit "Apply" click. Works with JS disabled too:
-    // the submit button below stays as the fallback.
+    // Auto-submit on change for the sector/country/market filters and the hide-value-traps
+    // checkbox (which lives in the hero card, associated via its form="nn-filter-form"
+    // attribute rather than DOM nesting, so it needs its own listener) — a plain full-page
+    // GET reload (no AJAX, see views.screen()'s docstring), just triggered automatically
+    // instead of needing an explicit "Apply" click. Works with JS disabled too: the submit
+    // button below stays as the fallback.
     var form = document.getElementById('nn-filter-form');
     if (!form) return;
     form.addEventListener('change', function () { form.submit(); });
+    var traps = document.getElementById('nn-hide-traps');
+    if (traps) traps.addEventListener('change', function () { form.submit(); });
   });
 </script>
 {% endblock %}
@@ -53,14 +57,7 @@
           {% endfor %}
         </select>
       </div>
-      <div class="ms-auto">
-        <label class="d-flex align-items-center gap-2 small mb-0">
-          <input type="checkbox" name="hide_value_traps" value="1" {% if hide_value_traps %}checked{% endif %}
-                 class="form-check-input mt-0">
-          Hide likely value traps (F-Score &lt; 4)
-        </label>
-      </div>
-      <noscript><button type="submit" class="btn btn-dark btn-sm">Apply</button></noscript>
+      <noscript><button type="submit" class="btn btn-dark btn-sm ms-auto">Apply</button></noscript>
     </form>
   </div>
 
