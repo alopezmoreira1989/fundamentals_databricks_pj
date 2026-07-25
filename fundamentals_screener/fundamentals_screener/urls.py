@@ -16,6 +16,7 @@ app_name = "fundamentals_screener"
 urlpatterns = [
     path("", views.screen, name="screen"),
     path("data/", views.screen_data, name="screen_data"),
+    path("about/", views.about, name="about"),
     path("<str:ticker>/", views.company_detail, name="company_detail"),
     path("<str:ticker>/data/", views.company_data, name="company_data"),
     path("<str:ticker>/news/", views.company_news, name="company_news"),
