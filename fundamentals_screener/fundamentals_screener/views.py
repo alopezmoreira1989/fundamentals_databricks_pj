@@ -415,17 +415,7 @@ def _netnet_screen(request: HttpRequest) -> HttpResponse:
         sector=sector, country=country, market=market,
     )
     total = len(result.rows)
-
-    # Distribution histogram (2 bins, below the hero stats): classic_net_net_count is already a
-    # subset of below_value_count (ratio <= 0.67 vs. ratio < 1.0 — see services.get_net_net_screen),
-    # so the "moderate" 0.67-1.0x bin is just their difference; both bars share eligible_count
-    # (positive-NCAV rows) as their denominator, since that's the pool both are carved from. Pure
-    # display-layer arithmetic over stats already computed by the service — no new query.
     stats = result.stats
-    moderate_below_count = stats.below_value_count - stats.classic_net_net_count
-    hist_denom = stats.eligible_count or 1
-    classic_bar_pct = 100.0 * stats.classic_net_net_count / hist_denom
-    moderate_bar_pct = 100.0 * moderate_below_count / hist_denom
     num_pages = max(1, math.ceil(total / PAGE_SIZE))
     page = min(page, num_pages)
     offset = (page - 1) * PAGE_SIZE
@@ -477,9 +467,6 @@ def _netnet_screen(request: HttpRequest) -> HttpResponse:
             "rows": rows,
             "total": total,
             "stats": stats,
-            "moderate_below_count": moderate_below_count,
-            "classic_bar_pct": classic_bar_pct,
-            "moderate_bar_pct": moderate_bar_pct,
             "page": page,
             "num_pages": num_pages,
             "has_prev": page > 1,
