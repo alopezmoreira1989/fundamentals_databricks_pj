@@ -103,7 +103,8 @@
                 <td>
                   {% if item.ratio is not None %}
                     <div class="nn-bar" title="{{ item.ratio|floatformat:2 }}&times; NCAV/share">
-                      <div class="nn-bar-fill" style="width: {{ item.bar_pct|floatformat:1 }}%"></div>
+                      <div class="nn-bar-fill {% if item.ratio <= 0.67 %}nn-bar-fill--classic{% elif item.ratio < 1.0 %}nn-bar-fill--below{% else %}nn-bar-fill--none{% endif %}"
+                           style="width: {{ item.bar_pct|floatformat:1 }}%"></div>
                     </div>
                     <span class="small font-monospace text-muted">{{ item.ratio|floatformat:2 }}&times;</span>
                   {% else %}
