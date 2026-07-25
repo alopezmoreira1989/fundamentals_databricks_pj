@@ -17,7 +17,7 @@ from fundamentals_screener import services as services_module
 def _row(ticker: str, *, price=10.0, relaxed=None, moderate=None, strict=None, f_score=None) -> NetNetRow:
     return NetNetRow(
         ticker=ticker, name=f"{ticker} Corp", sector="Industrials", industry="Machinery",
-        country="United States", market="US", price=price,
+        country="United States", market="US", price=price, market_cap=None,
         ncav_per_share_relaxed=relaxed, ncav_per_share_moderate=moderate,
         ncav_per_share_strict=strict, f_score=f_score, z_score=None, z_score_zone=None,
     )

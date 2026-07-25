@@ -145,10 +145,28 @@ def _num(value: float) -> str:
     return str(int(value)) if value == int(value) else str(value)
 
 
+_NET_NET_LEVELS = ("relaxed", "moderate", "strict")
+_NET_NET_LEVEL_FIELD = {
+    "relaxed": "ncav_per_share_relaxed",
+    "moderate": "ncav_per_share_moderate",
+    "strict": "ncav_per_share_strict",
+}
+
+
 def screen(request: HttpRequest) -> HttpResponse:
-    """HTML screener: the full company table narrowed by the descriptive filters, with the
-    user-chosen metric columns and metric filters, every column sortable, state in the URL.
+    """HTML screener — two modes sharing one route (``?mode=general|netnet``, default
+    ``general``). ``general`` is the full multi-metric company table (this function's
+    original scope, below). ``netnet`` is the Net-Net Finder — a fixed-column liquidation-
+    value screen delegated to ``_netnet_screen``, since its filters/columns/template are
+    almost entirely disjoint from the general screener's (only sector/country/market are
+    shared — see issue #259). Deliberately a plain full-page reload on every filter/level
+    change, not an AJAX partial-swap like the general screener's auto-apply: the two modes'
+    content differs far more (different hero, different columns, different filter set) than
+    the general screener's single-column benchmark switch did, so a fragment swap wouldn't
+    save much.
     """
+    if request.GET.get("mode", "general").strip().lower() == "netnet":
+        return _netnet_screen(request)
     search = request.GET.get("q", "").strip()
     sector = request.GET.get("sector", "").strip()
     index = request.GET.get("index", "").strip()
@@ -285,6 +303,13 @@ def screen(request: HttpRequest) -> HttpResponse:
         request,
         template,
         {
+            "mode": "general",
+            # The mode-nav bar carries sector/country/market across to Net-Net Finder (the
+            # only filters the two modes share) — precomputed here rather than in the template,
+            # matching this view's own "querystring" key just below.
+            "shared_qs": urlencode({
+                k: v for k, v in (("sector", sector), ("country", country), ("market", market)) if v
+            }),
             "metrics": services.available_metrics(),
             "sectors": services.available_sectors(),
             "countries": services.available_countries(),
@@ -319,6 +344,95 @@ def screen(request: HttpRequest) -> HttpResponse:
             "has_next": page < num_pages,
             "page_range": range(max(1, page - 2), min(num_pages, page + 2) + 1),
             "querystring": urlencode(state_pairs),
+        },
+    )
+
+
+def _netnet_screen(request: HttpRequest) -> HttpResponse:
+    """The Net-Net Finder: Graham-style deep-value screen at a user-chosen liquidation-
+    conservatism level (see ``services.get_net_net_screen``), sharing only the sector/country/
+    market descriptive filters with the general screener. Precomputes each row's price/NCAV-
+    per-share ratio and a clamped 0-100 bar percentage here (not in the template) — the same
+    "view builds a small per-row dict, template stays dumb" convention `screen()` itself uses
+    for its own ``rows`` context key.
+
+    Paginated in Python (the service has no LIMIT/OFFSET — it always returns the whole filtered
+    set): confirmed by an actual smoke test that "Relaxed" alone (base NCAV, no haircut) matches
+    ~1 in 3 tickers, not the "small fraction of the universe" a genuine net-net is — a plain
+    positive-NCAV filter is a much weaker bar than "trading below value". Rendering ~1,000
+    rows unpaginated produced a multi-megabyte response; slicing here (matching PAGE_SIZE) is
+    cheap since the full set is already in memory.
+    """
+    level = request.GET.get("level", "relaxed").strip().lower()
+    if level not in _NET_NET_LEVELS:
+        level = "relaxed"
+    hide_value_traps = request.GET.get("hide_value_traps") == "1"
+    sector = request.GET.get("sector", "").strip()
+    country = request.GET.get("country", "").strip()
+    market = request.GET.get("market", "").strip()
+    page = _parse_page(request.GET.get("page"))
+
+    result = services.get_net_net_screen(
+        level=level, hide_value_traps=hide_value_traps,
+        sector=sector, country=country, market=market,
+    )
+    total = len(result.rows)
+    num_pages = max(1, math.ceil(total / PAGE_SIZE))
+    page = min(page, num_pages)
+    offset = (page - 1) * PAGE_SIZE
+    window = result.rows[offset : offset + PAGE_SIZE]
+
+    field = _NET_NET_LEVEL_FIELD[level]
+    rows = []
+    for r in window:
+        ncav_per_share = getattr(r, field)
+        ratio = r.price / ncav_per_share if r.price is not None and ncav_per_share else None
+        discount_pct = (1 - ratio) * 100 if ratio is not None else None
+        bar_pct = max(0.0, min(discount_pct, 100.0)) if discount_pct is not None else 0.0
+        rows.append({
+            "row": r,
+            "ncav_per_share": ncav_per_share,
+            "ratio": ratio,
+            "discount_pct": discount_pct,
+            "bar_pct": bar_pct,
+        })
+
+    shared_qs = urlencode({
+        k: v for k, v in (("sector", sector), ("country", country), ("market", market)) if v
+    })
+    # Pagination-link querystring: every current param except `page` (appended by the template,
+    # matching _screen_results.html's own convention) so Prev/Next/page-N preserve state.
+    nn_qs = urlencode({
+        k: v for k, v in (
+            ("mode", "netnet"), ("level", level),
+            ("hide_value_traps", "1" if hide_value_traps else ""),
+            ("sector", sector), ("country", country), ("market", market),
+        ) if v
+    })
+
+    return render(
+        request,
+        "fundamentals_screener/netnet.html",
+        {
+            "mode": "netnet",
+            "shared_qs": shared_qs,
+            "querystring": nn_qs,
+            "level": level,
+            "hide_value_traps": hide_value_traps,
+            "sector": sector,
+            "country": country,
+            "market": market,
+            "sectors": services.available_sectors(),
+            "countries": services.available_countries(),
+            "markets": services.available_markets(),
+            "rows": rows,
+            "total": total,
+            "stats": result.stats,
+            "page": page,
+            "num_pages": num_pages,
+            "has_prev": page > 1,
+            "has_next": page < num_pages,
+            "page_range": range(max(1, page - 2), min(num_pages, page + 2) + 1),
         },
     )
 

@@ -69,9 +69,13 @@ _MARKET_CAP_FX_SQL = """
 
 # Net-Net Finder: which NCAV Ratio metric gates inclusion for each conservatism level (the
 # per-share value columns below are always all three, regardless of which level is active).
+# "Market Cap" is already a bulk-friendly metric row (injected at export time from
+# market_cap_asof specifically so screener-style listings never need the daily price series
+# for it — see CompanyRepository._MARKET_CAP_SQL's own comment) so it rides along in this same
+# pivot; unlike per-share Price, it needs no separate dashboard_prices join.
 _NET_NET_VALUE_METRICS = (
     "NCAV / Share", "NCAV (Moderate) / Share", "NCAV (Strict) / Share",
-    "Piotroski F-Score", "Altman Z-Score",
+    "Piotroski F-Score", "Altman Z-Score", "Market Cap",
 )
 _NET_NET_LEVEL_RATIO = {
     "relaxed":  "NCAV Ratio",
@@ -489,7 +493,7 @@ class CompanyListingRepository(DuckDBRepository):
         params = [
             ratio_metric, tickers,               # ratio_fy
             list(_NET_NET_VALUE_METRICS),        # vals's list_contains(?, m.metric)
-            *_NET_NET_VALUE_METRICS,              # the 5 FILTER (WHERE metric = ?) params
+            *_NET_NET_VALUE_METRICS,              # the 6 FILTER (WHERE metric = ?) params
         ]
 
         with self._connection() as con:
@@ -502,7 +506,7 @@ class CompanyListingRepository(DuckDBRepository):
             price_by_ticker = dict(price_rows)
 
         rows = []
-        for ticker, ncav_relaxed, ncav_moderate, ncav_strict, f_score, z_score in hits:
+        for ticker, ncav_relaxed, ncav_moderate, ncav_strict, f_score, z_score, market_cap in hits:
             rec = by_ticker.get(ticker, {})
             rows.append(NetNetRow(
                 ticker=ticker,
@@ -513,6 +517,7 @@ class CompanyListingRepository(DuckDBRepository):
                 market=rec.get("market"),
                 has_logo=_has_logo(rec),
                 price=price_by_ticker.get(ticker),
+                market_cap=market_cap,
                 ncav_per_share_relaxed=ncav_relaxed,
                 ncav_per_share_moderate=ncav_moderate,
                 ncav_per_share_strict=ncav_strict,

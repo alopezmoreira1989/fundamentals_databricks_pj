@@ -310,6 +310,7 @@ class NetNetRow:
     country: str | None
     market: str | None
     price: float | None
+    market_cap: float | None
     ncav_per_share_relaxed: float | None
     ncav_per_share_moderate: float | None
     ncav_per_share_strict: float | None
