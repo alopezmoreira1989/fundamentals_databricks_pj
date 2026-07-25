@@ -21,7 +21,9 @@
 
 # COMMAND ----------
 
+import json
 from datetime import datetime
+from pathlib import Path
 
 from pyspark.sql import functions as F
 from pyspark.sql.types import StringType, StructField, StructType, TimestampType
@@ -174,6 +176,31 @@ _gw_expr     = F.col("Goodwill")           if "Goodwill"           in wide.colum
 _intang_expr = F.col("Intangible Assets")  if "Intangible Assets"  in wide.columns else F.lit(None)
 # Accounts Receivable has no prior usage in this file (unlike the four above) — same guard idiom.
 _ar_expr = F.col("Accounts Receivable") if "Accounts Receivable" in wide.columns else F.lit(None)
+
+# Net-Net haircut percentages (Moderate/Strict conservatism levels, used by the NCAV (Moderate)/
+# NCAV (Strict) columns below) — read from valuation_assumptions.json instead of hardcoding, so a
+# policy change never needs a notebook edit. Same tolerant-loader convention (// comment lines,
+# _-prefixed doc keys stripped) as 23__intrinsic_value.py's _load_assumptions — duplicated here
+# rather than shared, matching this repo's existing per-notebook-loader convention (each pipeline
+# notebook stage is self-contained; there's no shared config-loading util module).
+def _load_json_config(path: str) -> dict:
+    raw = Path(path).read_text(encoding="utf-8")
+    lines = [line for line in raw.splitlines() if not line.strip().startswith("//")]
+    data = json.loads("\n".join(lines))
+
+    def _clean(obj):
+        if isinstance(obj, dict):
+            return {k: _clean(v) for k, v in obj.items() if not k.startswith("_")}
+        if isinstance(obj, list):
+            return [_clean(x) for x in obj]
+        return obj
+
+    return _clean(data)
+
+
+_NET_NET_HAIRCUTS = _load_json_config("../00__config/valuation_assumptions.json")["net_net_haircuts"]
+_moderate_haircut = _NET_NET_HAIRCUTS["moderate"]
+_strict_haircut   = _NET_NET_HAIRCUTS["strict"]
 
 metrics_wide = (
     wide
@@ -359,11 +386,11 @@ metrics_wide = (
     .withColumn("NCAV (Moderate)",
         F.when(
             F.col("Total Current Assets").isNotNull() & F.col("_ncav_liab").isNotNull(),
-            F.coalesce(F.col("Cash & Equivalents"),     F.lit(0))
-            + F.coalesce(F.col("Short-term Investments"), F.lit(0))
-            + F.coalesce(_ar_expr,  F.lit(0)) * 0.75
-            + F.coalesce(_inv_expr, F.lit(0)) * 0.50
-            + F.coalesce(F.col("Other Current Assets"), F.lit(0)) * 0.0
+            F.coalesce(F.col("Cash & Equivalents"),     F.lit(0)) * _moderate_haircut["cash_and_equivalents"]
+            + F.coalesce(F.col("Short-term Investments"), F.lit(0)) * _moderate_haircut["short_term_investments"]
+            + F.coalesce(_ar_expr,  F.lit(0)) * _moderate_haircut["accounts_receivable"]
+            + F.coalesce(_inv_expr, F.lit(0)) * _moderate_haircut["inventory"]
+            + F.coalesce(F.col("Other Current Assets"), F.lit(0)) * _moderate_haircut["other_current_assets"]
             - F.col("_ncav_liab")
         ))
     .withColumn("NCAV (Moderate) / Share",
@@ -376,11 +403,11 @@ metrics_wide = (
     .withColumn("NCAV (Strict)",
         F.when(
             F.col("Total Current Assets").isNotNull() & F.col("_ncav_liab").isNotNull(),
-            F.coalesce(F.col("Cash & Equivalents"), F.lit(0)) * 1.00
-            + F.coalesce(F.col("Short-term Investments"), F.lit(0)) * 0.90
-            + F.coalesce(_ar_expr,  F.lit(0)) * 0.50
-            + F.coalesce(_inv_expr, F.lit(0)) * 0.33
-            + F.coalesce(F.col("Other Current Assets"), F.lit(0)) * 0.0
+            F.coalesce(F.col("Cash & Equivalents"), F.lit(0)) * _strict_haircut["cash_and_equivalents"]
+            + F.coalesce(F.col("Short-term Investments"), F.lit(0)) * _strict_haircut["short_term_investments"]
+            + F.coalesce(_ar_expr,  F.lit(0)) * _strict_haircut["accounts_receivable"]
+            + F.coalesce(_inv_expr, F.lit(0)) * _strict_haircut["inventory"]
+            + F.coalesce(F.col("Other Current Assets"), F.lit(0)) * _strict_haircut["other_current_assets"]
             - F.col("_ncav_liab")
         ))
     .withColumn("NCAV (Strict) / Share",
@@ -1052,10 +1079,10 @@ if pe_mcap is not None:
         .withColumn("_ncav_moderate",
             F.when(
                 F.col("Total Current Assets").isNotNull(),
-                F.coalesce(F.col("Cash & Equivalents"),     F.lit(0))
-                + F.coalesce(F.col("Short-term Investments"), F.lit(0))
-                + F.coalesce(_ar_expr,  F.lit(0)) * 0.75
-                + F.coalesce(_inv_expr, F.lit(0)) * 0.50
+                F.coalesce(F.col("Cash & Equivalents"),     F.lit(0)) * _moderate_haircut["cash_and_equivalents"]
+                + F.coalesce(F.col("Short-term Investments"), F.lit(0)) * _moderate_haircut["short_term_investments"]
+                + F.coalesce(_ar_expr,  F.lit(0)) * _moderate_haircut["accounts_receivable"]
+                + F.coalesce(_inv_expr, F.lit(0)) * _moderate_haircut["inventory"]
                 - F.col("_total_liab"),
             ))
         .withColumn("NCAV (Moderate) Ratio",
@@ -1063,10 +1090,10 @@ if pe_mcap is not None:
         .withColumn("_ncav_strict",
             F.when(
                 F.col("Total Current Assets").isNotNull(),
-                F.coalesce(F.col("Cash & Equivalents"), F.lit(0)) * 1.00
-                + F.coalesce(F.col("Short-term Investments"), F.lit(0)) * 0.90
-                + F.coalesce(_ar_expr,  F.lit(0)) * 0.50
-                + F.coalesce(_inv_expr, F.lit(0)) * 0.33
+                F.coalesce(F.col("Cash & Equivalents"), F.lit(0)) * _strict_haircut["cash_and_equivalents"]
+                + F.coalesce(F.col("Short-term Investments"), F.lit(0)) * _strict_haircut["short_term_investments"]
+                + F.coalesce(_ar_expr,  F.lit(0)) * _strict_haircut["accounts_receivable"]
+                + F.coalesce(_inv_expr, F.lit(0)) * _strict_haircut["inventory"]
                 - F.col("_total_liab"),
             ))
         .withColumn("NCAV (Strict) Ratio",

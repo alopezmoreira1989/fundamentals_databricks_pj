@@ -88,7 +88,14 @@
     "Net-Net": [
       { "metric": "NCAV",         "unit": "usd",   "requires_market_data": false },
       { "metric": "NCAV / Share", "unit": "usd",   "requires_market_data": false },
-      { "metric": "NCAV Ratio",   "unit": "ratio", "requires_market_data": true  }
+      { "metric": "NCAV Ratio",   "unit": "ratio", "requires_market_data": true  },
+      { "metric": "Other Current Assets",       "unit": "usd",   "requires_market_data": false },
+      { "metric": "NCAV (Moderate)",             "unit": "usd",   "requires_market_data": false },
+      { "metric": "NCAV (Moderate) / Share",     "unit": "usd",   "requires_market_data": false },
+      { "metric": "NCAV (Moderate) Ratio",       "unit": "ratio", "requires_market_data": true  },
+      { "metric": "NCAV (Strict)",               "unit": "usd",   "requires_market_data": false },
+      { "metric": "NCAV (Strict) / Share",       "unit": "usd",   "requires_market_data": false },
+      { "metric": "NCAV (Strict) Ratio",         "unit": "ratio", "requires_market_data": true  }
     ],
     "Tangible Value": [
       { "metric": "Tangible Book Value",         "unit": "usd",     "requires_market_data": false },
