@@ -320,6 +320,36 @@ class NetNetRow:
 
 
 @dataclass(frozen=True)
+class NetNetStats:
+    """Hero-stat counts for the Net-Net Finder's selected level, all computed under the SAME
+    descriptive filters (and ``hide_value_traps``, if on) as the rows they accompany — so the
+    numbers always agree with what's on screen, never a stale/unfiltered count next to a
+    filtered table.
+
+    ``universe_size``: companies matching the descriptive filters, before any net-net-specific
+    filtering — the denominator for "how rare is this". ``eligible_count``: the subset with a
+    positive NCAV at this level (``len(rows)`` before sorting). ``below_value_count``: the
+    subset actually trading below their NCAV/share (price/NCAV-per-share < 1). ``classic_net_
+    net_count``: the subset at or below Graham's classic net-net rule-of-thumb margin of safety,
+    trading at ≤ 0.67× NCAV/share.
+    """
+
+    universe_size: int
+    eligible_count: int
+    below_value_count: int
+    classic_net_net_count: int
+
+
+@dataclass(frozen=True)
+class NetNetScreen:
+    """The Net-Net Finder's full result for one level: rows sorted by discount to NCAV
+    (descending — cheapest first), plus the hero stats for that same filtered set."""
+
+    rows: tuple[NetNetRow, ...]
+    stats: NetNetStats
+
+
+@dataclass(frozen=True)
 class FootballBar:
     """One intrinsic-value estimate as a bear→bull range with a mid point (per-share, USD)."""
 

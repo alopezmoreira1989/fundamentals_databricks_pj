@@ -202,6 +202,16 @@ class CompanyListingRepository(DuckDBRepository):
         rows.sort(key=lambda r: r.get("ticker", ""))
         return rows
 
+    def scope_size(
+        self, *, search: str = "", sector: str = "", index: str = "", country: str = "",
+        market: str = "", industry: str = "",
+    ) -> int:
+        """Count of tickers passing the descriptive filters, with no metric fetch at all (pure
+        in-memory meta filtering via `_scope`) — for hero stats like "N net-nets out of M
+        companies in scope" without paying for a DuckDB round trip just to count."""
+        return len(self._scope(search=search, sector=sector, index=index, country=country,
+                                market=market, industry=industry))
+
     def list_page(
         self,
         *,

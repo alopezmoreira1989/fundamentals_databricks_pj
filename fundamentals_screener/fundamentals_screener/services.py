@@ -27,6 +27,9 @@ from .dtos import (
     HeadlineKpi,
     MetricPoint,
     MetricSeries,
+    NetNetRow,
+    NetNetScreen,
+    NetNetStats,
     PeerBenchmark,
     PeerCompany,
     PricePoint,
@@ -266,6 +269,65 @@ def screen_table(
         industry=industry, columns=columns, filters=filters, sort=sort,
         page=page, page_size=page_size, usd_lens=usd_lens,
     )
+
+
+# ── Net-Net Finder ──────────────────────────────────────────────────────────────────────
+_NET_NET_LEVELS = ("relaxed", "moderate", "strict")
+_NET_NET_NCAV_FIELD = {
+    "relaxed": "ncav_per_share_relaxed",
+    "moderate": "ncav_per_share_moderate",
+    "strict": "ncav_per_share_strict",
+}
+# Graham's classic net-net rule-of-thumb margin of safety: buy at <= 2/3 of NCAV/share.
+_CLASSIC_NET_NET_THRESHOLD = 0.67
+# Piotroski F-Score floor below which "hide value traps" excludes a row (0-9 scale; < 4 is
+# the commonly-cited weak-quality cutoff — same threshold fundamentals_pipeline's Streamlit
+# lib uses for its own F-Score "weak" classification).
+_VALUE_TRAP_F_SCORE_FLOOR = 4.0
+
+
+def _price_to_ncav_ratio(row: NetNetRow, level: str) -> float | None:
+    """price / NCAV-per-share for `level` — None when either side is missing, or the level's
+    own NCAV/share isn't positive (shouldn't happen for a row that already passed the
+    repository's `NCAV Ratio IS NOT NULL` eligibility filter, but stay defensive rather than
+    divide by a non-positive value)."""
+    ncav_per_share = getattr(row, _NET_NET_NCAV_FIELD.get(level, "ncav_per_share_relaxed"))
+    if row.price is None or ncav_per_share is None or ncav_per_share <= 0:
+        return None
+    return row.price / ncav_per_share
+
+
+def get_net_net_screen(
+    *, level: str = "relaxed", hide_value_traps: bool = False,
+    sector: str = "", country: str = "", market: str = "",
+) -> NetNetScreen:
+    """The Net-Net Finder's full result for `level` ("relaxed"/"moderate"/"strict", falls back
+    to "relaxed" for anything else): rows sorted by discount to NCAV (descending — cheapest
+    first, i.e. ascending price/NCAV-per-share), optionally excluding likely value traps
+    (Piotroski F-Score < 4), plus hero stats for that SAME filtered set — so the counts always
+    agree with what's on screen, never a stale/unfiltered number next to a filtered table.
+    """
+    if level not in _NET_NET_LEVELS:
+        level = "relaxed"
+    repo = CompanyListingRepository()
+    universe_size = repo.scope_size(sector=sector, country=country, market=market)
+    rows = repo.net_net_screen(level=level, sector=sector, country=country, market=market)
+    if hide_value_traps:
+        rows = tuple(r for r in rows if r.f_score is None or r.f_score >= _VALUE_TRAP_F_SCORE_FLOOR)
+
+    ratios = {row.ticker: _price_to_ncav_ratio(row, level) for row in rows}
+    sorted_rows = tuple(
+        sorted(rows, key=lambda r: ratios[r.ticker] if ratios[r.ticker] is not None else float("inf"))
+    )
+
+    valid_ratios = [r for r in ratios.values() if r is not None]
+    stats = NetNetStats(
+        universe_size=universe_size,
+        eligible_count=len(rows),
+        below_value_count=sum(1 for r in valid_ratios if r < 1.0),
+        classic_net_net_count=sum(1 for r in valid_ratios if r <= _CLASSIC_NET_NET_THRESHOLD),
+    )
+    return NetNetScreen(rows=sorted_rows, stats=stats)
 
 
 def available_sectors() -> tuple[str, ...]:
