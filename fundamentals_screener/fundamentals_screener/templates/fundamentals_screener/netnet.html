@@ -20,6 +20,8 @@
 {% block content %}
   {% include "fundamentals_screener/_mode_nav.html" %}
 
+  {% include "fundamentals_screener/_netnet_hero.html" %}
+
   <div class="p-4 bg-white rounded-3 shadow-sm mb-4">
     <form method="get" id="nn-filter-form" class="d-flex flex-wrap align-items-end gap-3">
       <input type="hidden" name="mode" value="netnet">
@@ -61,8 +63,6 @@
       <noscript><button type="submit" class="btn btn-dark btn-sm">Apply</button></noscript>
     </form>
   </div>
-
-  {% include "fundamentals_screener/_netnet_hero.html" %}
 
   <div class="bg-white rounded-3 shadow-sm p-4">
     <div class="d-flex justify-content-between align-items-baseline mb-3">

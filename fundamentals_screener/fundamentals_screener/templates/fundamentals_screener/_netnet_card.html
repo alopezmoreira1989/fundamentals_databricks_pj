@@ -1,8 +1,10 @@
-{# Included by valuation.html and company_detail.html's Valuation tab. Context needed: net_net
-   (a NetNetRow) and net_net_levels (a list of {label, ncav_per_share, ratio, bar_pct} dicts,
-   one per level) — see views._net_net_card_context. Only rendered when that context key was
-   actually set (the view omits it entirely when the ticker has no NCAV data at any level), so
-   this partial doesn't need its own "nothing to show" branch. #}
+{% comment %}
+Included by valuation.html and company_detail.html's Valuation tab. Context needed: net_net
+(a NetNetRow) and net_net_levels (a list of {label, ncav_per_share, ratio, bar_pct} dicts,
+one per level) — see views._net_net_card_context. Only rendered when that context key was
+actually set (the view omits it entirely when the ticker has no NCAV data at any level), so
+this partial doesn't need its own "nothing to show" branch.
+{% endcomment %}
 {% load fmt %}
 <div class="bg-white rounded-3 shadow-sm p-4 mb-4">
   <div class="d-flex justify-content-between align-items-baseline mb-3 flex-wrap gap-2">
