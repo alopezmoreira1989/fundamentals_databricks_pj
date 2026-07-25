@@ -1,9 +1,11 @@
-{# Shared by screen.html and netnet.html — the two-tab screener-mode switch. `mode` and
-   `shared_qs` (a pre-encoded "sector=...&country=...&market=..." fragment, empty string if
-   none are set) come from whichever view rendered the including template. Plain full-page
-   links, no JS: the two modes' content differs enough (different hero, different columns,
-   different filter set) that a fragment swap wouldn't save much — see views.screen()'s
-   docstring. #}
+{% comment %}
+Shared by screen.html and netnet.html — the two-tab screener-mode switch. `mode` and
+`shared_qs` (a pre-encoded "sector=...&country=...&market=..." fragment, empty string if
+none are set) come from whichever view rendered the including template. Plain full-page
+links, no JS: the two modes' content differs enough (different hero, different columns,
+different filter set) that a fragment swap wouldn't save much — see views.screen()'s
+docstring.
+{% endcomment %}
 <div class="btn-group btn-group-sm mb-4" role="group" aria-label="Screener mode">
   <a class="btn {% if mode == 'general' %}btn-dark{% else %}btn-outline-secondary{% endif %}"
      href="{% url 'fundamentals_screener:screen' %}{% if shared_qs %}?{{ shared_qs }}{% endif %}">

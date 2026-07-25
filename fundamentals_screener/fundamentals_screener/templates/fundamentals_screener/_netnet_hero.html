@@ -1,6 +1,8 @@
-{# Included by netnet.html. Context needed: level, stats (NetNetStats), hide_value_traps,
-   shared_qs, sector, country, market (for the level pills to carry the rest of the state
-   forward, since they're plain full-reload links, not part of the filter <form> below). #}
+{% comment %}
+Included by netnet.html. Context needed: level, stats (NetNetStats), hide_value_traps,
+shared_qs, sector, country, market (for the level pills to carry the rest of the state
+forward, since they're plain full-reload links, not part of the filter <form> below).
+{% endcomment %}
 <div class="card p-4 mb-4">
   <div class="eyebrow mb-2">Net-Net Finder</div>
   <h1 class="h4 mb-2">Graham-style deep value screener</h1>
@@ -31,7 +33,7 @@
   </div>
 
   {% with base_qs=shared_qs %}
-  <div class="d-flex flex-wrap align-items-center gap-3">
+  <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
     <div>
       <div class="form-label mb-1">Conservatism level</div>
       <div class="btn-group btn-group-sm" role="group" aria-label="NCAV conservatism level">
@@ -49,6 +51,13 @@
         </a>
       </div>
     </div>
+    <label class="d-flex align-items-center gap-2 small mb-0">
+      {# form="nn-filter-form" submits with netnet.html's filter <form> despite living outside it #}
+      <input type="checkbox" id="nn-hide-traps" name="hide_value_traps" value="1"
+             form="nn-filter-form" {% if hide_value_traps %}checked{% endif %}
+             class="form-check-input mt-0">
+      Hide likely value traps (F-Score &lt; 4)
+    </label>
   </div>
   {% endwith %}
 
