@@ -351,6 +351,55 @@ class NetNetScreen:
 
 
 @dataclass(frozen=True)
+class PresetCriterion:
+    """One line of an Investor Presets school's criteria list — a human-readable rule plus
+    whether it's enforced today (``"live"``, latest-FY data) or still pending the multi-year
+    historical-depth work (``"pending"`` — rendered in the UI, never filtered on)."""
+
+    label: str
+    status: str  # "live" | "pending"
+
+
+@dataclass(frozen=True)
+class PresetDefinition:
+    """Static copy + criteria for one Investor Presets school (Graham/Buffett/Lynch) — the
+    same content for every request, not query-dependent. ``dot_color`` names a CSS custom
+    property (e.g. ``"--accent"``) for the pill selector's per-school dot."""
+
+    key: str  # "graham" | "buffett" | "lynch"
+    dot_color: str
+    eyebrow: str
+    headline: str
+    description: str
+    school: str
+    name: str
+    tagline: str
+    criteria: tuple[PresetCriterion, ...]
+
+
+@dataclass(frozen=True)
+class PresetStats:
+    """Hero-stat counts for the selected preset, computed under the SAME descriptive filters
+    as the rows they accompany."""
+
+    universe_size: int
+    live_criteria_count: int
+    pending_criteria_count: int
+
+
+@dataclass(frozen=True)
+class PresetScreen:
+    """The Investor Presets screener's full result for one school: the matching rows (generic
+    ticker + metric-values shape, reused from the multi-metric screener table), the columns
+    those rows carry values for, and the hero stats for that same filtered set."""
+
+    rows: tuple[ScreenTableRow, ...]
+    columns: tuple[ScreenColumn, ...]
+    total: int
+    stats: PresetStats
+
+
+@dataclass(frozen=True)
 class FootballBar:
     """One intrinsic-value estimate as a bear→bull range with a mid point (per-share, USD)."""
 
