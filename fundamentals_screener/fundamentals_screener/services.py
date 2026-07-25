@@ -345,75 +345,72 @@ def get_net_net_snapshot(ticker: str) -> NetNetRow | None:
 
 
 # ── Investor Presets ─────────────────────────────────────────────────────────────────────
-# Static copy + criteria for each school (Spanish UI copy is a deliberate, confirmed exception
-# to this package's otherwise English-only/no-i18n convention — approved specifically for this
-# mode's mockup, not a precedent for the rest of the app; see the docs issue in the "Investor
-# Presets Screener" milestone). Live criteria are the 10 latest-FY filters `preset_screen`
-# actually applies; pending ones render in the UI (visually disabled) but are never filtered on
-# — they depend on the milestone's separate Phase 0 historical-depth investigation and shared
-# multi-year repository method issue.
+# Static copy + criteria for each school. Live criteria are the 10 latest-FY filters
+# `preset_screen` actually applies; pending ones render in the UI (visually disabled) but are
+# never filtered on — they depend on the milestone's separate Phase 0 historical-depth
+# investigation and shared multi-year repository method issue.
 _PRESET_DEFINITIONS: dict[str, PresetDefinition] = {
     "graham": PresetDefinition(
         key="graham",
         dot_color="--accent",
         eyebrow="GRAHAM · DEFENSIVE INVESTOR",
-        headline="Precio, margen de seguridad y poco más.",
+        headline="Price, margin of safety, and little else.",
         description=(
-            "Los criterios clásicos de The Intelligent Investor aplicados al universo actual: "
-            "balance sólido, múltiplos moderados y, en cuanto el histórico lo permita, "
-            "estabilidad de beneficios y dividendo."
+            "The Intelligent Investor's classic criteria applied to today's universe: a solid "
+            "balance sheet, moderate multiples, and, once the historical depth allows it, "
+            "earnings stability and dividend record."
         ),
         school="GRAHAM · DEFENSIVE INVESTOR",
         name="Benjamin Graham",
-        tagline="El padre del análisis de valor y autor de El Inversor Inteligente.",
+        tagline="The father of value investing and author of The Intelligent Investor.",
         criteria=(
-            PresetCriterion("Ratio corriente ≥ 2", "live"),
+            PresetCriterion("Current ratio ≥ 2", "live"),
             PresetCriterion("P/E ≤ 15", "live"),
-            PresetCriterion("P/B ≤ 1,5 (o P/E × P/B ≤ 22,5)", "live"),
-            PresetCriterion("Beneficios positivos, varios años", "pending"),
-            PresetCriterion("Dividendo ininterrumpido, varios años", "pending"),
-            PresetCriterion("Crecimiento de BPA ≥ 33%, varios años", "pending"),
+            PresetCriterion("P/B ≤ 1.5 (or P/E × P/B ≤ 22.5)", "live"),
+            PresetCriterion("Positive earnings, several years", "pending"),
+            PresetCriterion("Uninterrupted dividend, several years", "pending"),
+            PresetCriterion("EPS growth ≥ 33%, several years", "pending"),
         ),
     ),
     "buffett": PresetDefinition(
         key="buffett",
         dot_color="--orange",
         eyebrow="BUFFETT · QUALITY COMPOUNDER",
-        headline="Negocios con foso, no gangas de balance.",
+        headline="Businesses with a moat, not balance-sheet bargains.",
         description=(
-            "El giro de Graham a Munger: pagar un precio justo por un negocio excelente. "
-            "Márgenes altos, poca deuda y un margen de seguridad calculado sobre el valor "
-            "del negocio, no solo sobre su precio en libros."
+            "Graham's turn toward Munger: pay a fair price for an excellent business. High "
+            "margins, little debt, and a margin of safety computed against the business's "
+            "value, not just its book price."
         ),
         school="BUFFETT · QUALITY COMPOUNDER",
         name="Warren Buffett",
-        tagline="CEO de Berkshire Hathaway; el mayor discípulo de Graham, evolucionado.",
+        tagline="CEO of Berkshire Hathaway; Graham's greatest disciple, evolved.",
         criteria=(
-            PresetCriterion("Deuda/Patrimonio ≤ 0,5", "live"),
-            PresetCriterion("Margen bruto > 40%", "live"),
-            PresetCriterion("Margen neto > 20%", "live"),
-            PresetCriterion("Margen de seguridad (Owner Earnings) ≥ 25%", "live"),
-            PresetCriterion("ROE ≥ 15% sostenido, varios años", "pending"),
+            PresetCriterion("Debt / Equity ≤ 0.5", "live"),
+            PresetCriterion("Gross margin > 40%", "live"),
+            PresetCriterion("Net margin > 20%", "live"),
+            PresetCriterion("Margin of safety (Owner Earnings) ≥ 25%", "live"),
+            PresetCriterion("ROE ≥ 15% sustained, several years", "pending"),
         ),
     ),
     "lynch": PresetDefinition(
         key="lynch",
         dot_color="--violet",
         eyebrow="LYNCH · GROWTH AT A REASONABLE PRICE",
-        headline="Crecimiento razonable, pagado a un precio razonable.",
+        headline="Reasonable growth, paid at a reasonable price.",
         description=(
-            "El enfoque GARP de Peter Lynch: negocios en crecimiento con balances sanos, "
-            "comprados sin pagar de más por ese crecimiento — el equilibrio entre "
-            "Graham y el puro momentum."
+            "Peter Lynch's GARP approach: growing businesses with healthy balance sheets, "
+            "bought without overpaying for that growth — the balance between Graham and pure "
+            "momentum."
         ),
         school="LYNCH · GROWTH AT A REASONABLE PRICE",
         name="Peter Lynch",
-        tagline="Gestor del Fidelity Magellan Fund; popularizó el análisis GARP.",
+        tagline="Manager of the Fidelity Magellan Fund; popularized GARP analysis.",
         criteria=(
-            PresetCriterion("Deuda/Patrimonio < 0,6", "live"),
-            PresetCriterion("Ratio corriente ≥ 1", "live"),
+            PresetCriterion("Debt / Equity < 0.6", "live"),
+            PresetCriterion("Current ratio ≥ 1", "live"),
             PresetCriterion("ROE > 15%", "live"),
-            PresetCriterion("CAGR de BPA a 5 años", "pending"),
+            PresetCriterion("5-year EPS CAGR", "pending"),
             PresetCriterion("PEG < 1", "pending"),
         ),
     ),

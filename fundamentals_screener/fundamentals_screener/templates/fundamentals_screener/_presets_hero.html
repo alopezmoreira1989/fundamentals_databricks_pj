@@ -18,21 +18,21 @@ country/market forward, since they're plain full-reload links, not part of the f
     <div class="nn-stats">
       <div class="nn-stat">
         <div class="v hi">{{ stats.live_criteria_count }}</div>
-        <div class="l">Criterios en vivo</div>
+        <div class="l">Live criteria</div>
       </div>
       <div class="nn-stat">
         <div class="v">{{ stats.pending_criteria_count }}</div>
-        <div class="l">Pendientes de histórico</div>
+        <div class="l">Pending history</div>
       </div>
       <div class="nn-stat">
         <div class="v">{{ stats.universe_size|intcomma }}</div>
-        <div class="l">Universo screeneado</div>
+        <div class="l">Universe screened</div>
       </div>
     </div>
   </div>
 
   {% with base_qs=shared_qs %}
-  <div class="levels" role="group" aria-label="Escuela de inversión">
+  <div class="levels" role="group" aria-label="Investment school">
     {% for key in presets %}
       <a class="level-btn {% if preset == key %}level-btn--active{% endif %}"
          href="?mode=presets&amp;preset={{ key }}{% if base_qs %}&amp;{{ base_qs }}{% endif %}">
@@ -57,9 +57,9 @@ country/market forward, since they're plain full-reload links, not part of the f
           <li>
             <span>{{ c.label }}</span>
             {% if c.status == "live" %}
-              <span class="preset-tag preset-tag--live">En vivo</span>
+              <span class="preset-tag preset-tag--live">Live</span>
             {% else %}
-              <span class="preset-tag preset-tag--pending">Pendiente · histórico</span>
+              <span class="preset-tag preset-tag--pending">Pending · history</span>
             {% endif %}
           </li>
         {% endfor %}
