@@ -101,6 +101,50 @@ _LATEST_PRICE_SQL = """
 _ALTMAN_SAFE_MIN = 3.0
 _ALTMAN_DISTRESS_MAX = 1.8
 
+# Investor Presets: each school's latest-FY-only display/filter columns (exact names confirmed
+# byte-for-byte against metrics_hierarchy.json) and its own WHERE predicate over the pivot
+# aliases (see _pivot_cte). Graham's P/B-or-P/E×P/B rule and Buffett's NULL-passthrough MoS
+# rule both need custom SQL, not the independent AND'd bounds `MetricFilter`/`_filter_clause`
+# express — hence a dedicated predicate per preset rather than reusing that generic mechanism.
+_PRESET_COLUMNS: dict[str, tuple[str, ...]] = {
+    "graham": ("Current Ratio", "P/E", "P/B"),
+    "buffett": ("Debt / Equity", "Gross Margin %", "Net Margin %", "MoS % (Owner Earnings, FY)"),
+    "lynch": ("Debt / Equity", "Current Ratio", "ROE %"),
+}
+
+
+def _graham_where(alias: dict[str, str]) -> str:
+    cr, pe, pb = alias["Current Ratio"], alias["P/E"], alias["P/B"]
+    return (
+        f"p.{cr} >= 2 AND p.{pe} <= 15"
+        f" AND (p.{pb} <= 1.5"
+        f" OR (p.{pe} IS NOT NULL AND p.{pb} IS NOT NULL AND p.{pe} * p.{pb} <= 22.5))"
+    )
+
+
+def _buffett_where(alias: dict[str, str]) -> str:
+    # MoS % (Owner Earnings, FY) is NULL for Energy/Financials/Real Estate by design (the Owner
+    # Earnings model is sector-gated upstream — see 23__intrinsic_value.py) — "not applicable",
+    # not "fails", so those sectors are still evaluated on the other three criteria rather than
+    # excluded outright by an AND'd NULL comparison.
+    de, gm, nm, mos = (
+        alias["Debt / Equity"], alias["Gross Margin %"], alias["Net Margin %"],
+        alias["MoS % (Owner Earnings, FY)"],
+    )
+    return f"p.{de} <= 0.5 AND p.{gm} > 40 AND p.{nm} > 20 AND (p.{mos} IS NULL OR p.{mos} >= 25)"
+
+
+def _lynch_where(alias: dict[str, str]) -> str:
+    de, cr, roe = alias["Debt / Equity"], alias["Current Ratio"], alias["ROE %"]
+    return f"p.{de} < 0.6 AND p.{cr} >= 1 AND p.{roe} > 15"
+
+
+_PRESET_WHERE: dict[str, Any] = {
+    "graham": _graham_where,
+    "buffett": _buffett_where,
+    "lynch": _lynch_where,
+}
+
 
 def _altman_zone(z_score: float | None) -> str | None:
     """Classify an Altman Z-Score into "safe" (> 3.0) / "grey" (1.8-3.0) / "distress" (< 1.8),
@@ -526,6 +570,88 @@ class CompanyListingRepository(DuckDBRepository):
                 z_score_zone=_altman_zone(z_score),
             ))
         return tuple(rows)
+
+    # ── Investor Presets ─────────────────────────────────────────────────────────────────
+    def preset_screen(
+        self,
+        *,
+        preset: str,
+        sector: str = "",
+        country: str = "",
+        market: str = "",
+        page: int = 1,
+        page_size: int = 50,
+    ) -> tuple[tuple[ScreenTableRow, ...], int, tuple[ScreenColumn, ...]]:
+        """One page of an Investor Presets school's matching companies, the total match count,
+        and the display columns — same pivot/pagination machinery as ``screen_table``, but with
+        each preset's own fixed filter predicate (``_PRESET_WHERE``) rather than a user-composed
+        ``MetricFilter`` list: Graham's combined P/E×P/B-or-P/B rule and Buffett's NULL-
+        passthrough Margin-of-Safety rule aren't expressible as independent AND'd bounds (a
+        NULL pivot value always fails a plain ``MetricFilter`` bound — see ``_filter_clause`` —
+        which is wrong for Buffett's MoS: Energy/Financials/Real Estate tickers have it NULL by
+        design, not failing, so they must still be evaluated on their other three criteria).
+        Falls back to an empty result for an unrecognized `preset`.
+        """
+        columns = list(_PRESET_COLUMNS.get(preset, ()))
+        if not columns:
+            return (), 0, ()
+        scope = self._scope(search="", sector=sector, index="", country=country, market=market,
+                             industry="")
+        offset = max(0, (page - 1) * page_size)
+        if not scope:
+            return (), 0, tuple(ScreenColumn(key=m) for m in columns)
+
+        scope_rows = [
+            (
+                rec.get("ticker", ""), rec.get("company", ""), rec.get("sector"),
+                rec.get("industry"), rec.get("country"), rec.get("market"), _has_logo(rec),
+            )
+            for rec in scope
+        ]
+        alias = {metric: f"m{i}" for i, metric in enumerate(columns)}
+
+        with self._connection() as con:
+            con.execute("DROP TABLE IF EXISTS scoped")
+            con.execute(
+                "CREATE TEMP TABLE scoped"
+                " (ticker VARCHAR, name VARCHAR, sector VARCHAR, industry VARCHAR,"
+                " country VARCHAR, market VARCHAR, has_logo BOOLEAN)"
+            )
+            con.executemany("INSERT INTO scoped VALUES (?, ?, ?, ?, ?, ?, ?)", scope_rows)
+
+            units = self._metric_units(con, columns)
+            cte, cte_params = self._pivot_cte(columns, alias)
+            where = f" WHERE {_PRESET_WHERE[preset](alias)}"
+            select_cols = ", ".join(f"p.{alias[m]}, p.{alias[m]}_u" for m in columns)
+            projection = (
+                "s.ticker, s.name, s.sector, s.industry, s.country, s.market, s.has_logo, "
+                + select_cols
+            )
+            from_join = "scoped s LEFT JOIN pivoted p USING (ticker)"
+
+            count_sql = f"{cte}SELECT count(*) AS n FROM {from_join}{where}"
+            count_row = con.execute(count_sql, cte_params).fetchone()
+            total = int(count_row[0]) if count_row else 0
+
+            page_sql = (
+                f"{cte}SELECT {projection} FROM {from_join}{where}"
+                " ORDER BY s.ticker LIMIT ? OFFSET ?"
+            )
+            cursor = con.execute(page_sql, cte_params + [page_size, offset])
+            hits = cursor.fetchall()
+
+            rows = tuple(
+                ScreenTableRow(
+                    ticker=row[0], name=row[1], sector=row[2], industry=row[3],
+                    country=row[4], market=row[5], has_logo=row[6],
+                    values={m: row[7 + 2 * i] for i, m in enumerate(columns)},
+                    units={m: row[7 + 2 * i + 1] for i, m in enumerate(columns)},
+                )
+                for row in hits
+            )
+
+        columns_meta = tuple(ScreenColumn(key=m, unit=units.get(m)) for m in columns)
+        return rows, total, columns_meta
 
     @staticmethod
     def _apply_usd_lens(con: Any, rows: tuple[ScreenTableRow, ...]) -> tuple[ScreenTableRow, ...]:

@@ -32,6 +32,10 @@ from .dtos import (
     NetNetStats,
     PeerBenchmark,
     PeerCompany,
+    PresetCriterion,
+    PresetDefinition,
+    PresetScreen,
+    PresetStats,
     PricePoint,
     QuarterGrid,
     ScreenRow,
@@ -338,6 +342,121 @@ def get_net_net_snapshot(ticker: str) -> NetNetRow | None:
     page always shows a company's own numbers rather than screening a universe.
     """
     return CompanyRepository().net_net_snapshot(ticker)
+
+
+# ── Investor Presets ─────────────────────────────────────────────────────────────────────
+# Static copy + criteria for each school (Spanish UI copy is a deliberate, confirmed exception
+# to this package's otherwise English-only/no-i18n convention — approved specifically for this
+# mode's mockup, not a precedent for the rest of the app; see the docs issue in the "Investor
+# Presets Screener" milestone). Live criteria are the 10 latest-FY filters `preset_screen`
+# actually applies; pending ones render in the UI (visually disabled) but are never filtered on
+# — they depend on the milestone's separate Phase 0 historical-depth investigation and shared
+# multi-year repository method issue.
+_PRESET_DEFINITIONS: dict[str, PresetDefinition] = {
+    "graham": PresetDefinition(
+        key="graham",
+        dot_color="--accent",
+        eyebrow="GRAHAM · DEFENSIVE INVESTOR",
+        headline="Precio, margen de seguridad y poco más.",
+        description=(
+            "Los criterios clásicos de The Intelligent Investor aplicados al universo actual: "
+            "balance sólido, múltiplos moderados y, en cuanto el histórico lo permita, "
+            "estabilidad de beneficios y dividendo."
+        ),
+        school="GRAHAM · DEFENSIVE INVESTOR",
+        name="Benjamin Graham",
+        tagline="El padre del análisis de valor y autor de El Inversor Inteligente.",
+        criteria=(
+            PresetCriterion("Ratio corriente ≥ 2", "live"),
+            PresetCriterion("P/E ≤ 15", "live"),
+            PresetCriterion("P/B ≤ 1,5 (o P/E × P/B ≤ 22,5)", "live"),
+            PresetCriterion("Beneficios positivos, varios años", "pending"),
+            PresetCriterion("Dividendo ininterrumpido, varios años", "pending"),
+            PresetCriterion("Crecimiento de BPA ≥ 33%, varios años", "pending"),
+        ),
+    ),
+    "buffett": PresetDefinition(
+        key="buffett",
+        dot_color="--orange",
+        eyebrow="BUFFETT · QUALITY COMPOUNDER",
+        headline="Negocios con foso, no gangas de balance.",
+        description=(
+            "El giro de Graham a Munger: pagar un precio justo por un negocio excelente. "
+            "Márgenes altos, poca deuda y un margen de seguridad calculado sobre el valor "
+            "del negocio, no solo sobre su precio en libros."
+        ),
+        school="BUFFETT · QUALITY COMPOUNDER",
+        name="Warren Buffett",
+        tagline="CEO de Berkshire Hathaway; el mayor discípulo de Graham, evolucionado.",
+        criteria=(
+            PresetCriterion("Deuda/Patrimonio ≤ 0,5", "live"),
+            PresetCriterion("Margen bruto > 40%", "live"),
+            PresetCriterion("Margen neto > 20%", "live"),
+            PresetCriterion("Margen de seguridad (Owner Earnings) ≥ 25%", "live"),
+            PresetCriterion("ROE ≥ 15% sostenido, varios años", "pending"),
+        ),
+    ),
+    "lynch": PresetDefinition(
+        key="lynch",
+        dot_color="--violet",
+        eyebrow="LYNCH · GROWTH AT A REASONABLE PRICE",
+        headline="Crecimiento razonable, pagado a un precio razonable.",
+        description=(
+            "El enfoque GARP de Peter Lynch: negocios en crecimiento con balances sanos, "
+            "comprados sin pagar de más por ese crecimiento — el equilibrio entre "
+            "Graham y el puro momentum."
+        ),
+        school="LYNCH · GROWTH AT A REASONABLE PRICE",
+        name="Peter Lynch",
+        tagline="Gestor del Fidelity Magellan Fund; popularizó el análisis GARP.",
+        criteria=(
+            PresetCriterion("Deuda/Patrimonio < 0,6", "live"),
+            PresetCriterion("Ratio corriente ≥ 1", "live"),
+            PresetCriterion("ROE > 15%", "live"),
+            PresetCriterion("CAGR de BPA a 5 años", "pending"),
+            PresetCriterion("PEG < 1", "pending"),
+        ),
+    ),
+}
+_PRESETS: tuple[str, ...] = ("graham", "buffett", "lynch")
+
+
+def preset_keys() -> tuple[str, ...]:
+    """The valid preset keys, in display order (for the pill selector)."""
+    return _PRESETS
+
+
+def get_preset_definition(preset: str) -> PresetDefinition:
+    """The static copy/criteria for one school, falling back to "graham" for an unrecognized
+    value."""
+    return _PRESET_DEFINITIONS.get(preset, _PRESET_DEFINITIONS["graham"])
+
+
+def get_preset_screen(
+    preset: str, *, sector: str = "", country: str = "", market: str = "",
+    page: int = 1, page_size: int = 50,
+) -> PresetScreen:
+    """The Investor Presets screener's full result for one school ("graham"/"buffett"/"lynch",
+    falls back to "graham" for anything else): one page of matching companies (paginated in
+    DuckDB — see ``CompanyListingRepository.preset_screen``), plus hero stats computed under
+    the SAME descriptive filters (universe size, and the definition's own live/pending
+    criteria counts, so the numbers always agree with what's on screen).
+    """
+    if preset not in _PRESET_DEFINITIONS:
+        preset = "graham"
+    repo = CompanyListingRepository()
+    universe_size = repo.scope_size(sector=sector, country=country, market=market)
+    rows, total, columns = repo.preset_screen(
+        preset=preset, sector=sector, country=country, market=market,
+        page=page, page_size=page_size,
+    )
+    definition = _PRESET_DEFINITIONS[preset]
+    stats = PresetStats(
+        universe_size=universe_size,
+        live_criteria_count=sum(1 for c in definition.criteria if c.status == "live"),
+        pending_criteria_count=sum(1 for c in definition.criteria if c.status == "pending"),
+    )
+    return PresetScreen(rows=rows, columns=columns, total=total, stats=stats)
 
 
 def available_sectors() -> tuple[str, ...]:

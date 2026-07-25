@@ -1,10 +1,10 @@
 {% comment %}
-Shared by screen.html and netnet.html — the two-tab screener-mode switch. `mode` and
-`shared_qs` (a pre-encoded "sector=...&country=...&market=..." fragment, empty string if
-none are set) come from whichever view rendered the including template. Plain full-page
-links, no JS: the two modes' content differs enough (different hero, different columns,
-different filter set) that a fragment swap wouldn't save much — see views.screen()'s
-docstring.
+Shared by screen.html, netnet.html and presets.html — the three-tab screener-mode switch.
+`mode` and `shared_qs` (a pre-encoded "sector=...&country=...&market=..." fragment, empty
+string if none are set) come from whichever view rendered the including template. Plain
+full-page links, no JS: each mode's content differs enough (different hero, different
+columns, different filter set) that a fragment swap wouldn't save much — see
+views.screen()'s docstring.
 {% endcomment %}
 <ul class="nav nav-tabs mb-4">
   <li class="nav-item">
@@ -17,6 +17,12 @@ docstring.
     <a class="nav-link {% if mode == 'netnet' %}active{% endif %}"
        href="{% url 'fundamentals_screener:screen' %}?mode=netnet{% if shared_qs %}&{{ shared_qs }}{% endif %}">
       Net-Net Finder
+    </a>
+  </li>
+  <li class="nav-item">
+    <a class="nav-link {% if mode == 'presets' %}active{% endif %}"
+       href="{% url 'fundamentals_screener:screen' %}?mode=presets{% if shared_qs %}&{{ shared_qs }}{% endif %}">
+      Investor Presets
     </a>
   </li>
 </ul>

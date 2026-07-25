@@ -192,19 +192,22 @@ def _net_net_card_context(ticker: str) -> dict | None:
 
 
 def screen(request: HttpRequest) -> HttpResponse:
-    """HTML screener — two modes sharing one route (``?mode=general|netnet``, default
-    ``general``). ``general`` is the full multi-metric company table (this function's
-    original scope, below). ``netnet`` is the Net-Net Finder — a fixed-column liquidation-
-    value screen delegated to ``_netnet_screen``, since its filters/columns/template are
-    almost entirely disjoint from the general screener's (only sector/country/market are
-    shared — see issue #259). Deliberately a plain full-page reload on every filter/level
-    change, not an AJAX partial-swap like the general screener's auto-apply: the two modes'
-    content differs far more (different hero, different columns, different filter set) than
-    the general screener's single-column benchmark switch did, so a fragment swap wouldn't
-    save much.
+    """HTML screener — three modes sharing one route (``?mode=general|netnet|presets``,
+    default ``general``). ``general`` is the full multi-metric company table (this
+    function's original scope, below). ``netnet`` is the Net-Net Finder and ``presets`` is
+    Investor Presets — both fixed-column screens delegated to their own ``_netnet_screen``/
+    ``_presets_screen``, since their filters/columns/templates are almost entirely disjoint
+    from the general screener's (only sector/country/market are shared — see issue #259).
+    Deliberately a plain full-page reload on every filter/level/preset change, not an AJAX
+    partial-swap like the general screener's auto-apply: each mode's content differs far
+    more (different hero, different columns, different filter set) than the general
+    screener's single-column benchmark switch did, so a fragment swap wouldn't save much.
     """
-    if request.GET.get("mode", "general").strip().lower() == "netnet":
+    mode = request.GET.get("mode", "general").strip().lower()
+    if mode == "netnet":
         return _netnet_screen(request)
+    if mode == "presets":
+        return _presets_screen(request)
     search = request.GET.get("q", "").strip()
     sector = request.GET.get("sector", "").strip()
     index = request.GET.get("index", "").strip()
@@ -467,6 +470,84 @@ def _netnet_screen(request: HttpRequest) -> HttpResponse:
             "rows": rows,
             "total": total,
             "stats": stats,
+            "page": page,
+            "num_pages": num_pages,
+            "has_prev": page > 1,
+            "has_next": page < num_pages,
+            "page_range": range(max(1, page - 2), min(num_pages, page + 2) + 1),
+        },
+    )
+
+
+def _presets_screen(request: HttpRequest) -> HttpResponse:
+    """Investor Presets: a name-only pill selector (Graham/Buffett/Lynch) revealing that
+    school's static philosophy panel (portrait, tagline, criteria list) plus a company table
+    filtered on that school's latest-FY-only criteria (see ``services.get_preset_screen``) —
+    sharing only the sector/country/market descriptive filters with the general screener,
+    the same pattern as the Net-Net Finder.
+
+    Paginated in DuckDB, unlike the Net-Net Finder's Python-side pagination: a preset's
+    matches aren't guaranteed to be a small fraction of the universe the way a genuine
+    net-net is, so pushing LIMIT/OFFSET into the query (``CompanyListingRepository.
+    preset_screen``) avoids ever materializing an unbounded result set in Python.
+    """
+    presets = services.preset_keys()
+    preset = request.GET.get("preset", presets[0]).strip().lower()
+    if preset not in presets:
+        preset = presets[0]
+    sector = request.GET.get("sector", "").strip()
+    country = request.GET.get("country", "").strip()
+    market = request.GET.get("market", "").strip()
+    page = _parse_page(request.GET.get("page"))
+
+    result = services.get_preset_screen(
+        preset, sector=sector, country=country, market=market, page=page, page_size=PAGE_SIZE,
+    )
+    num_pages = max(1, math.ceil(result.total / PAGE_SIZE))
+    page = min(page, num_pages)
+    definition = services.get_preset_definition(preset)
+
+    # Rows as (row, aligned metric cells) so the template never indexes a mapping by key —
+    # same convention screen_table's own `rows` context key uses.
+    rows = [
+        {
+            "row": r,
+            "cells": [(r.values.get(c.key), r.units.get(c.key) or c.unit) for c in result.columns],
+        }
+        for r in result.rows
+    ]
+
+    shared_qs = urlencode({
+        k: v for k, v in (("sector", sector), ("country", country), ("market", market)) if v
+    })
+    presets_qs = urlencode({
+        k: v for k, v in (
+            ("mode", "presets"), ("preset", preset),
+            ("sector", sector), ("country", country), ("market", market),
+        ) if v
+    })
+
+    return render(
+        request,
+        "fundamentals_screener/presets.html",
+        {
+            "mode": "presets",
+            "shared_qs": shared_qs,
+            "querystring": presets_qs,
+            "preset": preset,
+            "presets": presets,
+            "definition": definition,
+            "portrait_path": f"fundamentals_screener/portraits/{preset}.png",
+            "sector": sector,
+            "country": country,
+            "market": market,
+            "sectors": services.available_sectors(),
+            "countries": services.available_countries(),
+            "markets": services.available_markets(),
+            "columns": result.columns,
+            "rows": rows,
+            "total": result.total,
+            "stats": result.stats,
             "page": page,
             "num_pages": num_pages,
             "has_prev": page > 1,

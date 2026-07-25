@@ -1,0 +1,69 @@
+{% comment %}
+Included by presets.html. Context needed: preset, presets (tuple of valid keys, display
+order), definition (PresetDefinition for the ACTIVE preset only — the pill loop below keys
+its dot color off the preset string directly in CSS, same "kept in sync by hand" convention
+_netnet_hero.html's level-dot classes use), stats (PresetStats), portrait_path (the static
+path for the active preset's portrait), shared_qs (for the pill links to carry sector/
+country/market forward, since they're plain full-reload links, not part of the filter
+<form> below).
+{% endcomment %}
+{% load static humanize %}
+<div class="nn-hero mb-4">
+  <div class="nn-hero-top">
+    <div class="nn-hero-intro">
+      <span class="eyebrow accent">{{ definition.eyebrow }}</span>
+      <h1 class="nn-title">{{ definition.headline }}</h1>
+      <p class="nn-sub">{{ definition.description }}</p>
+    </div>
+    <div class="nn-stats">
+      <div class="nn-stat">
+        <div class="v hi">{{ stats.live_criteria_count }}</div>
+        <div class="l">Criterios en vivo</div>
+      </div>
+      <div class="nn-stat">
+        <div class="v">{{ stats.pending_criteria_count }}</div>
+        <div class="l">Pendientes de histórico</div>
+      </div>
+      <div class="nn-stat">
+        <div class="v">{{ stats.universe_size|intcomma }}</div>
+        <div class="l">Universo screeneado</div>
+      </div>
+    </div>
+  </div>
+
+  {% with base_qs=shared_qs %}
+  <div class="levels" role="group" aria-label="Escuela de inversión">
+    {% for key in presets %}
+      <a class="level-btn {% if preset == key %}level-btn--active{% endif %}"
+         href="?mode=presets&amp;preset={{ key }}{% if base_qs %}&amp;{{ base_qs }}{% endif %}">
+        <span class="level-dot level-dot--{{ key }}"></span>{{ key|title }}
+      </a>
+    {% endfor %}
+  </div>
+  {% endwith %}
+
+  <div class="preset-detail">
+    <div class="preset-portrait">
+      <img src="{% static portrait_path %}" alt="{{ definition.name }}">
+    </div>
+    <div class="preset-content">
+      <div class="preset-school">{{ definition.school }}</div>
+      <div class="preset-name">
+        <span class="preset-dot" style="background: var({{ definition.dot_color }})"></span>{{ definition.name }}
+      </div>
+      <p class="preset-tagline">{{ definition.tagline }}</p>
+      <ul class="preset-criteria">
+        {% for c in definition.criteria %}
+          <li>
+            <span>{{ c.label }}</span>
+            {% if c.status == "live" %}
+              <span class="preset-tag preset-tag--live">En vivo</span>
+            {% else %}
+              <span class="preset-tag preset-tag--pending">Pendiente · histórico</span>
+            {% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+</div>

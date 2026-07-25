@@ -30,6 +30,11 @@
   --negative: #B0301A;
   --negative-soft: #FBE9E4;
   --warning: #E8702A;
+  /* Third categorical color for Investor Presets' 3-way school distinction (Graham=accent,
+     Buffett=orange, Lynch=violet) — accent/orange/positive/negative are all already spoken
+     for by other semantics elsewhere in this app, so a genuinely distinct third hue is added
+     here rather than reusing one and losing the visual distinction between two pills. */
+  --violet: #8E44AD;
   --display: "Fraunces", "Times New Roman", serif;
   --sans: "Inter", system-ui, sans-serif;
   --mono: "JetBrains Mono", "SF Mono", Menlo, monospace;
@@ -351,6 +356,11 @@ body.fs-app { font-family: var(--sans); background: var(--bg); color: var(--ink)
 .fs-app .level-dot--relaxed { background: var(--accent); }
 .fs-app .level-dot--moderate { background: var(--orange); }
 .fs-app .level-dot--strict { background: var(--negative); }
+/* Investor Presets' own 3-way school dots (Graham/Buffett/Lynch), same .level-dot base —
+   kept in sync by hand with each PresetDefinition.dot_color in services.py. */
+.fs-app .level-dot--graham { background: var(--accent); }
+.fs-app .level-dot--buffett { background: var(--orange); }
+.fs-app .level-dot--lynch { background: var(--violet); }
 
 /* Real toggle-switch component (checkbox-driven, no JS) — an editorial upgrade over a plain
    checkbox, used for "hide likely value traps". <label class="switch"><input type="checkbox">
@@ -376,6 +386,47 @@ body.fs-app { font-family: var(--sans); background: var(--bg); color: var(--ink)
 .fs-app .formula-note .caveat {
   display: block; margin-top: 6px; font-family: var(--mono); font-size: 10px; color: var(--ink-3);
 }
+
+/* ---------- Investor Presets: philosophy panel (portrait + criteria) ---------- */
+.fs-app .preset-detail {
+  display: grid; grid-template-columns: 220px 1fr; margin-top: 20px;
+  border-top: 1px solid var(--rule-soft); padding-top: 20px;
+}
+@media (max-width: 640px) { .fs-app .preset-detail { grid-template-columns: 1fr; } }
+.fs-app .preset-portrait {
+  background: var(--bg-subtle); border-radius: 8px; overflow: hidden; display: flex;
+  align-items: stretch; justify-content: center;
+}
+.fs-app .preset-portrait img {
+  width: 100%; height: 100%; object-fit: cover; object-position: top center;
+  mix-blend-mode: multiply; filter: contrast(1.05);
+}
+.fs-app .preset-content { padding: 4px 0 0 28px; }
+@media (max-width: 640px) { .fs-app .preset-content { padding: 20px 0 0; } }
+.fs-app .preset-school {
+  font-family: var(--mono); font-size: .68rem; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--accent-ink); margin-bottom: 4px;
+}
+.fs-app .preset-name {
+  font-family: var(--display); font-weight: 600; font-size: 1.3rem; margin-bottom: 8px;
+}
+.fs-app .preset-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 8px; vertical-align: middle; }
+.fs-app .preset-tagline { font-size: .84rem; color: var(--ink-2); font-style: italic; margin-bottom: 18px; }
+.fs-app .preset-criteria { list-style: none; margin: 0; padding: 0; }
+.fs-app .preset-criteria li {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+  font-size: .84rem; padding: 9px 0; border-bottom: 1px solid var(--bg-subtle);
+}
+.fs-app .preset-criteria li:last-child { border-bottom: none; }
+.fs-app .preset-tag {
+  font-family: var(--mono); font-size: .62rem; padding: 2px 8px; border-radius: 10px;
+  white-space: nowrap;
+}
+/* Live/pending here reuse the app's established positive/orange "done vs. not yet" semantic
+   (same as .nn-zone--safe/--grey) — violet is reserved for Lynch's own school-identity dot,
+   not overloaded as a second meaning here. */
+.fs-app .preset-tag--live { background: var(--positive-soft); color: var(--positive); }
+.fs-app .preset-tag--pending { background: var(--orange-soft); color: var(--orange); }
 
 /* ---------- Footer ---------- */
 .fs-footer { background: var(--bg-card); border-top: 1px solid var(--rule); color: var(--ink-3); }
