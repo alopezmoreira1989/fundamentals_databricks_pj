@@ -269,13 +269,24 @@ body.fs-app { font-family: var(--sans); background: var(--bg); color: var(--ink)
 .fs-app .nn-hero-top {
   display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; flex-wrap: wrap;
 }
+/* .nn-hero-left groups an icon+intro pair as ONE flex item, so .nn-hero-top's own
+   space-between (above) only ever spreads apart TWO things — this group vs. .nn-stats — never
+   the icon from its own title/subtitle. Net-Net Finder is the only current user (see
+   _netnet_hero.html); Investor Presets' own .nn-hero-top has no icon at all (just .nn-hero-intro
+   + .nn-stats directly, 2 children already), so it never needed this wrapper. Fixed 22px gap,
+   not flex-grow, so the gap can't stretch with viewport width the way it did before this
+   wrapper existed (icon and text used to be two independent flex items under the same
+   space-between, which is what produced that bug). */
+.fs-app .nn-hero-left {
+  display: flex; align-items: center; gap: 22px;
+}
 /* Hero icon thumbnail — same multiply-blend engraving treatment as the Investor Presets
    portraits (.preset-portrait img), reused here for a consistent "art anchors the card" look
    across all three screener modes. Square crop centered on the source illustration; these are
    wide compositions (magnifying glass / iceberg), not head-and-shoulders portraits, but a
    centered object-fit: cover crop reads fine at this size for both. 180px is Net-Net Finder's
    own size (this hero has no divider/second section competing for vertical space, unlike the
-   merged General Screener card, which overrides this back down to 148px via its own more
+   merged General Screener card, which overrides this back down to 168px via its own more
    specific .scr-hero .nn-hero-icon rule in screen.html). */
 .fs-app .nn-hero-icon {
   width: 180px; height: 180px; flex-shrink: 0; border-radius: 8px; overflow: hidden;
