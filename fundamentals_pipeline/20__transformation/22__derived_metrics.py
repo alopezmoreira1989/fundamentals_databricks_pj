@@ -904,7 +904,14 @@ if pe_mcap is not None:
                     "Total Assets", "Total Liabilities", "Total Current Assets",
                     "Total Current Liabilities", "Retained Earnings",
                     # Tangible Value / Goodwill Risk inputs:
-                    "Goodwill", "Intangible Assets"
+                    "Goodwill", "Intangible Assets",
+                    # NCAV (Moderate)/(Strict) Ratio inputs (_ar_expr/_inv_expr below, reused
+                    # from the base block's guards) — val_wide is a SEPARATE lineage from the
+                    # base block's `wide`, so a Column reused here only resolves if its concept
+                    # is also selected into this whitelist. Omitting these two previously broke
+                    # both ratios at query-compile time (UNRESOLVED_COLUMN), confirmed against a
+                    # real failed run — see the git history for the incident.
+                    "Accounts Receivable", "Inventory"
                 ))
             )
         )
