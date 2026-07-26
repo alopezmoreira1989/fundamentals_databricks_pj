@@ -6,17 +6,25 @@ forward, since they're plain full-reload links, not part of the filter <form> be
 {% load static humanize %}
 <div class="nn-hero mb-4">
   <div class="nn-hero-top">
-    <div class="nn-hero-icon">
-      <img src="{% static 'fundamentals_screener/icons/netnet.png' %}" alt="">
-    </div>
-    <div class="nn-hero-intro">
-      <span class="eyebrow accent">Graham &middot; Deep Value</span>
-      <h1 class="nn-title">Companies trading below liquidation value</h1>
-      <p class="nn-sub">
-        Net Current Asset Value (NCAV) estimates what's left for shareholders if the company
-        stopped operating and sold off its current assets tomorrow. How much of that book value
-        you actually trust to realize is a judgment call — pick a level below.
-      </p>
+    {% comment %}
+      .nn-hero-left groups the icon+intro as ONE flex item with a fixed 22px gap, so
+      .nn-hero-top's own space-between (built for icon+text-group vs. stats, not three
+      independent items) only ever spreads apart this group and .nn-stats — not the icon
+      from its own title/subtitle.
+    {% endcomment %}
+    <div class="nn-hero-left">
+      <div class="nn-hero-icon">
+        <img src="{% static 'fundamentals_screener/icons/netnet.png' %}" alt="">
+      </div>
+      <div class="nn-hero-intro">
+        <span class="eyebrow accent">Graham &middot; Deep Value</span>
+        <h1 class="nn-title">Companies trading below liquidation value</h1>
+        <p class="nn-sub">
+          Net Current Asset Value (NCAV) estimates what's left for shareholders if the company
+          stopped operating and sold off its current assets tomorrow. How much of that book
+          value you actually trust to realize is a judgment call — pick a level below.
+        </p>
+      </div>
     </div>
     <div class="nn-stats">
       <div class="nn-stat">
