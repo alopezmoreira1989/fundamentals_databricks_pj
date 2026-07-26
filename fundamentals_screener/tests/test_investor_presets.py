@@ -23,10 +23,21 @@ _META = {
         for t in (
             "GRAHAM1", "GRAHAM2", "GRAHAMFAIL",
             "BUFF1", "BUFFNULLPASS", "BUFFNULLBUTFAILS", "BUFFTOOLOWMOS",
+            "BUFFROE_SUSTAINED", "BUFFROE_ONEDIP", "BUFFROE_SHORTHISTORY", "BUFFROE_FAILSOTHER",
             "LYNCH1", "LYNCHFAIL",
         )
     ]
 }
+
+# 5 years of ROE % >= 15 (FY2020-2024) — the "sustained ROE" criterion's passing shape, added to
+# every existing Buffett fixture ticker so each test still isolates exactly the ONE criterion it
+# was written to check, rather than incidentally failing for a second, unintended reason (no ROE
+# data at all) once the multi-year filter applies to every `preset="buffett"` call.
+_SUSTAINED_ROE_ROWS = [
+    (ticker, "ROE %", "percent", year, 18.0, "FY")
+    for ticker in ("BUFF1", "BUFFNULLPASS", "BUFFNULLBUTFAILS", "BUFFTOOLOWMOS")
+    for year in (2020, 2021, 2022, 2023, 2024)
+]
 
 # ticker, metric, unit, fiscal_year, value, period_type
 _METRIC_ROWS = [
@@ -81,7 +92,51 @@ _METRIC_ROWS = [
     ("LYNCHFAIL", "Debt / Equity", "ratio", 2024, 0.2, "FY"),
     ("LYNCHFAIL", "Current Ratio", "ratio", 2024, 1.5, "FY"),
     ("LYNCHFAIL", "ROE %", "percent", 2024, 5.0, "FY"),
-]
+
+    # BUFFROE_SUSTAINED: passes the other 3 latest-FY criteria AND has ROE % >= 15 in every one
+    # of the last 5 fiscal years — the "sustained" criterion's passing shape.
+    ("BUFFROE_SUSTAINED", "Debt / Equity", "ratio", 2024, 0.2, "FY"),
+    ("BUFFROE_SUSTAINED", "Gross Margin %", "percent", 2024, 50.0, "FY"),
+    ("BUFFROE_SUSTAINED", "Net Margin %", "percent", 2024, 25.0, "FY"),
+    ("BUFFROE_SUSTAINED", "ROE %", "percent", 2020, 16.0, "FY"),
+    ("BUFFROE_SUSTAINED", "ROE %", "percent", 2021, 17.0, "FY"),
+    ("BUFFROE_SUSTAINED", "ROE %", "percent", 2022, 18.0, "FY"),
+    ("BUFFROE_SUSTAINED", "ROE %", "percent", 2023, 19.0, "FY"),
+    ("BUFFROE_SUSTAINED", "ROE %", "percent", 2024, 20.0, "FY"),
+
+    # BUFFROE_ONEDIP: same other 3 criteria, but ROE % dips below 15 in one of the last 5 years
+    # (2022) — must fail: "every year", not "most years".
+    ("BUFFROE_ONEDIP", "Debt / Equity", "ratio", 2024, 0.2, "FY"),
+    ("BUFFROE_ONEDIP", "Gross Margin %", "percent", 2024, 50.0, "FY"),
+    ("BUFFROE_ONEDIP", "Net Margin %", "percent", 2024, 25.0, "FY"),
+    ("BUFFROE_ONEDIP", "ROE %", "percent", 2020, 16.0, "FY"),
+    ("BUFFROE_ONEDIP", "ROE %", "percent", 2021, 17.0, "FY"),
+    ("BUFFROE_ONEDIP", "ROE %", "percent", 2022, 10.0, "FY"),
+    ("BUFFROE_ONEDIP", "ROE %", "percent", 2023, 19.0, "FY"),
+    ("BUFFROE_ONEDIP", "ROE %", "percent", 2024, 20.0, "FY"),
+
+    # BUFFROE_SHORTHISTORY: same other 3 criteria, ROE % >= 15 in EVERY year on record, but only
+    # 3 years of history exist (2022-2024) — must fail: insufficient history is excluded, not
+    # silently passed just because nothing on record ever dipped below 15.
+    ("BUFFROE_SHORTHISTORY", "Debt / Equity", "ratio", 2024, 0.2, "FY"),
+    ("BUFFROE_SHORTHISTORY", "Gross Margin %", "percent", 2024, 50.0, "FY"),
+    ("BUFFROE_SHORTHISTORY", "Net Margin %", "percent", 2024, 25.0, "FY"),
+    ("BUFFROE_SHORTHISTORY", "ROE %", "percent", 2022, 18.0, "FY"),
+    ("BUFFROE_SHORTHISTORY", "ROE %", "percent", 2023, 19.0, "FY"),
+    ("BUFFROE_SHORTHISTORY", "ROE %", "percent", 2024, 20.0, "FY"),
+
+    # BUFFROE_FAILSOTHER: 5 sustained years of ROE % >= 15, but a real Debt/Equity failure —
+    # must fail overall, proving the multi-year AND-composition with the existing latest-FY
+    # predicate, not just the multi-year piece in isolation.
+    ("BUFFROE_FAILSOTHER", "Debt / Equity", "ratio", 2024, 0.9, "FY"),
+    ("BUFFROE_FAILSOTHER", "Gross Margin %", "percent", 2024, 50.0, "FY"),
+    ("BUFFROE_FAILSOTHER", "Net Margin %", "percent", 2024, 25.0, "FY"),
+    ("BUFFROE_FAILSOTHER", "ROE %", "percent", 2020, 16.0, "FY"),
+    ("BUFFROE_FAILSOTHER", "ROE %", "percent", 2021, 17.0, "FY"),
+    ("BUFFROE_FAILSOTHER", "ROE %", "percent", 2022, 18.0, "FY"),
+    ("BUFFROE_FAILSOTHER", "ROE %", "percent", 2023, 19.0, "FY"),
+    ("BUFFROE_FAILSOTHER", "ROE %", "percent", 2024, 20.0, "FY"),
+] + _SUSTAINED_ROE_ROWS
 
 
 @pytest.fixture
@@ -144,6 +199,48 @@ def test_buffett_a_real_low_mos_value_fails(repo):
     assert "BUFFTOOLOWMOS" not in {r.ticker for r in rows}
 
 
+def test_sustained_metric_tickers_requires_every_recent_year_to_clear_the_threshold(repo):
+    qualifying = repo.sustained_metric_tickers(
+        tickers=["BUFFROE_SUSTAINED", "BUFFROE_ONEDIP"], metric="ROE %", min_value=15.0, years=5,
+    )
+    assert qualifying == frozenset({"BUFFROE_SUSTAINED"})
+
+
+def test_sustained_metric_tickers_excludes_insufficient_history(repo):
+    """A ticker with only 3 years of (all-passing) history doesn't count as "5 years sustained"
+    just because nothing on record ever dipped below the threshold."""
+    qualifying = repo.sustained_metric_tickers(
+        tickers=["BUFFROE_SHORTHISTORY"], metric="ROE %", min_value=15.0, years=5,
+    )
+    assert qualifying == frozenset()
+
+
+def test_sustained_metric_tickers_empty_input_returns_empty(repo):
+    assert repo.sustained_metric_tickers(tickers=[], metric="ROE %", min_value=15.0, years=5) == frozenset()
+
+
+def test_buffett_sustained_roe_passes_when_every_recent_year_clears_threshold(repo):
+    rows, _, _ = repo.preset_screen(preset="buffett")
+    assert "BUFFROE_SUSTAINED" in {r.ticker for r in rows}
+
+
+def test_buffett_sustained_roe_fails_on_one_off_year_dip(repo):
+    rows, _, _ = repo.preset_screen(preset="buffett")
+    assert "BUFFROE_ONEDIP" not in {r.ticker for r in rows}
+
+
+def test_buffett_sustained_roe_fails_with_insufficient_history(repo):
+    rows, _, _ = repo.preset_screen(preset="buffett")
+    assert "BUFFROE_SHORTHISTORY" not in {r.ticker for r in rows}
+
+
+def test_buffett_sustained_roe_composes_with_the_other_latest_fy_criteria(repo):
+    """5 sustained years of ROE doesn't exempt a ticker from the other criteria — a real
+    Debt/Equity failure still excludes it."""
+    rows, _, _ = repo.preset_screen(preset="buffett")
+    assert "BUFFROE_FAILSOTHER" not in {r.ticker for r in rows}
+
+
 def test_lynch_passes_and_fails_as_expected(repo):
     rows, _, _ = repo.preset_screen(preset="lynch")
     tickers = {r.ticker for r in rows}
@@ -183,3 +280,9 @@ def test_service_falls_back_to_graham_for_an_unrecognized_preset(repo, monkeypat
 
 def test_preset_keys_are_graham_buffett_lynch():
     assert services.preset_keys() == ("graham", "buffett", "lynch")
+
+
+def test_buffett_roe_criterion_is_live_not_pending():
+    definition = services.get_preset_definition("buffett")
+    roe_criterion = next(c for c in definition.criteria if "ROE" in c.label)
+    assert roe_criterion.status == "live"

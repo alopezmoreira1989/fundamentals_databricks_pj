@@ -506,6 +506,19 @@ metrics_wide = (
     # Uses the SPLIT-ADJUSTED count so a split isn't mistaken for a +900% issuance.
     .withColumn("Net Buyback Yield %", -yoy("_shares_adj"))
 
+    # Trailing ROE % average — point-in-time (ends at each row's own fiscal_year, no
+    # lookahead), reusing w_yoy's ticker/fiscal_year ordering with a bounded rowsBetween
+    # frame instead of lag(). Strict N-year requirement (F.count ignores NULLs) rather than a
+    # partial early-year average, matching the Piotroski F-Score's own "NULL when there's no
+    # valid prior" precedent just below — a 2-year "5Y Avg" would be misleading under its own
+    # label.
+    .withColumn("_roe_5y_n",  F.count("ROE %").over(w_yoy.rowsBetween(-4, 0)))
+    .withColumn("ROE % (5Y Avg)",
+        F.when(F.col("_roe_5y_n") == 5, F.avg("ROE %").over(w_yoy.rowsBetween(-4, 0))))
+    .withColumn("_roe_10y_n", F.count("ROE %").over(w_yoy.rowsBetween(-9, 0)))
+    .withColumn("ROE % (10Y Avg)",
+        F.when(F.col("_roe_10y_n") == 10, F.avg("ROE %").over(w_yoy.rowsBetween(-9, 0))))
+
     # ── Quality & Risk — Piotroski F-Score (base; uses w_yoy lag) ───────────────
     # Nine 1-pt signals. Profitability: ROA>0, CFO>0, ΔROA>0, CFO>NI (accrual quality).
     # Leverage/liquidity/dilution: ΔDebt/Assets<0, ΔCurrentRatio>0, no share dilution
@@ -554,7 +567,7 @@ base_metric_cols = [
     # Profitability — Margins
     "Gross Margin %", "Operating Margin %", "Net Margin %", "FCF Margin %",
     # Returns
-    "ROA %", "ROE %", "ROIC %", "ROCE %", "CROIC %",
+    "ROA %", "ROE %", "ROE % (5Y Avg)", "ROE % (10Y Avg)", "ROIC %", "ROCE %", "CROIC %",
     # Cash Flow — Absolute (passthrough from the wide FY pivot) + cash-flow margin
     "Operating Cash Flow", "CapEx", "Free Cash Flow",
     "Op Cash Flow Margin %",
