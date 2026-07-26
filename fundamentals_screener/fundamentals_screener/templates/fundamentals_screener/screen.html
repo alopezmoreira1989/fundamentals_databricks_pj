@@ -1,4 +1,5 @@
 {% extends "fundamentals_screener/base_screener.html" %}
+{% load static %}
 {% block title %}Screener — Fundamentals Screener{% endblock %}
 
 {% block extra_head %}
@@ -91,8 +92,26 @@
 
 {% block content %}
   {% include "fundamentals_screener/_mode_nav.html" %}
+
+  <div class="nn-hero mb-4">
+    <div class="nn-hero-top">
+      <div class="nn-hero-icon">
+        <img src="{% static 'fundamentals_screener/icons/general.png' %}" alt="">
+      </div>
+      <div class="nn-hero-intro">
+        <span class="eyebrow accent">SEC EDGAR &middot; Full Universe</span>
+        <h1 class="nn-title">Every company, every metric, your filters.</h1>
+        <p class="nn-sub">
+          Search and filter the full universe by sector, index, industry, country, and market,
+          then screen on any derived metric — margins, returns, leverage, valuation multiples,
+          and more — sorted and displayed exactly the way you want.
+        </p>
+      </div>
+    </div>
+  </div>
+
   <div class="p-4 bg-white rounded-3 shadow-sm mb-4">
-    <h1 class="h3 mb-3">Screener</h1>
+    <h2 class="h3 mb-3">Screener</h2>
     <form method="get" id="scr-filter-form">
       {# Keep the active sort when the filter form is re-submitted. #}
       <input type="hidden" name="sort" value="{{ sort_key }}">
