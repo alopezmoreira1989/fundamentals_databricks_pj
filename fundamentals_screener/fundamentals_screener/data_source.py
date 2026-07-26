@@ -22,7 +22,15 @@ from typing import Any
 import requests
 from django.conf import settings
 
-from fundamentals_pipeline import schemas
+# The lightweight, pandas-free sibling of `schemas` — sync()/get_meta()/list_tickers() (the
+# request-path functions) never need pandas, only the plain ARTIFACT_NAMES string tuple.
+# validate() below defers importing the full `schemas` module (which does need pandas, for its
+# dtype-level DataFrame checks) since that function only ever runs from the cron-driven
+# sync_fundamentals_data management command, never on a real request. See artifacts.py's own
+# docstring for the full split rationale — this was costing every request ~400ms (pandas's
+# cold-import time) under this package's no-persistent-process (CGI) deployment, just to read
+# a constant that never needed pandas at all.
+from fundamentals_pipeline.artifacts import ARTIFACT_NAMES
 
 RELEASE_BASE_URL = (
     "https://github.com/alopezmoreira1989/fundamentals_databricks_pj/releases/download/latest"
@@ -46,7 +54,7 @@ def sync(force: bool = False) -> list[str]:
     """Download the latest artifacts to ``FUNDAMENTALS_DATA_PATH``. Returns the filenames
     updated (empty list ⇒ everything was already cached and ``force`` was not set)."""
     directory = data_dir()
-    filenames = [f"{name}.parquet" for name in schemas.ARTIFACT_NAMES] + [META_FILE]
+    filenames = [f"{name}.parquet" for name in ARTIFACT_NAMES] + [META_FILE]
     updated = []
     for filename in filenames:
         dest = directory / filename
@@ -60,9 +68,14 @@ def validate() -> list[str]:
     """Validate cached artifacts against the schema contract. Empty list means all valid."""
     import duckdb
 
+    # Deferred: the only caller of this function is the cron-driven sync_fundamentals_data
+    # management command, never a real request — see this module's own top-of-file comment on
+    # why ARTIFACT_NAMES is imported from the lightweight `artifacts` module instead.
+    from fundamentals_pipeline import schemas
+
     directory = data_dir()
     violations = []
-    for name in schemas.ARTIFACT_NAMES:
+    for name in ARTIFACT_NAMES:
         path = directory / f"{name}.parquet"
         if not path.exists():
             violations.append(f"{name}: not cached yet")
