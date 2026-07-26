@@ -1,0 +1,10 @@
+{% comment %}
+Included by presets.html (full page) AND rendered bare as the mode-switch fragment response
+(see views._presets_screen's is_mode_switch branch) — same context either way, matching the
+"single source of truth, included both ways" pattern already established one level deeper by
+_presets_content.html for its own narrower within-mode fragment tier.
+{% endcomment %}
+{% include "fundamentals_screener/_mode_nav.html" %}
+<div id="presets-content">
+  {% include "fundamentals_screener/_presets_content.html" %}
+</div>

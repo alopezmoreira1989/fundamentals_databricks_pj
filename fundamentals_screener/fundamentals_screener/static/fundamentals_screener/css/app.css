@@ -455,6 +455,117 @@ body.fs-app { font-family: var(--sans); background: var(--bg); color: var(--ink)
 .fs-app .preset-tag--live { background: var(--positive-soft); color: var(--positive); }
 .fs-app .preset-tag--pending { background: var(--orange-soft); color: var(--orange); }
 
+/* ---------- General Screener (moved from screen.html's own <style> block so it's always
+   loaded, not just when General Screener happens to be the initial full-page load — needed
+   for AJAX mode-switching to land here with correct styling from any of the other two modes,
+   see screener.js) ---------- */
+/* Compact filter toolbar — a dense CSS grid instead of Bootstrap's row/col breakpoints, which
+   left dead cells whenever a row's items didn't sum to 12 at every breakpoint (the "View
+   Market Cap in USD" checkbox stranding a bare col-md-4 was the visible symptom). */
+.fs-app .scr-filter-row {
+  display: grid; grid-template-columns: 1.6fr repeat(5, 1fr); gap: 12px;
+}
+@media (max-width: 1080px) { .fs-app .scr-filter-row { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 640px) { .fs-app .scr-filter-row { grid-template-columns: repeat(2, 1fr); } }
+
+.fs-app .scr-toolbar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--rule-soft);
+}
+.fs-app .scr-toolbar-spacer { flex: 1; }
+
+/* Columns / Metric filters — collapsed by default so they don't occupy permanent vertical
+   space; open automatically when they carry active state (see the `open` attrs in the
+   template). */
+.fs-app .scr-disclosure { position: relative; }
+.fs-app .scr-disclosure > summary {
+  list-style: none; cursor: pointer; user-select: none;
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: .82rem; font-weight: 500; color: var(--ink-2);
+  border: 1px solid var(--rule); border-radius: 4px; padding: 7px 12px; background: var(--bg-card);
+}
+.fs-app .scr-disclosure > summary::-webkit-details-marker { display: none; }
+.fs-app .scr-disclosure > summary:hover { border-color: var(--ink-3); color: var(--ink); }
+.fs-app .scr-disclosure[open] > summary {
+  border-color: var(--accent); color: var(--accent-ink); background: var(--accent-soft);
+}
+.fs-app .scr-disclosure > summary .scr-count {
+  font-family: var(--mono); font-size: .68rem; background: var(--accent); color: #fff;
+  border-radius: 10px; padding: 1px 7px;
+}
+.fs-app .scr-disclosure > summary .scr-chev { font-size: .6rem; color: var(--ink-3); transition: transform .15s ease; }
+.fs-app .scr-disclosure[open] > summary .scr-chev { transform: rotate(180deg); }
+
+.fs-app .scr-panel {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 20;
+  background: var(--bg-card); border: 1px solid var(--rule); border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(11, 37, 69, .14); padding: 14px;
+  min-width: 360px; max-width: calc(100vw - 48px);
+}
+@media (max-width: 480px) { .fs-app .scr-panel { min-width: min(360px, calc(100vw - 48px)); } }
+.fs-app .scr-panel-title {
+  font-family: var(--mono); font-size: .64rem; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--ink-3); margin-bottom: 10px;
+}
+.fs-app .scr-col-search { margin-bottom: 10px; }
+.fs-app .scr-chip-grid {
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px 16px;
+  max-height: 240px; overflow-y: auto;
+}
+.fs-app .scr-chip-grid label { display: flex; align-items: center; gap: 7px; font-size: .84rem; padding: 3px 0; color: var(--ink-2); }
+.fs-app .scr-chip-grid label.scr-hidden { display: none; }
+.fs-app .scr-chip-grid input { accent-color: var(--accent); width: 15px; height: 15px; }
+.fs-app .scr-no-match { padding: 4px 2px 0; }
+
+.fs-app .scr-filter-rule { display: grid; grid-template-columns: 1.4fr .8fr .8fr auto; gap: 8px; margin-bottom: 8px; align-items: center; }
+.fs-app .scr-rm-filter {
+  background: none; border: none; color: var(--ink-3); cursor: pointer;
+  font-size: 1.1rem; line-height: 1; padding: 2px 6px; border-radius: 4px;
+}
+.fs-app .scr-rm-filter:hover { color: var(--negative); background: var(--rule-soft); }
+.fs-app .scr-add-filter {
+  background: none; border: none; color: var(--accent-ink); cursor: pointer;
+  font-size: .8rem; font-weight: 500; padding: 4px 0; margin-top: 2px;
+}
+.fs-app .scr-add-filter:hover { text-decoration: underline; }
+
+.fs-app .scr-usd-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: .82rem; color: var(--ink-2); white-space: nowrap; }
+.fs-app .scr-usd-toggle input { accent-color: var(--accent); width: 15px; height: 15px; }
+
+/* Table-columns toggle — its own small auto-submitting form, replicating the filter form's
+   current state as hidden fields so toggling a column never loses the active search/filters. */
+.fs-app .scr-table-cols { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; font-size: .78rem; color: var(--ink-3); margin-bottom: 12px; }
+.fs-app .scr-table-cols .scr-label { font-family: var(--mono); text-transform: uppercase; letter-spacing: .08em; font-size: .64rem; }
+.fs-app .scr-table-cols label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; color: var(--ink-2); }
+.fs-app .scr-table-cols input { accent-color: var(--accent); width: 13px; height: 13px; }
+
+/* Unified hero+filter card (General Screener merges what used to be two separate cards): 168px
+   icon (smaller than Net-Net Finder's own 180px .nn-hero-icon default, overridden back down
+   here) since this card also has the filter form + toolbar below it competing for vertical
+   space, unlike Net-Net Finder's hero which stays hero-only, plus a rule + a Fraunces-display
+   "Screener" heading separating the editorial intro from the actual filter form below it.
+
+   .nn-hero-top's shared base rule above is `justify-content: space-between`, built for TWO
+   groups (an icon+text group vs. a stats column, see Net-Net Finder's own .nn-hero-left
+   wrapper). This page's .nn-hero-top has no stats block at all — just the icon and the intro
+   directly as its only two children — so space-between spreads THOSE apart instead of grouping
+   them, stretching a big, viewport-dependent gap between icon and text. Overridden here, scoped
+   to just this page via .scr-hero, to a fixed-gap flex row instead. */
+.fs-app .scr-hero .nn-hero-top { justify-content: flex-start; align-items: center; gap: 26px; }
+.fs-app .scr-hero .nn-hero-icon { width: 168px; height: 168px; }
+.fs-app .scr-hero-divider { border: none; border-top: 1px solid var(--rule-soft); margin: 26px 0 22px; }
+.fs-app .scr-filter-heading { font-family: var(--display); font-size: 1.28rem; font-weight: 600; margin: 0 0 16px; }
+
+/* ---------- Screener-mode AJAX swap targets (General Screener / Net-Net Finder / Investor
+   Presets / cross-mode #main) — shared loading-state treatment, see screener.js. Delayed
+   fade-in (.15s) so a fast local response never visibly flickers; quick fade-out on
+   completion. #main is included here (not just the three within-mode containers) because
+   mode-nav clicks swap the whole #main region — see base_screener.html. */
+.fs-app #main, .fs-app #scr-results, .fs-app #nn-content, .fs-app #presets-content {
+  transition: opacity .1s ease;
+}
+.fs-app .fs-swap-loading { opacity: .45; transition: opacity .15s ease .15s; pointer-events: none; }
+
 /* ---------- Footer ---------- */
 .fs-footer { background: var(--bg-card); border-top: 1px solid var(--rule); color: var(--ink-3); }
 .fs-footer a { color: var(--ink-2); text-decoration: none; }
