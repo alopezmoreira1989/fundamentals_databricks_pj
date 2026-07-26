@@ -1,10 +1,11 @@
 {% comment %}
-Included by netnet.html (wrapped in #nn-content) AND rendered bare as the AJAX fragment
-response (see views._netnet_screen's is_fragment branch) — same context either way, matching
-the convention _screen_results.html/screen()'s own is_fragment split already established.
-Deliberately does NOT include _mode_nav.html: switching between General/Net-Net/Presets is a
-real full-page navigation (a different template entirely), only within-mode interactions
-(filters, level pill, hide-traps toggle, column sort, pagination) are AJAX-swapped here.
+Included by _netnet_main.html (wrapped in #nn-content, itself included by netnet.html for a
+full page load) AND rendered bare as the within-mode AJAX fragment response (see
+views._netnet_screen's is_fragment branch in _render_mode) — same context either way. This is
+the narrower of two fragment tiers: within-mode interactions (filters, level pill, hide-traps
+toggle, column sort, pagination) swap just #nn-content's content via this template; switching
+to a DIFFERENT mode swaps the whole #main region via _netnet_main.html instead (mode-nav +
+this same content) — see screener.js's initModeNav / views._render_mode's docstring.
 {% endcomment %}
 {% load fmt logos l10n %}
 {% localize off %}{# see valuation.html for raw-value interpolation; floatformat ignores this entirely (hardcodes use_l10n=True) so bar-fill widths use floatformat's own 'u' suffix instead #}

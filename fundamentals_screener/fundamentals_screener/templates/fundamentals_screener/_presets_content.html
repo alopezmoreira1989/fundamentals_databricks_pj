@@ -1,10 +1,11 @@
 {% comment %}
-Included by presets.html (wrapped in #presets-content) AND rendered bare as the AJAX fragment
-response (see views._presets_screen's is_fragment branch) — same context either way, matching
-the convention _screen_results.html/screen()'s own is_fragment split already established.
-Deliberately does NOT include _mode_nav.html: switching between General/Net-Net/Presets is a
-real full-page navigation (a different template entirely), only within-mode interactions
-(preset pill, filters, column sort, pagination) are AJAX-swapped here.
+Included by _presets_main.html (wrapped in #presets-content, itself included by presets.html
+for a full page load) AND rendered bare as the within-mode AJAX fragment response (see
+views._presets_screen's is_fragment branch in _render_mode) — same context either way. This is
+the narrower of two fragment tiers: within-mode interactions (preset pill, filters, column
+sort, pagination) swap just #presets-content's content via this template; switching to a
+DIFFERENT mode swaps the whole #main region via _presets_main.html instead (mode-nav + this
+same content) — see screener.js's initModeNav / views._render_mode's docstring.
 {% endcomment %}
 {% load fmt logos %}
 {% include "fundamentals_screener/_presets_hero.html" %}

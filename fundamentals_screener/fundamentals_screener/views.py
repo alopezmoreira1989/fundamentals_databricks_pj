@@ -16,7 +16,7 @@ does and doesn't cover.
 from __future__ import annotations
 
 import math
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import render
@@ -191,6 +191,43 @@ def _net_net_card_context(ticker: str) -> dict | None:
     return {"net_net": snapshot, "net_net_levels": levels}
 
 
+def _render_mode(
+    request: HttpRequest, *, page_title: str, fragment_template: str, main_template: str,
+    full_template: str, context: dict,
+) -> HttpResponse:
+    """Renders one of three tiers for a screener mode view (``screen``/``_netnet_screen``/
+    ``_presets_screen``), matching the request's AJAX intent:
+
+    - a full page (real navigation — no special header);
+    - the mode-switch fragment (``X-Mode-Switch: 1``, see screener.js's ``fetchAndSwap`` calls
+      from ``_mode_nav.html``'s links) — mode-nav + the mode's whole content, swapped into
+      ``#main`` when the user clicks a different tab. Carries an ``X-Page-Title`` response
+      header (percent-encoded via ``urllib.parse.quote`` — Django would otherwise RFC 2047
+      MIME-encode the raw em-dash into ``=?utf-8?q?...?=``, which ``fetch()``'s ``Headers.get``
+      does not decode for you; the JS side undoes this with ``decodeURIComponent``) so the JS
+      can sync the browser tab title, since nothing outside ``#main`` — including ``<title>``
+      — is touched by an innerHTML swap otherwise;
+    - the narrower within-mode fragment (``X-Requested-With: XMLHttpRequest``, unchanged since
+      before mode-switching existed) — just the mode's own results/content, for an in-mode
+      filter/sort/pagination/pill change.
+
+    Checked in that priority order since a mode-switch request could in principle also carry
+    the generic AJAX header; ``X-Mode-Switch`` is the more specific signal.
+    """
+    is_mode_switch = request.headers.get("X-Mode-Switch") == "1"
+    is_fragment = request.headers.get("X-Requested-With") == "XMLHttpRequest"
+    if is_mode_switch:
+        template = main_template
+    elif is_fragment:
+        template = fragment_template
+    else:
+        template = full_template
+    response = render(request, template, context)
+    if is_mode_switch:
+        response["X-Page-Title"] = quote(page_title)
+    return response
+
+
 def screen(request: HttpRequest) -> HttpResponse:
     """HTML screener — three modes sharing one route (``?mode=general|netnet|presets``,
     default ``general``). ``general`` is the full multi-metric company table (this
@@ -198,10 +235,13 @@ def screen(request: HttpRequest) -> HttpResponse:
     Investor Presets — both fixed-column screens delegated to their own ``_netnet_screen``/
     ``_presets_screen``, since their filters/columns/templates are almost entirely disjoint
     from the general screener's (only sector/country/market are shared — see issue #259).
-    Deliberately a plain full-page reload on every filter/level/preset change, not an AJAX
-    partial-swap like the general screener's auto-apply: each mode's content differs far
-    more (different hero, different columns, different filter set) than the general
-    screener's single-column benchmark switch did, so a fragment swap wouldn't save much.
+
+    Every interaction on every mode is AJAX (screener.js): within-mode filter/sort/pagination/
+    pill changes swap just that mode's own content container, and switching between modes via
+    ``_mode_nav.html``'s links swaps the whole ``#main`` region — see ``_render_mode``'s
+    docstring for the three response tiers each of the three view functions picks between.
+    Every underlying ``<form method="get">``/``<a href>`` is still a real one, so all of this
+    degrades to plain full-page navigations with JS disabled.
     """
     mode = request.GET.get("mode", "general").strip().lower()
     if mode == "netnet":
@@ -335,15 +375,15 @@ def screen(request: HttpRequest) -> HttpResponse:
     while len(filter_rows) < 3:
         filter_rows.append({"metric": "", "min": "", "max": ""})
 
-    # Auto-apply filters (see screen.html's fetch() calls): an AJAX request only wants the
-    # results fragment re-rendered, not the whole page with masthead/filter form again — same
-    # context, same template code path either way, just a different entry point into it.
-    is_fragment = request.headers.get("X-Requested-With") == "XMLHttpRequest"
-    template = "fundamentals_screener/_screen_results.html" if is_fragment else "fundamentals_screener/screen.html"
-    return render(
+    # Auto-apply filters / mode-switch (see screener.js's fetchAndSwap calls): see
+    # _render_mode's own docstring for the three response tiers this picks between.
+    return _render_mode(
         request,
-        template,
-        {
+        page_title="Screener — Fundamentals Screener",
+        fragment_template="fundamentals_screener/_screen_results.html",
+        main_template="fundamentals_screener/_screen_main.html",
+        full_template="fundamentals_screener/screen.html",
+        context={
             "mode": "general",
             # The mode-nav bar carries sector/index/country/market/industry across to Net-Net
             # Finder and Investor Presets (the descriptive filters all three modes share) —
@@ -494,15 +534,15 @@ def _netnet_screen(request: HttpRequest) -> HttpResponse:
     # matching _screen_results.html's own convention) so Prev/Next/page-N preserve state.
     nn_qs = urlencode([*base_pairs, ("sort", sort_key), ("dir", "desc" if descending else "asc")])
 
-    # Auto-apply (see netnet.html's fetch() calls): an AJAX request only wants the content
-    # fragment re-rendered, not the whole page with masthead/mode-nav again — same context,
-    # same template code path either way, matching screen()'s own is_fragment convention.
-    is_fragment = request.headers.get("X-Requested-With") == "XMLHttpRequest"
-    template = "fundamentals_screener/_netnet_content.html" if is_fragment else "fundamentals_screener/netnet.html"
-    return render(
+    # Auto-apply / mode-switch (see screener.js's fetchAndSwap calls): see _render_mode's own
+    # docstring for the three response tiers this picks between.
+    return _render_mode(
         request,
-        template,
-        {
+        page_title="Net-Net Finder — Fundamentals Screener",
+        fragment_template="fundamentals_screener/_netnet_content.html",
+        main_template="fundamentals_screener/_netnet_main.html",
+        full_template="fundamentals_screener/netnet.html",
+        context={
             "mode": "netnet",
             "shared_qs": shared_qs,
             "querystring": nn_qs,
@@ -600,15 +640,15 @@ def _presets_screen(request: HttpRequest) -> HttpResponse:
     })
     presets_qs = urlencode([*base_pairs, ("sort", sort_key), ("dir", "desc" if descending else "asc")])
 
-    # Auto-apply (see presets.html's fetch() calls): an AJAX request only wants the content
-    # fragment re-rendered, not the whole page with masthead/mode-nav again — same context,
-    # same template code path either way, matching screen()'s own is_fragment convention.
-    is_fragment = request.headers.get("X-Requested-With") == "XMLHttpRequest"
-    template = "fundamentals_screener/_presets_content.html" if is_fragment else "fundamentals_screener/presets.html"
-    return render(
+    # Auto-apply / mode-switch (see screener.js's fetchAndSwap calls): see _render_mode's own
+    # docstring for the three response tiers this picks between.
+    return _render_mode(
         request,
-        template,
-        {
+        page_title="Investor Presets — Fundamentals Screener",
+        fragment_template="fundamentals_screener/_presets_content.html",
+        main_template="fundamentals_screener/_presets_main.html",
+        full_template="fundamentals_screener/presets.html",
+        context={
             "mode": "presets",
             "shared_qs": shared_qs,
             "querystring": presets_qs,

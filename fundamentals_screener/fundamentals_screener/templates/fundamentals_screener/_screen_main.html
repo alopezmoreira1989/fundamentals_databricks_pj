@@ -1,0 +1,166 @@
+{% comment %}
+Included by screen.html (full page) AND rendered bare as the mode-switch fragment response
+(see views.screen()'s is_mode_switch branch) — same context either way, matching the
+"single source of truth, included both ways" pattern _netnet_content.html/_presets_content.html
+already established for their own narrower within-mode fragment tier. Needs its own
+{% load static %} (used by the hero icon below) since {% load %} is per-template-file, not
+inherited across {% include %} boundaries.
+{% endcomment %}
+{% load static %}
+{% include "fundamentals_screener/_mode_nav.html" %}
+
+<div class="nn-hero scr-hero mb-4">
+  <div class="nn-hero-top">
+    <div class="nn-hero-icon">
+      <img src="{% static 'fundamentals_screener/icons/general.png' %}" alt="">
+    </div>
+    <div class="nn-hero-intro">
+      <span class="eyebrow accent">SEC EDGAR &middot; Full Universe</span>
+      <h1 class="nn-title">Every company, every metric, your filters.</h1>
+      <p class="nn-sub">
+        Search and filter the full universe by sector, index, industry, country, and market,
+        then screen on any derived metric — margins, returns, leverage, valuation multiples,
+        and more — sorted and displayed exactly the way you want.
+      </p>
+    </div>
+  </div>
+
+  <hr class="scr-hero-divider">
+
+  <h2 class="scr-filter-heading">Screener</h2>
+  <form method="get" id="scr-filter-form">
+    {# Keep the active sort when the filter form is re-submitted. #}
+    <input type="hidden" name="sort" value="{{ sort_key }}">
+    <input type="hidden" name="dir" value="{{ sort_dir }}">
+    {# Carry the table-columns choice through Apply too, once the user has made one. #}
+    {% if desc_explicit %}
+      <input type="hidden" name="desc_on" value="1">
+      {% for k in visible_desc %}<input type="hidden" name="desc" value="{{ k }}">{% endfor %}
+    {% endif %}
+
+    <div class="scr-filter-row">
+      <div>
+        <label for="q" class="form-label">Search</label>
+        <input type="text" id="q" name="q" value="{{ q }}" class="form-control"
+               placeholder="Ticker or company…">
+      </div>
+      <div>
+        <label for="sector" class="form-label">Sector</label>
+        <select id="sector" name="sector" class="form-select">
+          <option value="">All sectors</option>
+          {% for s in sectors %}
+            <option value="{{ s }}" {% if s == sector %}selected{% endif %}>{{ s }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="index" class="form-label">Index</label>
+        <select id="index" name="index" class="form-select">
+          <option value="">Any</option>
+          <option value="sp500" {% if index == "sp500" %}selected{% endif %}>S&amp;P 500</option>
+          <option value="r3000" {% if index == "r3000" %}selected{% endif %}>Russell 3000</option>
+          <option value="tsx" {% if index == "tsx" %}selected{% endif %}>S&amp;P/TSX Composite</option>
+        </select>
+      </div>
+      <div>
+        <label for="industry" class="form-label">Industry</label>
+        <select id="industry" name="industry" class="form-select">
+          <option value="">All industries</option>
+          {% for i in industries %}
+            <option value="{{ i }}" {% if i == industry %}selected{% endif %}>{{ i }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="country" class="form-label">Country</label>
+        <select id="country" name="country" class="form-select">
+          <option value="">All countries</option>
+          {% for c in countries %}
+            <option value="{{ c }}" {% if c == country %}selected{% endif %}>{{ c }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="market" class="form-label">Market</label>
+        <select id="market" name="market" class="form-select">
+          <option value="">All markets</option>
+          {% for m in markets %}
+            <option value="{{ m }}" {% if m == market %}selected{% endif %}>{{ m }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <div class="scr-toolbar">
+      <details class="scr-disclosure" name="scr_toggle" {% if cols %}open{% endif %}>
+        <summary>Columns {% if cols %}<span class="scr-count">{{ cols|length }}</span>{% endif %} <span class="scr-chev">▾</span></summary>
+        <div class="scr-panel">
+          <div class="scr-panel-title">Metric columns to display</div>
+          <input type="text" class="form-control form-control-sm scr-col-search"
+                 placeholder="Search metrics…" aria-label="Search metric columns" autocomplete="off">
+          <div class="scr-chip-grid">
+            {% for m in metrics %}
+              <label><input type="checkbox" name="col" value="{{ m }}" {% if m in cols %}checked{% endif %}> {{ m }}</label>
+            {% endfor %}
+          </div>
+          <p class="scr-no-match text-muted small mb-0" hidden>No metrics match.</p>
+        </div>
+      </details>
+
+      <details class="scr-disclosure" name="scr_toggle" {% if has_active_filters %}open{% endif %}>
+        <summary>Metric filters {% if active_filter_count %}<span class="scr-count">{{ active_filter_count }}</span>{% endif %} <span class="scr-chev">▾</span></summary>
+        <div class="scr-panel" style="min-width:440px">
+          <div class="scr-panel-title">Leave blank to ignore</div>
+          <div class="scr-filter-rows">
+            {% for f in filter_rows %}
+              <div class="scr-filter-rule">
+                <select name="fmetric" class="form-select form-select-sm" aria-label="Filter metric">
+                  <option value="">— metric —</option>
+                  {% for m in metrics %}
+                    <option value="{{ m }}" {% if m == f.metric %}selected{% endif %}>{{ m }}</option>
+                  {% endfor %}
+                </select>
+                <input type="text" inputmode="decimal" name="fmin" value="{{ f.min }}"
+                       class="form-control form-control-sm" placeholder="min" aria-label="Minimum">
+                <input type="text" inputmode="decimal" name="fmax" value="{{ f.max }}"
+                       class="form-control form-control-sm" placeholder="max" aria-label="Maximum">
+                <button type="button" class="scr-rm-filter" aria-label="Remove this filter">×</button>
+              </div>
+            {% endfor %}
+          </div>
+          <button type="button" class="scr-add-filter">+ Add another filter</button>
+          <template class="scr-filter-row-template">
+            <div class="scr-filter-rule">
+              <select name="fmetric" class="form-select form-select-sm" aria-label="Filter metric">
+                <option value="">— metric —</option>
+                {% for m in metrics %}
+                  <option value="{{ m }}">{{ m }}</option>
+                {% endfor %}
+              </select>
+              <input type="text" inputmode="decimal" name="fmin"
+                     class="form-control form-control-sm" placeholder="min" aria-label="Minimum">
+              <input type="text" inputmode="decimal" name="fmax"
+                     class="form-control form-control-sm" placeholder="max" aria-label="Maximum">
+              <button type="button" class="scr-rm-filter" aria-label="Remove this filter">×</button>
+            </div>
+          </template>
+        </div>
+      </details>
+
+      {% if show_usd_toggle %}
+        <label class="scr-usd-toggle">
+          <input type="checkbox" name="usd" value="1" {% if usd_lens %}checked{% endif %}>
+          View Market Cap in USD <span class="text-muted">(other figures stay native)</span>
+        </label>
+      {% endif %}
+
+      <div class="scr-toolbar-spacer"></div>
+      <a href="{% url 'fundamentals_screener:screen' %}" class="btn btn-outline-secondary">Reset</a>
+      <button type="submit" class="btn btn-dark">Apply filters</button>
+    </div>
+  </form>
+</div>
+
+<div id="scr-results">
+  {% include "fundamentals_screener/_screen_results.html" %}
+</div>
