@@ -108,7 +108,8 @@ _ALTMAN_DISTRESS_MAX = 1.8
 # express — hence a dedicated predicate per preset rather than reusing that generic mechanism.
 _PRESET_COLUMNS: dict[str, tuple[str, ...]] = {
     "graham": ("Current Ratio", "P/E", "P/B"),
-    "buffett": ("Debt / Equity", "Gross Margin %", "Net Margin %", "MoS % (Owner Earnings, FY)"),
+    "buffett": ("Debt / Equity", "Gross Margin %", "Net Margin %", "MoS % (Owner Earnings, FY)",
+                "ROE % (5Y Avg)"),
     "lynch": ("Debt / Equity", "Current Ratio", "ROE %"),
 }
 
@@ -143,6 +144,14 @@ _PRESET_WHERE: dict[str, Any] = {
     "graham": _graham_where,
     "buffett": _buffett_where,
     "lynch": _lynch_where,
+}
+
+# Multi-year criteria layered on top of _PRESET_WHERE's latest-FY predicate, as (metric,
+# min_value, years) — currently only Buffett's; Graham's earnings-stability/dividend-record and
+# Lynch's EPS CAGR/PEG are separate, deferred issues that can reuse the same
+# CompanyListingRepository.sustained_metric_tickers method with a different entry here.
+_PRESET_MULTI_YEAR: dict[str, tuple[str, float, int]] = {
+    "buffett": ("ROE %", 15.0, 5),
 }
 
 
@@ -571,6 +580,40 @@ class CompanyListingRepository(DuckDBRepository):
             ))
         return tuple(rows)
 
+    def sustained_metric_tickers(
+        self, *, tickers: Sequence[str], metric: str, min_value: float, years: int,
+    ) -> frozenset[str]:
+        """Tickers (out of `tickers`) whose `metric` FY value was >= `min_value` in EVERY ONE
+        of their most recent `years` fiscal years. A ticker with fewer than `years` non-null FY
+        values on record is excluded, not passed — "sustained over N years" requires N years of
+        proof, the same reasoning the Net-Net Finder's own eligibility filters already apply
+        elsewhere. Shared across whichever Investor Presets criteria need an every-year-
+        threshold test (currently only Buffett's ROE via `_PRESET_MULTI_YEAR`; Graham's
+        earnings-stability/dividend-record and Lynch's future criteria are separate, not-yet-
+        built issues that can reuse this same method with a different metric/threshold/years —
+        not a comparator this method doesn't support yet, `>=` only, add one if/when one of
+        those needs something else).
+        """
+        if not tickers:
+            return frozenset()
+        sql = """
+            WITH recent AS (
+                SELECT ticker, value
+                FROM dashboard_metrics
+                WHERE metric = ? AND period_type = 'FY' AND value IS NOT NULL
+                  AND list_contains(?, ticker)
+                QUALIFY row_number() OVER (PARTITION BY ticker ORDER BY fiscal_year DESC) <= ?
+            )
+            SELECT ticker
+            FROM recent
+            GROUP BY ticker
+            HAVING count(*) = ?
+               AND count(*) FILTER (WHERE value >= ?) = ?
+        """
+        return frozenset(
+            self._fetch_column(sql, [metric, list(tickers), years, years, min_value, years])
+        )
+
     # ── Investor Presets ─────────────────────────────────────────────────────────────────
     def preset_screen(
         self,
@@ -603,6 +646,13 @@ class CompanyListingRepository(DuckDBRepository):
             return (), 0, ()
         scope = self._scope(search="", sector=sector, index=index, country=country, market=market,
                              industry=industry)
+        if preset in _PRESET_MULTI_YEAR:
+            metric, min_value, years = _PRESET_MULTI_YEAR[preset]
+            qualifying = self.sustained_metric_tickers(
+                tickers=[rec.get("ticker", "") for rec in scope],
+                metric=metric, min_value=min_value, years=years,
+            )
+            scope = [rec for rec in scope if rec.get("ticker", "") in qualifying]
         offset = max(0, (page - 1) * page_size)
         sort = sort or SortSpec()
         if not scope:

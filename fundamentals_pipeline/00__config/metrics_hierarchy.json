@@ -10,6 +10,8 @@
     "Returns": [
       { "metric": "ROA %",   "unit": "percent", "requires_market_data": false },
       { "metric": "ROE %",   "unit": "percent", "requires_market_data": false },
+      { "metric": "ROE % (5Y Avg)",  "unit": "percent", "requires_market_data": false },
+      { "metric": "ROE % (10Y Avg)", "unit": "percent", "requires_market_data": false },
       { "metric": "ROIC %",  "unit": "percent", "requires_market_data": false },
       { "metric": "ROCE %",  "unit": "percent", "requires_market_data": false },
       { "metric": "CROIC %", "unit": "percent", "requires_market_data": false }

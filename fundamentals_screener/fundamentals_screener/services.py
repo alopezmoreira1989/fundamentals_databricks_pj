@@ -442,7 +442,7 @@ _PRESET_DEFINITIONS: dict[str, PresetDefinition] = {
             PresetCriterion("Gross margin > 40%", "live"),
             PresetCriterion("Net margin > 20%", "live"),
             PresetCriterion("Margin of safety (Owner Earnings) ≥ 25%", "live"),
-            PresetCriterion("ROE ≥ 15% sustained, several years", "pending"),
+            PresetCriterion("ROE ≥ 15% sustained, 5 years", "live"),
         ),
     ),
     "lynch": PresetDefinition(

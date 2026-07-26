@@ -269,6 +269,19 @@ body.fs-app { font-family: var(--sans); background: var(--bg); color: var(--ink)
 .fs-app .nn-hero-top {
   display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; flex-wrap: wrap;
 }
+/* Hero icon thumbnail — same multiply-blend engraving treatment as the Investor Presets
+   portraits (.preset-portrait img), reused here for a consistent "art anchors the card" look
+   across all three screener modes. Square crop centered on the source illustration; these are
+   wide compositions (magnifying glass / iceberg), not head-and-shoulders portraits, but a
+   centered object-fit: cover crop reads fine at this size for both. */
+.fs-app .nn-hero-icon {
+  width: 84px; height: 84px; flex-shrink: 0; border-radius: 8px; overflow: hidden;
+  background: var(--bg-subtle);
+}
+.fs-app .nn-hero-icon img {
+  width: 100%; height: 100%; object-fit: cover; object-position: center;
+  mix-blend-mode: multiply; filter: contrast(1.05);
+}
 .fs-app .nn-title {
   font-family: var(--display); font-style: italic; font-variation-settings: "opsz" 144;
   font-weight: 500; font-size: 26px; letter-spacing: -.01em; margin: 6px 0 0; color: var(--ink);

@@ -3,9 +3,12 @@ Included by netnet.html. Context needed: level, stats (NetNetStats), hide_value_
 shared_qs, sector, country, market (for the level pills to carry the rest of the state
 forward, since they're plain full-reload links, not part of the filter <form> below).
 {% endcomment %}
-{% load humanize %}
+{% load static humanize %}
 <div class="nn-hero mb-4">
   <div class="nn-hero-top">
+    <div class="nn-hero-icon">
+      <img src="{% static 'fundamentals_screener/icons/netnet.png' %}" alt="">
+    </div>
     <div class="nn-hero-intro">
       <span class="eyebrow accent">Graham &middot; Deep Value</span>
       <h1 class="nn-title">Companies trading below liquidation value</h1>
