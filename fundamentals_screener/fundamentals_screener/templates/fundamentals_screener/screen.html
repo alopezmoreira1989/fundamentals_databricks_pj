@@ -87,13 +87,22 @@
      full page reload. Delayed by .15s so a fast local response never visibly flickers. */
   #scr-results.scr-loading { opacity: .45; transition: opacity .15s ease .15s; pointer-events: none; }
   #scr-results { transition: opacity .1s ease; }
+
+  /* Unified hero+filter card (merges what used to be two separate cards): a bigger icon than
+     Net-Net Finder's 84px (148px, scoped to just this page via .scr-hero — .nn-hero-icon
+     itself stays 84px everywhere else) since there's no stats block competing for space here,
+     plus a rule + a Fraunces-display "Screener" heading separating the editorial intro from
+     the actual filter form below it. */
+  .scr-hero .nn-hero-icon { width: 148px; height: 148px; }
+  .scr-hero-divider { border: none; border-top: 1px solid var(--rule-soft); margin: 26px 0 22px; }
+  .scr-filter-heading { font-family: var(--display); font-size: 1.28rem; font-weight: 600; margin: 0 0 16px; }
 </style>
 {% endblock %}
 
 {% block content %}
   {% include "fundamentals_screener/_mode_nav.html" %}
 
-  <div class="nn-hero mb-4">
+  <div class="nn-hero scr-hero mb-4">
     <div class="nn-hero-top">
       <div class="nn-hero-icon">
         <img src="{% static 'fundamentals_screener/icons/general.png' %}" alt="">
@@ -108,10 +117,10 @@
         </p>
       </div>
     </div>
-  </div>
 
-  <div class="p-4 bg-white rounded-3 shadow-sm mb-4">
-    <h2 class="h3 mb-3">Screener</h2>
+    <hr class="scr-hero-divider">
+
+    <h2 class="scr-filter-heading">Screener</h2>
     <form method="get" id="scr-filter-form">
       {# Keep the active sort when the filter form is re-submitted. #}
       <input type="hidden" name="sort" value="{{ sort_key }}">
