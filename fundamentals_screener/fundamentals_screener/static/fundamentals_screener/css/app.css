@@ -273,9 +273,12 @@ body.fs-app { font-family: var(--sans); background: var(--bg); color: var(--ink)
    portraits (.preset-portrait img), reused here for a consistent "art anchors the card" look
    across all three screener modes. Square crop centered on the source illustration; these are
    wide compositions (magnifying glass / iceberg), not head-and-shoulders portraits, but a
-   centered object-fit: cover crop reads fine at this size for both. */
+   centered object-fit: cover crop reads fine at this size for both. 180px is Net-Net Finder's
+   own size (this hero has no divider/second section competing for vertical space, unlike the
+   merged General Screener card, which overrides this back down to 148px via its own more
+   specific .scr-hero .nn-hero-icon rule in screen.html). */
 .fs-app .nn-hero-icon {
-  width: 84px; height: 84px; flex-shrink: 0; border-radius: 8px; overflow: hidden;
+  width: 180px; height: 180px; flex-shrink: 0; border-radius: 8px; overflow: hidden;
   background: var(--bg-subtle);
 }
 .fs-app .nn-hero-icon img {

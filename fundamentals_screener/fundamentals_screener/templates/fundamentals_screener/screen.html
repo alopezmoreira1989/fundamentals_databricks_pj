@@ -88,11 +88,12 @@
   #scr-results.scr-loading { opacity: .45; transition: opacity .15s ease .15s; pointer-events: none; }
   #scr-results { transition: opacity .1s ease; }
 
-  /* Unified hero+filter card (merges what used to be two separate cards): a bigger icon than
-     Net-Net Finder's 84px (148px, scoped to just this page via .scr-hero — .nn-hero-icon
-     itself stays 84px everywhere else) since there's no stats block competing for space here,
-     plus a rule + a Fraunces-display "Screener" heading separating the editorial intro from
-     the actual filter form below it. */
+  /* Unified hero+filter card (merges what used to be two separate cards): 148px icon (smaller
+     than Net-Net Finder's own 180px .nn-hero-icon default, overridden back down here via this
+     more specific .scr-hero rule) since this card also has the filter form + toolbar below it
+     competing for vertical space, unlike Net-Net Finder's hero which stays hero-only, plus a
+     rule + a Fraunces-display "Screener" heading separating the editorial intro from the
+     actual filter form below it. */
   .scr-hero .nn-hero-icon { width: 148px; height: 148px; }
   .scr-hero-divider { border: none; border-top: 1px solid var(--rule-soft); margin: 26px 0 22px; }
   .scr-filter-heading { font-family: var(--display); font-size: 1.28rem; font-weight: 600; margin: 0 0 16px; }
