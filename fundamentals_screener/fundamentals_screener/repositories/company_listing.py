@@ -110,7 +110,9 @@ _PRESET_COLUMNS: dict[str, tuple[str, ...]] = {
     "graham": ("Current Ratio", "P/E", "P/B"),
     "buffett": ("Debt / Equity", "Gross Margin %", "Net Margin %", "MoS % (Owner Earnings, FY)",
                 "ROE % (5Y Avg)"),
-    "lynch": ("Debt / Equity", "Current Ratio", "ROE %"),
+    # "EPS CAGR (5Y) %" is display-only (no threshold of its own — see _lynch_where, which
+    # doesn't reference it); "PEG" is both displayed and the actual filter.
+    "lynch": ("Debt / Equity", "Current Ratio", "ROE %", "EPS CAGR (5Y) %", "PEG"),
 }
 
 
@@ -136,8 +138,10 @@ def _buffett_where(alias: dict[str, str]) -> str:
 
 
 def _lynch_where(alias: dict[str, str]) -> str:
-    de, cr, roe = alias["Debt / Equity"], alias["Current Ratio"], alias["ROE %"]
-    return f"p.{de} < 0.6 AND p.{cr} >= 1 AND p.{roe} > 15"
+    de, cr, roe, peg = (
+        alias["Debt / Equity"], alias["Current Ratio"], alias["ROE %"], alias["PEG"],
+    )
+    return f"p.{de} < 0.6 AND p.{cr} >= 1 AND p.{roe} > 15 AND p.{peg} < 1"
 
 
 _PRESET_WHERE: dict[str, Any] = {

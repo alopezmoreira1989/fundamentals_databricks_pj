@@ -7,9 +7,10 @@
 # MAGIC - **Returns** — ROA, ROE, ROIC, ROCE, CROIC (as %, end-of-year denominators)
 # MAGIC - **Free Cash Flow** — Operating CF − CapEx
 # MAGIC - **YoY Growth** — Revenue, Net Income, Operating CF, FCF
+# MAGIC - **Multi-Year Growth** — EPS CAGR (5Y), split-adjusted, point-in-time
 # MAGIC - **Leverage** — Debt/Equity, Debt/Assets
 # MAGIC - **Liquidity** — Current Ratio
-# MAGIC - **Valuation multiples** — P/E, P/S, P/FCF, P/B, EV, EV/EBITDA *(requires `market_data`)*
+# MAGIC - **Valuation multiples** — P/E, PEG, P/S, P/FCF, P/B, EV, EV/EBITDA *(requires `market_data`)*
 # MAGIC - **Yields** — Earnings, Sales, FCF, Op Cash Flow, Book, EBITDA Yield *(requires `market_data`)*
 # MAGIC
 # MAGIC **Output table:** `{catalog}.{schema}.financials_metrics` (long format, one row per
@@ -150,7 +151,55 @@ wide = (
             F.col("Shares Diluted") * F.coalesce(F.col("_split_factor"), F.lit(1.0)),
         ),
     )
+    # _eps_adj: split-adjusted EPS Diluted, the inverse operation of _shares_adj above (same
+    # _split_factor — EPS = NI/shares, so if shares are scaled up by `factor` to match today's
+    # post-split basis, EPS must be scaled DOWN by that same factor to stay consistent).
+    # Feeds the EPS CAGR (5Y) % self-join below; mirrors 23__intrinsic_value.py's own
+    # EPS_adj = EPS / factor (there computed as a disposable internal Graham Revised input —
+    # here it becomes a real, published metric, see the self-join right below).
+    .withColumn(
+        "_eps_adj",
+        F.when(
+            F.col("EPS Diluted").isNotNull(),
+            F.col("EPS Diluted") / F.coalesce(F.col("_split_factor"), F.lit(1.0)),
+        ),
+    )
     .drop("_split_factor")
+)
+
+# ── Trailing EPS CAGR (5Y, [3,5]y fallback) — "EPS CAGR (5Y) %" ────────────────────────────
+# Ports 23__intrinsic_value.py's own point-in-time Graham-Revised growth input (lines ~280-348)
+# almost verbatim: same window (base_year in [fiscal_year-5, fiscal_year-3], picking the
+# smallest/longest-span base_year via row_number()), same >0 gate on both split-adjusted EPS
+# endpoints. 23's own copy is a raw fraction that's computed then discarded (never published);
+# this becomes a first-class metric, × 100 to match this file's percent-metric convention (ROE %,
+# Net Income YoY %, ...) rather than 23's raw-fraction convention (that one feeds a formula, not
+# a display column — a deliberate divergence, not an oversight).
+_eps_base = wide.select("ticker", "fiscal_year", "_eps_adj").filter(F.col("_eps_adj") > 0)
+_eps_pairs = (
+    _eps_base
+    .join(
+        _eps_base
+        .withColumnRenamed("fiscal_year", "base_year")
+        .withColumnRenamed("_eps_adj", "_base_eps_adj"),
+        on="ticker",
+    )
+    .filter(
+        (F.col("base_year") >= F.col("fiscal_year") - 5)
+        & (F.col("base_year") <= F.col("fiscal_year") - 3)
+    )
+)
+_eps_cagr_w = Window.partitionBy("ticker", "fiscal_year").orderBy(F.col("base_year").asc())
+_eps_cagr = (
+    _eps_pairs.withColumn("_rn", F.row_number().over(_eps_cagr_w))
+    .filter(F.col("_rn") == 1)
+    .withColumn("_n", (F.col("fiscal_year") - F.col("base_year")).cast("double"))
+    .withColumn(
+        "EPS CAGR (5Y) %",
+        (F.pow(F.col("_eps_adj") / F.col("_base_eps_adj"), F.lit(1.0) / F.col("_n")) - F.lit(1.0))
+        * 100,
+    )
+    .select("ticker", "fiscal_year", "EPS CAGR (5Y) %")
 )
 
 # COMMAND ----------
@@ -204,6 +253,7 @@ _strict_haircut   = _NET_NET_HAIRCUTS["strict"]
 
 metrics_wide = (
     wide
+    .join(_eps_cagr, on=["ticker", "fiscal_year"], how="left")
     # ── Margins (%) ───────────────────────────────────────────────────────────
     .withColumn("Gross Margin %",     safe_div("Gross Profit",    "Revenue") * 100)
     .withColumn("Operating Margin %", safe_div("Operating Income","Revenue") * 100)
@@ -573,6 +623,8 @@ base_metric_cols = [
     "Op Cash Flow Margin %",
     # Growth — YoY
     "Revenue YoY %", "Net Income YoY %", "Operating Cash Flow YoY %", "Free Cash Flow YoY %",
+    # Growth — Multi-Year
+    "EPS CAGR (5Y) %",
     # Leverage
     "Debt / Equity", "Debt / Assets",
     # Financial Health — Solvency / Coverage
@@ -937,6 +989,17 @@ if pe_mcap is not None:
         .pivot("concept")
         .agg(F.first("value"))
         .join(pe_mcap, on=["ticker", "fiscal_year"], how="inner")
+        # val_wide is normally a SEPARATE lineage from the base block's `metrics_wide` (re-derived
+        # from `raw` above, not reused — see this file's own precedent on _tbv_val). Deliberate,
+        # narrow exception here: "EPS CAGR (5Y) %" is a non-trivial windowed self-join (see the
+        # base block), and re-deriving it a second time would duplicate that failure-prone logic
+        # rather than just a formula — a single-column join of the already-computed result is a
+        # smaller divergence than that duplication would be. `how="left"` preserves val_wide's own
+        # (market-cap-gated) row grain; PEG below is NULL wherever this doesn't match.
+        .join(
+            metrics_wide.select("ticker", "fiscal_year", "EPS CAGR (5Y) %"),
+            on=["ticker", "fiscal_year"], how="left",
+        )
     )
 
     def safe_div_col(num, den):
@@ -990,7 +1053,7 @@ if pe_mcap is not None:
     )
 
     val_metric_cols = [
-        "P/E", "P/S", "P/FCF", "P/B", "EV", "EV/EBITDA",
+        "P/E", "PEG", "P/S", "P/FCF", "P/B", "EV", "EV/EBITDA",
         "Earnings Yield %", "Sales Yield %", "FCF Yield %",
         "Op Cash Flow Yield %", "Book Yield %", "EBITDA Yield %",
         "Dividend Yield %", "Buyback Yield %", "Shareholder Yield %",
@@ -1009,6 +1072,16 @@ if pe_mcap is not None:
             F.when(
                 F.col("Net Income").isNotNull() & (F.col("Net Income") > 0),
                 safe_div_col(F.col("market_cap"), F.col("Net Income")),
+            ))
+        # PEG = P/E ÷ EPS CAGR (5Y) %. Gated on P/E already being non-NULL (it's NULL whenever
+        # Net Income <= 0, so this carries that gate forward without re-stating it) AND EPS CAGR
+        # (5Y) % > 0 — a shrinking-earnings company's PEG is meaningless, mirroring
+        # valuation.py's eps_cagr()'s own > 0 reasoning.
+        .withColumn("PEG",
+            F.when(
+                F.col("P/E").isNotNull()
+                & F.col("EPS CAGR (5Y) %").isNotNull() & (F.col("EPS CAGR (5Y) %") > 0),
+                safe_div_col(F.col("P/E"), F.col("EPS CAGR (5Y) %")),
             ))
         .withColumn("P/S",       safe_div_col(F.col("market_cap"), F.col("Revenue")))
         .withColumn("P/FCF",     safe_div_col(F.col("market_cap"), F.col("_fcf")))
