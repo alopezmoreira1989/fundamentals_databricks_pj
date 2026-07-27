@@ -29,7 +29,7 @@ _META = {
             "GRAHAMEPS_NEGATIVE_BASE", "GRAHAM_MULTIYEAR_FAILSOTHER",
             "BUFF1", "BUFFNULLPASS", "BUFFNULLBUTFAILS", "BUFFTOOLOWMOS",
             "BUFFROE_SUSTAINED", "BUFFROE_ONEDIP", "BUFFROE_SHORTHISTORY", "BUFFROE_FAILSOTHER",
-            "LYNCH1", "LYNCHFAIL",
+            "LYNCH1", "LYNCHFAIL", "LYNCHPEGFAIL",
         )
     ]
 }
@@ -167,15 +167,28 @@ _METRIC_ROWS = [
     ("BUFFTOOLOWMOS", "Net Margin %", "percent", 2024, 22.0, "FY"),
     ("BUFFTOOLOWMOS", "MoS % (Owner Earnings, FY)", "percent", 2024, 5.0, "FY"),
 
-    # LYNCH1: passes all three criteria.
+    # LYNCH1: passes all criteria, including PEG < 1 (issue #280).
     ("LYNCH1", "Debt / Equity", "ratio", 2024, 0.2, "FY"),
     ("LYNCH1", "Current Ratio", "ratio", 2024, 1.5, "FY"),
     ("LYNCH1", "ROE %", "percent", 2024, 20.0, "FY"),
+    ("LYNCH1", "EPS CAGR (5Y) %", "percent", 2024, 20.0, "FY"),
+    ("LYNCH1", "PEG", "ratio", 2024, 0.75, "FY"),
 
-    # LYNCHFAIL: ROE too low.
+    # LYNCHFAIL: ROE too low — PEG/EPS CAGR are given passing values too, so this fails for
+    # exactly the one reason the test targets (ROE), not incidentally for a missing PEG.
     ("LYNCHFAIL", "Debt / Equity", "ratio", 2024, 0.2, "FY"),
     ("LYNCHFAIL", "Current Ratio", "ratio", 2024, 1.5, "FY"),
     ("LYNCHFAIL", "ROE %", "percent", 2024, 5.0, "FY"),
+    ("LYNCHFAIL", "EPS CAGR (5Y) %", "percent", 2024, 20.0, "FY"),
+    ("LYNCHFAIL", "PEG", "ratio", 2024, 0.75, "FY"),
+
+    # LYNCHPEGFAIL: passes Debt/Equity, Current Ratio, and ROE, but PEG >= 1 — proves PEG
+    # composes with the rest of Lynch's predicate rather than being ignored.
+    ("LYNCHPEGFAIL", "Debt / Equity", "ratio", 2024, 0.2, "FY"),
+    ("LYNCHPEGFAIL", "Current Ratio", "ratio", 2024, 1.5, "FY"),
+    ("LYNCHPEGFAIL", "ROE %", "percent", 2024, 20.0, "FY"),
+    ("LYNCHPEGFAIL", "EPS CAGR (5Y) %", "percent", 2024, 20.0, "FY"),
+    ("LYNCHPEGFAIL", "PEG", "ratio", 2024, 1.5, "FY"),
 
     # BUFFROE_SUSTAINED: passes the other 3 latest-FY criteria AND has ROE % >= 15 in every one
     # of the last 5 fiscal years — the "sustained" criterion's passing shape.
@@ -555,6 +568,25 @@ def test_lynch_passes_and_fails_as_expected(repo):
     tickers = {r.ticker for r in rows}
     assert "LYNCH1" in tickers
     assert "LYNCHFAIL" not in tickers
+
+
+def test_lynch_peg_below_one_passes(repo):
+    rows, _, _ = repo.preset_screen(preset="lynch")
+    row = next(r for r in rows if r.ticker == "LYNCH1")
+    assert row.values["PEG"] == 0.75
+    assert row.values["EPS CAGR (5Y) %"] == 20.0
+
+
+def test_lynch_peg_at_or_above_one_fails(repo):
+    """PEG < 1 composes with the rest of Lynch's predicate — a real Debt/Equity, Current
+    Ratio, and ROE pass doesn't exempt a ticker from a PEG >= 1 failure."""
+    rows, _, _ = repo.preset_screen(preset="lynch")
+    assert "LYNCHPEGFAIL" not in {r.ticker for r in rows}
+
+
+def test_lynch_eps_cagr_criterion_is_live_not_pending():
+    definition = services.get_preset_definition("lynch")
+    assert all(c.status == "live" for c in definition.criteria)
 
 
 def test_unrecognized_preset_returns_empty_not_a_crash(repo):

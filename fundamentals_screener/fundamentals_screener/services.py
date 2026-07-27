@@ -397,11 +397,13 @@ def get_net_net_snapshot(ticker: str) -> NetNetRow | None:
 
 
 # ── Investor Presets ─────────────────────────────────────────────────────────────────────
-# Static copy + criteria for each school. Live criteria are the latest-FY filters plus the
-# multi-year checks in `CompanyListingRepository._PRESET_MULTI_YEAR` that `preset_screen`
-# actually applies (Buffett's sustained ROE; Graham's positive-earnings/uninterrupted-dividend/
-# EPS-growth). Pending ones render in the UI (visually disabled) but are never filtered on —
-# currently only Lynch's EPS CAGR/PEG (issue #280), a separate, not-yet-built multi-year check.
+# Static copy + criteria for each school. All 3 schools are now fully live: each preset's own
+# `_PRESET_WHERE` latest-FY predicate (`repositories/company_listing.py`), plus — for Buffett/
+# Graham — the multi-year checks in `CompanyListingRepository._PRESET_MULTI_YEAR` (sustained
+# ROE; positive-earnings/uninterrupted-dividend/EPS-growth). Lynch's PEG < 1 is a plain latest-FY
+# predicate too (not a `_PRESET_MULTI_YEAR` check) — it just happens to filter on "PEG", a metric
+# the pipeline computes from multi-year EPS history (issue #280); "5-year EPS CAGR" is
+# display-only (shown as a column, no threshold of its own).
 _PRESET_DEFINITIONS: dict[str, PresetDefinition] = {
     "graham": PresetDefinition(
         key="graham",
@@ -462,8 +464,8 @@ _PRESET_DEFINITIONS: dict[str, PresetDefinition] = {
             PresetCriterion("Debt / Equity < 0.6", "live"),
             PresetCriterion("Current ratio ≥ 1", "live"),
             PresetCriterion("ROE > 15%", "live"),
-            PresetCriterion("5-year EPS CAGR", "pending"),
-            PresetCriterion("PEG < 1", "pending"),
+            PresetCriterion("5-year EPS CAGR", "live"),
+            PresetCriterion("PEG < 1", "live"),
         ),
     ),
 }
