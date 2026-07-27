@@ -397,10 +397,11 @@ def get_net_net_snapshot(ticker: str) -> NetNetRow | None:
 
 
 # ── Investor Presets ─────────────────────────────────────────────────────────────────────
-# Static copy + criteria for each school. Live criteria are the 10 latest-FY filters
-# `preset_screen` actually applies; pending ones render in the UI (visually disabled) but are
-# never filtered on — they depend on the milestone's separate Phase 0 historical-depth
-# investigation and shared multi-year repository method issue.
+# Static copy + criteria for each school. Live criteria are the latest-FY filters plus the
+# multi-year checks in `CompanyListingRepository._PRESET_MULTI_YEAR` that `preset_screen`
+# actually applies (Buffett's sustained ROE; Graham's positive-earnings/uninterrupted-dividend/
+# EPS-growth). Pending ones render in the UI (visually disabled) but are never filtered on —
+# currently only Lynch's EPS CAGR/PEG (issue #280), a separate, not-yet-built multi-year check.
 _PRESET_DEFINITIONS: dict[str, PresetDefinition] = {
     "graham": PresetDefinition(
         key="graham",
@@ -409,8 +410,7 @@ _PRESET_DEFINITIONS: dict[str, PresetDefinition] = {
         headline="Price, margin of safety, and little else.",
         description=(
             "The Intelligent Investor's classic criteria applied to today's universe: a solid "
-            "balance sheet, moderate multiples, and, once the historical depth allows it, "
-            "earnings stability and dividend record."
+            "balance sheet, moderate multiples, earnings stability, and dividend record."
         ),
         school="GRAHAM · DEFENSIVE INVESTOR",
         name="Benjamin Graham",
@@ -419,9 +419,9 @@ _PRESET_DEFINITIONS: dict[str, PresetDefinition] = {
             PresetCriterion("Current ratio ≥ 2", "live"),
             PresetCriterion("P/E ≤ 15", "live"),
             PresetCriterion("P/B ≤ 1.5 (or P/E × P/B ≤ 22.5)", "live"),
-            PresetCriterion("Positive earnings, several years", "pending"),
-            PresetCriterion("Uninterrupted dividend, several years", "pending"),
-            PresetCriterion("EPS growth ≥ 33%, several years", "pending"),
+            PresetCriterion("Positive earnings, several years", "live"),
+            PresetCriterion("Uninterrupted dividend, several years", "live"),
+            PresetCriterion("EPS growth ≥ 33%, several years", "live"),
         ),
     ),
     "buffett": PresetDefinition(

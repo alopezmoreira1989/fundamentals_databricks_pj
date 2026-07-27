@@ -146,12 +146,29 @@ _PRESET_WHERE: dict[str, Any] = {
     "lynch": _lynch_where,
 }
 
-# Multi-year criteria layered on top of _PRESET_WHERE's latest-FY predicate, as (metric,
-# min_value, years) — currently only Buffett's; Graham's earnings-stability/dividend-record and
-# Lynch's EPS CAGR/PEG are separate, deferred issues that can reuse the same
-# CompanyListingRepository.sustained_metric_tickers method with a different entry here.
-_PRESET_MULTI_YEAR: dict[str, tuple[str, float, int]] = {
-    "buffett": ("ROE %", 15.0, 5),
+# Multi-year criteria layered on top of _PRESET_WHERE's latest-FY predicate: each preset maps to
+# a tuple of tagged check-spec tuples, evaluated in sequence (each check only re-queries the
+# tickers that survived the prior one). Tags dispatch to the matching repository method via
+# CompanyListingRepository._qualifying_tickers:
+#   ("metric", metric, min_value, years)                       -> sustained_metric_tickers
+#   ("concept", concept, min_value, years)                     -> sustained_concept_tickers
+#   ("dividend", metric, min_value, years, min_years)          -> uninterrupted_dividend_tickers
+#   ("eps_growth", concept, years, min_growth)                 -> eps_growth_tickers
+# N=5 (years) and the 1.33x (33%) growth threshold both per the milestone's Phase 0 historical-
+# depth finding (issue #276): a 5-year window is well-covered for Net Income/EPS/ROE (91%+ of
+# tickers), and Graham's own "≥33% over several years" is the endpoint-ratio test (latest FY vs
+# FY-5), not a compounded per-year rate. min_years=3 on the dividend check is that same finding's
+# explicit call to tolerate a newer payer's shorter-but-real record rather than hard-requiring
+# the full 5 (see uninterrupted_dividend_tickers's own docstring for why dividends specifically
+# need this tolerance and Net Income/ROE don't). Lynch's EPS CAGR/PEG are a separate, deferred
+# issue (different, annualized-CAGR semantics) and not represented here yet.
+_PRESET_MULTI_YEAR: dict[str, tuple[tuple, ...]] = {
+    "buffett": (("metric", "ROE %", 15.0, 5),),
+    "graham": (
+        ("concept", "Net Income", 0.0, 5),
+        ("dividend", "Dividend Yield %", 0.0, 5, 3),
+        ("eps_growth", "EPS Diluted", 5, 1.33),
+    ),
 }
 
 
@@ -614,6 +631,175 @@ class CompanyListingRepository(DuckDBRepository):
             self._fetch_column(sql, [metric, list(tickers), years, years, min_value, years])
         )
 
+    def sustained_concept_tickers(
+        self, *, tickers: Sequence[str], concept: str, min_value: float, years: int,
+    ) -> frozenset[str]:
+        """Same "every one of the most recent `years` FY values >= `min_value`" test as
+        `sustained_metric_tickers`, but over `dashboard_data` (raw statement `concept`/`value`,
+        e.g. "Net Income") rather than `dashboard_metrics` (derived `metric`/`value`) — a raw
+        line item is never published as a derived metric, so a criterion built on one (Graham's
+        "positive earnings, several years") needs this table instead. `period_type = 'FY'`
+        scoping and the exact-`years`-count requirement match `sustained_metric_tickers` exactly;
+        kept as a separate method rather than a table/column parameter on that one since the two
+        source tables have different column names (`concept` vs `metric`).
+        """
+        if not tickers:
+            return frozenset()
+        sql = """
+            WITH recent AS (
+                SELECT ticker, value
+                FROM dashboard_data
+                WHERE concept = ? AND period_type = 'FY' AND value IS NOT NULL
+                  AND list_contains(?, ticker)
+                QUALIFY row_number() OVER (PARTITION BY ticker ORDER BY fiscal_year DESC) <= ?
+            )
+            SELECT ticker
+            FROM recent
+            GROUP BY ticker
+            HAVING count(*) = ?
+               AND count(*) FILTER (WHERE value >= ?) = ?
+        """
+        return frozenset(
+            self._fetch_column(sql, [concept, list(tickers), years, years, min_value, years])
+        )
+
+    def uninterrupted_dividend_tickers(
+        self, *, tickers: Sequence[str], metric: str, min_value: float, years: int, min_years: int,
+    ) -> frozenset[str]:
+        """Tickers (out of `tickers`) with a *contiguous*, *currently active* run of >= `min_value`
+        `metric` (e.g. "Dividend Yield %") FY values of at least `min_years`, counting back from
+        each ticker's own most recent fiscal year on record — capped at looking back `years` years.
+
+        Deliberately NOT `sustained_metric_tickers` (which just requires the latest `years`
+        non-null rows to all clear the bar): dividend metrics are only ever published for years a
+        dividend was actually paid (a non-payer/cut year has no row at all, not a zero row — see
+        this repository's other dividend-metric callers), so `sustained_metric_tickers`'s "latest
+        N non-null rows" window can silently reach past a real gap into a company's paying years
+        from *before* it stopped, incorrectly treating a lapsed payer as "sustained." Confirmed
+        against real fixture data before building this: an anchor a company's own most recent
+        reported fiscal year (over `dashboard_metrics` generally, not just this metric) is
+        required to catch that; anchoring to the *dataset-wide* max fiscal year instead was tried
+        first and wrongly excluded ~480 genuinely current payers (a lone outlier ticker with a
+        later fiscal year skewed the dataset-wide max).
+
+        `min_years` (not `years`) is the actual pass bar — a floor lower than `years` per the
+        milestone's Phase 0 historical-depth finding, which flagged that "uninterrupted dividend"
+        specifically should tolerate a newer payer's shorter-but-real record (e.g. 3 real years)
+        rather than hard-requiring the full window the way Buffett's ROE/Graham's earnings
+        criteria do — those two have no equivalent "omitted, not zeroed" row-shape and so don't
+        need this tolerance.
+        """
+        if not tickers:
+            return frozenset()
+        sql = """
+            WITH ticker_latest AS (
+                SELECT ticker, max(fiscal_year) AS latest_fy
+                FROM dashboard_metrics
+                WHERE period_type = 'FY' AND list_contains(?, ticker)
+                GROUP BY ticker
+            ),
+            div_rows AS (
+                SELECT ticker, fiscal_year,
+                    row_number() OVER (PARTITION BY ticker ORDER BY fiscal_year DESC) AS rn
+                FROM dashboard_metrics
+                WHERE metric = ? AND period_type = 'FY' AND value IS NOT NULL AND value >= ?
+                  AND list_contains(?, ticker)
+                QUALIFY rn <= ?
+            ),
+            runs AS (
+                SELECT ticker, fiscal_year, rn, (fiscal_year + rn) AS run_id
+                FROM div_rows
+            )
+            SELECT r1.ticker
+            FROM runs r1
+            JOIN runs r2 ON r2.ticker = r1.ticker AND r2.run_id = r1.run_id
+            JOIN ticker_latest t ON t.ticker = r1.ticker
+            WHERE r1.rn = 1 AND r1.fiscal_year >= t.latest_fy - 1
+            GROUP BY r1.ticker
+            HAVING count(*) >= ?
+        """
+        tickers_list = list(tickers)
+        return frozenset(
+            self._fetch_column(
+                sql,
+                [tickers_list, metric, min_value, tickers_list, years, min_years],
+            )
+        )
+
+    def eps_growth_tickers(
+        self, *, tickers: Sequence[str], concept: str, years: int, min_growth: float,
+    ) -> frozenset[str]:
+        """Tickers (out of `tickers`) whose latest-FY `concept` value (e.g. "EPS Diluted") is >=
+        `min_growth` times its value from exactly `years` fiscal years earlier — Graham's actual
+        "EPS growth >= 33% over several years" test (`min_growth=1.33`) is an endpoint-to-endpoint
+        comparison over a window, NOT a per-year compounded rate (that would be an absurdly high,
+        almost-never-met bar) and NOT the single-year "Net Income YoY %" metric already published
+        (a different, single-period figure, and Net Income rather than EPS specifically).
+
+        Both endpoints must be strictly positive: mirrors `23__intrinsic_value.py`'s own `eps > 0`
+        gate on its (unpublished, internal-only) EPS CAGR calc for the Graham Revised model — a
+        company recovering from a loss to any positive EPS isn't "33% growth", it's a different
+        (turnaround) situation this test isn't meant to capture. A ticker missing the exact
+        FY-`years`-ago row is excluded (insufficient history), matching this repository's existing
+        "no proof, no pass" convention (e.g. `sustained_metric_tickers`'s own exact-count
+        requirement).
+        """
+        if not tickers:
+            return frozenset()
+        sql = """
+            WITH eps_rows AS (
+                SELECT ticker, fiscal_year, value,
+                    row_number() OVER (PARTITION BY ticker ORDER BY fiscal_year DESC) AS rn
+                FROM dashboard_data
+                WHERE concept = ? AND period_type = 'FY' AND value IS NOT NULL
+                  AND list_contains(?, ticker)
+            ),
+            latest AS (
+                SELECT ticker, value AS latest_eps, fiscal_year AS latest_fy
+                FROM eps_rows WHERE rn = 1
+            ),
+            base AS (
+                SELECT e.ticker, e.value AS base_eps
+                FROM eps_rows e
+                JOIN latest l ON l.ticker = e.ticker
+                WHERE e.fiscal_year = l.latest_fy - ?
+            )
+            SELECT l.ticker
+            FROM latest l
+            JOIN base b ON b.ticker = l.ticker
+            WHERE l.latest_eps > 0 AND b.base_eps > 0 AND l.latest_eps >= b.base_eps * ?
+        """
+        return frozenset(
+            self._fetch_column(sql, [concept, list(tickers), years, min_growth])
+        )
+
+    def _qualifying_tickers(self, check: tuple, tickers: Sequence[str]) -> frozenset[str]:
+        """Dispatch one `_PRESET_MULTI_YEAR` check-spec tuple to its repository method — see
+        that constant's own comment for the tag/shape of each kind."""
+        kind = check[0]
+        if kind == "metric":
+            _, metric, min_value, years = check
+            return self.sustained_metric_tickers(
+                tickers=tickers, metric=metric, min_value=min_value, years=years,
+            )
+        if kind == "concept":
+            _, concept, min_value, years = check
+            return self.sustained_concept_tickers(
+                tickers=tickers, concept=concept, min_value=min_value, years=years,
+            )
+        if kind == "dividend":
+            _, metric, min_value, years, min_years = check
+            return self.uninterrupted_dividend_tickers(
+                tickers=tickers, metric=metric, min_value=min_value, years=years,
+                min_years=min_years,
+            )
+        if kind == "eps_growth":
+            _, concept, years, min_growth = check
+            return self.eps_growth_tickers(
+                tickers=tickers, concept=concept, years=years, min_growth=min_growth,
+            )
+        raise ValueError(f"unknown multi-year check kind: {kind!r}")
+
     # ── Investor Presets ─────────────────────────────────────────────────────────────────
     def preset_screen(
         self,
@@ -646,11 +832,9 @@ class CompanyListingRepository(DuckDBRepository):
             return (), 0, ()
         scope = self._scope(search="", sector=sector, index=index, country=country, market=market,
                              industry=industry)
-        if preset in _PRESET_MULTI_YEAR:
-            metric, min_value, years = _PRESET_MULTI_YEAR[preset]
-            qualifying = self.sustained_metric_tickers(
-                tickers=[rec.get("ticker", "") for rec in scope],
-                metric=metric, min_value=min_value, years=years,
+        for check in _PRESET_MULTI_YEAR.get(preset, ()):
+            qualifying = self._qualifying_tickers(
+                check, [rec.get("ticker", "") for rec in scope],
             )
             scope = [rec for rec in scope if rec.get("ticker", "") in qualifying]
         offset = max(0, (page - 1) * page_size)
