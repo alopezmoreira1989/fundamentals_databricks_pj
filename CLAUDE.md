@@ -71,12 +71,45 @@ Databricks analytical pipeline that ingests SEC EDGAR XBRL filings (10-K/10-Q) f
   Canadian ingestion — see the currency-alignment entry above — has since been fixed; that
   was a correctness gate, not a "dual-currency" feature, and is not reopened by this note.)
 - **`market_data` is frozen legacy** — no longer rebuilt. It was the calendar-year-aligned (last raw `close` per **calendar** year × FY `Shares Diluted`) price/cap table; its 0–11mo fiscal offset distorted multiples for non-December filers, so `12` no longer writes it and all consumers were migrated to `market_cap_asof`. The table is left in place for ad-hoc back-compat queries but receives no new data. Don't add new dependencies on it.
+- **`EPS CAGR (5Y) %` and `PEG` (2026-07) — the first real published metrics computed from a
+  multi-year EPS window, not a single-year snapshot.** Previously, a working trailing EPS CAGR
+  calculation existed only *inside* `23__intrinsic_value.py`, as a disposable internal input to
+  the Graham Revised valuation model (split-adjusted, point-in-time, 5y with a [3,5]y fallback
+  window) — computed, used once, then discarded; nothing published it. `22__derived_metrics.py`
+  now publishes it for real:
+  - **`EPS CAGR (5Y) %`** (base block) reuses the split-factor machinery `22` already computes
+    for `_shares_adj` (the cross-year share-count adjustment used by Net Buyback Yield %/
+    Piotroski's no-dilution signal) rather than re-deriving a second copy the way `23` does —
+    `_eps_adj = EPS Diluted / _split_factor`, the inverse of `_shares_adj`'s multiplication (EPS
+    = NI/shares, so if shares are scaled up by `factor` to match today's post-split basis, EPS
+    must be scaled *down* by the same factor). The CAGR window itself (base_year in
+    `[fiscal_year-5, fiscal_year-3]`, picking the smallest/longest-span base_year, both endpoints
+    required `> 0`) is ported from `23`'s own proven logic almost verbatim, but stored `× 100`
+    (a percent, matching every sibling growth metric — `23`'s own copy is a raw fraction since it
+    feeds a formula, not a display column; a deliberate, not overlooked, divergence).
+  - **`PEG`** (val block) = `P/E ÷ EPS CAGR (5Y) %`, gated on both being positive. `val_wide` is
+    normally a **separate lineage** from the base block's `metrics_wide` (re-derived from `raw`,
+    not reused — see the file's own comment on `_tbv_val` for the established precedent). PEG is
+    a deliberate, narrow exception: rather than re-deriving the whole CAGR self-join a second
+    time inside `val_wide`'s lineage (duplicating a non-trivial, failure-prone computation), a
+    single already-computed column is joined in from `metrics_wide` (`how="left"`, preserves
+    `val_wide`'s own market-cap-gated row grain).
+  - Both are registered in `00__config/metrics_hierarchy.json` (`Growth > Multi-Year`,
+    `Valuation > Price Multiples`) — required for `dashboard_metrics`'s LEFT JOIN against that
+    table to give them a category/sort_order at export time, same as any other metric.
+  - **Consumers**: `fundamentals_screener`'s Lynch Investor Presets criteria — `EPS CAGR (5Y) %`
+    display-only, `PEG < threshold` the actual filter (see the Investor Presets entry below) —
+    and Graham's own Strict-level EPS-growth criterion, which uses a *different*, literal-to-the-
+    book 3-year-rolling-average test (`eps_growth_avg_tickers`, screener-side, over the raw
+    `EPS Diluted` concept directly — not this published metric, which is a single-endpoint 5y
+    CAGR, a different definition serving a different consumer).
 - **Screener "modes" (`fundamentals_screener`) share one route + one nav pattern — established by
-  the Net-Net Finder (milestone "Net-Net Finder", issues #257–262), the first of a planned family
-  (later: Graham Defensive Checklist, Compounders — see that milestone's description). Follow
-  this same shape for the next mode rather than inventing a new one:**
+  the Net-Net Finder (milestone "Net-Net Finder", issues #257–262), the first of a planned family.
+  Investor Presets (below) is the second and, as of 2026-07, the family is General Screener /
+  Net-Net Finder / Investor Presets. Follow this same shape for the next mode rather than
+  inventing a new one:**
   - **One URL, one `?mode=` query param** on the existing `screen` view (`?mode=general` is the
-    default/omittable; a new mode gets its own value, e.g. `?mode=checklist`) — never a separate
+    default/omittable; a new mode gets its own value, e.g. `?mode=presets`) — never a separate
     URL route per mode. `views.screen()` branches on `mode` right at the top and delegates to a
     private `_<mode>_screen(request)` function; the general screener's own logic is untouched
     below that branch.
@@ -86,14 +119,27 @@ Databricks analytical pipeline that ingests SEC EDGAR XBRL filings (10-K/10-Q) f
     shares with the others (a precomputed `shared_qs` context key, built the same way in every
     mode's view — see `views.screen()`'s own `shared_qs` construction — never assembled ad hoc in
     a template with nested `{% if %}` chains).
-  - **Full-page reload, not AJAX, for both the mode switch and any mode-specific filter/level
-    control** — confirmed with the repo owner before building the Net-Net Finder specifically
-    because each mode's content differs far more (different hero, different columns, different
-    filter set) than the general screener's own auto-apply-filters fragment swap (`86ba440`) was
-    built for, so a partial-swap wouldn't save much. Every control stays a plain
-    `<a href="?...">` or `<form method="get">`, degrading correctly with JS disabled; an
-    `onchange="this.form.submit()"`-style auto-submit is fine as a convenience layered on top,
-    never a requirement.
+  - **AJAX mode-switching (superseded the original full-page-reload decision).** The mode nav,
+    and any mode-specific filter/level control, was originally full-page-reload-only — confirmed
+    deliberately when the Net-Net Finder was built, since at the time each mode's within-mode
+    interactions (filters, sort, pagination) weren't AJAX either, so a mode-switch partial-swap
+    wouldn't have saved much. Once every mode's own within-mode interactions became AJAX
+    (auto-apply filters, sort, pagination, level/preset pills), switching modes via full navigation
+    became the one slow step left, confirmed by real production latency measurements — so the
+    mode-nav itself was converted to AJAX too. Mechanism: `screener.js` (one shared static file,
+    loaded unconditionally by `base_screener.html`) delegates a `click` listener on `#main` for
+    `.nav-tabs a`; on click it `fetch()`es with an `X-Mode-Switch: 1` header, swaps `#main`'s
+    innerHTML, reads `X-Page-Title` (RFC-2047-decoded via `decodeURIComponent`/`quote()` — Django
+    MIME-encodes non-ASCII header values, e.g. an em dash, which `fetch()`'s `Headers.get()`
+    doesn't decode on its own) into `document.title`, `history.pushState`s, then re-invokes
+    `initModeContent()` to rewire the freshly-swapped mode's own within-mode listeners (`#main`
+    itself is never replaced, so its own delegated listener survives the swap). Server side:
+    `views._render_mode()` is a 3-tier responder per mode view — full page (`full_template`) /
+    `X-Mode-Switch` main-fragment (`main_template`, exactly the `{% block content %}` body,
+    included both by the full template and returned raw here — one source of truth) /
+    `X-Requested-With` narrow within-mode fragment (`fragment_template`, unchanged from before).
+    Browser back/forward (`popstate`) stays a full reload — deliberately out of scope, matches
+    what was actually asked for.
   - **Each mode gets its own dedicated template(s) and — if its own results list can plausibly
     exceed ~50 rows — Python-side pagination**, mirroring `views.PAGE_SIZE`/the general
     screener's own pagination-control markup. Confirmed the hard way on the Net-Net Finder: an
@@ -108,6 +154,79 @@ Databricks analytical pipeline that ingests SEC EDGAR XBRL filings (10-K/10-Q) f
     (a detail page shows a company's own numbers regardless), so a companion single-ticker method
     (e.g. `net_net_snapshot`) is typically warranted rather than filtering the bulk list down to
     one row.
+  - **CGI hosting caps how much AJAX mode-switching can help.** The `fundamentals_screener`
+    reference deployment (Dinahosting plain CGI, see External consumers below) has no persistent
+    process between requests, so every request — AJAX or not — still pays a full Python/Django
+    cold-start cost; confirmed via real production `curl` timing (~1.5–2.0s per request
+    uniformly, ~0.18s for a static asset) that this, not the mode-nav being full-reload, was the
+    real latency floor. A follow-up (splitting `fundamentals_pipeline/schemas.py`'s pandas-free
+    constants into `artifacts.py`, see Layout below) shaved cold-import time but confirmed DuckDB's
+    own Python binding imports pandas on any parameterized query regardless — a real, structural
+    ceiling on further gains within this stack, not a bug to keep chasing. Moving off CGI (e.g. a
+    persistent-process host) was investigated and explicitly deferred by the repo owner in the
+    short term — don't re-propose it without a fresh instruction to look at hosting again.
+
+- **Investor Presets (`?mode=presets`) — three schools (Graham/Buffett/Lynch), each with its own
+  criteria set, all fully live and evaluated at a user-chosen conservatism level.**
+  `services.py`'s `_PRESET_DEFINITIONS` holds each school's static copy (portrait, tagline,
+  headline); `repositories/company_listing.py`'s `_PRESET_WHERE` (a per-preset SQL-predicate
+  function over the latest-FY metric pivot) and `_preset_multi_year_checks` (per-preset,
+  per-level multi-year check specs) are what `preset_screen()` actually filters on.
+  - **Shared multi-year repository methods**, reusable across any preset's deferred/live
+    multi-year criteria rather than each one reimplementing its own window logic:
+    `sustained_metric_tickers` (a `dashboard_metrics` metric ≥ a threshold in every one of the
+    last N years, exact count — used by Buffett's sustained ROE), `sustained_concept_tickers`
+    (same shape, but over a raw `dashboard_data` *concept* like "Net Income" rather than a
+    derived `dashboard_metrics` metric — needed because a metric and a raw statement line item
+    are two different published tables with different column shapes),
+    `uninterrupted_dividend_tickers` (a *tolerant* variant — dividend rows are absent, not
+    zeroed, for a non-payer/cut year, so a plain "latest N non-null rows" window can silently
+    reach past a real gap into a
+    company's paying years from before it stopped; this one anchors to each ticker's own most
+    recent reporting year and requires a *contiguous* run of at least a floor, not the full
+    window, tolerating a newer payer's shorter-but-real record), `eps_growth_tickers` (single-
+    year endpoint EPS growth over N years — latest FY vs. FY−N, both required positive) and
+    `eps_growth_avg_tickers` (Graham's own literal EPS-growth test — 3-year averages at each end
+    of an N-year span, not single-year endpoints; used only at Graham's Strict level). All five
+    live in `CompanyListingRepository`; a preset's check-spec tuple is dispatched to the right one
+    via `_qualifying_tickers`.
+  - **Strict / Moderate / Relaxed conservatism levels**, one pill per school (mirrors the
+    Net-Net Finder's own level pill exactly, including CSS reuse — `level-btn`,
+    `level-dot--strict`, `level-dot--moderate`, `level-dot--relaxed`, zero new styles) but
+    rendered *inside* the school's own
+    card below the criteria list, not next to the school pill — the two pills answer different
+    questions ("which school" vs. "how conservative") and shouldn't compete for the same
+    "choose something" moment. **Pill display order is `("relaxed", "moderate", "strict")` in
+    both features** (`company_listing.PRESET_LEVELS` / `views._NET_NET_LEVELS`) — increasing
+    conservatism left to right, a deliberate cross-feature consistency choice; the two features'
+    *defaults* still differ (Net-Net defaults to Relaxed, Investor Presets defaults to Strict —
+    the repo owner's explicit choice, since Presets' criteria are otherwise this app's closest
+    analogue to a book's literal numbers, and the toughest reading should be the resting state)
+    and are hardcoded at each fallback site, not derived from the tuple's first element.
+    Per-preset, per-level threshold values (`_GRAHAM_THRESHOLDS`/`_BUFFETT_THRESHOLDS`/
+    `_LYNCH_THRESHOLDS` in `company_listing.py`) are the single source of truth both the SQL
+    predicates and the criteria-list label copy (`services.py`'s `_graham_criteria`/
+    `_buffett_criteria`/`_lynch_criteria`, invoked by `get_preset_definition(preset, level)`)
+    read from — the label text is never a second, hand-duplicated copy of the numbers. "Strict"
+    is Graham's own literal numbers where one genuinely exists (*The Intelligent Investor*'s
+    exact rules), *except* the dividend criterion's window — Graham's literal 20-year bar is
+    confirmed infeasible against real published data (dividend payers rarely have 20y of history
+    on record at all) and is capped at 10y, the export's own retention limit, instead. Buffett
+    and Lynch have no single quotable rule set (their criteria here are this project's own
+    synthesis of each investor's philosophy, not book quotes), so their "Moderate" tier is
+    exactly today's pre-levels live values, with Strict/Relaxed tightening/loosening from there.
+  - **`EPS CAGR (5Y) %` and `PEG`** (Lynch's remaining two criteria) are real published
+    `22__derived_metrics.py` metrics, not screener-side computations — see the "EPS CAGR (5Y) %
+    and PEG" bullet above. `EPS CAGR (5Y) %` is display-only at every level (no threshold of its
+    own); `PEG < threshold` is the actual filter.
+  - **The Django-side query/criteria work and the pipeline metric it depends on are two
+    separately-deployed changes** — merging the Django side does nothing until the *next*
+    scheduled Databricks pipeline run actually publishes the new metric into `dashboard_metrics`
+    (the GitHub Release is a snapshot, not live-queried). Confirmed as a real, temporary gap in
+    practice (Lynch's PEG filter returned 0 matches at every level, including Relaxed, for
+    several hours after the Django-side PR shipped, until the next pipeline run backfilled the
+    metric) — not a bug to chase if you see it, but worth flagging to the repo owner if a new
+    preset criterion depends on a metric that was *just* added to the pipeline.
 
 ## Operational gotchas
 
@@ -144,7 +263,7 @@ Databricks analytical pipeline that ingests SEC EDGAR XBRL filings (10-K/10-Q) f
 ## Layout
 
 - `00__config/` — tickers list, XBRL concept map, metric hierarchies, master-table builders, `valuation_assumptions.json`, `backtest_archetypes.json`
-- `fundamentals_pipeline/` — the installable package (`pyproject.toml` at repo root) and the project's single source of truth. Its **importable** public modules (pure Python, no Spark/Streamlit/Django dep, unit-tested) sit at the top of the package alongside the numbered stage dirs: `schemas.py` (export↔app artifact contract), `valuation.py` (scalar Graham/DCF/Owner-Earnings/EPS-CAGR refs), `periods.py` (Q4 arithmetic), `backtest.py` (as-of/no-look-ahead, predicate eval, CAGR/drawdown/vol/Sharpe), `splits.py` (cumulative split factor), `identity.py` (cross-market ticker-collision guard + company-name matching), `tickers_universe.py` (pure CSV parsing for non-US ticker-universe sources), `fx.py` (currency-conversion helper — see the currency-alignment convention above). The `NN__` subdirectories (below) are Databricks notebook stages — not importable. The Django `web/` app imports these modules as a public API and never reimplements them. Exempt from the `NN__` filename rule (they're library modules, not stages) — see the naming-convention exception under Conventions.
+- `fundamentals_pipeline/` — the installable package (`pyproject.toml` at repo root) and the project's single source of truth. Its **importable** public modules (pure Python, no Spark/Streamlit/Django dep, unit-tested) sit at the top of the package alongside the numbered stage dirs: `artifacts.py` (pandas-free: `ARTIFACT_NAMES`, `SchemaError`, `META_REQUIRED_KEYS`/`validate_meta`/`assert_meta` and the raw column-spec dicts), `schemas.py` (re-exports everything in `artifacts.py` for backward compat, plus the pandas-dependent dtype-level checks — `dtype_family`/`validate_artifact`/`assert_artifact`; split from `artifacts.py` 2026-07 because a caller needing only the artifact-name constants — `fundamentals_screener`'s request-path DuckDB connection setup — was paying pandas's ~400ms cold-import cost on every request under its CGI deployment just to read a plain string tuple; see the AJAX-mode-switching entry above for why that mattered), `valuation.py` (scalar Graham/DCF/Owner-Earnings/EPS-CAGR refs), `periods.py` (Q4 arithmetic), `backtest.py` (as-of/no-look-ahead, predicate eval, CAGR/drawdown/vol/Sharpe), `splits.py` (cumulative split factor), `identity.py` (cross-market ticker-collision guard + company-name matching), `tickers_universe.py` (pure CSV parsing for non-US ticker-universe sources), `fx.py` (currency-conversion helper — see the currency-alignment convention above). The `NN__` subdirectories (below) are Databricks notebook stages — not importable. The Django `web/` app imports these modules as a public API and never reimplements them. Exempt from the `NN__` filename rule (they're library modules, not stages) — see the naming-convention exception under Conventions.
 - `10__ingestion/` — parallel SEC (8-worker, rate-limited) and yfinance fetch. `12` also prices `BENCHMARK_TICKERS` (SPY) into `market_prices_daily` for the backtester (not in `config.tickers` — no fundamentals).
 - `20__transformation/` — annual merge, quarterly derivation, pruning, derived metrics, intrinsic value
 - `30__analysis/` — ad-hoc validation queries; `36__run_log_report.py` reads the run-log
