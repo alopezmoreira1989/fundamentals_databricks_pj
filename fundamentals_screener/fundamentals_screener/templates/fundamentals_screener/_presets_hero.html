@@ -1,12 +1,19 @@
 {% comment %}
 Included by presets.html. Context needed: preset, presets (tuple of valid keys, display
 order), level, levels (tuple of valid conservatism-level keys, display order), definition
-(PresetDefinition for the ACTIVE preset + level — the pill loop below keys its dot color off
+(PresetDefinition for the ACTIVE preset + level — the pill loops below key their dot color off
 the preset/level string directly in CSS, same "kept in sync by hand" convention
 _netnet_hero.html's level-dot classes use), stats (PresetStats), portrait_path (the static
 path for the active preset's portrait), shared_qs (for the pill links to carry sector/
 country/market forward, since they're plain full-reload links, not part of the filter
 <form> below).
+
+Two separate pill groups, deliberately NOT adjacent: the school pill (Graham/Buffett/Lynch)
+sits at the top, right below the hero intro/stats, since it picks WHICH card renders below.
+The conservatism-level pill (Strict/Moderate/Relaxed) sits inside that card's own content
+column, after the criteria list — it's a property of the currently-shown investor's card, not
+a second "which school" choice, so it reads as part of that card rather than competing with
+the school pill for the same "choose something" moment.
 {% endcomment %}
 {% load static humanize %}
 <div class="nn-hero mb-4">
@@ -32,25 +39,14 @@ country/market forward, since they're plain full-reload links, not part of the f
     </div>
   </div>
 
-  {% with base_qs=shared_qs %}
   <div class="levels" role="group" aria-label="Investment school">
     {% for key in presets %}
       <a class="level-btn {% if preset == key %}level-btn--active{% endif %}"
-         href="?mode=presets&amp;preset={{ key }}&amp;level={{ level }}{% if base_qs %}&amp;{{ base_qs }}{% endif %}">
+         href="?mode=presets&amp;preset={{ key }}&amp;level={{ level }}{% if shared_qs %}&amp;{{ shared_qs }}{% endif %}">
         <span class="level-dot level-dot--{{ key }}"></span>{{ key|title }}
       </a>
     {% endfor %}
   </div>
-
-  <div class="levels mt-2" role="group" aria-label="Conservatism level">
-    {% for lvl in levels %}
-      <a class="level-btn {% if level == lvl %}level-btn--active{% endif %}"
-         href="?mode=presets&amp;preset={{ preset }}&amp;level={{ lvl }}{% if base_qs %}&amp;{{ base_qs }}{% endif %}">
-        <span class="level-dot level-dot--{{ lvl }}"></span>{{ lvl|title }}
-      </a>
-    {% endfor %}
-  </div>
-  {% endwith %}
 
   <div class="preset-detail">
     <div class="preset-portrait">
@@ -74,6 +70,17 @@ country/market forward, since they're plain full-reload links, not part of the f
           </li>
         {% endfor %}
       </ul>
+
+      {% with base_qs=shared_qs %}
+      <div class="levels mt-3" role="group" aria-label="Conservatism level">
+        {% for lvl in levels %}
+          <a class="level-btn {% if level == lvl %}level-btn--active{% endif %}"
+             href="?mode=presets&amp;preset={{ preset }}&amp;level={{ lvl }}{% if base_qs %}&amp;{{ base_qs }}{% endif %}">
+            <span class="level-dot level-dot--{{ lvl }}"></span>{{ lvl|title }}
+          </a>
+        {% endfor %}
+      </div>
+      {% endwith %}
     </div>
   </div>
 </div>
