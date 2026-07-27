@@ -99,13 +99,15 @@ sync command via cron/deploy-hook — there's no reason not to.
 Ported from `web/`'s `apps/companies`, `apps/screener`, `apps/valuation`:
 
 - **Screener** (`/`): paginated, multi-metric, filterable (sector/industry/index/country/
-  market) company table, every column sortable, state in the URL (bookmarkable). Two **modes**
-  behind one route/`?mode=` param — **General Screener** (the table above, default) and
-  **Net-Net Finder** (`?mode=netnet`, below) — sharing only the sector/country/market filters,
-  switched via a plain full-reload mode-nav tab bar. First of a planned family of curated
-  screener modes (see the "Net-Net Finder" milestone's description); follow its established
-  pattern (one route/one `?mode=`, a shared mode-nav partial, full-reload-not-AJAX for the mode
-  and any mode-specific controls, Python-side pagination once a mode's own result set can
+  market) company table, every column sortable, state in the URL (bookmarkable). Three **modes**
+  behind one route/`?mode=` param — **General Screener** (the table above, default),
+  **Net-Net Finder** (`?mode=netnet`, below), and **Investor Presets** (`?mode=presets`, below)
+  — sharing only the sector/country/market filters, switched via one shared mode-nav tab bar.
+  The mode switch (and any mode-specific filter/level control) is AJAX — a `fetch()` swap of the
+  page's `#main` region, not a full reload — layered on top of a design that degrades correctly
+  with JS disabled (every control is still a plain `<a href="?...">` or `<form method="get">`).
+  Net-Net Finder was the first of this family; follow its established pattern (one route/one
+  `?mode=`, a shared mode-nav partial, Python-side pagination once a mode's own result set can
   plausibly exceed ~50 rows) for the next one rather than inventing a new shape.
 - **Net-Net Finder** (`?mode=netnet`): Graham-style deep-value screen — companies trading below
   their net current asset value (NCAV), at three liquidation-conservatism levels (**Relaxed** /
@@ -119,6 +121,20 @@ Ported from `web/`'s `apps/companies`, `apps/screener`, `apps/valuation`:
   detail**'s Valuation tab and the standalone **Valuation** page (below) for any ticker with NCAV
   data at any level — including a negative one, shown deliberately (a company's own numbers,
   not a screened/filtered view).
+- **Investor Presets** (`?mode=presets`): three classic investor "schools" — **Graham**
+  (Defensive Investor), **Buffett** (Quality Compounder), **Lynch** (GARP) — each its own
+  criteria set, portrait card, and company table. Every criterion is fully live (filters real
+  data), including multi-year checks (Graham's positive-earnings/uninterrupted-dividend/EPS-
+  growth history, Buffett's sustained ROE) and Lynch's `PEG`/`EPS CAGR (5Y)` (real published
+  pipeline metrics, not screener-side math). A second pill inside each school's own card — below
+  its criteria list, not next to the school pill — picks a conservatism level: **Strict**
+  (default; the investor's own literal numbers where a book quote genuinely exists, e.g.
+  Graham's exact rules from *The Intelligent Investor*) / **Moderate** (today's baseline
+  thresholds for Buffett/Lynch, who have no single quotable rule set) / **Relaxed** (loosened,
+  for more matches — since AND'ing several real criteria together can otherwise leave very few
+  or zero companies passing, which is expected, not a bug, given how demanding some of these
+  combinations are). The criteria list's own label text embeds the active level's actual numbers
+  (e.g. "Current ratio ≥ 2" at Strict vs. "≥ 1.5" at Relaxed), not a generic description.
 - **Company detail** (`/<ticker>/`): overview KPIs, financial statements (Income/Balance
   Sheet/Cash Flow, with row hierarchy — subtotals/grand-totals/headline rows indented and
   styled), quarterly Income Statement, derived metrics (5-year sparkline trend per metric,

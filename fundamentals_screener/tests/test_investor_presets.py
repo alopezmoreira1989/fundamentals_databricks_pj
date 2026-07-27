@@ -841,8 +841,12 @@ def test_lynch_criteria_labels_reflect_the_resolved_level_numbers():
     assert moderate_peg.label == "PEG < 1"
 
 
-def test_preset_levels_are_strict_moderate_relaxed():
-    assert services.preset_levels() == ("strict", "moderate", "relaxed")
+def test_preset_levels_are_relaxed_moderate_strict():
+    """Display order matches the Net-Net Finder's own level-pill order (relaxed -> moderate ->
+    strict, increasing conservatism left to right) — the two features must agree on one order,
+    even though Investor Presets' actual default is "strict" (a separate concern from display
+    order; see the fallback logic in preset_screen/preset_thresholds/views._presets_screen)."""
+    assert services.preset_levels() == ("relaxed", "moderate", "strict")
 
 
 def test_get_preset_screen_level_defaults_to_strict(repo, monkeypatch):

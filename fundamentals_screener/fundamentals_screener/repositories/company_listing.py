@@ -116,7 +116,11 @@ _PRESET_COLUMNS: dict[str, tuple[str, ...]] = {
 }
 
 
-PRESET_LEVELS: tuple[str, ...] = ("strict", "moderate", "relaxed")
+# Display/iteration order matches the Net-Net Finder's own level pill (views._NET_NET_LEVELS) —
+# increasing conservatism left to right, both features agreeing on one order. The actual
+# default ("strict") is a separate concern, hardcoded at each fallback site below and in
+# views._presets_screen — not derived from this tuple's first element.
+PRESET_LEVELS: tuple[str, ...] = ("relaxed", "moderate", "strict")
 
 # Per-preset, per-level threshold values for the latest-FY WHERE predicate and the multi-year
 # checks below — the single source of truth both this module's query builders AND services.py's
