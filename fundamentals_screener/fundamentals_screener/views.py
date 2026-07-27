@@ -572,10 +572,13 @@ def _netnet_screen(request: HttpRequest) -> HttpResponse:
 
 def _presets_screen(request: HttpRequest) -> HttpResponse:
     """Investor Presets: a name-only pill selector (Graham/Buffett/Lynch) revealing that
-    school's static philosophy panel (portrait, tagline, criteria list) plus a company table
-    filtered on that school's latest-FY-only criteria (see ``services.get_preset_screen``) —
-    sharing the sector/index/country/market/industry descriptive filters with the general
-    screener, the same pattern as the Net-Net Finder.
+    school's philosophy panel (portrait, tagline, criteria list) plus a company table filtered
+    on that school's criteria (see ``services.get_preset_screen``) — sharing the sector/index/
+    country/market/industry descriptive filters with the general screener, the same pattern as
+    the Net-Net Finder. A second pill (``level`` — "strict"/"moderate"/"relaxed", mirroring the
+    Net-Net Finder's own conservatism-level pill exactly) picks which threshold set the criteria
+    actually use; the criteria list's label text is level-dependent too (see
+    ``services.get_preset_definition``), not just the query bounds.
 
     Paginated AND sorted in DuckDB, unlike the Net-Net Finder's Python-side pagination/sort: a
     preset's matches aren't guaranteed to be a small fraction of the universe the way a genuine
@@ -589,6 +592,10 @@ def _presets_screen(request: HttpRequest) -> HttpResponse:
     preset = request.GET.get("preset", presets[0]).strip().lower()
     if preset not in presets:
         preset = presets[0]
+    levels = services.preset_levels()
+    level = request.GET.get("level", "strict").strip().lower()
+    if level not in levels:
+        level = "strict"
     sector = request.GET.get("sector", "").strip()
     index = request.GET.get("index", "").strip()
     country = request.GET.get("country", "").strip()
@@ -602,12 +609,13 @@ def _presets_screen(request: HttpRequest) -> HttpResponse:
     page = _parse_page(request.GET.get("page"))
 
     result = services.get_preset_screen(
-        preset, sector=sector, index=index, country=country, market=market, industry=industry,
-        sort=SortSpec(key=sort_key, descending=descending), page=page, page_size=PAGE_SIZE,
+        preset, level=level, sector=sector, index=index, country=country, market=market,
+        industry=industry, sort=SortSpec(key=sort_key, descending=descending), page=page,
+        page_size=PAGE_SIZE,
     )
     num_pages = max(1, math.ceil(result.total / PAGE_SIZE))
     page = min(page, num_pages)
-    definition = services.get_preset_definition(preset)
+    definition = services.get_preset_definition(preset, level)
 
     # Rows as (row, aligned metric cells) so the template never indexes a mapping by key —
     # same convention screen_table's own `rows` context key uses.
@@ -621,7 +629,7 @@ def _presets_screen(request: HttpRequest) -> HttpResponse:
 
     base_pairs: list[tuple[str, str]] = [
         p for p in (
-            ("mode", "presets"), ("preset", preset),
+            ("mode", "presets"), ("preset", preset), ("level", level),
             ("sector", sector), ("index", index), ("country", country), ("market", market),
             ("industry", industry),
         ) if p[1]
@@ -654,6 +662,8 @@ def _presets_screen(request: HttpRequest) -> HttpResponse:
             "querystring": presets_qs,
             "preset": preset,
             "presets": presets,
+            "level": level,
+            "levels": levels,
             "definition": definition,
             "portrait_path": f"fundamentals_screener/portraits/{preset}.png",
             "sector": sector,
