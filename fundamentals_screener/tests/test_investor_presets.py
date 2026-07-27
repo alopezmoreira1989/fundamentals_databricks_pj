@@ -27,9 +27,11 @@ _META = {
             "GRAHAMDIV_STOPPED", "GRAHAMDIV_GAP",
             "GRAHAMEPS_SUSTAINED", "GRAHAMEPS_TOOLOW", "GRAHAMEPS_MISSING_BASE",
             "GRAHAMEPS_NEGATIVE_BASE", "GRAHAM_MULTIYEAR_FAILSOTHER",
+            "GRAHAM_LEVEL_MODERATE_ONLY", "GRAHAM_STRICT_EPS_ENDPOINT_ONLY",
             "BUFF1", "BUFFNULLPASS", "BUFFNULLBUTFAILS", "BUFFTOOLOWMOS",
             "BUFFROE_SUSTAINED", "BUFFROE_ONEDIP", "BUFFROE_SHORTHISTORY", "BUFFROE_FAILSOTHER",
-            "LYNCH1", "LYNCHFAIL", "LYNCHPEGFAIL",
+            "BUFFETT_LEVEL_MODERATE_ONLY",
+            "LYNCH1", "LYNCHFAIL", "LYNCHPEGFAIL", "LYNCH_LEVEL_MODERATE_ONLY",
         )
     ]
 }
@@ -135,10 +137,12 @@ _METRIC_ROWS = [
     ("GRAHAM2", "P/E", "ratio", 2024, 10.0, "FY"),
     ("GRAHAM2", "P/B", "ratio", 2024, 2.0, "FY"),
 
-    # GRAHAMFAIL: fails both the direct P/B test and the product test (2.0 > 1.5; 15*2.0=30 > 22.5).
+    # GRAHAMFAIL: fails both the direct P/B test and the product test at every conservatism
+    # level (P/E=25 exceeds even Relaxed's 20 P/E cap; P/B=5.0 and P/E*P/B=125 exceed even
+    # Relaxed's loosest P/B/product caps of 2.5/30) — a robust, level-independent failure.
     ("GRAHAMFAIL", "Current Ratio", "ratio", 2024, 2.5, "FY"),
-    ("GRAHAMFAIL", "P/E", "ratio", 2024, 15.0, "FY"),
-    ("GRAHAMFAIL", "P/B", "ratio", 2024, 2.0, "FY"),
+    ("GRAHAMFAIL", "P/E", "ratio", 2024, 25.0, "FY"),
+    ("GRAHAMFAIL", "P/B", "ratio", 2024, 5.0, "FY"),
 
     # BUFF1: passes all four criteria outright.
     ("BUFF1", "Debt / Equity", "ratio", 2024, 0.3, "FY"),
@@ -233,6 +237,58 @@ _METRIC_ROWS = [
     ("BUFFROE_FAILSOTHER", "ROE %", "percent", 2022, 18.0, "FY"),
     ("BUFFROE_FAILSOTHER", "ROE %", "percent", 2023, 19.0, "FY"),
     ("BUFFROE_FAILSOTHER", "ROE %", "percent", 2024, 20.0, "FY"),
+
+    # ── Conservatism-level mechanism proofs (Strict/Moderate/Relaxed, issue: presets levels) ──
+    # GRAHAM_LEVEL_MODERATE_ONLY: passes Moderate (7y earnings/7y dividend-floor5/7y EPS growth)
+    # but fails Strict (needs 10y earnings) — proves `level` changes the actual query bounds,
+    # not just the criteria-list display copy.
+    ("GRAHAM_LEVEL_MODERATE_ONLY", "Current Ratio", "ratio", 2024, 2.5, "FY"),
+    ("GRAHAM_LEVEL_MODERATE_ONLY", "P/E", "ratio", 2024, 10.0, "FY"),
+    ("GRAHAM_LEVEL_MODERATE_ONLY", "P/B", "ratio", 2024, 1.2, "FY"),
+    ("GRAHAM_LEVEL_MODERATE_ONLY", "Dividend Yield %", "percent", 2020, 2.0, "FY"),
+    ("GRAHAM_LEVEL_MODERATE_ONLY", "Dividend Yield %", "percent", 2021, 2.0, "FY"),
+    ("GRAHAM_LEVEL_MODERATE_ONLY", "Dividend Yield %", "percent", 2022, 2.0, "FY"),
+    ("GRAHAM_LEVEL_MODERATE_ONLY", "Dividend Yield %", "percent", 2023, 2.0, "FY"),
+    ("GRAHAM_LEVEL_MODERATE_ONLY", "Dividend Yield %", "percent", 2024, 2.0, "FY"),
+
+    # GRAHAM_STRICT_EPS_ENDPOINT_ONLY: passes Strict's 10y earnings/10y dividend, and would pass
+    # a single-year-endpoint EPS growth test (2014 -> 2024) — but Strict's real, literal test
+    # uses 3-year averages at each end, and this ticker has no data in either 3-year window (see
+    # eps_growth_avg_tickers's own test coverage below).
+    ("GRAHAM_STRICT_EPS_ENDPOINT_ONLY", "Current Ratio", "ratio", 2024, 2.5, "FY"),
+    ("GRAHAM_STRICT_EPS_ENDPOINT_ONLY", "P/E", "ratio", 2024, 10.0, "FY"),
+    ("GRAHAM_STRICT_EPS_ENDPOINT_ONLY", "P/B", "ratio", 2024, 1.2, "FY"),
+    ("GRAHAM_STRICT_EPS_ENDPOINT_ONLY", "Dividend Yield %", "percent", 2015, 2.0, "FY"),
+    ("GRAHAM_STRICT_EPS_ENDPOINT_ONLY", "Dividend Yield %", "percent", 2016, 2.0, "FY"),
+    ("GRAHAM_STRICT_EPS_ENDPOINT_ONLY", "Dividend Yield %", "percent", 2017, 2.0, "FY"),
+    ("GRAHAM_STRICT_EPS_ENDPOINT_ONLY", "Dividend Yield %", "percent", 2018, 2.0, "FY"),
+    ("GRAHAM_STRICT_EPS_ENDPOINT_ONLY", "Dividend Yield %", "percent", 2019, 2.0, "FY"),
+    ("GRAHAM_STRICT_EPS_ENDPOINT_ONLY", "Dividend Yield %", "percent", 2020, 2.0, "FY"),
+    ("GRAHAM_STRICT_EPS_ENDPOINT_ONLY", "Dividend Yield %", "percent", 2021, 2.0, "FY"),
+    ("GRAHAM_STRICT_EPS_ENDPOINT_ONLY", "Dividend Yield %", "percent", 2022, 2.0, "FY"),
+    ("GRAHAM_STRICT_EPS_ENDPOINT_ONLY", "Dividend Yield %", "percent", 2023, 2.0, "FY"),
+    ("GRAHAM_STRICT_EPS_ENDPOINT_ONLY", "Dividend Yield %", "percent", 2024, 2.0, "FY"),
+
+    # BUFFETT_LEVEL_MODERATE_ONLY: passes Moderate (5y sustained ROE) but fails Strict (needs
+    # 10y) — same level-mechanism proof as GRAHAM_LEVEL_MODERATE_ONLY, for Buffett.
+    ("BUFFETT_LEVEL_MODERATE_ONLY", "Debt / Equity", "ratio", 2024, 0.2, "FY"),
+    ("BUFFETT_LEVEL_MODERATE_ONLY", "Gross Margin %", "percent", 2024, 60.0, "FY"),
+    ("BUFFETT_LEVEL_MODERATE_ONLY", "Net Margin %", "percent", 2024, 30.0, "FY"),
+    ("BUFFETT_LEVEL_MODERATE_ONLY", "MoS % (Owner Earnings, FY)", "percent", 2024, 40.0, "FY"),
+    ("BUFFETT_LEVEL_MODERATE_ONLY", "ROE %", "percent", 2020, 20.0, "FY"),
+    ("BUFFETT_LEVEL_MODERATE_ONLY", "ROE %", "percent", 2021, 20.0, "FY"),
+    ("BUFFETT_LEVEL_MODERATE_ONLY", "ROE %", "percent", 2022, 20.0, "FY"),
+    ("BUFFETT_LEVEL_MODERATE_ONLY", "ROE %", "percent", 2023, 20.0, "FY"),
+    ("BUFFETT_LEVEL_MODERATE_ONLY", "ROE %", "percent", 2024, 20.0, "FY"),
+
+    # LYNCH_LEVEL_MODERATE_ONLY: ROE=17% clears Moderate's >15% bar but not Strict's >20% —
+    # Lynch has no multi-year checks, so this is a plain latest-FY threshold difference (the
+    # simplest possible "level changes the query" proof for this preset).
+    ("LYNCH_LEVEL_MODERATE_ONLY", "Debt / Equity", "ratio", 2024, 0.2, "FY"),
+    ("LYNCH_LEVEL_MODERATE_ONLY", "Current Ratio", "ratio", 2024, 2.0, "FY"),
+    ("LYNCH_LEVEL_MODERATE_ONLY", "ROE %", "percent", 2024, 17.0, "FY"),
+    ("LYNCH_LEVEL_MODERATE_ONLY", "EPS CAGR (5Y) %", "percent", 2024, 20.0, "FY"),
+    ("LYNCH_LEVEL_MODERATE_ONLY", "PEG", "ratio", 2024, 0.5, "FY"),
 ] + _SUSTAINED_ROE_ROWS + _GRAHAM_MULTIYEAR_ROWS
 
 # ticker, concept, period_type, fiscal_year, value — dashboard_data (raw statement concepts),
@@ -306,6 +362,75 @@ _DATA_ROWS = [
     # turnaround, not "33% growth"; both endpoints must be positive, so this fails.
     ("GRAHAMEPS_NEGATIVE_BASE", "EPS Diluted", "FY", 2019, -0.50),
     ("GRAHAMEPS_NEGATIVE_BASE", "EPS Diluted", "FY", 2024, 1.40),
+
+    # ── Conservatism-level mechanism proofs (see the matching _METRIC_ROWS block above) ──
+    # GRAHAM_LEVEL_MODERATE_ONLY: 7 straight positive years (2018-2024) — clears Moderate's 7y
+    # earnings bar but not Strict's 10y one; EPS Diluted spans exactly Moderate's 7y endpoint
+    # window (2017 -> 2024, 1.4x growth).
+    *[
+        ("GRAHAM_LEVEL_MODERATE_ONLY", "Net Income", "FY", year, 100.0)
+        for year in (2018, 2019, 2020, 2021, 2022, 2023, 2024)
+    ],
+    ("GRAHAM_LEVEL_MODERATE_ONLY", "EPS Diluted", "FY", 2017, 1.00),
+    ("GRAHAM_LEVEL_MODERATE_ONLY", "EPS Diluted", "FY", 2024, 1.40),
+
+    # GRAHAM_STRICT_EPS_ENDPOINT_ONLY: 10 straight positive years (2015-2024) — clears Strict's
+    # 10y earnings bar. EPS Diluted has only the two endpoint years (2014, 2024) — enough for
+    # the single-year-endpoint method, not enough for the 3-year-average method Strict actually
+    # uses (see eps_growth_avg_tickers's own test coverage below).
+    *[
+        ("GRAHAM_STRICT_EPS_ENDPOINT_ONLY", "Net Income", "FY", year, 100.0)
+        for year in (2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024)
+    ],
+    ("GRAHAM_STRICT_EPS_ENDPOINT_ONLY", "EPS Diluted", "FY", 2014, 1.00),
+    ("GRAHAM_STRICT_EPS_ENDPOINT_ONLY", "EPS Diluted", "FY", 2024, 1.40),
+
+    # eps_growth_avg_tickers unit-test fixtures — direct-method tests only (not wired through
+    # preset_screen/_META, mirrors uninterrupted_dividend_tickers's own direct-call tests above).
+    # For a years=10 span ending at fiscal_year 2024: END window = 2022-2024, BASE window =
+    # 2015-2017 (years-1=9 to years-3=7 years before latest), per eps_growth_avg_tickers's own
+    # window math.
+    ("EPSAVG_PASS", "EPS Diluted", "FY", 2015, 1.00),
+    ("EPSAVG_PASS", "EPS Diluted", "FY", 2016, 1.00),
+    ("EPSAVG_PASS", "EPS Diluted", "FY", 2017, 1.00),
+    ("EPSAVG_PASS", "EPS Diluted", "FY", 2022, 1.30),
+    ("EPSAVG_PASS", "EPS Diluted", "FY", 2023, 1.35),
+    ("EPSAVG_PASS", "EPS Diluted", "FY", 2024, 1.40),
+
+    # EPSAVG_TOOLOW: end avg 1.10 vs base avg 1.00 — real growth, but below the 1.33x bar.
+    ("EPSAVG_TOOLOW", "EPS Diluted", "FY", 2015, 1.00),
+    ("EPSAVG_TOOLOW", "EPS Diluted", "FY", 2016, 1.00),
+    ("EPSAVG_TOOLOW", "EPS Diluted", "FY", 2017, 1.00),
+    ("EPSAVG_TOOLOW", "EPS Diluted", "FY", 2022, 1.05),
+    ("EPSAVG_TOOLOW", "EPS Diluted", "FY", 2023, 1.10),
+    ("EPSAVG_TOOLOW", "EPS Diluted", "FY", 2024, 1.15),
+
+    # EPSAVG_MISSING_BASE_YEAR: only 2 of the 3 base-window years present (2015 missing) — the
+    # base average requires all 3 real rows, "no proof, no pass".
+    ("EPSAVG_MISSING_BASE_YEAR", "EPS Diluted", "FY", 2016, 1.00),
+    ("EPSAVG_MISSING_BASE_YEAR", "EPS Diluted", "FY", 2017, 1.00),
+    ("EPSAVG_MISSING_BASE_YEAR", "EPS Diluted", "FY", 2022, 1.30),
+    ("EPSAVG_MISSING_BASE_YEAR", "EPS Diluted", "FY", 2023, 1.35),
+    ("EPSAVG_MISSING_BASE_YEAR", "EPS Diluted", "FY", 2024, 1.40),
+
+    # EPSAVG_NEGATIVE_BASE: base avg is negative (a real historical loss period) — even though
+    # the end avg is strongly positive, a smoothed "growth" figure off a net-negative base isn't
+    # meaningful, so this fails.
+    ("EPSAVG_NEGATIVE_BASE", "EPS Diluted", "FY", 2015, -0.50),
+    ("EPSAVG_NEGATIVE_BASE", "EPS Diluted", "FY", 2016, -0.50),
+    ("EPSAVG_NEGATIVE_BASE", "EPS Diluted", "FY", 2017, -0.50),
+    ("EPSAVG_NEGATIVE_BASE", "EPS Diluted", "FY", 2022, 1.30),
+    ("EPSAVG_NEGATIVE_BASE", "EPS Diluted", "FY", 2023, 1.35),
+    ("EPSAVG_NEGATIVE_BASE", "EPS Diluted", "FY", 2024, 1.40),
+
+    # EPSAVG_NEGATIVE_END: end avg is negative (a recent slide into losses) — fails on the other
+    # side of the same positivity gate.
+    ("EPSAVG_NEGATIVE_END", "EPS Diluted", "FY", 2015, 1.00),
+    ("EPSAVG_NEGATIVE_END", "EPS Diluted", "FY", 2016, 1.00),
+    ("EPSAVG_NEGATIVE_END", "EPS Diluted", "FY", 2017, 1.00),
+    ("EPSAVG_NEGATIVE_END", "EPS Diluted", "FY", 2022, -0.50),
+    ("EPSAVG_NEGATIVE_END", "EPS Diluted", "FY", 2023, -0.50),
+    ("EPSAVG_NEGATIVE_END", "EPS Diluted", "FY", 2024, -0.50),
 ]
 
 
@@ -335,19 +460,19 @@ def repo(con, monkeypatch):
 
 
 def test_graham_passes_via_direct_pb_test(repo):
-    rows, total, _ = repo.preset_screen(preset="graham")
+    rows, total, _ = repo.preset_screen(preset="graham", level="relaxed")
     tickers = {r.ticker for r in rows}
     assert "GRAHAM1" in tickers
     assert total == len(rows)
 
 
 def test_graham_passes_via_pe_times_pb_product_test(repo):
-    rows, _, _ = repo.preset_screen(preset="graham")
+    rows, _, _ = repo.preset_screen(preset="graham", level="relaxed")
     assert "GRAHAM2" in {r.ticker for r in rows}
 
 
 def test_graham_fails_both_branches(repo):
-    rows, _, _ = repo.preset_screen(preset="graham")
+    rows, _, _ = repo.preset_screen(preset="graham", level="relaxed")
     assert "GRAHAMFAIL" not in {r.ticker for r in rows}
 
 
@@ -368,17 +493,17 @@ def test_sustained_concept_tickers_excludes_insufficient_history(repo):
 
 
 def test_graham_positive_earnings_passes_on_five_straight_positive_years(repo):
-    rows, _, _ = repo.preset_screen(preset="graham")
+    rows, _, _ = repo.preset_screen(preset="graham", level="relaxed")
     assert "GRAHAMEARN_SUSTAINED" in {r.ticker for r in rows}
 
 
 def test_graham_positive_earnings_fails_on_one_loss_year(repo):
-    rows, _, _ = repo.preset_screen(preset="graham")
+    rows, _, _ = repo.preset_screen(preset="graham", level="relaxed")
     assert "GRAHAMEARN_ONELOSS" not in {r.ticker for r in rows}
 
 
 def test_graham_positive_earnings_fails_with_insufficient_history(repo):
-    rows, _, _ = repo.preset_screen(preset="graham")
+    rows, _, _ = repo.preset_screen(preset="graham", level="relaxed")
     assert "GRAHAMEARN_SHORTHISTORY" not in {r.ticker for r in rows}
 
 
@@ -435,7 +560,7 @@ def test_uninterrupted_dividend_tickers_empty_input_returns_empty(repo):
 
 
 def test_graham_uninterrupted_dividend_passes_and_fails_as_expected(repo):
-    rows, _, _ = repo.preset_screen(preset="graham")
+    rows, _, _ = repo.preset_screen(preset="graham", level="relaxed")
     tickers = {r.ticker for r in rows}
     assert "GRAHAMDIV_SUSTAINED" in tickers
     assert "GRAHAMDIV_FLOOR3" in tickers
@@ -481,7 +606,7 @@ def test_eps_growth_tickers_empty_input_returns_empty(repo):
 
 
 def test_graham_eps_growth_passes_and_fails_as_expected(repo):
-    rows, _, _ = repo.preset_screen(preset="graham")
+    rows, _, _ = repo.preset_screen(preset="graham", level="relaxed")
     tickers = {r.ticker for r in rows}
     assert "GRAHAMEPS_SUSTAINED" in tickers
     assert "GRAHAMEPS_TOOLOW" not in tickers
@@ -493,14 +618,14 @@ def test_graham_multiyear_criteria_compose_with_the_other_latest_fy_criteria(rep
     """Passing all 3 new multi-year criteria doesn't exempt a ticker from the existing latest-FY
     Current Ratio/P-E/P-B test — a real Current Ratio failure still excludes it (mirrors
     BUFFROE_FAILSOTHER's own rationale)."""
-    rows, _, _ = repo.preset_screen(preset="graham")
+    rows, _, _ = repo.preset_screen(preset="graham", level="relaxed")
     assert "GRAHAM_MULTIYEAR_FAILSOTHER" not in {r.ticker for r in rows}
 
 
 def test_buffett_null_mos_passes_when_other_criteria_hold(repo):
     """The NULL-passthrough this preset requires: a ticker with no reported MoS (sector-gated
     upstream, e.g. Financials/Real Estate) still passes on its other three criteria."""
-    rows, _, _ = repo.preset_screen(preset="buffett")
+    rows, _, _ = repo.preset_screen(preset="buffett", level="moderate")
     tickers = {r.ticker for r in rows}
     assert "BUFFNULLPASS" in tickers
     row = next(r for r in rows if r.ticker == "BUFFNULLPASS")
@@ -510,14 +635,14 @@ def test_buffett_null_mos_passes_when_other_criteria_hold(repo):
 def test_buffett_null_mos_does_not_exempt_the_other_criteria(repo):
     """The NULL passthrough is scoped to MoS only — a real Debt/Equity failure still excludes
     the ticker even though its MoS is also NULL."""
-    rows, _, _ = repo.preset_screen(preset="buffett")
+    rows, _, _ = repo.preset_screen(preset="buffett", level="moderate")
     assert "BUFFNULLBUTFAILS" not in {r.ticker for r in rows}
 
 
 def test_buffett_a_real_low_mos_value_fails(repo):
     """A present-but-too-low MoS must fail, unlike a NULL one — proves the OR-NULL clause
     isn't accidentally a blanket "ignore MoS" bypass."""
-    rows, _, _ = repo.preset_screen(preset="buffett")
+    rows, _, _ = repo.preset_screen(preset="buffett", level="moderate")
     assert "BUFFTOOLOWMOS" not in {r.ticker for r in rows}
 
 
@@ -542,36 +667,36 @@ def test_sustained_metric_tickers_empty_input_returns_empty(repo):
 
 
 def test_buffett_sustained_roe_passes_when_every_recent_year_clears_threshold(repo):
-    rows, _, _ = repo.preset_screen(preset="buffett")
+    rows, _, _ = repo.preset_screen(preset="buffett", level="moderate")
     assert "BUFFROE_SUSTAINED" in {r.ticker for r in rows}
 
 
 def test_buffett_sustained_roe_fails_on_one_off_year_dip(repo):
-    rows, _, _ = repo.preset_screen(preset="buffett")
+    rows, _, _ = repo.preset_screen(preset="buffett", level="moderate")
     assert "BUFFROE_ONEDIP" not in {r.ticker for r in rows}
 
 
 def test_buffett_sustained_roe_fails_with_insufficient_history(repo):
-    rows, _, _ = repo.preset_screen(preset="buffett")
+    rows, _, _ = repo.preset_screen(preset="buffett", level="moderate")
     assert "BUFFROE_SHORTHISTORY" not in {r.ticker for r in rows}
 
 
 def test_buffett_sustained_roe_composes_with_the_other_latest_fy_criteria(repo):
     """5 sustained years of ROE doesn't exempt a ticker from the other criteria — a real
     Debt/Equity failure still excludes it."""
-    rows, _, _ = repo.preset_screen(preset="buffett")
+    rows, _, _ = repo.preset_screen(preset="buffett", level="moderate")
     assert "BUFFROE_FAILSOTHER" not in {r.ticker for r in rows}
 
 
 def test_lynch_passes_and_fails_as_expected(repo):
-    rows, _, _ = repo.preset_screen(preset="lynch")
+    rows, _, _ = repo.preset_screen(preset="lynch", level="moderate")
     tickers = {r.ticker for r in rows}
     assert "LYNCH1" in tickers
     assert "LYNCHFAIL" not in tickers
 
 
 def test_lynch_peg_below_one_passes(repo):
-    rows, _, _ = repo.preset_screen(preset="lynch")
+    rows, _, _ = repo.preset_screen(preset="lynch", level="moderate")
     row = next(r for r in rows if r.ticker == "LYNCH1")
     assert row.values["PEG"] == 0.75
     assert row.values["EPS CAGR (5Y) %"] == 20.0
@@ -580,13 +705,154 @@ def test_lynch_peg_below_one_passes(repo):
 def test_lynch_peg_at_or_above_one_fails(repo):
     """PEG < 1 composes with the rest of Lynch's predicate — a real Debt/Equity, Current
     Ratio, and ROE pass doesn't exempt a ticker from a PEG >= 1 failure."""
-    rows, _, _ = repo.preset_screen(preset="lynch")
+    rows, _, _ = repo.preset_screen(preset="lynch", level="moderate")
     assert "LYNCHPEGFAIL" not in {r.ticker for r in rows}
 
 
 def test_lynch_eps_cagr_criterion_is_live_not_pending():
     definition = services.get_preset_definition("lynch")
     assert all(c.status == "live" for c in definition.criteria)
+
+
+# ── Conservatism levels (Strict / Moderate / Relaxed) ───────────────────────────────────────
+def test_preset_screen_defaults_to_strict_when_level_omitted(repo):
+    """No `level` kwarg -> "strict", the toughest tier and the intended default. GRAHAM1 clears
+    Relaxed's 5-year multi-year bars but not Strict's 10-year ones."""
+    rows, _, _ = repo.preset_screen(preset="graham")
+    assert "GRAHAM1" not in {r.ticker for r in rows}
+
+
+def test_preset_screen_falls_back_to_strict_for_an_unrecognized_level(repo):
+    default_tickers = {r.ticker for r in repo.preset_screen(preset="graham")[0]}
+    garbage_tickers = {
+        r.ticker for r in repo.preset_screen(preset="graham", level="not-a-real-level")[0]
+    }
+    assert garbage_tickers == default_tickers
+
+
+def test_graham_level_moderate_passes_but_strict_fails(repo):
+    """Proves `level` changes the actual query bounds (not just the criteria-list copy):
+    GRAHAM_LEVEL_MODERATE_ONLY has 7 years of positive earnings — enough for Moderate's 7y bar,
+    not Strict's 10y one — while its other criteria pass at every level."""
+    moderate_tickers = {r.ticker for r in repo.preset_screen(preset="graham", level="moderate")[0]}
+    strict_tickers = {r.ticker for r in repo.preset_screen(preset="graham", level="strict")[0]}
+    assert "GRAHAM_LEVEL_MODERATE_ONLY" in moderate_tickers
+    assert "GRAHAM_LEVEL_MODERATE_ONLY" not in strict_tickers
+
+
+def test_buffett_level_moderate_passes_but_strict_fails(repo):
+    """Same level-mechanism proof as Graham's, for Buffett: 5 years of sustained ROE clears
+    Moderate's 5y bar but not Strict's 10y one."""
+    moderate_tickers = {r.ticker for r in repo.preset_screen(preset="buffett", level="moderate")[0]}
+    strict_tickers = {r.ticker for r in repo.preset_screen(preset="buffett", level="strict")[0]}
+    assert "BUFFETT_LEVEL_MODERATE_ONLY" in moderate_tickers
+    assert "BUFFETT_LEVEL_MODERATE_ONLY" not in strict_tickers
+
+
+def test_lynch_level_moderate_passes_but_strict_fails(repo):
+    """Lynch has no multi-year checks, so this is the simplest possible proof: ROE=17% clears
+    Moderate's >15% bar but not Strict's >20% one — a plain latest-FY threshold difference."""
+    moderate_tickers = {r.ticker for r in repo.preset_screen(preset="lynch", level="moderate")[0]}
+    strict_tickers = {r.ticker for r in repo.preset_screen(preset="lynch", level="strict")[0]}
+    assert "LYNCH_LEVEL_MODERATE_ONLY" in moderate_tickers
+    assert "LYNCH_LEVEL_MODERATE_ONLY" not in strict_tickers
+
+
+def test_graham_strict_eps_growth_uses_the_3yr_average_method_not_single_year_endpoints(repo):
+    """GRAHAM_STRICT_EPS_ENDPOINT_ONLY clears Strict's 10y earnings/10y dividend bars, and would
+    pass a single-year-endpoint EPS growth test (2014 -> 2024, 1.4x) — but Strict's real,
+    literal test uses 3-year averages at each end, which this ticker has no data for (only 2 EPS
+    Diluted rows total). If Strict mistakenly dispatched to eps_growth_tickers instead of
+    eps_growth_avg_tickers, this ticker would incorrectly pass."""
+    rows, _, _ = repo.preset_screen(preset="graham", level="strict")
+    assert "GRAHAM_STRICT_EPS_ENDPOINT_ONLY" not in {r.ticker for r in rows}
+
+
+def test_eps_growth_avg_tickers_passes_on_real_3yr_average_growth(repo):
+    qualifying = repo.eps_growth_avg_tickers(
+        tickers=["EPSAVG_PASS"], concept="EPS Diluted", years=10, min_growth=1.33,
+    )
+    assert qualifying == frozenset({"EPSAVG_PASS"})
+
+
+def test_eps_growth_avg_tickers_fails_below_the_growth_bar(repo):
+    qualifying = repo.eps_growth_avg_tickers(
+        tickers=["EPSAVG_TOOLOW"], concept="EPS Diluted", years=10, min_growth=1.33,
+    )
+    assert qualifying == frozenset()
+
+
+def test_eps_growth_avg_tickers_fails_with_an_incomplete_base_window(repo):
+    """The base 3-year average requires all 3 real FY rows — 2 of 3 doesn't count."""
+    qualifying = repo.eps_growth_avg_tickers(
+        tickers=["EPSAVG_MISSING_BASE_YEAR"], concept="EPS Diluted", years=10, min_growth=1.33,
+    )
+    assert qualifying == frozenset()
+
+
+def test_eps_growth_avg_tickers_fails_on_a_negative_base_average(repo):
+    qualifying = repo.eps_growth_avg_tickers(
+        tickers=["EPSAVG_NEGATIVE_BASE"], concept="EPS Diluted", years=10, min_growth=1.33,
+    )
+    assert qualifying == frozenset()
+
+
+def test_eps_growth_avg_tickers_fails_on_a_negative_end_average(repo):
+    qualifying = repo.eps_growth_avg_tickers(
+        tickers=["EPSAVG_NEGATIVE_END"], concept="EPS Diluted", years=10, min_growth=1.33,
+    )
+    assert qualifying == frozenset()
+
+
+def test_eps_growth_avg_tickers_empty_input_returns_empty(repo):
+    assert repo.eps_growth_avg_tickers(
+        tickers=[], concept="EPS Diluted", years=10, min_growth=1.33,
+    ) == frozenset()
+
+
+def test_graham_criteria_labels_reflect_the_resolved_level_numbers():
+    strict = services.get_preset_definition("graham", "strict")
+    moderate = services.get_preset_definition("graham", "moderate")
+    strict_div = next(c for c in strict.criteria if "dividend" in c.label.lower())
+    moderate_div = next(c for c in moderate.criteria if "dividend" in c.label.lower())
+    assert strict_div.label == "Uninterrupted dividend, 10 straight years"
+    assert moderate_div.label == "Uninterrupted dividend, 5+ of last 7 years"
+    strict_eps = next(c for c in strict.criteria if "EPS growth" in c.label)
+    assert strict_eps.label == "EPS growth ≥ 33% over 10y (3-year averages)"
+    moderate_eps = next(c for c in moderate.criteria if "EPS growth" in c.label)
+    assert moderate_eps.label == "EPS growth ≥ 33% over 7y"
+
+
+def test_buffett_criteria_labels_reflect_the_resolved_level_numbers():
+    strict = services.get_preset_definition("buffett", "strict")
+    relaxed = services.get_preset_definition("buffett", "relaxed")
+    strict_roe = next(c for c in strict.criteria if "ROE" in c.label)
+    relaxed_roe = next(c for c in relaxed.criteria if "ROE" in c.label)
+    assert strict_roe.label == "ROE ≥ 15% sustained, 10 years"
+    assert relaxed_roe.label == "ROE ≥ 12% sustained, 3 years"
+
+
+def test_lynch_criteria_labels_reflect_the_resolved_level_numbers():
+    strict = services.get_preset_definition("lynch", "strict")
+    moderate = services.get_preset_definition("lynch", "moderate")
+    strict_peg = next(c for c in strict.criteria if "PEG" in c.label)
+    moderate_peg = next(c for c in moderate.criteria if "PEG" in c.label)
+    assert strict_peg.label == "PEG < 0.75"
+    assert moderate_peg.label == "PEG < 1"
+
+
+def test_preset_levels_are_strict_moderate_relaxed():
+    assert services.preset_levels() == ("strict", "moderate", "relaxed")
+
+
+def test_get_preset_screen_level_defaults_to_strict(repo, monkeypatch):
+    monkeypatch.setattr(services, "CompanyListingRepository", lambda: repo)
+    default_tickers = {r.ticker for r in services.get_preset_screen("graham").rows}
+    strict_tickers = {
+        r.ticker for r in services.get_preset_screen("graham", level="strict").rows
+    }
+    assert default_tickers == strict_tickers
+    assert "GRAHAM1" not in default_tickers
 
 
 def test_unrecognized_preset_returns_empty_not_a_crash(repo):
@@ -597,9 +863,10 @@ def test_unrecognized_preset_returns_empty_not_a_crash(repo):
 
 
 def test_pagination_bounds_the_page_but_total_counts_everything(repo):
-    rows, total, _ = repo.preset_screen(preset="lynch", page=1, page_size=1)
+    rows, total, _ = repo.preset_screen(preset="lynch", level="moderate", page=1, page_size=1)
     assert len(rows) == 1
-    assert total == 1  # only LYNCH1 passes in this fixture
+    # LYNCH1 and LYNCH_LEVEL_MODERATE_ONLY both pass at "moderate" in this fixture.
+    assert total == 2
 
 
 # ── service layer ───────────────────────────────────────────────────────────────────────────

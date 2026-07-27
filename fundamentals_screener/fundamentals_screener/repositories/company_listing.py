@@ -116,16 +116,71 @@ _PRESET_COLUMNS: dict[str, tuple[str, ...]] = {
 }
 
 
-def _graham_where(alias: dict[str, str]) -> str:
+PRESET_LEVELS: tuple[str, ...] = ("strict", "moderate", "relaxed")
+
+# Per-preset, per-level threshold values for the latest-FY WHERE predicate and the multi-year
+# checks below — the single source of truth both this module's query builders AND services.py's
+# criteria-label copy read from (never duplicated). "strict" is Graham's own literal numbers
+# where one genuinely exists (The Intelligent Investor: Current Ratio >= 2, P/E <= 15,
+# P/B <= 1.5 or P/E*P/B <= 22.5, 10y positive earnings, 20y uninterrupted dividends, 33% EPS
+# growth over 10y using 3-year averages at each end) — except the dividend window, capped at
+# 10y (the published export's own retention limit) rather than the literal 20y, which issue
+# #276's Phase-0 finding confirmed is infeasible against real data (dividend payers rarely have
+# 20y on record) and would return ~0 matches always. Buffett/Lynch have no single quotable rule
+# set (this app's 5 criteria for each are already our own synthesis), so their "moderate" tier IS
+# today's live values — the natural, already-tuned center — with strict/relaxed tightening/
+# loosening from there.
+_GRAHAM_THRESHOLDS: dict[str, dict[str, Any]] = {
+    "strict":   {"cr_min": 2.0,  "pe_max": 15.0, "pb_max": 1.5, "pe_pb_max": 22.5,
+                 "earnings_years": 10, "div_years": 10, "div_min_years": 10,
+                 "eps_years": 10, "eps_min_growth": 1.33, "eps_use_3y_avg": True},
+    "moderate": {"cr_min": 1.75, "pe_max": 17.5, "pb_max": 2.0, "pe_pb_max": 26.0,
+                 "earnings_years": 7, "div_years": 7, "div_min_years": 5,
+                 "eps_years": 7, "eps_min_growth": 1.33, "eps_use_3y_avg": False},
+    "relaxed":  {"cr_min": 1.5,  "pe_max": 20.0, "pb_max": 2.5, "pe_pb_max": 30.0,
+                 "earnings_years": 5, "div_years": 5, "div_min_years": 3,
+                 "eps_years": 5, "eps_min_growth": 1.33, "eps_use_3y_avg": False},
+}
+_BUFFETT_THRESHOLDS: dict[str, dict[str, Any]] = {
+    "strict":   {"de_max": 0.35, "gm_min": 50.0, "nm_min": 25.0, "mos_min": 33.0,
+                 "roe_min": 15.0, "roe_years": 10},
+    "moderate": {"de_max": 0.5,  "gm_min": 40.0, "nm_min": 20.0, "mos_min": 25.0,
+                 "roe_min": 15.0, "roe_years": 5},
+    "relaxed":  {"de_max": 0.75, "gm_min": 30.0, "nm_min": 12.0, "mos_min": 15.0,
+                 "roe_min": 12.0, "roe_years": 3},
+}
+_LYNCH_THRESHOLDS: dict[str, dict[str, Any]] = {
+    "strict":   {"de_max": 0.4, "cr_min": 1.5, "roe_min": 20.0, "peg_max": 0.75},
+    "moderate": {"de_max": 0.6, "cr_min": 1.0, "roe_min": 15.0, "peg_max": 1.0},
+    "relaxed":  {"de_max": 1.0, "cr_min": 0.8, "roe_min": 10.0, "peg_max": 1.5},
+}
+_PRESET_THRESHOLDS: dict[str, dict[str, dict[str, Any]]] = {
+    "graham": _GRAHAM_THRESHOLDS, "buffett": _BUFFETT_THRESHOLDS, "lynch": _LYNCH_THRESHOLDS,
+}
+
+
+def preset_thresholds(preset: str, level: str) -> dict[str, Any]:
+    """Public accessor for one preset's resolved threshold dict at one conservatism level — the
+    exact same values `preset_screen`'s WHERE/multi-year-check building uses (via
+    `_PRESET_WHERE`/`_preset_multi_year_checks`), exposed so `services.py`'s criteria-label copy
+    can render the numbers the query is actually using without a second, duplicated registry.
+    Falls back to "strict" for an unrecognized `level`, mirroring `preset_screen`'s own fallback;
+    an unrecognized `preset` returns an empty dict (no thresholds to resolve)."""
+    if level not in PRESET_LEVELS:
+        level = "strict"
+    return _PRESET_THRESHOLDS.get(preset, {}).get(level, {})
+
+
+def _graham_where(alias: dict[str, str], t: dict[str, Any]) -> str:
     cr, pe, pb = alias["Current Ratio"], alias["P/E"], alias["P/B"]
     return (
-        f"p.{cr} >= 2 AND p.{pe} <= 15"
-        f" AND (p.{pb} <= 1.5"
-        f" OR (p.{pe} IS NOT NULL AND p.{pb} IS NOT NULL AND p.{pe} * p.{pb} <= 22.5))"
+        f"p.{cr} >= {t['cr_min']} AND p.{pe} <= {t['pe_max']}"
+        f" AND (p.{pb} <= {t['pb_max']}"
+        f" OR (p.{pe} IS NOT NULL AND p.{pb} IS NOT NULL AND p.{pe} * p.{pb} <= {t['pe_pb_max']}))"
     )
 
 
-def _buffett_where(alias: dict[str, str]) -> str:
+def _buffett_where(alias: dict[str, str], t: dict[str, Any]) -> str:
     # MoS % (Owner Earnings, FY) is NULL for Energy/Financials/Real Estate by design (the Owner
     # Earnings model is sector-gated upstream — see 23__intrinsic_value.py) — "not applicable",
     # not "fails", so those sectors are still evaluated on the other three criteria rather than
@@ -134,14 +189,20 @@ def _buffett_where(alias: dict[str, str]) -> str:
         alias["Debt / Equity"], alias["Gross Margin %"], alias["Net Margin %"],
         alias["MoS % (Owner Earnings, FY)"],
     )
-    return f"p.{de} <= 0.5 AND p.{gm} > 40 AND p.{nm} > 20 AND (p.{mos} IS NULL OR p.{mos} >= 25)"
+    return (
+        f"p.{de} <= {t['de_max']} AND p.{gm} > {t['gm_min']} AND p.{nm} > {t['nm_min']}"
+        f" AND (p.{mos} IS NULL OR p.{mos} >= {t['mos_min']})"
+    )
 
 
-def _lynch_where(alias: dict[str, str]) -> str:
+def _lynch_where(alias: dict[str, str], t: dict[str, Any]) -> str:
     de, cr, roe, peg = (
         alias["Debt / Equity"], alias["Current Ratio"], alias["ROE %"], alias["PEG"],
     )
-    return f"p.{de} < 0.6 AND p.{cr} >= 1 AND p.{roe} > 15 AND p.{peg} < 1"
+    return (
+        f"p.{de} < {t['de_max']} AND p.{cr} >= {t['cr_min']} AND p.{roe} > {t['roe_min']}"
+        f" AND p.{peg} < {t['peg_max']}"
+    )
 
 
 _PRESET_WHERE: dict[str, Any] = {
@@ -150,30 +211,35 @@ _PRESET_WHERE: dict[str, Any] = {
     "lynch": _lynch_where,
 }
 
-# Multi-year criteria layered on top of _PRESET_WHERE's latest-FY predicate: each preset maps to
-# a tuple of tagged check-spec tuples, evaluated in sequence (each check only re-queries the
-# tickers that survived the prior one). Tags dispatch to the matching repository method via
-# CompanyListingRepository._qualifying_tickers:
-#   ("metric", metric, min_value, years)                       -> sustained_metric_tickers
-#   ("concept", concept, min_value, years)                     -> sustained_concept_tickers
-#   ("dividend", metric, min_value, years, min_years)          -> uninterrupted_dividend_tickers
-#   ("eps_growth", concept, years, min_growth)                 -> eps_growth_tickers
-# N=5 (years) and the 1.33x (33%) growth threshold both per the milestone's Phase 0 historical-
-# depth finding (issue #276): a 5-year window is well-covered for Net Income/EPS/ROE (91%+ of
-# tickers), and Graham's own "≥33% over several years" is the endpoint-ratio test (latest FY vs
-# FY-5), not a compounded per-year rate. min_years=3 on the dividend check is that same finding's
-# explicit call to tolerate a newer payer's shorter-but-real record rather than hard-requiring
-# the full 5 (see uninterrupted_dividend_tickers's own docstring for why dividends specifically
-# need this tolerance and Net Income/ROE don't). Lynch's EPS CAGR/PEG are a separate, deferred
-# issue (different, annualized-CAGR semantics) and not represented here yet.
-_PRESET_MULTI_YEAR: dict[str, tuple[tuple, ...]] = {
-    "buffett": (("metric", "ROE %", 15.0, 5),),
-    "graham": (
-        ("concept", "Net Income", 0.0, 5),
-        ("dividend", "Dividend Yield %", 0.0, 5, 3),
-        ("eps_growth", "EPS Diluted", 5, 1.33),
-    ),
-}
+
+def _preset_multi_year_checks(preset: str, level: str) -> tuple[tuple, ...]:
+    """Multi-year checks layered on top of `_PRESET_WHERE`'s latest-FY predicate, for one preset
+    at one conservatism level — each a tagged check-spec tuple dispatched to the matching
+    repository method via `CompanyListingRepository._qualifying_tickers`:
+      ("metric", metric, min_value, years)              -> sustained_metric_tickers
+      ("concept", concept, min_value, years)             -> sustained_concept_tickers
+      ("dividend", metric, min_value, years, min_years)  -> uninterrupted_dividend_tickers
+      ("eps_growth", concept, years, min_growth)         -> eps_growth_tickers (single-year
+                                                             endpoints — moderate/relaxed)
+      ("eps_growth_avg", concept, years, min_growth)     -> eps_growth_avg_tickers (3-year
+                                                             averages at each end — strict only,
+                                                             Graham's own literal phrasing)
+    Lynch's PEG is a plain latest-FY WHERE predicate (`_lynch_where`), not a multi-year check,
+    even though it filters on a metric the pipeline computes from multi-year EPS history — so
+    Lynch has no entry here.
+    """
+    if preset == "buffett":
+        t = _BUFFETT_THRESHOLDS[level]
+        return (("metric", "ROE %", t["roe_min"], t["roe_years"]),)
+    if preset == "graham":
+        t = _GRAHAM_THRESHOLDS[level]
+        eps_tag = "eps_growth_avg" if t["eps_use_3y_avg"] else "eps_growth"
+        return (
+            ("concept", "Net Income", 0.0, t["earnings_years"]),
+            ("dividend", "Dividend Yield %", 0.0, t["div_years"], t["div_min_years"]),
+            (eps_tag, "EPS Diluted", t["eps_years"], t["eps_min_growth"]),
+        )
+    return ()
 
 
 def _altman_zone(z_score: float | None) -> str | None:
@@ -777,9 +843,62 @@ class CompanyListingRepository(DuckDBRepository):
             self._fetch_column(sql, [concept, list(tickers), years, min_growth])
         )
 
+    def eps_growth_avg_tickers(
+        self, *, tickers: Sequence[str], concept: str, years: int, min_growth: float,
+    ) -> frozenset[str]:
+        """Graham's own literal EPS-growth test (The Intelligent Investor): "an increase of at
+        least one-third... using three-year averages at the beginning and end" of a `years`-year
+        span (Graham's own span is 10). Distinct from `eps_growth_tickers`'s single-year endpoint
+        comparison: averaging smooths over one bad year at either end — the whole point of
+        Graham's own phrasing — but both resulting averages still have to be `> 0` (a smoothed
+        "growth" figure from a net-negative base isn't meaningful either, same reasoning
+        `eps_growth_tickers` already applies to its own single-year endpoints). Each 3-year
+        window requires all 3 real FY rows present — no partial-average passes, matching this
+        repository's existing "no proof, no pass" convention.
+
+        For a `years`-year span ending at a ticker's own latest FY: the END window is the most
+        recent 3 years of the span; the BASE window is the earliest 3 years of the span (i.e.
+        `years - 1` to `years - 3` years before latest, so the two 3-year windows sit at opposite
+        ends of the same `years`-year span, not overlapping and not adjacent).
+        """
+        if not tickers:
+            return frozenset()
+        sql = """
+            WITH eps_rows AS (
+                SELECT ticker, fiscal_year, value
+                FROM dashboard_data
+                WHERE concept = ? AND period_type = 'FY' AND value IS NOT NULL
+                  AND list_contains(?, ticker)
+            ),
+            latest AS (
+                SELECT ticker, max(fiscal_year) AS latest_fy FROM eps_rows GROUP BY ticker
+            ),
+            end_avg AS (
+                SELECT e.ticker, avg(e.value) AS avg_value, count(*) AS n
+                FROM eps_rows e JOIN latest l ON l.ticker = e.ticker
+                WHERE e.fiscal_year BETWEEN l.latest_fy - 2 AND l.latest_fy
+                GROUP BY e.ticker
+            ),
+            base_avg AS (
+                SELECT e.ticker, avg(e.value) AS avg_value, count(*) AS n
+                FROM eps_rows e JOIN latest l ON l.ticker = e.ticker
+                WHERE e.fiscal_year BETWEEN l.latest_fy - (? - 1) AND l.latest_fy - (? - 3)
+                GROUP BY e.ticker
+            )
+            SELECT en.ticker
+            FROM end_avg en
+            JOIN base_avg b ON b.ticker = en.ticker
+            WHERE en.n = 3 AND b.n = 3
+              AND en.avg_value > 0 AND b.avg_value > 0
+              AND en.avg_value >= b.avg_value * ?
+        """
+        return frozenset(
+            self._fetch_column(sql, [concept, list(tickers), years, years, min_growth])
+        )
+
     def _qualifying_tickers(self, check: tuple, tickers: Sequence[str]) -> frozenset[str]:
-        """Dispatch one `_PRESET_MULTI_YEAR` check-spec tuple to its repository method — see
-        that constant's own comment for the tag/shape of each kind."""
+        """Dispatch one `_preset_multi_year_checks` check-spec tuple to its repository method —
+        see that function's own comment for the tag/shape of each kind."""
         kind = check[0]
         if kind == "metric":
             _, metric, min_value, years = check
@@ -802,6 +921,11 @@ class CompanyListingRepository(DuckDBRepository):
             return self.eps_growth_tickers(
                 tickers=tickers, concept=concept, years=years, min_growth=min_growth,
             )
+        if kind == "eps_growth_avg":
+            _, concept, years, min_growth = check
+            return self.eps_growth_avg_tickers(
+                tickers=tickers, concept=concept, years=years, min_growth=min_growth,
+            )
         raise ValueError(f"unknown multi-year check kind: {kind!r}")
 
     # ── Investor Presets ─────────────────────────────────────────────────────────────────
@@ -809,6 +933,7 @@ class CompanyListingRepository(DuckDBRepository):
         self,
         *,
         preset: str,
+        level: str = "strict",
         sector: str = "",
         index: str = "",
         country: str = "",
@@ -826,17 +951,24 @@ class CompanyListingRepository(DuckDBRepository):
         NULL pivot value always fails a plain ``MetricFilter`` bound — see ``_filter_clause`` —
         which is wrong for Buffett's MoS: Energy/Financials/Real Estate tickers have it NULL by
         design, not failing, so they must still be evaluated on their other three criteria).
-        Falls back to an empty result for an unrecognized `preset`. ``sort`` reuses
-        ``_order_clause`` — a descriptive column or one of the preset's own display columns;
-        defaults to ``s.ticker`` for anything else (same safe fallback ``screen_table`` relies
-        on).
+        Falls back to an empty result for an unrecognized `preset`. ``level`` is the conservatism
+        tier ("strict"/"moderate"/"relaxed" — see `_PRESET_THRESHOLDS`), falling back to
+        "strict" (the toughest, and the default) for anything unrecognized — resolves the
+        preset's own threshold dict, fed to both `_PRESET_WHERE` and `_preset_multi_year_checks`
+        so the latest-FY predicate and the multi-year checks always agree on which level is
+        active. ``sort`` reuses ``_order_clause`` — a descriptive column or one of the preset's
+        own display columns; defaults to ``s.ticker`` for anything else (same safe fallback
+        ``screen_table`` relies on).
         """
         columns = list(_PRESET_COLUMNS.get(preset, ()))
         if not columns:
             return (), 0, ()
+        if level not in PRESET_LEVELS:
+            level = "strict"
+        thresholds = _PRESET_THRESHOLDS.get(preset, {}).get(level, {})
         scope = self._scope(search="", sector=sector, index=index, country=country, market=market,
                              industry=industry)
-        for check in _PRESET_MULTI_YEAR.get(preset, ()):
+        for check in _preset_multi_year_checks(preset, level):
             qualifying = self._qualifying_tickers(
                 check, [rec.get("ticker", "") for rec in scope],
             )
@@ -866,7 +998,7 @@ class CompanyListingRepository(DuckDBRepository):
 
             units = self._metric_units(con, columns)
             cte, cte_params = self._pivot_cte(columns, alias)
-            where = f" WHERE {_PRESET_WHERE[preset](alias)}"
+            where = f" WHERE {_PRESET_WHERE[preset](alias, thresholds)}"
             select_cols = ", ".join(f"p.{alias[m]}, p.{alias[m]}_u" for m in columns)
             projection = (
                 "s.ticker, s.name, s.sector, s.industry, s.country, s.market, s.has_logo, "

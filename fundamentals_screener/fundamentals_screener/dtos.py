@@ -362,9 +362,12 @@ class PresetCriterion:
 
 @dataclass(frozen=True)
 class PresetDefinition:
-    """Static copy + criteria for one Investor Presets school (Graham/Buffett/Lynch) — the
-    same content for every request, not query-dependent. ``dot_color`` names a CSS custom
-    property (e.g. ``"--accent"``) for the pill selector's per-school dot."""
+    """Copy for one Investor Presets school (Graham/Buffett/Lynch). Everything except
+    ``criteria`` is static (the same for every request); ``criteria`` is level-dependent (its
+    label text embeds that conservatism level's actual threshold numbers — see
+    ``services.get_preset_definition``) and is filled in at call time via
+    ``dataclasses.replace``, not stored directly in the static registry. ``dot_color`` names a
+    CSS custom property (e.g. ``"--accent"``) for the pill selector's per-school dot."""
 
     key: str  # "graham" | "buffett" | "lynch"
     dot_color: str

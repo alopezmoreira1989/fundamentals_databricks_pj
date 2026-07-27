@@ -44,7 +44,13 @@ from .dtos import (
 )
 from .news import NewsItem, fetch_yahoo_news
 from .repositories.companies import PRICE_WINDOW_DAYS, PRICE_WINDOW_DEFAULT, CompanyRepository
-from .repositories.company_listing import CompanyListingRepository, MetricFilter, SortSpec
+from .repositories.company_listing import (
+    PRESET_LEVELS,
+    CompanyListingRepository,
+    MetricFilter,
+    SortSpec,
+    preset_thresholds,
+)
 from .repositories.screener import ScreenerRepository
 from .repositories.valuation import ValuationRepository
 
@@ -397,13 +403,17 @@ def get_net_net_snapshot(ticker: str) -> NetNetRow | None:
 
 
 # ── Investor Presets ─────────────────────────────────────────────────────────────────────
-# Static copy + criteria for each school. All 3 schools are now fully live: each preset's own
-# `_PRESET_WHERE` latest-FY predicate (`repositories/company_listing.py`), plus — for Buffett/
-# Graham — the multi-year checks in `CompanyListingRepository._PRESET_MULTI_YEAR` (sustained
-# ROE; positive-earnings/uninterrupted-dividend/EPS-growth). Lynch's PEG < 1 is a plain latest-FY
-# predicate too (not a `_PRESET_MULTI_YEAR` check) — it just happens to filter on "PEG", a metric
-# the pipeline computes from multi-year EPS history (issue #280); "5-year EPS CAGR" is
-# display-only (shown as a column, no threshold of its own).
+# Static copy for each school; `criteria` below is always a `()` placeholder — the real,
+# level-parameterized criteria list is built by `get_preset_definition` via the
+# `_PRESET_CRITERIA_BUILDERS` functions further down, reading `company_listing.preset_thresholds`
+# (the single source of truth also `CompanyListingRepository.preset_screen`'s WHERE/multi-year
+# checks read from — never a second, duplicated set of numbers). All 3 schools are fully live at
+# every conservatism level: each preset's own `_PRESET_WHERE` latest-FY predicate plus — for
+# Buffett/Graham — the multi-year checks in `_preset_multi_year_checks` (sustained ROE;
+# positive-earnings/uninterrupted-dividend/EPS-growth). Lynch's PEG is a plain latest-FY
+# predicate too (not a multi-year check) — it just happens to filter on "PEG", a metric the
+# pipeline computes from multi-year EPS history (issue #280); "5-year EPS CAGR" stays
+# display-only (shown as a column) at every level — it has no threshold of its own.
 _PRESET_DEFINITIONS: dict[str, PresetDefinition] = {
     "graham": PresetDefinition(
         key="graham",
@@ -417,14 +427,7 @@ _PRESET_DEFINITIONS: dict[str, PresetDefinition] = {
         school="GRAHAM · DEFENSIVE INVESTOR",
         name="Benjamin Graham",
         tagline="The father of value investing and author of The Intelligent Investor.",
-        criteria=(
-            PresetCriterion("Current ratio ≥ 2", "live"),
-            PresetCriterion("P/E ≤ 15", "live"),
-            PresetCriterion("P/B ≤ 1.5 (or P/E × P/B ≤ 22.5)", "live"),
-            PresetCriterion("Positive earnings, several years", "live"),
-            PresetCriterion("Uninterrupted dividend, several years", "live"),
-            PresetCriterion("EPS growth ≥ 33%, several years", "live"),
-        ),
+        criteria=(),
     ),
     "buffett": PresetDefinition(
         key="buffett",
@@ -439,13 +442,7 @@ _PRESET_DEFINITIONS: dict[str, PresetDefinition] = {
         school="BUFFETT · QUALITY COMPOUNDER",
         name="Warren Buffett",
         tagline="CEO of Berkshire Hathaway; Graham's greatest disciple, evolved.",
-        criteria=(
-            PresetCriterion("Debt / Equity ≤ 0.5", "live"),
-            PresetCriterion("Gross margin > 40%", "live"),
-            PresetCriterion("Net margin > 20%", "live"),
-            PresetCriterion("Margin of safety (Owner Earnings) ≥ 25%", "live"),
-            PresetCriterion("ROE ≥ 15% sustained, 5 years", "live"),
-        ),
+        criteria=(),
     ),
     "lynch": PresetDefinition(
         key="lynch",
@@ -460,16 +457,56 @@ _PRESET_DEFINITIONS: dict[str, PresetDefinition] = {
         school="LYNCH · GROWTH AT A REASONABLE PRICE",
         name="Peter Lynch",
         tagline="Manager of the Fidelity Magellan Fund; popularized GARP analysis.",
-        criteria=(
-            PresetCriterion("Debt / Equity < 0.6", "live"),
-            PresetCriterion("Current ratio ≥ 1", "live"),
-            PresetCriterion("ROE > 15%", "live"),
-            PresetCriterion("5-year EPS CAGR", "live"),
-            PresetCriterion("PEG < 1", "live"),
-        ),
+        criteria=(),
     ),
 }
 _PRESETS: tuple[str, ...] = ("graham", "buffett", "lynch")
+
+
+def _graham_criteria(t: dict[str, Any]) -> tuple[PresetCriterion, ...]:
+    div_label = (
+        f"Uninterrupted dividend, {t['div_years']:g} straight years"
+        if t["div_min_years"] == t["div_years"] else
+        f"Uninterrupted dividend, {t['div_min_years']:g}+ of last {t['div_years']:g} years"
+    )
+    growth_pct = (t["eps_min_growth"] - 1) * 100
+    eps_label = f"EPS growth ≥ {growth_pct:.0f}% over {t['eps_years']:g}y"
+    if t["eps_use_3y_avg"]:
+        eps_label += " (3-year averages)"
+    return (
+        PresetCriterion(f"Current ratio ≥ {t['cr_min']:g}", "live"),
+        PresetCriterion(f"P/E ≤ {t['pe_max']:g}", "live"),
+        PresetCriterion(
+            f"P/B ≤ {t['pb_max']:g} (or P/E × P/B ≤ {t['pe_pb_max']:g})", "live"),
+        PresetCriterion(f"Positive earnings, {t['earnings_years']:g} straight years", "live"),
+        PresetCriterion(div_label, "live"),
+        PresetCriterion(eps_label, "live"),
+    )
+
+
+def _buffett_criteria(t: dict[str, Any]) -> tuple[PresetCriterion, ...]:
+    return (
+        PresetCriterion(f"Debt / Equity ≤ {t['de_max']:g}", "live"),
+        PresetCriterion(f"Gross margin > {t['gm_min']:g}%", "live"),
+        PresetCriterion(f"Net margin > {t['nm_min']:g}%", "live"),
+        PresetCriterion(f"Margin of safety (Owner Earnings) ≥ {t['mos_min']:g}%", "live"),
+        PresetCriterion(f"ROE ≥ {t['roe_min']:g}% sustained, {t['roe_years']:g} years", "live"),
+    )
+
+
+def _lynch_criteria(t: dict[str, Any]) -> tuple[PresetCriterion, ...]:
+    return (
+        PresetCriterion(f"Debt / Equity < {t['de_max']:g}", "live"),
+        PresetCriterion(f"Current ratio ≥ {t['cr_min']:g}", "live"),
+        PresetCriterion(f"ROE > {t['roe_min']:g}%", "live"),
+        PresetCriterion("5-year EPS CAGR", "live"),
+        PresetCriterion(f"PEG < {t['peg_max']:g}", "live"),
+    )
+
+
+_PRESET_CRITERIA_BUILDERS: dict[str, Any] = {
+    "graham": _graham_criteria, "buffett": _buffett_criteria, "lynch": _lynch_criteria,
+}
 
 
 def preset_keys() -> tuple[str, ...]:
@@ -477,21 +514,34 @@ def preset_keys() -> tuple[str, ...]:
     return _PRESETS
 
 
-def get_preset_definition(preset: str) -> PresetDefinition:
-    """The static copy/criteria for one school, falling back to "graham" for an unrecognized
-    value."""
-    return _PRESET_DEFINITIONS.get(preset, _PRESET_DEFINITIONS["graham"])
+def preset_levels() -> tuple[str, ...]:
+    """The valid conservatism-level keys, in display order (for the level pill) — "strict" is
+    the toughest and the default."""
+    return PRESET_LEVELS
+
+
+def get_preset_definition(preset: str, level: str = "strict") -> PresetDefinition:
+    """The copy for one school, with `criteria` built for this conservatism level (falls back to
+    "graham"/"strict" for unrecognized values) — see `_PRESET_CRITERIA_BUILDERS` and
+    `company_listing.preset_thresholds`, the single source of truth for the actual numbers."""
+    if preset not in _PRESET_DEFINITIONS:
+        preset = "graham"
+    thresholds = preset_thresholds(preset, level)
+    criteria = _PRESET_CRITERIA_BUILDERS[preset](thresholds)
+    return replace(_PRESET_DEFINITIONS[preset], criteria=criteria)
 
 
 def get_preset_screen(
-    preset: str, *, sector: str = "", index: str = "", country: str = "", market: str = "",
-    industry: str = "", sort: SortSpec | None = None, page: int = 1, page_size: int = 50,
+    preset: str, *, level: str = "strict", sector: str = "", index: str = "", country: str = "",
+    market: str = "", industry: str = "", sort: SortSpec | None = None, page: int = 1,
+    page_size: int = 50,
 ) -> PresetScreen:
     """The Investor Presets screener's full result for one school ("graham"/"buffett"/"lynch",
-    falls back to "graham" for anything else): one page of matching companies (paginated AND
-    sorted in DuckDB — see ``CompanyListingRepository.preset_screen``), plus hero stats computed
-    under the SAME descriptive filters (universe size, and the definition's own live/pending
-    criteria counts, so the numbers always agree with what's on screen).
+    falls back to "graham" for anything else) at one conservatism `level` ("strict"/"moderate"/
+    "relaxed", falls back to "strict"): one page of matching companies (paginated AND sorted in
+    DuckDB — see ``CompanyListingRepository.preset_screen``), plus hero stats computed under the
+    SAME descriptive filters (universe size, and the level-resolved definition's own live/
+    pending criteria counts, so the numbers always agree with what's on screen).
     """
     if preset not in _PRESET_DEFINITIONS:
         preset = "graham"
@@ -499,10 +549,10 @@ def get_preset_screen(
     universe_size = repo.scope_size(sector=sector, index=index, country=country, market=market,
                                      industry=industry)
     rows, total, columns = repo.preset_screen(
-        preset=preset, sector=sector, index=index, country=country, market=market,
+        preset=preset, level=level, sector=sector, index=index, country=country, market=market,
         industry=industry, sort=sort, page=page, page_size=page_size,
     )
-    definition = _PRESET_DEFINITIONS[preset]
+    definition = get_preset_definition(preset, level)
     stats = PresetStats(
         universe_size=universe_size,
         live_criteria_count=sum(1 for c in definition.criteria if c.status == "live"),
