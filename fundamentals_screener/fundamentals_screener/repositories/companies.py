@@ -95,6 +95,42 @@ _LATEST_CLOSE_SQL = """
     SELECT close FROM dashboard_prices WHERE ticker = ? ORDER BY date DESC LIMIT 1
 """
 
+# NCAV/Share, anchored to the SAME fiscal year as EACH level's own latest non-null Ratio — one
+# anchor year per level (independently), not one shared year across all three. Mirrors
+# CompanyListingRepository.net_net_screen's own anchoring rule exactly (see that method's
+# docstring for why: a ticker can have a more recent FY with e.g. NCAV / Share computed but no
+# NCAV Ratio yet — market_cap not available for that FY — so picking each column's own latest
+# FY independently can silently pair a non-null ratio from one year with an NCAV/Share from a
+# DIFFERENT, possibly stale/wrong year). Confirmed as a real bug (2026-07): the Net-Net Finder
+# table and this page disagreed dramatically for a ticker whose Shares Diluted was corrupted in
+# its most-recent FY (later fixed at the pipeline layer) — the table's ratio-anchored value
+# skipped the corrupted year, this page's old metric's-own-latest-FY logic did not.
+#
+# A level with NO fiscal year ever having a non-null Ratio (e.g. this ticker is never NCAV-
+# eligible at that level) simply has no row here — net_net_snapshot() below falls back to that
+# metric's own latest-FY value in that case, preserving this page's "show a company's own
+# numbers, even negative/absent ones" intent (net_net_screen's bulk list, by contrast, only
+# ever lists ratio-eligible tickers in the first place, so it has no equivalent fallback need).
+_NET_NET_ANCHORED_SQL = """
+    WITH levels(level, ratio_metric, share_metric) AS (
+        VALUES ('relaxed',  'NCAV Ratio',            'NCAV / Share'),
+               ('moderate', 'NCAV (Moderate) Ratio', 'NCAV (Moderate) / Share'),
+               ('strict',   'NCAV (Strict) Ratio',   'NCAV (Strict) / Share')
+    ),
+    ratio_fy AS (
+        SELECT l.level, l.share_metric, m.fiscal_year
+        FROM dashboard_metrics m
+        JOIN levels l ON l.ratio_metric = m.metric
+        WHERE m.ticker = ? AND m.period_type = 'FY' AND m.value IS NOT NULL
+        QUALIFY row_number() OVER (PARTITION BY l.level ORDER BY m.fiscal_year DESC) = 1
+    )
+    SELECT r.level, sm.value AS ncav_per_share
+    FROM ratio_fy r
+    JOIN dashboard_metrics sm
+      ON sm.ticker = ? AND sm.metric = r.share_metric
+     AND sm.period_type = 'FY' AND sm.fiscal_year = r.fiscal_year
+"""
+
 # Most recent currency->USD rate on or before `as_of` — never today's spot rate, never the
 # SEC filed timestamp (date-anchoring rule).
 _FX_RATE_SQL = """
@@ -279,16 +315,22 @@ class CompanyRepository(DuckDBRepository):
         overlay, regardless of whether it's NCAV-positive at any level — unlike
         ``CompanyListingRepository.net_net_screen`` (which only lists *eligible*,
         positive-NCAV tickers for a multi-ticker screen), the Valuation page always wants to
-        show a company's own numbers, even negative/absent ones. ``price`` is this ticker's own
-        latest close (``_LATEST_CLOSE_SQL`` — the same source `net_net_screen` uses in bulk),
-        not the football-field chart's intrinsic-value price, which is unavailable for tickers
-        lacking EPS/BVPS data even when a real close and real NCAV both exist. Returns ``None``
-        for an unknown ticker.
+        show a company's own numbers, even negative/absent ones. Each level's NCAV/Share is
+        anchored to THAT level's own latest non-null Ratio fiscal year (``_NET_NET_ANCHORED_SQL``
+        — the same rule ``net_net_screen`` applies in bulk), falling back to the metric's own
+        latest-FY value (via ``latest_metrics()``) only for a level that has never had a non-null
+        Ratio at all — so this page and the Net-Net Finder table never disagree on which year's
+        numbers they're showing. ``price`` is this ticker's own latest close (``_LATEST_CLOSE_
+        SQL`` — the same source `net_net_screen` uses in bulk), not the football-field chart's
+        intrinsic-value price, which is unavailable for tickers lacking EPS/BVPS data even when a
+        real close and real NCAV both exist. Returns ``None`` for an unknown ticker.
         """
         summary = self.get_summary(ticker)
         if summary is None:
             return None
         values = {p.metric: p.value for p in self.latest_metrics(ticker)}
+        with self._connection() as con:
+            anchored = dict(con.execute(_NET_NET_ANCHORED_SQL, [ticker, ticker]).fetchall())
         mc = self.market_cap(ticker)
         try:
             price_rows = self._fetch_column(_LATEST_CLOSE_SQL, [ticker])
@@ -300,9 +342,9 @@ class CompanyRepository(DuckDBRepository):
             ticker=ticker, name=summary.name, sector=summary.sector, industry=summary.industry,
             country=summary.country, market=summary.market, has_logo=summary.has_logo,
             price=price, market_cap=mc.value if mc else None,
-            ncav_per_share_relaxed=values.get("NCAV / Share"),
-            ncav_per_share_moderate=values.get("NCAV (Moderate) / Share"),
-            ncav_per_share_strict=values.get("NCAV (Strict) / Share"),
+            ncav_per_share_relaxed=anchored.get("relaxed", values.get("NCAV / Share")),
+            ncav_per_share_moderate=anchored.get("moderate", values.get("NCAV (Moderate) / Share")),
+            ncav_per_share_strict=anchored.get("strict", values.get("NCAV (Strict) / Share")),
             f_score=values.get("Piotroski F-Score"),
             z_score=z_score,
             z_score_zone=_altman_zone(z_score),
