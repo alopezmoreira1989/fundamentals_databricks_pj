@@ -32,7 +32,10 @@ print(f"✓ Config loaded — target: {DB}.{TABLE}")
 
 # COMMAND ----------
 
+from datetime import datetime
+
 from pyspark.sql import functions as F
+from pyspark.sql.types import StringType, StructField, StructType, TimestampType
 from pyspark.sql.window import Window
 
 raw_full = f"{CATALOG}.{SCHEMA}.{RAW_TABLE}"
@@ -349,6 +352,193 @@ spark.sql(f"""
     WHEN MATCHED AND t.is_derived = false THEN DELETE
 """)
 print(f"✓ Orphan FY DELETE complete → {full_tbl}")
+
+# COMMAND ----------
+
+# MAGIC %md ## 5. Plausibility guard — implausible Shares Diluted values
+# MAGIC
+# MAGIC A confirmed, real-world XBRL failure mode (found 2026-07 via a live NCAV/Share bug
+# MAGIC report — Badger Meter's Net-Net Finder and Valuation pages showed wildly different,
+# MAGIC opposite-signed numbers): a filer's own submission software tags
+# MAGIC `WeightedAverageNumberOfDilutedSharesOutstanding` ("Shares Diluted") **"in thousands"
+# MAGIC without rescaling it back to raw share units**, for a contiguous run of fiscal years,
+# MAGIC while OTHER years from the SAME filer are correctly scaled. SEC's `companyfacts` API
+# MAGIC reproduces whatever was actually tagged — it does not retroactively correct filer-side
+# MAGIC errors. Confirmed against real published data: 88 tickers, 143 (ticker, fiscal_year)
+# MAGIC pairs, the scale error always within a ~900x-1080x band relative to a genuinely correct
+# MAGIC neighboring year (BMI's own run was 7 consecutive bad years: FY2018-2024, sandwiched
+# MAGIC between correct FY2017 and FY2025) — a magnitude no real stock split/buyback/offering
+# MAGIC produces, so it's a clean, self-contained signal (no cross-reference to `stock_splits`
+# MAGIC needed; no independent share-count concept exists in this pipeline to cross-validate
+# MAGIC against either — `Shares Diluted` is the only one, see `01__tickers.py`).
+# MAGIC
+# MAGIC This corrupts every downstream metric that divides by Shares Diluted for the affected
+# MAGIC years — NCAV/Share, Market Cap (= price × shares), P/E, P/B, and more.
+# MAGIC
+# MAGIC **Why this needs an ITERATIVE check, not a single adjacent-year comparison:** a naive
+# MAGIC "compare each year only to its immediate neighbor" check fails on a real, common shape —
+# MAGIC a multi-year bad RUN (like BMI's 7 straight years). Comparing two ADJACENT bad years to
+# MAGIC EACH OTHER looks perfectly plausible (they're both wrong by the same ~1000x factor, so
+# MAGIC their ratio to each other is ≈1) — only a bad year's transition to a genuinely CORRECT
+# MAGIC neighbor reveals the problem, and for an interior year of a long run, no such neighbor is
+# MAGIC adjacent. This loop treats "the current best guess at which years are trustworthy" as a
+# MAGIC pool, evaluates every year (trustworthy or not) against its nearest POOL neighbor (via
+# MAGIC last/first-non-null carried across an ordered window — no self-join needed), removes
+# MAGIC newly-implausible years from the pool, and repeats: each pass, the pool of "known-good"
+# MAGIC years erodes one step further into a bad run from BOTH the correct year just outside it,
+# MAGIC until the run is fully unwound. It also SELF-CORRECTS a same-round false positive (a
+# MAGIC genuinely good year adjacent to a *not-yet-excluded* bad year briefly looks implausible
+# MAGIC too, since both are evaluated against the SAME starting pool within one pass — the next
+# MAGIC pass, once the true bad year has been excluded, that good year's nearest pool neighbor
+# MAGIC skips past it and resolves correctly) — convergence is a fixed point (this round's flagged
+# MAGIC set exactly matches the previous round's), not a monotonically-growing accumulation.
+# MAGIC `_MAX_ITERATIONS` is set comfortably above the 10-year (`FY_YEARS`) retention window, since
+# MAGIC a maximal-length bad run takes roughly one extra iteration per year to fully unwind from
+# MAGIC its slower (trailing) boundary.
+# MAGIC
+# MAGIC Flagged rows are DELETED from `financials` (never "corrected" by guessing ×1000 — this
+# MAGIC repo's convention is always "real gap reads NULL/absent", never a guessed fix) and logged
+# MAGIC to `ingestion_failures`. `financials_raw` (the audit table) is never touched — it stays a
+# MAGIC true, unfiltered record of what was actually reported, warts and all.
+
+# COMMAND ----------
+
+_shares_diluted = (
+    spark.table(full_tbl)
+    .filter((F.col("concept") == "Shares Diluted") & (F.col("period_type") == "FY"))
+    .select("ticker", "fiscal_year", "value")
+    .localCheckpoint(eager=True)
+)
+
+_SD_RATIO_LOW  = 1.0 / 500.0
+_SD_RATIO_HIGH = 500.0
+_SD_MAX_ITERATIONS = 15
+_w_sd_ticker = Window.partitionBy("ticker").orderBy("fiscal_year")
+
+_sd_excluded: set = set()      # {(ticker, fiscal_year), ...} — the current "presumed bad" set
+_sd_prev_excluded: set = set()  # the set one iteration back — used for the non-convergence
+                                 # per-ticker stability check below (see its own comment)
+_sd_converged = False
+for _sd_iter in range(_SD_MAX_ITERATIONS):
+    if _sd_excluded:
+        _sd_excl_df = spark.createDataFrame(list(_sd_excluded), schema=["ticker", "fiscal_year"])
+        _sd_marked = (
+            _shares_diluted
+            .join(_sd_excl_df.withColumn("_excl", F.lit(True)), on=["ticker", "fiscal_year"], how="left")
+            .withColumn("pool_value", F.when(F.col("_excl").isNull(), F.col("value")))
+            .drop("_excl")
+        )
+    else:
+        _sd_marked = _shares_diluted.withColumn("pool_value", F.col("value"))
+
+    _sd_evaluated = (
+        _sd_marked
+        .withColumn("prev_value", F.last("pool_value", ignorenulls=True)
+                    .over(_w_sd_ticker.rowsBetween(Window.unboundedPreceding, -1)))
+        .withColumn("next_value", F.first("pool_value", ignorenulls=True)
+                    .over(_w_sd_ticker.rowsBetween(1, Window.unboundedFollowing)))
+        .withColumn("neighbor_value", F.coalesce(F.col("prev_value"), F.col("next_value")))
+        .withColumn("neighbor_side", F.when(F.col("prev_value").isNotNull(), F.lit("prev")).otherwise(F.lit("next")))
+    )
+    _sd_bad_df = (
+        _sd_evaluated
+        .filter(F.col("neighbor_value").isNotNull() & (F.col("neighbor_value") != 0) & (F.col("value") != 0))
+        .withColumn("ratio", F.col("value") / F.col("neighbor_value"))
+        .filter((F.col("ratio") <= _SD_RATIO_LOW) | (F.col("ratio") >= _SD_RATIO_HIGH))
+    )
+    _sd_bad_rows = _sd_bad_df.select(
+        "ticker", "fiscal_year", "value", "neighbor_value", "neighbor_side", "ratio"
+    ).collect()
+    _sd_new_excluded = {(r.ticker, r.fiscal_year) for r in _sd_bad_rows}
+
+    if _sd_new_excluded == _sd_excluded:
+        print(f"✓ Shares Diluted plausibility check converged after {_sd_iter + 1} iteration(s)")
+        _sd_converged = True
+        _sd_prev_excluded = _sd_excluded
+        break
+    _sd_prev_excluded = _sd_excluded
+    _sd_excluded = _sd_new_excluded
+else:
+    print(f"⚠ Shares Diluted plausibility check did not fully converge after "
+          f"{_SD_MAX_ITERATIONS} iterations for every ticker")
+
+if not _sd_converged:
+    # A handful of tickers with very little history (confirmed real case: a 4-year-old ticker
+    # with genuinely volatile real share counts) can make the flag/unflag decision for their
+    # OWN years oscillate forever between two states, without ever settling — comparing a
+    # newly-excluded year against whatever's left in the pool can swing in and out of the
+    # implausible-ratio band each pass. This does NOT mean every other ticker's answer is in
+    # doubt (tickers are evaluated independently; one ticker's oscillation can't change another
+    # ticker's own row values or comparisons) — only the specific years still changing between
+    # this iteration and the last are actually undetermined. Drop exactly those (never guess
+    # which of the two oscillating states is right); every other ticker's already-stable answer
+    # is unaffected and kept as computed.
+    _sd_unstable = _sd_excluded.symmetric_difference(_sd_prev_excluded)
+    if _sd_unstable:
+        print(f"⚠ {len(_sd_unstable):,} (ticker, fiscal_year) row(s) never stabilized — "
+              f"excluding from this run's action, will be re-evaluated next run: "
+              f"{sorted(_sd_unstable)[:10]}{'...' if len(_sd_unstable) > 10 else ''}")
+        _sd_excluded = _sd_excluded - _sd_unstable
+
+print(f"Implausible Shares Diluted values found: {len(_sd_excluded):,}")
+
+if _sd_excluded:
+    _sd_bad_final = spark.createDataFrame(list(_sd_excluded), schema=["ticker", "fiscal_year"])
+    _sd_bad_final.createOrReplaceTempView("implausible_shares_diluted")
+
+    spark.sql(f"""
+        MERGE INTO {full_tbl} AS t
+        USING implausible_shares_diluted AS s
+        ON  t.ticker      = s.ticker
+        AND t.fiscal_year = s.fiscal_year
+        AND t.concept     = 'Shares Diluted'
+        AND t.period_type = 'FY'
+        WHEN MATCHED THEN DELETE
+    """)
+    print(f"✓ Deleted {len(_sd_excluded):,} implausible Shares Diluted row(s) from {full_tbl}")
+
+    _sd_fail_tbl = f"{CATALOG}.{SCHEMA}.ingestion_failures"
+    spark.sql(f"""
+        CREATE TABLE IF NOT EXISTS {_sd_fail_tbl} (
+            ticker         STRING    NOT NULL,
+            error_type     STRING    NOT NULL,
+            error_message  STRING,
+            step           STRING    NOT NULL,
+            scraped_at     TIMESTAMP NOT NULL
+        )
+        USING DELTA
+        TBLPROPERTIES (
+            'delta.autoOptimize.optimizeWrite' = 'true',
+            'delta.autoOptimize.autoCompact'   = 'true'
+        )
+    """)
+    _sd_fail_schema = StructType([
+        StructField("ticker",        StringType(),    False),
+        StructField("error_type",    StringType(),    False),
+        StructField("error_message", StringType(),    True),
+        StructField("step",          StringType(),    False),
+        StructField("scraped_at",    TimestampType(), False),
+    ])
+    _sd_scraped_at = datetime.utcnow()
+    # _sd_bad_rows is from the loop's LAST (converged) iteration — its neighbor/ratio values
+    # already reflect the final, stable excluded set, so no re-evaluation is needed here.
+    _sd_fail_records = [{
+        "ticker": r.ticker,
+        "error_type": "implausible_shares_diluted",
+        "error_message": (
+            f"Shares Diluted FY{r.fiscal_year}={r.value:,.0f} is {r.ratio:.4g}x its nearest "
+            f"trustworthy neighbor ({r.neighbor_side}, {r.neighbor_value:,.0f}) — outside the "
+            f"range any real split/buyback/offering produces, consistent with a filer-side "
+            f"'reported in thousands' XBRL tagging error. Excluded from financials this run."
+        ),
+        "step": "shares_diluted_plausibility",
+        "scraped_at": _sd_scraped_at,
+    } for r in _sd_bad_rows if (r.ticker, r.fiscal_year) in _sd_excluded]
+    spark.createDataFrame(_sd_fail_records, schema=_sd_fail_schema) \
+         .write.mode("append").saveAsTable(_sd_fail_tbl)
+    print(f"✓ Logged {len(_sd_fail_records):,} row(s) to {_sd_fail_tbl}")
+else:
+    print("✓ No implausible Shares Diluted values found.")
 
 # COMMAND ----------
 
