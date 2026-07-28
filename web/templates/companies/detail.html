@@ -99,9 +99,10 @@
       }
     }
 
-    var el = document.getElementById('news-list');
-    if (!el) return;
     var esc = function (s) { var d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; };
+
+    var el = document.getElementById('news-list');
+    if (el) {
     fetch(el.dataset.newsUrl)
       .then(function (r) { return r.json(); })
       .then(function (d) {
@@ -114,6 +115,23 @@
         }).join('');
       })
       .catch(function () { el.innerHTML = '<p class="text-muted small mb-0">News unavailable.</p>'; });
+    }
+
+    var filingsEl = document.getElementById('filings-list');
+    if (filingsEl) {
+    fetch(filingsEl.dataset.filingsUrl)
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        var items = (d && d.filings) || [];
+        if (!items.length) { filingsEl.innerHTML = '<p class="text-muted small mb-0">No filings found.</p>'; return; }
+        filingsEl.innerHTML = items.map(function (f) {
+          return '<a class="news-item" href="' + encodeURI(f.url) + '" target="_blank" rel="noopener noreferrer">'
+            + '<span class="news-title">' + esc(f.form) + ' &middot; ' + esc(f.description) + '</span>'
+            + '<span class="news-date">' + esc(f.filing_date) + '</span></a>';
+        }).join('');
+      })
+      .catch(function () { filingsEl.innerHTML = '<p class="text-muted small mb-0">Filings unavailable.</p>'; });
+    }
   });
 </script>
 {% endblock %}
@@ -201,6 +219,10 @@
                 type="button" role="tab" aria-controls="pane-{{ st.name|slugify }}" aria-selected="false">{{ st.name }}</button>
       </li>
     {% endfor %}
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="tab-filings" data-bs-toggle="tab" data-bs-target="#pane-filings"
+              type="button" role="tab" aria-controls="pane-filings" aria-selected="false">Filings</button>
+    </li>
     {% if quarterly.lines %}
       <li class="nav-item" role="presentation">
         <button class="nav-link" id="tab-quarterly" data-bs-toggle="tab" data-bs-target="#pane-quarterly"
@@ -383,6 +405,16 @@
         </div>
       </div>
     {% endfor %}
+
+    <!-- Filings (fetched async from SEC EDGAR) -->
+    <div class="tab-pane fade" id="pane-filings" role="tabpanel" aria-labelledby="tab-filings" tabindex="0">
+      <div class="card p-4">
+        <div class="eyebrow mb-2">SEC filings · 10-K &amp; 10-Q</div>
+        <div id="filings-list" data-filings-url="{% url 'companies:filings' s.ticker %}">
+          <p class="text-muted small mb-0">Loading filings…</p>
+        </div>
+      </div>
+    </div>
 
     <!-- Quarterly (Income Statement by fiscal quarter) -->
     {% if quarterly.lines %}

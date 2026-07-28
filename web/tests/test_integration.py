@@ -138,6 +138,12 @@ def test_company_page_has_price_and_quarterly_tabs(artifacts_from_fixtures, clie
     assert "Quarterly" in body and 'id="pane-quarterly"' in body
 
 
+def test_company_page_has_filings_tab(artifacts_from_fixtures, client):
+    body = client.get(f"/companies/{TICKER}/").content.decode()
+    assert "Filings" in body and 'id="pane-filings"' in body
+    assert "data-filings-url" in body  # async filings placeholder
+
+
 def test_company_page_valuation_tab_and_no_iv_in_derived(artifacts_from_fixtures, client):
     body = client.get(f"/companies/{TICKER}/").content.decode()
     # Valuation is its own tab (football field + MoS + multiples)...

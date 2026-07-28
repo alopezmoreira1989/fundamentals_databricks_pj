@@ -135,3 +135,22 @@ def company_news(request: HttpRequest, ticker: str) -> JsonResponse:
     return JsonResponse(
         {"news": [{"title": n.title, "link": n.link, "published": n.published} for n in news]}
     )
+
+
+def company_filings(request: HttpRequest, ticker: str) -> JsonResponse:
+    """Latest 10-K/10-Q SEC filings for the ticker (JSON, fetched async by the Filings tab)."""
+    filings = services.get_company_filings(ticker.upper())
+    return JsonResponse(
+        {
+            "filings": [
+                {
+                    "form": f.form,
+                    "filing_date": f.filing_date,
+                    "report_date": f.report_date,
+                    "description": f.description,
+                    "url": f.url,
+                }
+                for f in filings
+            ]
+        }
+    )
