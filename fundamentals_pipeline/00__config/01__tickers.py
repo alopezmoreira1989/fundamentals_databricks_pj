@@ -146,7 +146,36 @@ BALANCE_SHEET = {
     "Total Stockholders Equity":  ("StockholdersEquity",                         "stock"),
     "Total Equity (incl NCI)":    ("StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest", "stock"),
     "Total Liabilities & Equity": ("LiabilitiesAndStockholdersEquity",           "stock"),
+    # ── Shares Outstanding (Cover Page) — NOT a balance-sheet line item; placed here so it
+    # rides the existing Balance Sheet "stock" snapshot path (21f__dedup_balance_sheet's dedup)
+    # for free. Deliberately excluded from concept_hierarchy.json (see DEI_NAMESPACE_CONCEPTS
+    # comment below) — it exists purely as an input to the "live" Market Cap metric, not as a
+    # displayable statement line.
+    "Shares Outstanding (Cover Page)": ("EntityCommonStockSharesOutstanding",    "stock"),
 }
+
+# ── dei-namespace concepts ─────────────────────────────────────────────────────
+# `STATEMENTS` tuples have no namespace slot — every tag above is fetched from the `us-gaap`
+# XBRL taxonomy by default. `dei` (Document and Entity Information) is a different taxonomy
+# entirely, used for cover-page/entity facts rather than financial-statement line items.
+# "Shares Outstanding (Cover Page)" is the one case so far: the 10-Q/10-K cover page's
+# point-in-time "shares outstanding as of [a date near the filing]" fact
+# (`dei:EntityCommonStockSharesOutstanding`) — a genuine point-in-time count, unlike
+# "Shares Diluted" (`WeightedAverageNumberOfDilutedSharesOutstanding`, a weighted AVERAGE over
+# the reporting period). Confirmed 2026-07 against real SEC data (KRRO, DMRA): this concept's
+# own `period_end` is the cover-page date, close to the filing date, NOT the fiscal period's own
+# close the way every other "stock" concept's date is — that's fine (even useful, for picking
+# "the single most recent value") for its one consumer, but don't assume it aligns with a fiscal
+# close anywhere else. Labels in this set are fetched with `namespace="dei"` in
+# `11__fetch_sec_xbrl.py` instead of the default `"us-gaap"`. No new SEC API call is needed for
+# this — `get_facts(cik)` already pulls the whole companyfacts document (all namespaces) in one
+# request per ticker; this just reads one more field already present in that same response.
+# Deliberately NOT added to `concept_hierarchy.json` — that file controls Statement-tab display
+# layout, and this concept would look out of place mixed into the Balance Sheet's real line
+# items. The `validate-concept-hierarchy` skill's own cross-check will report this concept as
+# present in `financials` but absent from `concept_hierarchy.json` — that's expected here, not
+# an oversight.
+DEI_NAMESPACE_CONCEPTS = {"Shares Outstanding (Cover Page)"}
 
 CASH_FLOW = {
     "Net Income":                  ("NetIncomeLoss",                                                 "flow_additive"),

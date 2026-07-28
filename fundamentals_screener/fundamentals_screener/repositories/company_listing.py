@@ -69,13 +69,20 @@ _MARKET_CAP_FX_SQL = """
 
 # Net-Net Finder: which NCAV Ratio metric gates inclusion for each conservatism level (the
 # per-share value columns below are always all three, regardless of which level is active).
-# "Market Cap" is already a bulk-friendly metric row (injected at export time from
-# market_cap_asof specifically so screener-style listings never need the daily price series
+# "Market Cap (Live)" is already a bulk-friendly metric row (injected at export time from
+# market_cap_live specifically so screener-style listings never need the daily price series
 # for it — see CompanyRepository._MARKET_CAP_SQL's own comment) so it rides along in this same
 # pivot; unlike per-share Price, it needs no separate dashboard_prices join.
+#
+# Deliberately "Market Cap (Live)", not the fiscal-year-anchored "Market Cap" the General
+# Screener's own column uses (see list_page/_apply_usd_lens, untouched by this) — confirmed real
+# cases (2026-07): DMRA and KRRO both showed roughly half their real market cap here using the
+# FY-anchored figure (a weighted-average share count badly lagging a recent reverse merger /
+# continuous dilution). This table's ROW ATTRIBUTE stays named `market_cap` regardless of which
+# metric backs it (see the unpack below), so nothing downstream needed to change for this swap.
 _NET_NET_VALUE_METRICS = (
     "NCAV / Share", "NCAV (Moderate) / Share", "NCAV (Strict) / Share",
-    "Piotroski F-Score", "Altman Z-Score", "Market Cap",
+    "Piotroski F-Score", "Altman Z-Score", "Market Cap (Live)",
 )
 _NET_NET_LEVEL_RATIO = {
     "relaxed":  "NCAV Ratio",

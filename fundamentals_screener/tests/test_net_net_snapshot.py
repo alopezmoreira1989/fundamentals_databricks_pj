@@ -31,7 +31,7 @@ _METRIC_ROWS = [
     ("GOOD1", "NCAV (Strict) / Share", "usd", 2024, 6.0, "Valuation", "Net-Net", 1.0, "FY", "2024-12-31"),
     ("GOOD1", "Piotroski F-Score", "ratio", 2024, 7.0, "Quality", None, 1.0, "FY", "2024-12-31"),
     ("GOOD1", "Altman Z-Score", "ratio", 2024, 3.5, "Quality", None, 1.0, "FY", "2024-12-31"),
-    ("GOOD1", "Market Cap", "usd", 2024, 5_000_000.0, None, None, 1.0, "FY", "2024-12-31"),
+    ("GOOD1", "Market Cap (Live)", "usd", 2024, 5_000_000.0, None, None, 1.0, "FY", "2024-12-31"),
 
     ("NEG1", "NCAV / Share", "usd", 2024, -9.17, "Valuation", "Net-Net", 1.0, "FY", "2024-12-31"),
     ("NEG1", "Altman Z-Score", "ratio", 2024, 12.0, "Quality", None, 1.0, "FY", "2024-12-31"),
