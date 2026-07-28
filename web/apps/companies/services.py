@@ -6,6 +6,7 @@ the data comes from DuckDB/parquet.
 
 from __future__ import annotations
 
+from infrastructure.filings import Filing, fetch_filings
 from infrastructure.news import NewsItem, fetch_yahoo_news
 from repositories.companies import PRICE_WINDOW_DAYS, PRICE_WINDOW_DEFAULT, CompanyRepository
 from repositories.dtos import (
@@ -63,6 +64,11 @@ def price_windows() -> tuple[str, ...]:
 def get_company_news(ticker: str) -> tuple[NewsItem, ...]:
     """Latest Yahoo Finance headlines for the ticker (cached; empty on any error)."""
     return fetch_yahoo_news(ticker)
+
+
+def get_company_filings(ticker: str) -> tuple[Filing, ...]:
+    """Latest 10-K/10-Q SEC filings for the ticker (cached; empty on any error)."""
+    return fetch_filings(ticker)
 
 
 # Metric categories that belong to the Valuation tab, not the Derived-metrics tab:
