@@ -67,27 +67,24 @@ _MARKET_CAP_FX_SQL = """
 """
 
 
-# Net-Net Finder: which NCAV Ratio metric gates inclusion for each conservatism level (the
-# per-share value columns below are always all three, regardless of which level is active).
-# "Market Cap (Live)" is already a bulk-friendly metric row (injected at export time from
-# market_cap_live specifically so screener-style listings never need the daily price series
-# for it — see CompanyRepository._MARKET_CAP_SQL's own comment) so it rides along in this same
-# pivot; unlike per-share Price, it needs no separate dashboard_prices join.
-#
-# Deliberately "Market Cap (Live)", not the fiscal-year-anchored "Market Cap" the General
-# Screener's own column uses (see list_page/_apply_usd_lens, untouched by this) — confirmed real
-# cases (2026-07): DMRA and KRRO both showed roughly half their real market cap here using the
-# FY-anchored figure (a weighted-average share count badly lagging a recent reverse merger /
-# continuous dilution). This table's ROW ATTRIBUTE stays named `market_cap` regardless of which
-# metric backs it (see the unpack below), so nothing downstream needed to change for this swap.
+# Net-Net Finder: which NCAV Ratio (Live) metric gates inclusion for each conservatism level
+# (the per-share value columns below are always all three, regardless of which level is
+# active), and Piotroski/Altman for the quality overlay — each fetched as that TICKER's own
+# independently-latest value (see net_net_screen's query: a plain "latest per (ticker, metric)"
+# pivot, no shared anchor year). "Market Cap (Live)" and price are fetched separately (bulk,
+# ticker-only — see _LATEST_MARKET_CAP_LIVE_SQL/_LATEST_PRICE_SQL below), NOT through this
+# pivot: both are single-row-per-ticker metrics with no meaningful fiscal_year, so joining them
+# through a fiscal-year-keyed CTE the way an earlier version of this code did silently returned
+# NULL market_cap for any ticker whose eligibility year differed from its own latest FY —
+# confirmed as a real bug (2026-07) affecting 271 tickers before this fix.
 _NET_NET_VALUE_METRICS = (
-    "NCAV / Share", "NCAV (Moderate) / Share", "NCAV (Strict) / Share",
-    "Piotroski F-Score", "Altman Z-Score", "Market Cap (Live)",
+    "NCAV / Share (Live)", "NCAV (Moderate) / Share (Live)", "NCAV (Strict) / Share (Live)",
+    "Piotroski F-Score", "Altman Z-Score",
 )
 _NET_NET_LEVEL_RATIO = {
-    "relaxed":  "NCAV Ratio",
-    "moderate": "NCAV (Moderate) Ratio",
-    "strict":   "NCAV (Strict) Ratio",
+    "relaxed":  "NCAV Ratio (Live)",
+    "moderate": "NCAV (Moderate) Ratio (Live)",
+    "strict":   "NCAV (Strict) Ratio (Live)",
 }
 
 # Latest close per ticker, scoped to the tickers that already passed the NCAV-ratio filter (a
@@ -98,6 +95,14 @@ _LATEST_PRICE_SQL = """
     SELECT ticker, close FROM dashboard_prices
     WHERE list_contains(?, ticker)
     QUALIFY row_number() OVER (PARTITION BY ticker ORDER BY date DESC) = 1
+"""
+
+# Market Cap (Live) — a single row per ticker (see 22__derived_metrics.py's market_cap_live),
+# so this is a flat ticker-keyed lookup, deliberately NOT joined through the fiscal-year-keyed
+# `vals` CTE below (see _NET_NET_VALUE_METRICS' own comment on why that broke for 271 tickers).
+_LATEST_MARKET_CAP_LIVE_SQL = """
+    SELECT ticker, value FROM dashboard_metrics
+    WHERE metric = 'Market Cap (Live)' AND list_contains(?, ticker)
 """
 
 # Altman Z-Score traffic-light thresholds — duplicated from fundamentals_pipeline's Streamlit
@@ -591,23 +596,25 @@ class CompanyListingRepository(DuckDBRepository):
         market: str = "",
         industry: str = "",
     ) -> tuple[NetNetRow, ...]:
-        """Every ticker in scope whose `level` NCAV Ratio is non-null (i.e. NCAV > 0 for that
-        level — genuine liquidation-value candidates only), with NCAV/Share at all three levels,
-        latest close price, and the Piotroski/Altman quality overlay.
+        """Every ticker in scope whose `level` NCAV Ratio (Live) is non-null (i.e. its own
+        latest-FY NCAV for that level is positive, priced against today's real market cap —
+        genuine, CURRENT liquidation-value candidates only), with NCAV/Share (Live) at all
+        three levels, today's close, live market cap, and the Piotroski/Altman quality overlay.
 
-        `level`: ``"relaxed"`` | ``"moderate"`` | ``"strict"`` — picks which NCAV Ratio metric
-        gates inclusion; falls back to ``"relaxed"`` for an unrecognized value. The three
-        NCAV/Share values are always all three, regardless of `level`.
+        `level`: ``"relaxed"`` | ``"moderate"`` | ``"strict"`` — picks which NCAV Ratio (Live)
+        metric gates inclusion; falls back to ``"relaxed"`` for an unrecognized value. The three
+        NCAV/Share (Live) values are always all three, regardless of `level`.
 
-        Every value comes from the SAME fiscal year as the selected level's own latest non-null
-        Ratio — deliberately NOT each metric's own independently-latest FY (unlike
-        ``_pivot_cte``, used by the general screener for arbitrary metric combinations, which
-        picks each column's latest FY independently). That independence is fine when the
-        columns are unrelated user-picked metrics, but wrong here: a ticker can have a more
-        recent FY with e.g. ``NCAV / Share`` computed but no ``NCAV Ratio`` yet (market_cap not
-        available for that FY), so picking each column's own latest would silently pair a
-        non-null ratio from one year with an NCAV/Share from a DIFFERENT, possibly negative-NCAV
-        year — confirmed as a real bug by running this against real data before fixing it.
+        Unlike the old FY-anchored Ratio this replaced, every "live" metric here (NCAV/Share,
+        NCAV Ratio, Market Cap) is already a single current snapshot per ticker (see
+        22__derived_metrics.py's market_cap_live) — no shared-fiscal-year anchoring is needed
+        or done: each of NCAV/Share/F-Score/Z-Score below is simply that ticker's own
+        independently-latest value, and Market Cap (Live) is fetched separately (a flat
+        ticker-only lookup, see _LATEST_MARKET_CAP_LIVE_SQL — NOT joined through this pivot,
+        since it has no fiscal_year that would reliably match one). Confirmed as a real bug
+        (2026-07): DMRA showed an 83% "discount to liquidation value" that was a pure division
+        artifact of a stale, pre-reverse-merger weighted-average share count — using each
+        ticker's actual current share count instead (Shares Outstanding (Cover Page)) fixes it.
 
         No pagination — genuine net-nets are a small fraction of the universe (unlike the
         general screener, which can match thousands of rows), so the whole filtered set is
@@ -627,24 +634,26 @@ class CompanyListingRepository(DuckDBRepository):
             for i in range(len(_NET_NET_VALUE_METRICS))
         )
         sql = f"""
-            WITH ratio_fy AS (
-                SELECT ticker, fiscal_year FROM dashboard_metrics
+            WITH eligible AS (
+                SELECT ticker FROM dashboard_metrics
                 WHERE metric = ? AND period_type = 'FY' AND value IS NOT NULL
                   AND list_contains(?, ticker)
-                QUALIFY row_number() OVER (PARTITION BY ticker ORDER BY fiscal_year DESC) = 1
             ), vals AS (
                 SELECT m.ticker, m.metric, m.value
                 FROM dashboard_metrics m
-                JOIN ratio_fy r ON r.ticker = m.ticker AND r.fiscal_year = m.fiscal_year
+                JOIN eligible e ON e.ticker = m.ticker
                 WHERE m.period_type = 'FY' AND list_contains(?, m.metric)
+                QUALIFY row_number() OVER (
+                    PARTITION BY m.ticker, m.metric ORDER BY m.fiscal_year DESC
+                ) = 1
             )
             SELECT ticker, {value_filters}
             FROM vals GROUP BY ticker
         """
         params = [
-            ratio_metric, tickers,               # ratio_fy
+            ratio_metric, tickers,               # eligible
             list(_NET_NET_VALUE_METRICS),        # vals's list_contains(?, m.metric)
-            *_NET_NET_VALUE_METRICS,              # the 6 FILTER (WHERE metric = ?) params
+            *_NET_NET_VALUE_METRICS,              # the 5 FILTER (WHERE metric = ?) params
         ]
 
         with self._connection() as con:
@@ -655,9 +664,11 @@ class CompanyListingRepository(DuckDBRepository):
             matched_tickers = [row[0] for row in hits]
             price_rows = con.execute(_LATEST_PRICE_SQL, [matched_tickers]).fetchall()
             price_by_ticker = dict(price_rows)
+            mc_rows = con.execute(_LATEST_MARKET_CAP_LIVE_SQL, [matched_tickers]).fetchall()
+            market_cap_by_ticker = dict(mc_rows)
 
         rows = []
-        for ticker, ncav_relaxed, ncav_moderate, ncav_strict, f_score, z_score, market_cap in hits:
+        for ticker, ncav_relaxed, ncav_moderate, ncav_strict, f_score, z_score in hits:
             rec = by_ticker.get(ticker, {})
             rows.append(NetNetRow(
                 ticker=ticker,
@@ -668,7 +679,7 @@ class CompanyListingRepository(DuckDBRepository):
                 market=rec.get("market"),
                 has_logo=_has_logo(rec),
                 price=price_by_ticker.get(ticker),
-                market_cap=market_cap,
+                market_cap=market_cap_by_ticker.get(ticker),
                 ncav_per_share_relaxed=ncav_relaxed,
                 ncav_per_share_moderate=ncav_moderate,
                 ncav_per_share_strict=ncav_strict,

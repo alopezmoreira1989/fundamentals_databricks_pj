@@ -20,49 +20,57 @@ _META = {
     "tickers": [
         {"ticker": "GOOD1", "company": "Good One Corp", "sector": "Industrials",
          "industry": "Machinery", "country": "United States", "market": "US"},
-        {"ticker": "MISMATCH1", "company": "Mismatch One Corp", "sector": "Industrials",
-         "industry": "Machinery", "country": "United States", "market": "US"},
         {"ticker": "NOMATCH1", "company": "No Match One Corp", "sector": "Industrials",
          "industry": "Machinery", "country": "United States", "market": "US"},
         {"ticker": "MODTICK", "company": "Mod Tick Corp", "sector": "Industrials",
+         "industry": "Machinery", "country": "United States", "market": "US"},
+        {"ticker": "JOINBUG1", "company": "Join Bug One Corp", "sector": "Industrials",
          "industry": "Machinery", "country": "United States", "market": "US"},
     ]
 }
 
 # ticker, metric, fiscal_year, value, period_type
 _METRIC_ROWS = [
-    # GOOD1: everything consistent at FY2024.
-    ("GOOD1", "NCAV Ratio", 2024, 0.5, "FY"),
-    ("GOOD1", "NCAV / Share", 2024, 12.0, "FY"),
+    # GOOD1: everything live/current — single latest-value rows, no anchoring needed anymore.
+    ("GOOD1", "NCAV Ratio (Live)", 2024, 0.5, "FY"),
+    ("GOOD1", "NCAV / Share (Live)", 2024, 12.0, "FY"),
     ("GOOD1", "Piotroski F-Score", 2024, 6.0, "FY"),
     ("GOOD1", "Altman Z-Score", 2024, 2.5, "FY"),
+    ("GOOD1", "Market Cap (Live)", 2024, 1_000_000.0, "FY"),
 
-    # MISMATCH1: the bug scenario — NCAV Ratio only exists at FY2023 (older; simulates a market
-    # cap gap for the most recent year), but a NEWER FY2024 "NCAV / Share" row also exists with a
-    # different (deliberately implausible, negative) value. The correct read must anchor to
-    # FY2023 (the ratio's own year) and return 10.0, never picking up FY2024's -50.0.
-    ("MISMATCH1", "NCAV Ratio", 2023, 0.4, "FY"),
-    ("MISMATCH1", "NCAV / Share", 2023, 10.0, "FY"),
-    ("MISMATCH1", "NCAV / Share", 2024, -50.0, "FY"),
+    # NOMATCH1: has NCAV / Share (Live) but never a non-null NCAV Ratio (Live) — must never
+    # appear (the eligibility gate).
+    ("NOMATCH1", "NCAV / Share (Live)", 2024, 7.0, "FY"),
 
-    # NOMATCH1: has NCAV / Share but never a non-null NCAV Ratio — must never appear.
-    ("NOMATCH1", "NCAV / Share", 2024, 7.0, "FY"),
+    # MODTICK: both "relaxed" and "moderate" ratios non-null, with DIFFERENT NCAV/Share (Live)
+    # values per level — proves `level` selects the right gate/value.
+    ("MODTICK", "NCAV Ratio (Live)", 2024, 0.5, "FY"),
+    ("MODTICK", "NCAV / Share (Live)", 2024, 12.0, "FY"),
+    ("MODTICK", "NCAV (Moderate) Ratio (Live)", 2024, 0.6, "FY"),
+    ("MODTICK", "NCAV (Moderate) / Share (Live)", 2024, 8.0, "FY"),
+    ("MODTICK", "Market Cap (Live)", 2024, 2_000_000.0, "FY"),
 
-    # MODTICK: both "relaxed" and "moderate" ratios non-null at the same FY, with DIFFERENT
-    # NCAV/Share values per level — proves `level` selects the right gate/value, independent of
-    # the fiscal-year-anchoring fix above.
-    ("MODTICK", "NCAV Ratio", 2024, 0.5, "FY"),
-    ("MODTICK", "NCAV / Share", 2024, 12.0, "FY"),
-    ("MODTICK", "NCAV (Moderate) Ratio", 2024, 0.6, "FY"),
-    ("MODTICK", "NCAV (Moderate) / Share", 2024, 8.0, "FY"),
+    # JOINBUG1: regression test for a real bug (2026-07) — Market Cap (Live) has NO meaningful
+    # fiscal_year relationship to the other per-metric rows (it's a single current snapshot, not
+    # tied to any particular FY), while NCAV Ratio (Live)/F-Score/Z-Score are deliberately
+    # stamped with DIFFERENT fiscal years from each other and from Market Cap (Live)'s own. An
+    # earlier version of this query joined Market Cap through a shared-fiscal-year CTE and
+    # silently returned NULL whenever the years didn't match — confirmed against real published
+    # data as affecting 271 tickers. This fixture proves the fix (Market Cap fetched via a
+    # separate, ticker-only query, independent of any fiscal_year).
+    ("JOINBUG1", "NCAV Ratio (Live)", 2019, 0.3, "FY"),
+    ("JOINBUG1", "NCAV / Share (Live)", 2019, 5.0, "FY"),
+    ("JOINBUG1", "Piotroski F-Score", 2022, 4.0, "FY"),
+    ("JOINBUG1", "Altman Z-Score", 2023, 1.9, "FY"),
+    ("JOINBUG1", "Market Cap (Live)", 9999, 3_000_000.0, "FY"),
 ]
 
 # ticker, date, close
 _PRICE_ROWS = [
     ("GOOD1", "2026-07-01", 5.0),
     ("GOOD1", "2026-07-10", 6.0),  # latest — must be the one picked, not the earlier row
-    ("MISMATCH1", "2026-07-10", 3.0),
     ("MODTICK", "2026-07-10", 4.0),
+    ("JOINBUG1", "2026-07-10", 2.0),
     # NOMATCH1 has no price row at all — must degrade to price=None, not crash.
 ]
 
@@ -85,13 +93,6 @@ def con():
 def repo(con, monkeypatch):
     monkeypatch.setattr(company_listing_module, "load_meta", lambda: _META)
     return CompanyListingRepository(connection=con)
-
-
-def test_anchors_every_value_to_the_ratios_own_fiscal_year(repo):
-    """The bug this test guards against: independently-latest-per-metric pivoting would have
-    paired MISMATCH1's FY2023 ratio with its FY2024 (wrong-year, negative) NCAV/Share."""
-    rows = {r.ticker: r for r in repo.net_net_screen(level="relaxed")}
-    assert rows["MISMATCH1"].ncav_per_share_relaxed == 10.0
 
 
 def test_ticker_with_no_ratio_never_appears(repo):
@@ -118,12 +119,16 @@ def test_price_picks_the_latest_date(repo):
 
 
 def test_missing_price_degrades_to_none_not_a_crash(repo):
-    # MISMATCH1 has a price row, but confirm a ticker matching the ratio filter with NO price
-    # row at all doesn't crash the join — reuse GOOD1/MISMATCH1's existing coverage implicitly
-    # via the fixture design (NOMATCH1 never reaches the price join since it's filtered out
-    # earlier); this test instead asserts the whole call succeeds without raising.
     rows = repo.net_net_screen(level="relaxed")
     assert isinstance(rows, tuple)
+
+
+def test_market_cap_live_fetched_independently_of_fiscal_year(repo):
+    """Regression test (2026-07): Market Cap (Live) must not go NULL just because a ticker's
+    other Net-Net metrics are stamped with a different fiscal_year than its own Market Cap
+    (Live) row — confirmed as a real bug affecting 271 tickers before this fix."""
+    rows = {r.ticker: r for r in repo.net_net_screen(level="relaxed")}
+    assert rows["JOINBUG1"].market_cap == 3_000_000.0
 
 
 @pytest.mark.parametrize(

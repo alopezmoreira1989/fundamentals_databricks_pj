@@ -1006,13 +1006,53 @@ else:
         .join(price_live, on="ticker", how="inner")
         .join(latest_mca, on="ticker", how="inner")
         .withColumn("market_cap", F.col("price_live") * F.col("shares_live"))
-        .select(
-            "ticker", "fiscal_year",
-            F.col("price_date").alias("period_end"),
-            F.col("price_live").alias("price_close"),
-            "market_cap",
-            "currency",
+    )
+
+    # Live NCAV/Share + Ratio (relaxed/moderate/strict) — same "live" principle as market_cap
+    # above: NCAV itself (the dollar total) is a real Balance Sheet snapshot, not a weighted
+    # average, so only the SHARE COUNT converting it to a per-share figure was ever stale.
+    # Confirmed real case (2026-07): DMRA's published (FY-anchored) NCAV/Share showed $176.28 (a
+    # real $240.3M NCAV divided by the same stale 1.36M pre-reverse-merger share count
+    # market_cap used to divide by) against a ~$28-29 price — an 83% "discount to liquidation
+    # value" that was a pure division artifact; at the real current share count (61.6M),
+    # NCAV/Share is $3.86, nowhere near the price. Using the ticker's own latest-FY NCAV
+    # (already computed earlier in this same notebook, in metrics_wide — no need to recompute)
+    # means eligibility no longer needs the old "search backward for the latest year the Ratio
+    # was positive" — it's simply "is the ticker's own latest-FY NCAV positive right now".
+    _w_latest_ncav = Window.partitionBy("ticker").orderBy(F.col("fiscal_year").desc())
+    _NCAV_LIVE_LEVELS = {"relaxed": "NCAV", "moderate": "NCAV (Moderate)", "strict": "NCAV (Strict)"}
+    for _level, _ncav_col in _NCAV_LIVE_LEVELS.items():
+        _ncav_latest = (
+            metrics_wide
+            .filter(F.col(_ncav_col).isNotNull())
+            .withColumn("_rn", F.row_number().over(_w_latest_ncav))
+            .filter(F.col("_rn") == 1)
+            .select("ticker", F.col(_ncav_col).alias(f"_ncav_latest_{_level}"))
         )
+        market_cap_live = market_cap_live.join(_ncav_latest, on="ticker", how="left")
+    for _level in _NCAV_LIVE_LEVELS:
+        market_cap_live = (
+            market_cap_live
+            .withColumn(f"ncav_share_live_{_level}",
+                F.when(
+                    F.col(f"_ncav_latest_{_level}").isNotNull() & F.col("shares_live").isNotNull()
+                    & (F.col("shares_live") != 0),
+                    F.col(f"_ncav_latest_{_level}") / F.col("shares_live"),
+                ))
+            .withColumn(f"ncav_ratio_live_{_level}",
+                F.when(F.col(f"_ncav_latest_{_level}") > 0,
+                       F.col("market_cap") / F.col(f"_ncav_latest_{_level}")))
+        )
+
+    market_cap_live = market_cap_live.select(
+        "ticker", "fiscal_year",
+        F.col("price_date").alias("period_end"),
+        F.col("price_live").alias("price_close"),
+        "market_cap",
+        "currency",
+        "ncav_share_live_relaxed", "ncav_ratio_live_relaxed",
+        "ncav_share_live_moderate", "ncav_ratio_live_moderate",
+        "ncav_share_live_strict", "ncav_ratio_live_strict",
     )
     (market_cap_live.write.format("delta").mode("overwrite")
      .option("overwriteSchema", "true").saveAsTable(mcl_tbl))
