@@ -885,6 +885,13 @@ else:
     # FY-preferred on a tie so a normal FY uses its own reported figure, falling back across
     # periods when the FY value is NULL (approved fallback). NOTE: Shares Diluted is the
     # weighted-average diluted count, not shares-outstanding-at-date — see the out-of-scope note.
+    # Bounded to _ASOF_SHARES_MAX_STALENESS_DAYS: a share count this old relative to the FY
+    # being priced is too stale to trust for a "current" market cap — better to leave it NULL
+    # (this repo's standing "real gap reads NULL" convention) than silently reuse arbitrarily
+    # old data. Defense-in-depth alongside 21__clean_and_merge.py's plausibility guard, which
+    # already deletes bad Shares Diluted rows outright — this bound instead covers a ticker that
+    # genuinely stops reporting the concept for a long stretch, not a corrupted value.
+    _ASOF_SHARES_MAX_STALENESS_DAYS = 400
     _sh = (
         spark.table(full_tbl)
         .filter((F.col("concept") == "Shares Diluted") & F.col("value").isNotNull())
@@ -896,7 +903,10 @@ else:
         F.col("sh_end").desc(), F.col("_is_fy").desc())
     asof_shares = (
         fy_dates.join(_sh, on="ticker", how="inner")
-        .filter(F.col("sh_end") <= F.col("period_end"))
+        .filter(
+            (F.col("sh_end") <= F.col("period_end"))
+            & (F.datediff(F.col("period_end"), F.col("sh_end")) <= _ASOF_SHARES_MAX_STALENESS_DAYS)
+        )
         .withColumn("_rn", F.row_number().over(_w_sh))
         .filter(F.col("_rn") == 1)
         .select("ticker", "fiscal_year", F.col("shares").alias("asof_shares"))
