@@ -42,6 +42,7 @@ prices_tbl  = f"{CATALOG}.{SCHEMA}.market_prices_daily"   # daily price store �
 splits_tbl  = f"{CATALOG}.{SCHEMA}.stock_splits"          # for split-adjusting cross-year share metrics
 metrics_tbl = f"{CATALOG}.{SCHEMA}.financials_metrics"
 mca_tbl     = f"{CATALOG}.{SCHEMA}.market_cap_asof"       # period_end-aligned price + market cap
+mcl_tbl     = f"{CATALOG}.{SCHEMA}.market_cap_live"       # genuinely live price + market cap (see §below)
 
 # Quote currency by listing market — the same style as 00__config/02__tickers_master.py's own
 # _SECTOR_NORMALIZE. Only US/CA exist today; a future market addition extends this dict, not
@@ -952,6 +953,70 @@ else:
      .option("overwriteSchema", "true").saveAsTable(mca_tbl))
     print(f"✓ wrote {mca_tbl}")
     market_cap_asof.groupBy("currency").count().show()
+
+    # ── Live market cap (genuinely current, not fiscal-year-anchored) ───────────────────────
+    # `market_cap_asof` above is deliberately anchored to each FY's own period_end — required
+    # for every historical P/E, P/B, and NCAV-ratio calculation to stay priced on that year's
+    # own basis, never today's. But that means the LATEST available row is only as fresh as the
+    # last fiscal year-end, understating reality for any company diluting quickly (continuous
+    # ATM-raise biotechs) or that had a recent reverse merger (confirmed real cases 2026-07:
+    # DMRA/Damora Therapeutics — formerly Galecto — and KRRO/Korro Bio, both showing roughly
+    # HALF their real Finviz-quoted market cap because "Shares Diluted", a weighted AVERAGE for
+    # the reporting period, badly lags a recent large share-count jump). `market_cap_live` fixes
+    # this for display purposes ONLY — one row per ticker (not per fiscal year), using:
+    #   - the single most recent "Shares Outstanding (Cover Page)" value
+    #     (`dei:EntityCommonStockSharesOutstanding`) — a genuine point-in-time count from the
+    #     10-Q/10-K cover page, unlike the weighted-average "Shares Diluted". Confirmed against
+    #     real SEC data: KRRO's latest cover-page value (14,422,571) × its price ≈ $153.5M,
+    #     matching Finviz's ~$150M — vs. market_cap_asof's stale $75.2M (FY2025's 9.4M shares).
+    #   - the latest available close in market_prices_daily (today's real price, not a fiscal
+    #     close).
+    #   - `currency` inherited from this SAME ticker's market_cap_asof latest row (a ticker's
+    #     reporting currency doesn't change) — deliberately NOT re-deriving the full FX/currency-
+    #     alignment machinery for this narrow addition.
+    #   - `fiscal_year` inherited the same way, purely to keep the row schema-compatible/
+    #     joinable with the rest of financials_metrics — the figure itself isn't tied to that
+    #     fiscal year, which is why `period_end` here is the actual as-of trading date, not a
+    #     fiscal close.
+    _w_shares_live = Window.partitionBy("ticker").orderBy(F.col("period_end").desc())
+    shares_live = (
+        spark.table(full_tbl)
+        .filter((F.col("concept") == "Shares Outstanding (Cover Page)") & F.col("value").isNotNull())
+        .withColumn("_rn", F.row_number().over(_w_shares_live))
+        .filter(F.col("_rn") == 1)
+        .select("ticker", F.col("value").alias("shares_live"))
+    )
+    _w_price_live = Window.partitionBy("ticker").orderBy(F.col("date").desc())
+    price_live = (
+        spark.table(prices_tbl)
+        .filter(F.col("close").isNotNull())
+        .withColumn("_rn", F.row_number().over(_w_price_live))
+        .filter(F.col("_rn") == 1)
+        .select("ticker", F.col("date").alias("price_date"), F.col("close").alias("price_live"))
+    )
+    _w_latest_fy = Window.partitionBy("ticker").orderBy(F.col("fiscal_year").desc())
+    latest_mca = (
+        market_cap_asof
+        .withColumn("_rn", F.row_number().over(_w_latest_fy))
+        .filter(F.col("_rn") == 1)
+        .select("ticker", "fiscal_year", "currency")
+    )
+    market_cap_live = (
+        shares_live
+        .join(price_live, on="ticker", how="inner")
+        .join(latest_mca, on="ticker", how="inner")
+        .withColumn("market_cap", F.col("price_live") * F.col("shares_live"))
+        .select(
+            "ticker", "fiscal_year",
+            F.col("price_date").alias("period_end"),
+            F.col("price_live").alias("price_close"),
+            "market_cap",
+            "currency",
+        )
+    )
+    (market_cap_live.write.format("delta").mode("overwrite")
+     .option("overwriteSchema", "true").saveAsTable(mcl_tbl))
+    print(f"✓ wrote {mcl_tbl} — {market_cap_live.count():,} ticker rows")
 
 # COMMAND ----------
 

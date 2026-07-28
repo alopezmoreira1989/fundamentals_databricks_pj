@@ -604,6 +604,7 @@ def process_ticker(ticker: str, scraped_at_ts: datetime) -> tuple:
         # parallelism to improve; see ingestion bottleneck investigation.)
         frames = []
         _agg_sum = globals().get("AGGREGATE_OR_SUM_CONCEPTS", {})
+        _dei_concepts = globals().get("DEI_NAMESPACE_CONCEPTS", set())
         for stmt_name, concept_map in STATEMENTS.items():
             for label, (xbrl_concept, kind) in concept_map.items():
                 # Most concepts COALESCE a priority list (extract_series_multi). A few are an
@@ -617,8 +618,14 @@ def process_ticker(ticker: str, scraped_at_ts: datetime) -> tuple:
                     # xbrl_concept may be a single tag (str) or a priority list[str]. Concepts
                     # in IFRS_FALLBACK_TAGS also get an ifrs-full fallback tried after every
                     # us-gaap tag comes back empty (20-F/40-F filers — see IFRS_FALLBACK_TAGS).
+                    # Concepts in DEI_NAMESPACE_CONCEPTS are cover-page/entity facts fetched
+                    # from the `dei` taxonomy instead of the default `us-gaap` — no IFRS
+                    # fallback applies to these (they're taxonomy-agnostic entity metadata,
+                    # not a financial-statement line item that varies by accounting standard).
                     series = extract_series_multi(
-                        facts, xbrl_concept, kind, ifrs_concepts=IFRS_FALLBACK_TAGS.get(label))
+                        facts, xbrl_concept, kind,
+                        namespace="dei" if label in _dei_concepts else "us-gaap",
+                        ifrs_concepts=IFRS_FALLBACK_TAGS.get(label))
                 if series.empty:
                     continue
                 # Share Repurchases is a positive cash-outflow MAGNITUDE by definition. Some filers

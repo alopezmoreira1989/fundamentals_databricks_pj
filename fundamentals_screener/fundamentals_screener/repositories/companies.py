@@ -73,14 +73,25 @@ _PEER_BENCHMARK_SQL = """
     GROUP BY metric
 """
 
-# Market Cap's category is NULL in the artifact by design (screener-only, invisible in the
-# metrics grid), so it needs its own targeted fetch rather than _LATEST_METRICS_SQL's
+# Market Cap (Live)'s category is NULL in the artifact by design (screener-only, invisible in
+# the metrics grid), so it needs its own targeted fetch rather than _LATEST_METRICS_SQL's
 # category-IS-NOT-NULL filter. period_end (a real date) is included for the USD-lens toggle's
 # date-anchored FX lookup (see usd_fx_rate below) — the only MetricPoint use case that needs it.
+#
+# Reads 'Market Cap (Live)' (22__derived_metrics.py's market_cap_live), NOT the fiscal-year-
+# anchored 'Market Cap' — confirmed real cases (2026-07): DMRA (Damora Therapeutics, formerly
+# Galecto — a recent reverse merger) and KRRO (Korro Bio — continuous ATM dilution) both showed
+# roughly HALF their real Finviz-quoted market cap using the FY-anchored figure, because
+# "Shares Diluted" is a weighted AVERAGE for the reporting period, not a point-in-time count —
+# it badly lags a recent large share-count change. 'Market Cap (Live)' is priced with today's
+# close × the most recent "Shares Outstanding (Cover Page)" count instead. The FY-anchored
+# 'Market Cap' metric itself is untouched and still backs every historical P/E/P/B/NCAV-ratio
+# calculation, which must stay priced on each year's own basis, never today's — this KPI card is
+# the one place a "what is this worth right now" figure is actually wanted.
 _MARKET_CAP_SQL = """
     SELECT ticker, 'Market Cap' AS metric, unit, fiscal_year, period_end, value
     FROM dashboard_metrics
-    WHERE ticker = ? AND metric = 'Market Cap' AND period_type = 'FY' AND value IS NOT NULL
+    WHERE ticker = ? AND metric = 'Market Cap (Live)' AND period_type = 'FY' AND value IS NOT NULL
     ORDER BY fiscal_year DESC
     LIMIT 1
 """

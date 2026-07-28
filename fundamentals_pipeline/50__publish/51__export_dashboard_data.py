@@ -242,10 +242,39 @@ except Exception as e:
     print(f"⚠ market_cap_asof unavailable ({e}) — skipping Market Cap rows.")
     market_cap = pd.DataFrame(columns=MKT_COLUMNS)
 
+# Market Cap (Live) — mirrors the Market Cap injection above, but reads market_cap_live
+# (22__derived_metrics.py) instead: one row per ticker (not FY_YEARS-many), priced with
+# TODAY's close × the most recent point-in-time "Shares Outstanding (Cover Page)" count,
+# not a fiscal year's own weighted-average Shares Diluted. Same category/subcategory=NULL
+# convention (invisible on the generic metrics grid, picked up by name like Market Cap).
+try:
+    _mcl_cols = {f.name for f in spark.table(f"{CATALOG}.{SCHEMA}.market_cap_live").schema.fields}
+    _live_unit_expr = "LOWER(md.currency)" if "currency" in _mcl_cols else "'usd'"
+    market_cap_live = spark.sql(f"""
+        SELECT
+            md.ticker,
+            'FY'                       AS period_type,
+            md.period_end              AS period_end,
+            md.fiscal_year,
+            CAST(NULL AS STRING)       AS category,
+            CAST(NULL AS STRING)       AS subcategory,
+            'Market Cap (Live)'        AS metric,
+            {_live_unit_expr}          AS unit,
+            CAST(NULL AS DOUBLE)       AS sort_order,
+            md.market_cap              AS value
+        FROM {CATALOG}.{SCHEMA}.market_cap_live md
+        WHERE md.ticker IN (SELECT ticker FROM _export_universe)
+          AND md.market_cap IS NOT NULL
+    """).toPandas()
+except Exception as e:
+    print(f"⚠ market_cap_live unavailable ({e}) — skipping Market Cap (Live) rows.")
+    market_cap_live = pd.DataFrame(columns=MKT_COLUMNS)
+
 # Retention now enforced in SQL (last FY_YEARS years per ticker, per source), so no
-# driver-side trim needed — just stack the two long-format metric frames.
-metrics = pd.concat([metrics, market_cap], ignore_index=True)
+# driver-side trim needed — just stack the long-format metric frames.
+metrics = pd.concat([metrics, market_cap, market_cap_live], ignore_index=True)
 print(f"  + Market Cap rows: {len(market_cap):,}")
+print(f"  + Market Cap (Live) rows: {len(market_cap_live):,}")
 print(f"  metrics rows: {len(metrics):,}")
 
 # COMMAND ----------
