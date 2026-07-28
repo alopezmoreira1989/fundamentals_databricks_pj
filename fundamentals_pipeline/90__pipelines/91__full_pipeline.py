@@ -441,6 +441,31 @@ _record_step("Dedup Flow Orphans", _t0)
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ## 7f. Shares Diluted Plausibility
+# MAGIC `financials` — deletes implausible `Shares Diluted` values (filer-side XBRL "reported in
+# MAGIC thousands" scale errors), both a ticker wrong in every period and isolated bad quarters.
+# MAGIC Must run after all quarterly writers (21, 21b, 21e, 21f, 21g) — a version of this guard
+# MAGIC placed inside `21` itself was found to silently miss quarterly-only bugs, since no
+# MAGIC quarterly rows exist in `financials` yet at that point. Must run before metrics.
+
+# COMMAND ----------
+
+print("=" * 55)
+print("STEP 6e / 12 — Shares Diluted Plausibility")
+print("=" * 55)
+_t0 = time.monotonic()
+
+# COMMAND ----------
+
+# MAGIC %run "../20__transformation/21h__shares_diluted_plausibility"
+
+# COMMAND ----------
+
+_record_step("Shares Diluted Plausibility", _t0)
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## 8. Derived metrics
 # MAGIC `financials_metrics` — margins, FCF, YoY growth, leverage, valuation ratios
 
