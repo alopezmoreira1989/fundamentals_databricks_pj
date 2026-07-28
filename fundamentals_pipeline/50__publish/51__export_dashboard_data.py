@@ -270,11 +270,44 @@ except Exception as e:
     print(f"⚠ market_cap_live unavailable ({e}) — skipping Market Cap (Live) rows.")
     market_cap_live = pd.DataFrame(columns=MKT_COLUMNS)
 
+# NCAV / Share (Live) + NCAV Ratio (Live) — same market_cap_live table, relaxed/moderate/strict.
+# Unpivoted via a plain UNION ALL of six single-column selects (one per source column), the
+# exact same shape as the Market Cap (Live) block above — kept deliberately simple/uniform
+# rather than a fancier LATERAL VIEW EXPLODE, since there's no local Spark session to test
+# against here.
+_NCAV_LIVE_COLUMNS = [
+    ("ncav_share_live_relaxed",  "NCAV / Share (Live)",            "usd"),
+    ("ncav_ratio_live_relaxed",  "NCAV Ratio (Live)",              "ratio"),
+    ("ncav_share_live_moderate", "NCAV (Moderate) / Share (Live)", "usd"),
+    ("ncav_ratio_live_moderate", "NCAV (Moderate) Ratio (Live)",   "ratio"),
+    ("ncav_share_live_strict",   "NCAV (Strict) / Share (Live)",   "usd"),
+    ("ncav_ratio_live_strict",   "NCAV (Strict) Ratio (Live)",     "ratio"),
+]
+try:
+    _ncav_live_union = " UNION ALL ".join(
+        f"""
+        SELECT
+            md.ticker, 'FY' AS period_type, md.period_end AS period_end, md.fiscal_year,
+            CAST(NULL AS STRING) AS category, CAST(NULL AS STRING) AS subcategory,
+            '{_metric}' AS metric, '{_unit}' AS unit, CAST(NULL AS DOUBLE) AS sort_order,
+            md.{_col} AS value
+        FROM {CATALOG}.{SCHEMA}.market_cap_live md
+        WHERE md.ticker IN (SELECT ticker FROM _export_universe)
+          AND md.{_col} IS NOT NULL
+        """
+        for _col, _metric, _unit in _NCAV_LIVE_COLUMNS
+    )
+    _ncav_live_metrics = spark.sql(_ncav_live_union).toPandas()
+except Exception as e:
+    print(f"⚠ market_cap_live NCAV columns unavailable ({e}) — skipping NCAV (Live) rows.")
+    _ncav_live_metrics = pd.DataFrame(columns=MKT_COLUMNS)
+
 # Retention now enforced in SQL (last FY_YEARS years per ticker, per source), so no
 # driver-side trim needed — just stack the long-format metric frames.
-metrics = pd.concat([metrics, market_cap, market_cap_live], ignore_index=True)
+metrics = pd.concat([metrics, market_cap, market_cap_live, _ncav_live_metrics], ignore_index=True)
 print(f"  + Market Cap rows: {len(market_cap):,}")
 print(f"  + Market Cap (Live) rows: {len(market_cap_live):,}")
+print(f"  + NCAV (Live) rows: {len(_ncav_live_metrics):,}")
 print(f"  metrics rows: {len(metrics):,}")
 
 # COMMAND ----------
