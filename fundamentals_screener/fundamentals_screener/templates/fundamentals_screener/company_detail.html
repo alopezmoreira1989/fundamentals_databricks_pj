@@ -213,6 +213,10 @@
                 type="button" role="tab" aria-controls="pane-{{ st.name|slugify }}" aria-selected="false">{{ st.name }}</button>
       </li>
     {% endfor %}
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="tab-filings" data-bs-toggle="tab" data-bs-target="#pane-filings"
+              type="button" role="tab" aria-controls="pane-filings" aria-selected="false">Filings</button>
+    </li>
     {% if quarterly.lines %}
       <li class="nav-item" role="presentation">
         <button class="nav-link" id="tab-quarterly" data-bs-toggle="tab" data-bs-target="#pane-quarterly"
@@ -395,6 +399,27 @@
         </div>
       </div>
     {% endfor %}
+
+    <!-- Filings (issue #318): direct links to SEC EDGAR's own filing-browse page, resolved
+         from a ticker->CIK map cached at sync time (data_source.get_cik_map) -- no per-filing
+         data of our own, no request-time network (this app's CGI hosting has none at all). -->
+    <div class="tab-pane fade" id="pane-filings" role="tabpanel" aria-labelledby="tab-filings" tabindex="0">
+      <div class="card p-4">
+        <div class="eyebrow mb-2">SEC filings</div>
+        {% with tenk=s.cik|edgar_filings_url:"10-K" tenq=s.cik|edgar_filings_url:"10-Q" %}
+          {% if tenk %}
+            <p class="mb-2">
+              <a href="{{ tenk }}" target="_blank" rel="noopener noreferrer">10-K filings (annual reports) &rarr;</a>
+            </p>
+            <p class="mb-0">
+              <a href="{{ tenq }}" target="_blank" rel="noopener noreferrer">10-Q filings (quarterly reports) &rarr;</a>
+            </p>
+          {% else %}
+            <p class="text-muted small mb-0">Filings not available for this ticker.</p>
+          {% endif %}
+        {% endwith %}
+      </div>
+    </div>
 
     <!-- Quarterly (Income Statement by fiscal quarter) -->
     {% if quarterly.lines %}

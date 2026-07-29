@@ -11,6 +11,7 @@ import duckdb
 from fundamentals_pipeline.statement_layout import resolve_indent
 from fundamentals_pipeline.statement_layout import row_class as _row_class
 
+from ..data_source import get_cik_map
 from ..data_source import get_meta as load_meta
 from ..dtos import (
     CompanyStatements,
@@ -270,7 +271,12 @@ PRICE_WINDOW_DEFAULT = "1Y"
 
 class CompanyRepository(DuckDBRepository):
     def get_summary(self, ticker: str) -> CompanySummary | None:
-        """Descriptive facts from the meta artifact (``None`` if the ticker is unknown)."""
+        """Descriptive facts from the meta artifact (``None`` if the ticker is unknown).
+
+        ``cik`` comes from a SEPARATE cached source (``data_source.get_cik_map()``, synced by
+        the cron-driven ``sync_fundamentals_data`` command — see its own docstring), not the
+        meta artifact itself — issue #318's Filings tab link-out.
+        """
         records: list[dict[str, Any]] = load_meta().get("tickers", [])
         for rec in records:
             if rec.get("ticker") == ticker:
@@ -290,6 +296,7 @@ class CompanyRepository(DuckDBRepository):
                     employees=_as_int(rec.get("employees")),
                     founded=_clean(rec.get("founded")),
                     has_logo=_as_bool(rec.get("has_logo")),
+                    cik=get_cik_map().get(rec["ticker"]),
                 )
         return None
 

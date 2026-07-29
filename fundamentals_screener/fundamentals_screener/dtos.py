@@ -35,6 +35,10 @@ class CompanySummary:
     employees: int | None = None
     founded: str | None = None
     has_logo: bool | None = None
+    # 10-digit SEC CIK, from data_source.get_cik_map() — NOT the meta artifact (issue #318's
+    # Filings tab link-out; see repositories/companies.py's get_summary()). None when the
+    # ticker->CIK cache hasn't been synced yet or SEC doesn't have this ticker.
+    cik: str | None = None
 
 
 @dataclass(frozen=True)
