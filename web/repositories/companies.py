@@ -37,15 +37,29 @@ _LATEST_METRICS_SQL = """
     LIMIT ?
 """
 
-# Market Cap's category is NULL in the artifact by design (screener-only, invisible in the
-# metrics grid — mirrors the Streamlit app; see 51__export_dashboard_data.py's injection
-# comment), so it needs its own targeted fetch rather than _LATEST_METRICS_SQL's
+# Market Cap (Live)'s category is NULL in the artifact by design (screener-only, invisible in
+# the metrics grid), so it needs its own targeted fetch rather than _LATEST_METRICS_SQL's
 # category-IS-NOT-NULL filter. period_end (a real date) is included for the USD-lens toggle's
 # date-anchored FX lookup (see usd_fx_rate below) — the only MetricPoint use case that needs it.
+#
+# Reads 'Market Cap (Live)' (22__derived_metrics.py's market_cap_live), NOT the fiscal-year-
+# anchored 'Market Cap' — mirrors fundamentals_screener's own CompanyRepository.market_cap
+# (this repo's other, separately-deployed Django app; see its own repositories/companies.py for
+# the full history: DMRA/Damora Therapeutics and KRRO/Korro Bio both showed roughly HALF their
+# real Finviz-quoted market cap using the FY-anchored figure, because "Shares Diluted" is a
+# weighted AVERAGE for the reporting period, not a point-in-time count). This app's own company
+# KPI card had NOT been ported to the live variant when that fix originally shipped (it was
+# scoped to fundamentals_screener only) — brought to parity here so both apps' "what is this
+# worth right now" KPI card use the same live figure the live P/E/P/B/EV-EBITDA multiples
+# already do (23__intrinsic_value.py's "P/E (TTM, live)" etc., which flow through
+# _LATEST_METRICS_SQL like any other categorized metric, no per-app wiring needed). The
+# FY-anchored 'Market Cap' metric itself is untouched and still backs every historical P/E/P/B/
+# NCAV-ratio calculation and the general screener's own Market Cap column, which must stay
+# priced on each year's own basis, never today's.
 _MARKET_CAP_SQL = """
     SELECT ticker, 'Market Cap' AS metric, unit, fiscal_year, period_end, value
     FROM metrics
-    WHERE ticker = ? AND metric = 'Market Cap' AND period_type = 'FY' AND value IS NOT NULL
+    WHERE ticker = ? AND metric = 'Market Cap (Live)' AND period_type = 'FY' AND value IS NOT NULL
     ORDER BY fiscal_year DESC
     LIMIT 1
 """
