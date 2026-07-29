@@ -151,6 +151,13 @@ _NET_NET_LEVEL_FIELD = {
     "moderate": "ncav_per_share_moderate",
     "strict": "ncav_per_share_strict",
 }
+
+# NCAV/Share Discount filter (issue #317): a small preset tier, not a freeform threshold input
+# — mirrors the level pill's own "small discrete choice, not a text field" convention. "all" is
+# the default/omittable value (no filter, ``None`` passed to the service); the other three map
+# to ``services.get_net_net_screen``'s ``min_discount_pct``. Order matches the pill display
+# order (loosest first), same convention as ``_NET_NET_LEVELS``/Investor Presets' own levels.
+_NET_NET_DISCOUNT_OPTIONS: dict[str, float | None] = {"all": None, "0": 0.0, "15": 15.0, "33": 33.0}
 # Display order + label for the Valuation page's Net-Net card (issue #262), which shows all
 # three levels side by side rather than one user-selected level like the Net-Net Finder does.
 _NET_NET_CARD_LEVELS = (("Relaxed", "relaxed"), ("Moderate", "moderate"), ("Strict", "strict"))
@@ -472,6 +479,9 @@ def _netnet_screen(request: HttpRequest) -> HttpResponse:
     if level not in _NET_NET_LEVELS:
         level = "relaxed"
     hide_value_traps = request.GET.get("hide_value_traps") == "1"
+    discount = request.GET.get("discount", "all").strip().lower()
+    if discount not in _NET_NET_DISCOUNT_OPTIONS:
+        discount = "all"
     sector = request.GET.get("sector", "").strip()
     index = request.GET.get("index", "").strip()
     country = request.GET.get("country", "").strip()
@@ -486,6 +496,7 @@ def _netnet_screen(request: HttpRequest) -> HttpResponse:
 
     result = services.get_net_net_screen(
         level=level, hide_value_traps=hide_value_traps,
+        min_discount_pct=_NET_NET_DISCOUNT_OPTIONS[discount],
         sector=sector, index=index, country=country, market=market, industry=industry,
         sort_key=sort_key, descending=descending,
     )
@@ -515,6 +526,7 @@ def _netnet_screen(request: HttpRequest) -> HttpResponse:
         p for p in (
             ("mode", "netnet"), ("level", level),
             ("hide_value_traps", "1" if hide_value_traps else ""),
+            ("discount", discount if discount != "all" else ""),
             ("sector", sector), ("index", index), ("country", country), ("market", market),
             ("industry", industry),
         ) if p[1]
@@ -548,6 +560,7 @@ def _netnet_screen(request: HttpRequest) -> HttpResponse:
             "querystring": nn_qs,
             "level": level,
             "hide_value_traps": hide_value_traps,
+            "discount": discount,
             "sector": sector,
             "index": index,
             "country": country,

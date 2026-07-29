@@ -1,7 +1,8 @@
 {% comment %}
 Included by netnet.html. Context needed: level, stats (NetNetStats), hide_value_traps,
-shared_qs, sector, country, market (for the level pills to carry the rest of the state
-forward, since they're plain full-reload links, not part of the filter <form> below).
+discount, shared_qs, sector, country, market (for the level/discount pills to carry the rest
+of the state forward, since they're plain full-reload-style links intercepted by JS, not part
+of the filter <form> below).
 {% endcomment %}
 {% load static humanize %}
 <div class="nn-hero mb-4">
@@ -46,15 +47,15 @@ forward, since they're plain full-reload links, not part of the filter <form> be
   <div class="d-flex flex-wrap align-items-center gap-3 mt-3">
     <div class="levels" role="group" aria-label="NCAV conservatism level">
       <a class="level-btn {% if level == 'relaxed' %}level-btn--active{% endif %}"
-         href="?mode=netnet&amp;level=relaxed{% if base_qs %}&amp;{{ base_qs }}{% endif %}{% if hide_value_traps %}&amp;hide_value_traps=1{% endif %}">
+         href="?mode=netnet&amp;level=relaxed{% if base_qs %}&amp;{{ base_qs }}{% endif %}{% if hide_value_traps %}&amp;hide_value_traps=1{% endif %}{% if discount != 'all' %}&amp;discount={{ discount }}{% endif %}">
         <span class="level-dot level-dot--relaxed"></span>Relaxed
       </a>
       <a class="level-btn {% if level == 'moderate' %}level-btn--active{% endif %}"
-         href="?mode=netnet&amp;level=moderate{% if base_qs %}&amp;{{ base_qs }}{% endif %}{% if hide_value_traps %}&amp;hide_value_traps=1{% endif %}">
+         href="?mode=netnet&amp;level=moderate{% if base_qs %}&amp;{{ base_qs }}{% endif %}{% if hide_value_traps %}&amp;hide_value_traps=1{% endif %}{% if discount != 'all' %}&amp;discount={{ discount }}{% endif %}">
         <span class="level-dot level-dot--moderate"></span>Moderate
       </a>
       <a class="level-btn {% if level == 'strict' %}level-btn--active{% endif %}"
-         href="?mode=netnet&amp;level=strict{% if base_qs %}&amp;{{ base_qs }}{% endif %}{% if hide_value_traps %}&amp;hide_value_traps=1{% endif %}">
+         href="?mode=netnet&amp;level=strict{% if base_qs %}&amp;{{ base_qs }}{% endif %}{% if hide_value_traps %}&amp;hide_value_traps=1{% endif %}{% if discount != 'all' %}&amp;discount={{ discount }}{% endif %}">
         <span class="level-dot level-dot--strict"></span>Strict
       </a>
     </div>
@@ -66,6 +67,33 @@ forward, since they're plain full-reload links, not part of the filter <form> be
                form="nn-filter-form" {% if hide_value_traps %}checked{% endif %}>
         <span class="switch-track"></span>
       </label>
+    </div>
+  </div>
+  {% comment %}
+    NCAV/Share Discount filter (issue #317) — a second, independent pill group, same ".levels
+    a" class the JS click-delegation in screener.js's initNetNet already listens for, so this
+    needs zero JS changes. Each pill carries the CURRENT level forward (unlike the level pills
+    above carrying discount forward) since the two filters are independent axes.
+  {% endcomment %}
+  <div class="d-flex flex-wrap align-items-center gap-2 mt-2">
+    <span class="small text-muted mb-0">Min. discount</span>
+    <div class="levels" role="group" aria-label="NCAV/Share discount">
+      <a class="level-btn {% if discount == 'all' %}level-btn--active{% endif %}"
+         href="?mode=netnet&amp;level={{ level }}{% if base_qs %}&amp;{{ base_qs }}{% endif %}{% if hide_value_traps %}&amp;hide_value_traps=1{% endif %}">
+        All
+      </a>
+      <a class="level-btn {% if discount == '0' %}level-btn--active{% endif %}"
+         href="?mode=netnet&amp;level={{ level }}&amp;discount=0{% if base_qs %}&amp;{{ base_qs }}{% endif %}{% if hide_value_traps %}&amp;hide_value_traps=1{% endif %}">
+        &gt;0%
+      </a>
+      <a class="level-btn {% if discount == '15' %}level-btn--active{% endif %}"
+         href="?mode=netnet&amp;level={{ level }}&amp;discount=15{% if base_qs %}&amp;{{ base_qs }}{% endif %}{% if hide_value_traps %}&amp;hide_value_traps=1{% endif %}">
+        &gt;15%
+      </a>
+      <a class="level-btn {% if discount == '33' %}level-btn--active{% endif %}"
+         href="?mode=netnet&amp;level={{ level }}&amp;discount=33{% if base_qs %}&amp;{{ base_qs }}{% endif %}{% if hide_value_traps %}&amp;hide_value_traps=1{% endif %}">
+        &gt;33%
+      </a>
     </div>
   </div>
   {% endwith %}
