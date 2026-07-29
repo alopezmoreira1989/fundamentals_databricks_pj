@@ -219,10 +219,6 @@
                 type="button" role="tab" aria-controls="pane-{{ st.name|slugify }}" aria-selected="false">{{ st.name }}</button>
       </li>
     {% endfor %}
-    <li class="nav-item" role="presentation">
-      <button class="nav-link" id="tab-filings" data-bs-toggle="tab" data-bs-target="#pane-filings"
-              type="button" role="tab" aria-controls="pane-filings" aria-selected="false">Filings</button>
-    </li>
     {% if quarterly.lines %}
       <li class="nav-item" role="presentation">
         <button class="nav-link" id="tab-quarterly" data-bs-toggle="tab" data-bs-target="#pane-quarterly"
@@ -241,6 +237,10 @@
                 type="button" role="tab" aria-controls="pane-metrics" aria-selected="false">Derived metrics</button>
       </li>
     {% endif %}
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="tab-filings" data-bs-toggle="tab" data-bs-target="#pane-filings"
+              type="button" role="tab" aria-controls="pane-filings" aria-selected="false">Filings</button>
+    </li>
   </ul>
 
   <div class="tab-content">
@@ -406,16 +406,6 @@
       </div>
     {% endfor %}
 
-    <!-- Filings (fetched async from SEC EDGAR) -->
-    <div class="tab-pane fade" id="pane-filings" role="tabpanel" aria-labelledby="tab-filings" tabindex="0">
-      <div class="card p-4">
-        <div class="eyebrow mb-2">SEC filings · 10-K &amp; 10-Q</div>
-        <div id="filings-list" data-filings-url="{% url 'companies:filings' s.ticker %}">
-          <p class="text-muted small mb-0">Loading filings…</p>
-        </div>
-      </div>
-    </div>
-
     <!-- Quarterly (Income Statement by fiscal quarter) -->
     {% if quarterly.lines %}
       <div class="tab-pane fade" id="pane-quarterly" role="tabpanel" aria-labelledby="tab-quarterly" tabindex="0">
@@ -549,6 +539,17 @@
         </div>
       </div>
     {% endif %}
+
+    <!-- Filings (fetched async from SEC EDGAR). Last tab, deliberately -- the least-used,
+         reference-lookup tab belongs at the end. -->
+    <div class="tab-pane fade" id="pane-filings" role="tabpanel" aria-labelledby="tab-filings" tabindex="0">
+      <div class="card p-4">
+        <div class="eyebrow mb-2">SEC filings · 10-K &amp; 10-Q</div>
+        <div id="filings-list" data-filings-url="{% url 'companies:filings' s.ticker %}">
+          <p class="text-muted small mb-0">Loading filings…</p>
+        </div>
+      </div>
+    </div>
   </div>
   {% endwith %}
 {% endblock %}
