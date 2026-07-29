@@ -49,8 +49,8 @@ CIK_MAP_FILE = "cik_map.json"
 # SEC blocks requests without a real, identifying User-Agent (org + contact email) — same class
 # of gotcha as the root pipeline's 01__tickers.py placeholder (see CLAUDE.md). Ships inert; the
 # host MUST set a real one via the SEC_USER_AGENT Django setting (see README) or SEC will simply
-# reject the request (403) — that fails sync() loudly (same "let it raise" convention as
-# _download below), not a silent, hard-to-diagnose failure.
+# reject the request (403) — logged as a warning by _sync_cik_map below, not raised (see its
+# own docstring for why this one step is deliberately lenient, unlike _download).
 _SEC_USER_AGENT_PLACEHOLDER = "fundamentals_screener (configure SEC_USER_AGENT in settings.py)"
 
 
@@ -87,15 +87,35 @@ def sync(force: bool = False) -> list[str]:
 def _sync_cik_map(force: bool = False) -> bool:
     """Cache ``{ticker: 10-digit CIK}`` for this app's own ticker universe (Filings tab
     link-out — see this module's own top-of-file comment). Skips if already cached and not
-    ``force``, same idiom as ``_download``. Returns whether it fetched."""
+    ``force``. Returns whether it fetched.
+
+    Deliberately NEVER raises — unlike ``_download`` above, whose targets are essential (the
+    whole app is non-functional without them), the CIK map is optional, best-effort data for
+    one tab's link-out. ``sync()`` runs directly inside the production deploy script (not just
+    an independent cron), so a failure in this one non-essential step must never take down the
+    rest of that run — including the essential parquet/meta refresh already completed earlier
+    in the SAME call. Confirmed as a real incident (2026-07-29): an unconfigured
+    ``SEC_USER_AGENT`` produced a 403 here, which (before this fix) propagated and killed the
+    whole deploy script via its ``set -e``, before it ever reached the media-file copy or
+    health check. Prints a clear, visible warning instead of raising — an operator diagnosing
+    "why is the Filings tab empty" needs this logged somewhere findable, just not fatal.
+    """
     dest = data_dir() / CIK_MAP_FILE
     if dest.exists() and not force:
         return False
     headers = {"User-Agent": getattr(settings, "SEC_USER_AGENT", _SEC_USER_AGENT_PLACEHOLDER)}
-    response = requests.get(SEC_TICKER_INDEX_URL, headers=headers, timeout=30)
-    response.raise_for_status()
-    idx = response.json()
-    sec_map = {entry["ticker"].upper(): str(entry["cik_str"]).zfill(10) for entry in idx.values()}
+    try:
+        response = requests.get(SEC_TICKER_INDEX_URL, headers=headers, timeout=30)
+        response.raise_for_status()
+        idx = response.json()
+        sec_map = {entry["ticker"].upper(): str(entry["cik_str"]).zfill(10) for entry in idx.values()}
+    except Exception as exc:
+        print(
+            f"⚠ Could not refresh the SEC ticker→CIK map ({exc}) — the Filings "
+            f"tab will show \"not available\" until this succeeds. If this is a 403, set a "
+            f"real SEC_USER_AGENT (see the README)."
+        )
+        return False
     our_tickers = {t["ticker"] for t in list_tickers()}
     cik_map = {ticker: cik for ticker, cik in sec_map.items() if ticker in our_tickers}
     dest.write_text(json.dumps(cik_map), encoding="utf-8")
