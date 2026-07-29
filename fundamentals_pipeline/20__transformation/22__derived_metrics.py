@@ -978,12 +978,26 @@ else:
     #     joinable with the rest of financials_metrics — the figure itself isn't tied to that
     #     fiscal year, which is why `period_end` here is the actual as-of trading date, not a
     #     fiscal close.
+    # Staleness bound: a ticker that simply stopped reporting the cover-page concept a long
+    # time ago (confirmed real cases 2026-07: UWMC's latest cover-page value is from 2021, QS's
+    # from 2022) would otherwise have its multi-year-old share count silently reused as if it
+    # were "live". Bounded against TODAY (not a fiscal period_end, unlike
+    # _ASOF_SHARES_MAX_STALENESS_DAYS above) — this whole table's point is being current, so
+    # "stale relative to now" is the right question, not "stale relative to some FY close".
+    # Same 400-day threshold as _ASOF_SHARES_MAX_STALENESS_DAYS: cover-page shares are refiled
+    # at least once a year (every 10-K, plus each 10-Q for a domestic filer), so a real gap this
+    # long means the ticker isn't a normal ongoing filer, not a run of bad luck on timing.
+    # A ticker that fails this bound is simply absent from shares_live/market_cap_live this run
+    # (the join below is inner) — this repo's standing "real gap reads NULL/absent" convention,
+    # not a guessed/stale fallback.
+    _LIVE_SHARES_MAX_STALENESS_DAYS = 400
     _w_shares_live = Window.partitionBy("ticker").orderBy(F.col("period_end").desc())
     shares_live = (
         spark.table(full_tbl)
         .filter((F.col("concept") == "Shares Outstanding (Cover Page)") & F.col("value").isNotNull())
         .withColumn("_rn", F.row_number().over(_w_shares_live))
         .filter(F.col("_rn") == 1)
+        .filter(F.datediff(F.current_date(), F.col("period_end")) <= _LIVE_SHARES_MAX_STALENESS_DAYS)
         .select("ticker", F.col("value").alias("shares_live"))
     )
     _w_price_live = Window.partitionBy("ticker").orderBy(F.col("date").desc())
