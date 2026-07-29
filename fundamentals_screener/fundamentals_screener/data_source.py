@@ -37,6 +37,22 @@ RELEASE_BASE_URL = (
 )
 META_FILE = "dashboard_meta.json"
 
+# Filings tab (issue #318): a ticker->CIK cache for linking straight out to SEC EDGAR's own
+# filing-browse page, NOT a per-filing list — this app's CGI/no-persistent-process hosting has
+# no request-path network at all (see this module's own docstring), so `web/`'s richer,
+# live-per-request Filings tab (infrastructure/filings.py, calling SEC's submissions API on
+# every page load) isn't an option here. A single small ticker-map fetch, done here in the
+# cron-driven sync, is.
+SEC_TICKER_INDEX_URL = "https://www.sec.gov/files/company_tickers.json"
+CIK_MAP_FILE = "cik_map.json"
+
+# SEC blocks requests without a real, identifying User-Agent (org + contact email) — same class
+# of gotcha as the root pipeline's 01__tickers.py placeholder (see CLAUDE.md). Ships inert; the
+# host MUST set a real one via the SEC_USER_AGENT Django setting (see README) or SEC will simply
+# reject the request (403) — that fails sync() loudly (same "let it raise" convention as
+# _download below), not a silent, hard-to-diagnose failure.
+_SEC_USER_AGENT_PLACEHOLDER = "fundamentals_screener (configure SEC_USER_AGENT in settings.py)"
+
 
 def data_dir() -> Path:
     path = Path(settings.FUNDAMENTALS_DATA_PATH)
@@ -61,7 +77,46 @@ def sync(force: bool = False) -> list[str]:
         if force or not dest.exists():
             _download(filename, dest)
             updated.append(filename)
+    # Runs AFTER the loop above: needs list_tickers() (backed by META_FILE), which the loop
+    # just ensured is on disk (whether freshly downloaded this run or already cached).
+    if _sync_cik_map(force=force):
+        updated.append(CIK_MAP_FILE)
     return updated
+
+
+def _sync_cik_map(force: bool = False) -> bool:
+    """Cache ``{ticker: 10-digit CIK}`` for this app's own ticker universe (Filings tab
+    link-out — see this module's own top-of-file comment). Skips if already cached and not
+    ``force``, same idiom as ``_download``. Returns whether it fetched."""
+    dest = data_dir() / CIK_MAP_FILE
+    if dest.exists() and not force:
+        return False
+    headers = {"User-Agent": getattr(settings, "SEC_USER_AGENT", _SEC_USER_AGENT_PLACEHOLDER)}
+    response = requests.get(SEC_TICKER_INDEX_URL, headers=headers, timeout=30)
+    response.raise_for_status()
+    idx = response.json()
+    sec_map = {entry["ticker"].upper(): str(entry["cik_str"]).zfill(10) for entry in idx.values()}
+    our_tickers = {t["ticker"] for t in list_tickers()}
+    cik_map = {ticker: cik for ticker, cik in sec_map.items() if ticker in our_tickers}
+    dest.write_text(json.dumps(cik_map), encoding="utf-8")
+    return True
+
+
+def get_cik_map() -> dict[str, str]:
+    """``{ticker: 10-digit CIK}``, or ``{}`` on ANY failure to load it — never synced yet, SEC
+    was unreachable on a prior sync, a corrupt cache file, or (the case that matters for
+    callers outside a fully-configured Django project, e.g. this package's own test suite,
+    which configures Django nowhere at all) ``FUNDAMENTALS_DATA_PATH`` itself not being set up.
+    `get_summary()` calls this unconditionally for every ticker, so a CIK-cache problem must
+    never take down the rest of a company page over one optional field — same "degrade, don't
+    crash" convention as this file's own ``usd_fx_rate``."""
+    try:
+        path = data_dir() / CIK_MAP_FILE
+        if not path.exists():
+            return {}
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
 
 
 def validate() -> list[str]:

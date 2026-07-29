@@ -53,7 +53,20 @@ pip install "fundamentals-screener @ git+https://github.com/alopezmoreira1989/fu
    fresh" below.
 4. Optional setting: `LOGO_DEV_KEY` (a [Logo.dev](https://logo.dev) publishable key) — enables
    real company logos instead of the monogram fallback. Unset ⇒ always monogram, no error.
-5. Recommended setting: a persistent `CACHES` backend, for the "Latest news" widget on the
+5. Recommended setting: `SEC_USER_AGENT` — a real, identifying User-Agent (org + contact
+   email) for the one SEC request `sync_fundamentals_data` makes to build the company page's
+   Filings tab (a ticker→CIK map, cached locally, used to link out to SEC EDGAR's own
+   filing-browse page — no per-filing data is fetched or stored). SEC rejects anonymous
+   requests outright:
+
+   ```python
+   SEC_USER_AGENT = env("SEC_USER_AGENT", default="your-org-name your-contact-email@example.com")
+   ```
+
+   Unset ⇒ ships with an inert placeholder, so `sync_fundamentals_data` will fail to refresh
+   the CIK map (SEC returns 403) until you set a real one — the Filings tab itself degrades to
+   "not available" rather than erroring, same as any other missing optional field.
+6. Recommended setting: a persistent `CACHES` backend, for the "Latest news" widget on the
    company Overview tab (Yahoo Finance headlines, cached 30 min). Django's default
    `LocMemCache` is process-local — under CGI hosting (a fresh process per request, see
    "Keeping data fresh" below) it never actually persists between requests, so the widget
@@ -84,8 +97,10 @@ python manage.py sync_fundamentals_data --force  # re-download everything
 
 It downloads the 5 `dashboard_*.parquet` files + `dashboard_meta.json` from the upstream
 repo's GitHub Release `latest` into `FUNDAMENTALS_DATA_PATH`, then validates them against
-`fundamentals_pipeline.schemas`. The web views never touch the network — they only ever read
-whatever is already on disk via `fundamentals_screener.repository.connection()`.
+`fundamentals_pipeline.schemas`. It also refreshes a small `cik_map.json` (ticker→SEC CIK, for
+the company page's Filings tab) from SEC's own `company_tickers.json` — one lightweight
+request, not per-ticker. The web views never touch the network — they only ever read whatever
+is already on disk via `fundamentals_screener.repository.connection()`.
 
 This is deliberate, not a missing feature: the reference deployment for this package is plain
 CGI hosting (`mod_cgi`, no persistent process between requests), where a lazy
@@ -147,7 +162,12 @@ Ported from `web/`'s `apps/companies`, `apps/screener`, `apps/valuation`:
   reload with JS disabled). A ▲/▼ delta chip rides next to each percent-unit metric's own Latest
   value, showing the signed gap vs. the active benchmark), valuation football field + Margin of
   Safety table + Net-Net card, price chart with SMA 20/50/200, a "Latest news" card (async Yahoo
-  Finance headlines, `/<ticker>/news/`, cached — see the `CACHES` recommendation above).
+  Finance headlines, `/<ticker>/news/`, cached — see the `CACHES` recommendation above), and a
+  **Filings** tab linking straight to SEC EDGAR's own 10-K/10-Q filing-browse page for the
+  ticker (via a ticker→CIK map refreshed by `sync_fundamentals_data` — see "Keeping data fresh"
+  and the `SEC_USER_AGENT` setting above; unlike `fundamentals_databricks_pj`'s own `web/` app,
+  this does NOT fetch a live per-filing list at request time — no network on the request path,
+  ever, see below).
 - **Valuation** (`/<ticker>/valuation/`): a standalone version of the same football field + MoS
   table + Net-Net card.
 - JSON siblings of all three (`/data/`, `/<ticker>/data/`, `/<ticker>/valuation/data/`).
