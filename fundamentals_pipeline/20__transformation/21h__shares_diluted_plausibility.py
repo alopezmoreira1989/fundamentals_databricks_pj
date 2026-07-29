@@ -60,6 +60,18 @@
 # MAGIC round's flagged set exactly matches the previous round's, not a monotonically-growing
 # MAGIC accumulation).
 # MAGIC
+# MAGIC **Also runs against `Shares Outstanding (Cover Page)` (`dei:EntityCommonStockSharesOutstanding`,
+# MAGIC added 2026-07 for the "live" Market Cap / NCAV features — see 00__config/01__tickers.py).**
+# MAGIC A universe-wide scan comparing cover-page shares against Shares Diluted (triggered by a
+# MAGIC GENI market-cap bug report) found the SAME isolated single-quarter scale-error failure
+# MAGIC mode already fixed above for Shares Diluted — confirmed real cases: ADV, AGL, PTCT, BKNG,
+# MAGIC MCHB. The check is identical in mechanism (same ratio thresholds, same iterative pool
+# MAGIC convergence) — only the concept being scanned differs — so it is implemented as one
+# MAGIC shared function, `_run_neighbor_plausibility_check(concept, error_type)`, called once per
+# MAGIC concept below. Check 1 (the absolute TCA-based check) is NOT extended to cover-page
+# MAGIC shares — it is specific to Shares Diluted's own "assets per share vs. traded price"
+# MAGIC signal, and this scope was deliberately left for a later pass.
+# MAGIC
 # MAGIC **Why check 1 must run before check 2, not after or merged into one pass (found via
 # MAGIC pre-implementation simulation against real data, not just reasoned about):** a ticker
 # MAGIC with SEVERAL consecutive wrong periods (e.g. ACAD's wrong FY2022/FY2023 AND wrong Q2/Q3
@@ -122,27 +134,28 @@ _sd_fail_schema = StructType([
 ])
 
 
-def _delete_implausible_shares_diluted(excluded_keys: set, records: list) -> None:
-    """Shared DELETE + ingestion_failures logging for both plausibility checks below.
-    `excluded_keys`: {(ticker, period_type, fiscal_year), ...}. `records`: dict rows matching
-    `_sd_fail_schema`, already filtered to `excluded_keys`."""
+def _delete_implausible_rows(concept: str, excluded_keys: set, records: list) -> None:
+    """Shared DELETE + ingestion_failures logging for every plausibility check in this file.
+    `concept`: the exact `financials.concept` value to delete rows for (e.g. 'Shares Diluted',
+    'Shares Outstanding (Cover Page)'). `excluded_keys`: {(ticker, period_type, fiscal_year), ...}.
+    `records`: dict rows matching `_sd_fail_schema`, already filtered to `excluded_keys`."""
     if not excluded_keys:
-        print("✓ No implausible Shares Diluted values found.")
+        print(f"✓ No implausible {concept} values found.")
         return
     _bad_df = spark.createDataFrame(
         list(excluded_keys), schema=["ticker", "period_type", "fiscal_year"]
     )
-    _bad_df.createOrReplaceTempView("implausible_shares_diluted")
+    _bad_df.createOrReplaceTempView("implausible_concept_rows")
     spark.sql(f"""
         MERGE INTO {full_tbl} AS t
-        USING implausible_shares_diluted AS s
+        USING implausible_concept_rows AS s
         ON  t.ticker      = s.ticker
         AND t.fiscal_year = s.fiscal_year
         AND t.period_type = s.period_type
-        AND t.concept     = 'Shares Diluted'
+        AND t.concept     = '{concept}'
         WHEN MATCHED THEN DELETE
     """)
-    print(f"✓ Deleted {len(excluded_keys):,} implausible Shares Diluted row(s) from {full_tbl}")
+    print(f"✓ Deleted {len(excluded_keys):,} implausible {concept} row(s) from {full_tbl}")
     spark.createDataFrame(records, schema=_sd_fail_schema) \
          .write.mode("append").saveAsTable(_sd_fail_tbl)
     print(f"✓ Logged {len(records):,} row(s) to {_sd_fail_tbl}")
@@ -228,111 +241,137 @@ _sd_abs_records = [{
     "scraped_at": _sd_abs_scraped_at,
 } for r in _sd_abs_rows]
 
-_delete_implausible_shares_diluted(_sd_abs_excluded, _sd_abs_records)
+_delete_implausible_rows("Shares Diluted", _sd_abs_excluded, _sd_abs_records)
 
 # COMMAND ----------
 
 # MAGIC %md ## 2. Neighbor-based iterative check (all period_types, runs after check 1)
+# MAGIC
+# MAGIC Shared across both `Shares Diluted` and `Shares Outstanding (Cover Page)` — same
+# MAGIC mechanism, only the scanned concept and the logged `error_type` differ (see the header
+# MAGIC doc above).
 
 # COMMAND ----------
-
-# Re-read from the table so this reflects check 1's deletions, not a pre-check-1 in-memory frame.
-_shares_diluted = (
-    spark.table(full_tbl)
-    .filter(F.col("concept") == "Shares Diluted")
-    .select("ticker", "period_type", "fiscal_year", "period_end", "value")
-    .localCheckpoint(eager=True)
-)
 
 _SD_RATIO_LOW  = 1.0 / 500.0
 _SD_RATIO_HIGH = 500.0
 _SD_MAX_ITERATIONS = 15
-_w_sd_ticker = Window.partitionBy("ticker").orderBy("period_end", (F.col("period_type") != "FY"))
 
-_sd_excluded: set = set()      # {(ticker, period_type, fiscal_year), ...} — "presumed bad" set
-_sd_prev_excluded: set = set()  # the set one iteration back — used for the non-convergence
-                                 # per-ticker stability check below (see its own comment)
-_sd_converged = False
-for _sd_iter in range(_SD_MAX_ITERATIONS):
-    if _sd_excluded:
-        _sd_excl_df = spark.createDataFrame(
-            list(_sd_excluded), schema=["ticker", "period_type", "fiscal_year"]
-        )
-        _sd_marked = (
-            _shares_diluted
-            .join(_sd_excl_df.withColumn("_excl", F.lit(True)),
-                  on=["ticker", "period_type", "fiscal_year"], how="left")
-            .withColumn("pool_value", F.when(F.col("_excl").isNull(), F.col("value")))
-            .drop("_excl")
-        )
-    else:
-        _sd_marked = _shares_diluted.withColumn("pool_value", F.col("value"))
 
-    _sd_evaluated = (
-        _sd_marked
-        .withColumn("prev_value", F.last("pool_value", ignorenulls=True)
-                    .over(_w_sd_ticker.rowsBetween(Window.unboundedPreceding, -1)))
-        .withColumn("next_value", F.first("pool_value", ignorenulls=True)
-                    .over(_w_sd_ticker.rowsBetween(1, Window.unboundedFollowing)))
-        .withColumn("neighbor_value", F.coalesce(F.col("prev_value"), F.col("next_value")))
-        .withColumn("neighbor_side", F.when(F.col("prev_value").isNotNull(), F.lit("prev")).otherwise(F.lit("next")))
+def _run_neighbor_plausibility_check(concept: str, error_type: str) -> None:
+    """Iterative neighbor-relative plausibility check for a single stock/count concept.
+    Re-reads from `financials` so this reflects any prior check's deletions, not a stale
+    in-memory frame. See the header doc's "2. Neighbor-based iterative check" for the
+    algorithm description."""
+    _sd_concept_rows = (
+        spark.table(full_tbl)
+        .filter(F.col("concept") == concept)
+        .select("ticker", "period_type", "fiscal_year", "period_end", "value")
+        .localCheckpoint(eager=True)
     )
-    _sd_bad_df = (
-        _sd_evaluated
-        .filter(F.col("neighbor_value").isNotNull() & (F.col("neighbor_value") != 0) & (F.col("value") != 0))
-        .withColumn("ratio", F.col("value") / F.col("neighbor_value"))
-        .filter((F.col("ratio") <= _SD_RATIO_LOW) | (F.col("ratio") >= _SD_RATIO_HIGH))
-    )
-    _sd_bad_rows = _sd_bad_df.select(
-        "ticker", "period_type", "fiscal_year", "value", "neighbor_value", "neighbor_side", "ratio"
-    ).collect()
-    _sd_new_excluded = {(r.ticker, r.period_type, r.fiscal_year) for r in _sd_bad_rows}
+    _w_sd_ticker = Window.partitionBy("ticker").orderBy("period_end", (F.col("period_type") != "FY"))
 
-    if _sd_new_excluded == _sd_excluded:
-        print(f"✓ Shares Diluted neighbor plausibility check converged after {_sd_iter + 1} iteration(s)")
-        _sd_converged = True
+    _sd_excluded: set = set()      # {(ticker, period_type, fiscal_year), ...} — "presumed bad" set
+    _sd_prev_excluded: set = set()  # the set one iteration back — used for the non-convergence
+                                     # per-ticker stability check below (see its own comment)
+    _sd_converged = False
+    for _sd_iter in range(_SD_MAX_ITERATIONS):
+        if _sd_excluded:
+            _sd_excl_df = spark.createDataFrame(
+                list(_sd_excluded), schema=["ticker", "period_type", "fiscal_year"]
+            )
+            _sd_marked = (
+                _sd_concept_rows
+                .join(_sd_excl_df.withColumn("_excl", F.lit(True)),
+                      on=["ticker", "period_type", "fiscal_year"], how="left")
+                .withColumn("pool_value", F.when(F.col("_excl").isNull(), F.col("value")))
+                .drop("_excl")
+            )
+        else:
+            _sd_marked = _sd_concept_rows.withColumn("pool_value", F.col("value"))
+
+        _sd_evaluated = (
+            _sd_marked
+            .withColumn("prev_value", F.last("pool_value", ignorenulls=True)
+                        .over(_w_sd_ticker.rowsBetween(Window.unboundedPreceding, -1)))
+            .withColumn("next_value", F.first("pool_value", ignorenulls=True)
+                        .over(_w_sd_ticker.rowsBetween(1, Window.unboundedFollowing)))
+            .withColumn("neighbor_value", F.coalesce(F.col("prev_value"), F.col("next_value")))
+            .withColumn("neighbor_side", F.when(F.col("prev_value").isNotNull(), F.lit("prev")).otherwise(F.lit("next")))
+        )
+        _sd_bad_df = (
+            _sd_evaluated
+            .filter(F.col("neighbor_value").isNotNull() & (F.col("neighbor_value") != 0) & (F.col("value") != 0))
+            .withColumn("ratio", F.col("value") / F.col("neighbor_value"))
+            .filter((F.col("ratio") <= _SD_RATIO_LOW) | (F.col("ratio") >= _SD_RATIO_HIGH))
+        )
+        _sd_bad_rows = _sd_bad_df.select(
+            "ticker", "period_type", "fiscal_year", "value", "neighbor_value", "neighbor_side", "ratio"
+        ).collect()
+        _sd_new_excluded = {(r.ticker, r.period_type, r.fiscal_year) for r in _sd_bad_rows}
+
+        if _sd_new_excluded == _sd_excluded:
+            print(f"✓ {concept} neighbor plausibility check converged after {_sd_iter + 1} iteration(s)")
+            _sd_converged = True
+            _sd_prev_excluded = _sd_excluded
+            break
         _sd_prev_excluded = _sd_excluded
-        break
-    _sd_prev_excluded = _sd_excluded
-    _sd_excluded = _sd_new_excluded
-else:
-    print(f"⚠ Shares Diluted neighbor plausibility check did not fully converge after "
-          f"{_SD_MAX_ITERATIONS} iterations for every ticker")
+        _sd_excluded = _sd_new_excluded
+    else:
+        print(f"⚠ {concept} neighbor plausibility check did not fully converge after "
+              f"{_SD_MAX_ITERATIONS} iterations for every ticker")
 
-if not _sd_converged:
-    # A handful of tickers with very little history (confirmed real case: a 4-year-old ticker
-    # with genuinely volatile real share counts) can make the flag/unflag decision for their
-    # OWN periods oscillate forever between two states, without ever settling — comparing a
-    # newly-excluded period against whatever's left in the pool can swing in and out of the
-    # implausible-ratio band each pass. This does NOT mean every other ticker's answer is in
-    # doubt (tickers are evaluated independently; one ticker's oscillation can't change another
-    # ticker's own row values or comparisons) — only the specific periods still changing
-    # between this iteration and the last are actually undetermined. Drop exactly those (never
-    # guess which of the two oscillating states is right); every other ticker's already-stable
-    # answer is unaffected and kept as computed.
-    _sd_unstable = _sd_excluded.symmetric_difference(_sd_prev_excluded)
-    if _sd_unstable:
-        print(f"⚠ {len(_sd_unstable):,} (ticker, period_type, fiscal_year) row(s) never "
-              f"stabilized — excluding from this run's action, will be re-evaluated next run: "
-              f"{sorted(_sd_unstable)[:10]}{'...' if len(_sd_unstable) > 10 else ''}")
-        _sd_excluded = _sd_excluded - _sd_unstable
+    if not _sd_converged:
+        # A handful of tickers with very little history (confirmed real case: a 4-year-old ticker
+        # with genuinely volatile real share counts) can make the flag/unflag decision for their
+        # OWN periods oscillate forever between two states, without ever settling — comparing a
+        # newly-excluded period against whatever's left in the pool can swing in and out of the
+        # implausible-ratio band each pass. This does NOT mean every other ticker's answer is in
+        # doubt (tickers are evaluated independently; one ticker's oscillation can't change another
+        # ticker's own row values or comparisons) — only the specific periods still changing
+        # between this iteration and the last are actually undetermined. Drop exactly those (never
+        # guess which of the two oscillating states is right); every other ticker's already-stable
+        # answer is unaffected and kept as computed.
+        _sd_unstable = _sd_excluded.symmetric_difference(_sd_prev_excluded)
+        if _sd_unstable:
+            print(f"⚠ {len(_sd_unstable):,} (ticker, period_type, fiscal_year) row(s) never "
+                  f"stabilized — excluding from this run's action, will be re-evaluated next run: "
+                  f"{sorted(_sd_unstable)[:10]}{'...' if len(_sd_unstable) > 10 else ''}")
+            _sd_excluded = _sd_excluded - _sd_unstable
 
-print(f"Neighbor-relative implausible Shares Diluted values found: {len(_sd_excluded):,}")
+    print(f"Neighbor-relative implausible {concept} values found: {len(_sd_excluded):,}")
 
-_sd_scraped_at = datetime.utcnow()
-# _sd_bad_rows is from the loop's LAST (converged) iteration — its neighbor/ratio values
-# already reflect the final, stable excluded set, so no re-evaluation is needed here.
-_sd_records = [{
-    "ticker": r.ticker,
-    "error_type": "implausible_shares_diluted",
-    "error_message": (
-        f"Shares Diluted {r.period_type} FY{r.fiscal_year}={r.value:,.0f} is {r.ratio:.4g}x its "
-        f"nearest trustworthy neighbor ({r.neighbor_side}, {r.neighbor_value:,.0f}) — outside "
-        f"the range any real split/buyback/offering produces, consistent with a filer-side "
-        f"'reported in thousands' XBRL tagging error. Excluded from financials this run."
-    ),
-    "step": "shares_diluted_plausibility",
-    "scraped_at": _sd_scraped_at,
-} for r in _sd_bad_rows if (r.ticker, r.period_type, r.fiscal_year) in _sd_excluded]
+    _sd_scraped_at = datetime.utcnow()
+    # _sd_bad_rows is from the loop's LAST (converged) iteration — its neighbor/ratio values
+    # already reflect the final, stable excluded set, so no re-evaluation is needed here.
+    _sd_records = [{
+        "ticker": r.ticker,
+        "error_type": error_type,
+        "error_message": (
+            f"{concept} {r.period_type} FY{r.fiscal_year}={r.value:,.0f} is {r.ratio:.4g}x its "
+            f"nearest trustworthy neighbor ({r.neighbor_side}, {r.neighbor_value:,.0f}) — outside "
+            f"the range any real split/buyback/offering produces, consistent with a filer-side "
+            f"'reported in thousands' XBRL tagging error. Excluded from financials this run."
+        ),
+        "step": "shares_diluted_plausibility",
+        "scraped_at": _sd_scraped_at,
+    } for r in _sd_bad_rows if (r.ticker, r.period_type, r.fiscal_year) in _sd_excluded]
 
-_delete_implausible_shares_diluted(_sd_excluded, _sd_records)
+    _delete_implausible_rows(concept, _sd_excluded, _sd_records)
+
+
+_run_neighbor_plausibility_check("Shares Diluted", "implausible_shares_diluted")
+
+# COMMAND ----------
+
+# MAGIC %md ## 3. Neighbor-based iterative check — Shares Outstanding (Cover Page)
+# MAGIC
+# MAGIC Same mechanism as check 2 above, applied to the cover-page share count instead of the
+# MAGIC weighted-average one. See the header doc's cover-page-shares note for the confirmed
+# MAGIC real cases (ADV, AGL, PTCT, BKNG, MCHB).
+
+# COMMAND ----------
+
+_run_neighbor_plausibility_check(
+    "Shares Outstanding (Cover Page)", "implausible_shares_outstanding_cover_page"
+)
