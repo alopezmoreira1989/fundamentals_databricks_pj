@@ -131,6 +131,45 @@ def test_hero_stats_reflect_hide_value_traps_not_the_unfiltered_set(patch_repo):
     assert result.stats.below_value_count == 1
 
 
+def test_min_discount_pct_none_applies_no_filter(patch_repo):
+    # "All" (min_discount_pct=None, issue #317's default) keeps every eligible row regardless
+    # of ratio — including one trading ABOVE NCAV and one with no computable ratio at all.
+    rows = (
+        _row("ABOVE", price=12.0, relaxed=10.0),   # ratio 1.20
+        _row("NORATIO", price=5.0, relaxed=None),
+    )
+    patch_repo(rows)
+    result = get_net_net_screen(level="relaxed", min_discount_pct=None)
+    assert {r.ticker for r in result.rows} == {"ABOVE", "NORATIO"}
+
+
+def test_min_discount_pct_excludes_below_threshold_and_drops_unknown_ratio(patch_repo):
+    # min_discount_pct=15 -> keep only ratio < 0.85 (issue #317's ">15%" tier). Unlike
+    # hide_value_traps, an unknown ratio is DROPPED here, not passed through leniently — we
+    # can't confirm NORATIO clears a bar the user explicitly asked for.
+    rows = (
+        _row("EXACT15", price=8.5, relaxed=10.0),  # ratio 0.85 exactly -> excluded (strict <)
+        _row("DEEPER", price=8.0, relaxed=10.0),   # ratio 0.80 -> kept
+        _row("SHALLOWER", price=9.0, relaxed=10.0),  # ratio 0.90 -> excluded
+        _row("NORATIO", price=5.0, relaxed=None),
+    )
+    patch_repo(rows)
+    result = get_net_net_screen(level="relaxed", min_discount_pct=15.0)
+    assert {r.ticker for r in result.rows} == {"DEEPER"}
+
+
+def test_hero_stats_reflect_min_discount_pct_not_the_unfiltered_set(patch_repo):
+    rows = (
+        _row("SHALLOW", price=9.0, relaxed=10.0),   # ratio 0.90 -> below value, filtered out at >15%
+        _row("DEEP", price=6.0, relaxed=10.0),       # ratio 0.60 -> classic, kept
+    )
+    patch_repo(rows)
+    result = get_net_net_screen(level="relaxed", min_discount_pct=15.0)
+    assert result.stats.eligible_count == 1
+    assert result.stats.below_value_count == 1
+    assert result.stats.classic_net_net_count == 1
+
+
 def test_unrecognized_level_falls_back_to_relaxed(patch_repo):
     fake = patch_repo((_row("A", price=5.0, relaxed=10.0),))
     get_net_net_screen(level="not-a-real-level")

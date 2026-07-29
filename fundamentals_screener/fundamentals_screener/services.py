@@ -359,6 +359,7 @@ def _sort_net_net_rows(
 
 def get_net_net_screen(
     *, level: str = "relaxed", hide_value_traps: bool = False,
+    min_discount_pct: float | None = None,
     sector: str = "", index: str = "", country: str = "", market: str = "", industry: str = "",
     sort_key: str = "discount", descending: bool = False,
 ) -> NetNetScreen:
@@ -366,8 +367,16 @@ def get_net_net_screen(
     to "relaxed" for anything else): rows sorted by `sort_key` (defaults to discount to NCAV,
     ascending — cheapest first, i.e. ascending price/NCAV-per-share, this table's original
     behaviour before column-header sorting existed), optionally excluding likely value traps
-    (Piotroski F-Score < 4), plus hero stats for that SAME filtered set — so the counts always
-    agree with what's on screen, never a stale/unfiltered number next to a filtered table.
+    (Piotroski F-Score < 4) and/or rows below a minimum discount, plus hero stats for that SAME
+    filtered set — so the counts always agree with what's on screen, never a stale/unfiltered
+    number next to a filtered table.
+
+    `min_discount_pct`: `None` (issue #317's "All") applies no discount filter at all, keeping
+    every eligible row regardless of ratio — including rows with no computable ratio (e.g. a
+    missing live price). A float (0.0/15.0/33.0, issue #317's ">0%"/">15%"/">33%") keeps only
+    rows with a STRICTLY greater discount than that threshold; a row with no computable ratio
+    is dropped in this case (unlike `hide_value_traps`'s lenient "unknown passes" convention) —
+    we can't confirm an unknown discount clears a specific bar the user explicitly asked for.
     """
     if level not in _NET_NET_LEVELS:
         level = "relaxed"
@@ -380,6 +389,12 @@ def get_net_net_screen(
         rows = tuple(r for r in rows if r.f_score is None or r.f_score >= _VALUE_TRAP_F_SCORE_FLOOR)
 
     ratios = {row.ticker: _price_to_ncav_ratio(row, level) for row in rows}
+
+    if min_discount_pct is not None:
+        max_ratio = 1 - min_discount_pct / 100
+        rows = tuple(r for r in rows if (ratio := ratios.get(r.ticker)) is not None and ratio < max_ratio)
+        ratios = {row.ticker: ratios[row.ticker] for row in rows}
+
     sorted_rows = _sort_net_net_rows(rows, ratios, level, sort_key, descending)
 
     valid_ratios = [r for r in ratios.values() if r is not None]
