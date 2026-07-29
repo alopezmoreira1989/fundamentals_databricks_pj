@@ -25,16 +25,19 @@
 # MAGIC was placed in `21__clean_and_merge` — moving it here (after quarterly data actually
 # MAGIC exists) is the fix.
 # MAGIC
-# MAGIC Two independent checks, run in this specific order:
+# MAGIC Four checks, run in this specific order — each later check depends on the deletions of
+# MAGIC the ones before it, for the same reason: a neighbor-relative check can be poisoned by
+# MAGIC leaving an absolutely-implausible value in its comparison pool (see check 2's own doc
+# MAGIC for the concrete, confirmed-at-scale failure mode this produces if skipped).
 # MAGIC
-# MAGIC **1. Absolute plausibility check (runs FIRST).** Catches a ticker whose Shares Diluted
-# MAGIC is wrong in EVERY reported period (found 2026-07: FULC, IOVA, NUVB, CLDX, GOGO, NTNX,
-# MAGIC LOAR, WOOF, EVER, ACAD, TEM — every FY row wrong ~1000x, so there is no genuinely correct
-# MAGIC period anywhere in the ticker's own history for a neighbor-relative check to compare
-# MAGIC against) — plus isolated bad QUARTERS in otherwise-correct tickers (MCD, BRKR, SYNA,
-# MAGIC UCTT) that silently poisoned `22__derived_metrics.py`'s Market Cap as-of carry-forward
-# MAGIC join (e.g. MCD FY2024 Market Cap computed as $208,721 instead of ~$200B). Independent,
-# MAGIC absolute signal, no neighboring period needed: a row's own
+# MAGIC **1. Absolute plausibility check (Shares Diluted only).** Catches a ticker whose Shares
+# MAGIC Diluted is wrong in EVERY reported period (found 2026-07: FULC, IOVA, NUVB, CLDX, GOGO,
+# MAGIC NTNX, LOAR, WOOF, EVER, ACAD, TEM — every FY row wrong ~1000x, so there is no genuinely
+# MAGIC correct period anywhere in the ticker's own history for a neighbor-relative check to
+# MAGIC compare against) — plus isolated bad QUARTERS in otherwise-correct tickers (MCD, BRKR,
+# MAGIC SYNA, UCTT) that silently poisoned `22__derived_metrics.py`'s Market Cap as-of
+# MAGIC carry-forward join (e.g. MCD FY2024 Market Cap computed as $208,721 instead of ~$200B).
+# MAGIC Independent, absolute signal, no neighboring period needed: a row's own
 # MAGIC `Total Current Assets / Shares Diluted` ("assets per share") compared against that
 # MAGIC ticker's own real traded price. Flagged when ALL of:
 # MAGIC   - `Shares Diluted < 2,000,000` — a real US-listed common stock this small is a rare,
@@ -48,7 +51,17 @@
 # MAGIC     confirmed bug lands at 12x-1800x+. Verified against real published data before
 # MAGIC     shipping.
 # MAGIC
-# MAGIC **2. Neighbor-based iterative check (runs SECOND, after check 1's deletions).** The
+# MAGIC **2. Isolation guard (both concepts; see its own section doc for the full story).** A
+# MAGIC confirmed regression found 2026-07, the day check 4 (below) first shipped: a corrupted
+# MAGIC value sitting at an EDGE of a ticker's own history (no opposite-side neighbor to test it
+# MAGIC against) can invert check 3/4's whole neighbor-relative logic, wrongly surviving while
+# MAGIC every REAL value gets deleted instead. Confirmed at scale for both Shares Diluted (a
+# MAGIC pre-existing check, running for weeks — 63% of its own accumulated deletions were this
+# MAGIC exact false positive) and Shares Outstanding (Cover Page) (48% of its first-run
+# MAGIC deletions). Fixed with two absolute, cross-concept signals that remove the poisoned edge
+# MAGIC value BEFORE it ever reaches check 3/4's pool — see `_run_isolation_guard`'s own doc.
+# MAGIC
+# MAGIC **3. Neighbor-based iterative check — Shares Diluted (runs after checks 1-2).** The
 # MAGIC original guard for a contiguous bad run sandwiched between correct periods (BMI's own
 # MAGIC case: 7 straight wrong FY years, FY2018-2024, between correct FY2017 and FY2025) —
 # MAGIC scans ALL `period_type`s (FY, Q1-Q4, TTM), ordered by `period_end` instead of
@@ -58,30 +71,34 @@
 # MAGIC (via last/first-non-null carried across an ordered window — no self-join needed),
 # MAGIC removes newly-implausible periods from the pool, and repeats to a fixed point (this
 # MAGIC round's flagged set exactly matches the previous round's, not a monotonically-growing
-# MAGIC accumulation).
+# MAGIC accumulation). Sound for this validated "minority sandwiched by good data" case — the
+# MAGIC vulnerability check 2 fixes is a boundary condition of the pool-convergence approach
+# MAGIC itself, not a flaw in this comparison logic.
 # MAGIC
-# MAGIC **Also runs against `Shares Outstanding (Cover Page)` (`dei:EntityCommonStockSharesOutstanding`,
-# MAGIC added 2026-07 for the "live" Market Cap / NCAV features — see 00__config/01__tickers.py).**
-# MAGIC A universe-wide scan comparing cover-page shares against Shares Diluted (triggered by a
-# MAGIC GENI market-cap bug report) found the SAME isolated single-quarter scale-error failure
-# MAGIC mode already fixed above for Shares Diluted — confirmed real cases: ADV, AGL, PTCT, BKNG,
-# MAGIC MCHB. The check is identical in mechanism (same ratio thresholds, same iterative pool
-# MAGIC convergence) — only the concept being scanned differs — so it is implemented as one
-# MAGIC shared function, `_run_neighbor_plausibility_check(concept, error_type)`, called once per
-# MAGIC concept below. Check 1 (the absolute TCA-based check) is NOT extended to cover-page
-# MAGIC shares — it is specific to Shares Diluted's own "assets per share vs. traded price"
-# MAGIC signal, and this scope was deliberately left for a later pass.
+# MAGIC **4. Neighbor-based iterative check — Shares Outstanding (Cover Page) (runs after check
+# MAGIC 2's second pass + check 3).** `dei:EntityCommonStockSharesOutstanding`, added 2026-07 for
+# MAGIC the "live" Market Cap / NCAV features — see 00__config/01__tickers.py. A universe-wide
+# MAGIC scan comparing cover-page shares against Shares Diluted (triggered by a GENI market-cap
+# MAGIC bug report) found the SAME isolated single-quarter scale-error failure mode already fixed
+# MAGIC for Shares Diluted — confirmed real cases: ADV, AGL, PTCT, BKNG, MCHB. Identical
+# MAGIC mechanism to check 3 (same ratio thresholds, same iterative pool convergence) — only the
+# MAGIC concept differs — implemented as one shared function,
+# MAGIC `_run_neighbor_plausibility_check(concept, error_type)`, called once per concept. Check 1
+# MAGIC (the absolute TCA-based check) is NOT extended to cover-page shares — it is specific to
+# MAGIC Shares Diluted's own "assets per share vs. traded price" signal; check 2 (the isolation
+# MAGIC guard) covers cover-page shares' own boundary-anchor vulnerability instead.
 # MAGIC
-# MAGIC **Why check 1 must run before check 2, not after or merged into one pass (found via
+# MAGIC **Why check 1/2 must run before check 3/4, not after or merged into one pass (found via
 # MAGIC pre-implementation simulation against real data, not just reasoned about):** a ticker
 # MAGIC with SEVERAL consecutive wrong periods (e.g. ACAD's wrong FY2022/FY2023 AND wrong Q2/Q3
-# MAGIC 2023) has those wrong periods mutually validate each other in check 2's neighbor
+# MAGIC 2023) has those wrong periods mutually validate each other in check 3's neighbor
 # MAGIC comparison — both wrong by the same factor, so their ratio to each other looks perfectly
-# MAGIC normal — and check 2's preference for comparing against the PREVIOUS still-trusted
+# MAGIC normal — and check 3's preference for comparing against the PREVIOUS still-trusted
 # MAGIC period then never looks past them to find a genuinely correct reference. Left unfixed,
-# MAGIC check 2 would instead wrongly flag the correctly-scaled LATER quarters as the "outlier",
-# MAGIC actively deleting real, correct data. Removing the entire wrong cluster in check 1 first
-# MAGIC (it needs no "good" reference period at all) avoids this.
+# MAGIC check 3 would instead wrongly flag the correctly-scaled LATER quarters as the "outlier",
+# MAGIC actively deleting real, correct data. Removing the entire wrong cluster (check 1) or the
+# MAGIC poisoned edge anchor (check 2) first — neither needs a "good" reference period at all —
+# MAGIC avoids this.
 # MAGIC
 # MAGIC Flagged rows are DELETED from `financials` (never "corrected" by guessing a scale factor
 # MAGIC — this repo's convention is always "real gap reads NULL/absent", never a guessed fix)
@@ -245,7 +262,162 @@ _delete_implausible_rows("Shares Diluted", _sd_abs_excluded, _sd_abs_records)
 
 # COMMAND ----------
 
-# MAGIC %md ## 2. Neighbor-based iterative check (all period_types, runs after check 1)
+# MAGIC %md ## 2. Isolation guard (absolute pre-filter, runs before EITHER neighbor check)
+# MAGIC
+# MAGIC **A confirmed, real regression (found 2026-07, the day the cover-page neighbor check
+# MAGIC below first shipped) in the neighbor check's own core assumption.** Check 3 (the
+# MAGIC iterative neighbor check) assumes a bad run is a MINORITY sandwiched by good data on
+# MAGIC BOTH sides (its original design case — BMI's 7-year contiguous bad run between two
+# MAGIC correct anchors) — that assumption inverts when a single corrupted value sits at (or
+# MAGIC becomes, after other exclusions) an EDGE of a ticker's own history with no opposite-side
+# MAGIC neighbor to test it against: the corrupted value is never itself evaluated (nothing to
+# MAGIC compare it to), so it's never excluded, while every real value that must compare against
+# MAGIC it — one-to-one, with no way for the real values to outvote it as a bloc — gets
+# MAGIC individually flagged and deleted instead.
+# MAGIC
+# MAGIC **Confirmed at scale against real production data, both directions, both concepts:**
+# MAGIC   - A **tiny shell/placeholder anchor** (1, 10, 48, 100, 1000, 87846 — genuine newco/
+# MAGIC     pre-merger placeholders, e.g. VTRS's real 2020 pre-Pfizer-Upjohn-spinoff "100", or
+# MAGIC     stray old typos) wrongly survives while excluding every real (large) value after it.
+# MAGIC     Confirmed real cases: cover-page — VTRS, ICE, QRVO, ANF, CERS, AMRX, PSKY (151 of 316
+# MAGIC     rows deleted the day this check first ran, 48%, across 12 tickers at a 100% false-
+# MAGIC     positive rate each); the SAME pattern was found already live for weeks in the
+# MAGIC     pre-existing Shares Diluted check (1,036 of 1,697 ever-logged unique deletions, 63%,
+# MAGIC     across 52 of 307 flagged tickers — including LUV/Southwest Airlines, confirmed
+# MAGIC     directly against real SEC data: its real Diluted shares, 498M-643M throughout
+# MAGIC     2024-2026, are exactly what's expected).
+# MAGIC   - A **×1000-inflated anchor** (17-37 billion, even 246 trillion for SRE — a filer-side
+# MAGIC     scale-tagging artifact) wrongly survives while excluding every real (normal-sized)
+# MAGIC     value after it. Confirmed real cases: ALK, ENSG, WTBA, SRE, MEI.
+# MAGIC
+# MAGIC **Two independent absolute signals** (either sufficient to delete a row outright, BEFORE
+# MAGIC it ever enters check 3's pool — mirroring exactly why check 1 above already runs before
+# MAGIC check 3, just widened to a signal check 1 doesn't cover):
+# MAGIC   1. **Absolute floor — 100,000 shares.** No real US-listed company has fewer (the
+# MAGIC      smallest known real exceptions, Seaboard ~964K-971K and Daily Journal ~1.38M, are
+# MAGIC      comfortably above this — a 10x margin). Concept-agnostic.
+# MAGIC   2. **Cross-concept ratio ceiling — 100x, one direction only** (candidate too LARGE
+# MAGIC      relative to the OTHER concept's own nearest-in-time value for the same ticker,
+# MAGIC      reusing check 1's own as-of/latest-fallback join idiom). Evidence-based threshold,
+# MAGIC      not guessed: the largest CONFIRMED real corporate action this session was BKNG's
+# MAGIC      25:1 split (~24.46x) and ADV/AGL's 1-for-25 reverse splits (~24.6x/24.9x) — all
+# MAGIC      comfortably under 100x; every confirmed false-positive anchor ratio was 1000x+,
+# MAGIC      comfortably clearing it. Deliberately one-directional: does NOT flag a candidate
+# MAGIC      that's *smaller* than the reference — that direction is where GENI's B-Shares/
+# MAGIC      NFL-warrant class confusion and PTCT's dropped-digit tagging bug legitimately live
+# MAGIC      (both ~10-25x too small, the SAME magnitude range as a genuine reverse split — a
+# MAGIC      ratio check alone can't safely tell them apart; resolving those needs a
+# MAGIC      `stock_splits`-table cross-reference tie-breaker, deliberately out of scope here).
+# MAGIC      Skipped (only the floor applies) when the reference concept has no data at all for
+# MAGIC      that ticker.
+
+# COMMAND ----------
+
+_ISO_ABS_FLOOR = 100_000
+_ISO_RATIO_CEILING = 100.0
+
+
+def _run_isolation_guard(concept: str, reference_concept: str, error_type: str) -> None:
+    """Absolute pre-filter for `concept`, cross-referencing `reference_concept` (the other of
+    Shares Diluted / Shares Outstanding (Cover Page) for the same ticker) — see the header doc
+    above for the two signals and why each threshold was chosen."""
+    _candidates = (
+        spark.table(full_tbl)
+        .filter((F.col("concept") == concept) & F.col("value").isNotNull())
+        .select("ticker", "period_type", "fiscal_year", "period_end", "value")
+    )
+
+    # Signal 1: absolute floor — no cross-reference needed.
+    _floor_rows = (
+        _candidates.filter(F.col("value") < _ISO_ABS_FLOOR)
+        .select("ticker", "period_type", "fiscal_year", "value")
+        .collect()
+    )
+
+    # Signal 2: cross-concept ratio ceiling. As-of (≤ period_end) join to the reference
+    # concept, falling back to the ticker's latest available reference value at all — same
+    # as-of + latest-fallback idiom as check 1's own price_asof/price_latest above.
+    _reference = (
+        spark.table(full_tbl)
+        .filter((F.col("concept") == reference_concept) & F.col("value").isNotNull())
+        .select("ticker", F.col("period_end").alias("ref_end"), F.col("value").alias("ref_value"))
+    )
+    _w_ref_asof = Window.partitionBy("ticker", "period_type", "fiscal_year").orderBy(F.col("ref_end").desc())
+    _ref_asof = (
+        _candidates.select("ticker", "period_type", "fiscal_year", "period_end").distinct()
+        .join(_reference, on="ticker", how="inner")
+        .filter(F.col("ref_end") <= F.col("period_end"))
+        .withColumn("_rn", F.row_number().over(_w_ref_asof))
+        .filter(F.col("_rn") == 1)
+        .select("ticker", "period_type", "fiscal_year", F.col("ref_value").alias("ref_asof"))
+    )
+    _w_ref_latest = Window.partitionBy("ticker").orderBy(F.col("ref_end").desc())
+    _ref_latest = (
+        _reference
+        .withColumn("_rn", F.row_number().over(_w_ref_latest))
+        .filter(F.col("_rn") == 1)
+        .select("ticker", F.col("ref_value").alias("ref_latest"))
+    )
+    _ratio_rows = (
+        _candidates
+        .join(_ref_asof, on=["ticker", "period_type", "fiscal_year"], how="left")
+        .join(_ref_latest, on="ticker", how="left")
+        .withColumn("reference", F.coalesce(F.col("ref_asof"), F.col("ref_latest")))
+        .filter(F.col("reference").isNotNull() & (F.col("reference") > 0))
+        .withColumn("ratio", F.col("value") / F.col("reference"))
+        .filter(F.col("ratio") > _ISO_RATIO_CEILING)
+        .select("ticker", "period_type", "fiscal_year", "value", "reference", "ratio")
+        .collect()
+    )
+
+    _excluded: set = set()
+    _scraped_at = datetime.utcnow()
+    _records = []
+    for r in _floor_rows:
+        key = (r.ticker, r.period_type, r.fiscal_year)
+        _excluded.add(key)
+        _records.append({
+            "ticker": r.ticker,
+            "error_type": error_type,
+            "error_message": (
+                f"{concept} {r.period_type} FY{r.fiscal_year}={r.value:,.0f} is below the "
+                f"absolute floor ({_ISO_ABS_FLOOR:,}) for a real total share count — consistent "
+                f"with a shell-company/newco placeholder or a stray tagging artifact, not a "
+                f"real outstanding count. Excluded from financials this run."
+            ),
+            "step": "shares_diluted_plausibility",
+            "scraped_at": _scraped_at,
+        })
+    for r in _ratio_rows:
+        key = (r.ticker, r.period_type, r.fiscal_year)
+        if key in _excluded:
+            continue  # already caught by the floor above — don't double-log
+        _excluded.add(key)
+        _records.append({
+            "ticker": r.ticker,
+            "error_type": error_type,
+            "error_message": (
+                f"{concept} {r.period_type} FY{r.fiscal_year}={r.value:,.0f} is {r.ratio:.4g}x "
+                f"the ticker's own nearest-in-time {reference_concept}={r.reference:,.0f} — "
+                f"outside the range any real split/merger/dilution event produces (the largest "
+                f"confirmed real split this session was ~25x), consistent with a filer-side "
+                f"scale-tagging error. Excluded from financials this run."
+            ),
+            "step": "shares_diluted_plausibility",
+            "scraped_at": _scraped_at,
+        })
+
+    print(f"Isolation-guard implausible {concept} values found: {len(_excluded):,}")
+    _delete_implausible_rows(concept, _excluded, _records)
+
+
+_run_isolation_guard(
+    "Shares Diluted", "Shares Outstanding (Cover Page)", "implausible_shares_diluted_isolation"
+)
+
+# COMMAND ----------
+
+# MAGIC %md ## 3. Neighbor-based iterative check (all period_types, runs after checks 1-2)
 # MAGIC
 # MAGIC Shared across both `Shares Diluted` and `Shares Outstanding (Cover Page)` — same
 # MAGIC mechanism, only the scanned concept and the logged `error_type` differ (see the header
@@ -261,7 +433,7 @@ _SD_MAX_ITERATIONS = 15
 def _run_neighbor_plausibility_check(concept: str, error_type: str) -> None:
     """Iterative neighbor-relative plausibility check for a single stock/count concept.
     Re-reads from `financials` so this reflects any prior check's deletions, not a stale
-    in-memory frame. See the header doc's "2. Neighbor-based iterative check" for the
+    in-memory frame. See the header doc's "3. Neighbor-based iterative check" for the
     algorithm description."""
     _sd_concept_rows = (
         spark.table(full_tbl)
@@ -364,14 +536,19 @@ _run_neighbor_plausibility_check("Shares Diluted", "implausible_shares_diluted")
 
 # COMMAND ----------
 
-# MAGIC %md ## 3. Neighbor-based iterative check — Shares Outstanding (Cover Page)
+# MAGIC %md ## 4. Neighbor-based iterative check — Shares Outstanding (Cover Page)
 # MAGIC
-# MAGIC Same mechanism as check 2 above, applied to the cover-page share count instead of the
+# MAGIC Same mechanism as check 3 above, applied to the cover-page share count instead of the
 # MAGIC weighted-average one. See the header doc's cover-page-shares note for the confirmed
-# MAGIC real cases (ADV, AGL, PTCT, BKNG, MCHB).
+# MAGIC real cases (ADV, AGL, PTCT, BKNG, MCHB) — and the isolation-guard note (check 2) for why
+# MAGIC it runs first here too, using the now-cleaned Shares Diluted as its cross-reference.
 
 # COMMAND ----------
 
+_run_isolation_guard(
+    "Shares Outstanding (Cover Page)", "Shares Diluted",
+    "implausible_shares_outstanding_cover_page_isolation",
+)
 _run_neighbor_plausibility_check(
     "Shares Outstanding (Cover Page)", "implausible_shares_outstanding_cover_page"
 )

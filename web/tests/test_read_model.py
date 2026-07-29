@@ -63,6 +63,19 @@ def test_latest_metrics_grouped_and_ordered(artifacts_from_fixtures):
             seen.append(m.category)
 
 
+def test_market_cap_reads_live_metric(artifacts_from_fixtures):
+    # Reads 'Market Cap (Live)' (22__derived_metrics.py's market_cap_live), not the fiscal-
+    # year-anchored 'Market Cap' — mirrors fundamentals_screener's own CompanyRepository.
+    # market_cap. A regression back to the old metric name would still return a MetricPoint
+    # for AAPL (both exist in real published data), so this only catches a wiring break, not
+    # a metric-name typo — but the fiscal_year/label plumbing is shared with services.
+    # get_market_cap_kpi, which does depend on this resolving.
+    mc = CompanyRepository().market_cap(TICKER)
+    assert mc is not None
+    assert mc.metric == "Market Cap"  # display label, aliased in the SQL regardless of source
+    assert mc.value and mc.value > 0
+
+
 def test_get_statements_pivots_line_items_by_year(artifacts_from_fixtures):
     result = CompanyRepository().get_statements(TICKER, max_years=6)
     names = [s.name for s in result.statements]
