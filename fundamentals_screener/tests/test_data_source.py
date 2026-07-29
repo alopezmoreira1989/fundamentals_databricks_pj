@@ -13,6 +13,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
+import requests
 
 from fundamentals_screener import data_source
 
@@ -86,4 +87,35 @@ def test_sync_cik_map_force_refetches_even_when_cached(isolated, monkeypatch):
 
 
 def test_get_cik_map_empty_when_never_synced(isolated):
+    assert data_source.get_cik_map() == {}
+
+
+class _FailingResp:
+    """A response whose raise_for_status() raises — mirrors SEC's real 403 when
+    SEC_USER_AGENT isn't configured."""
+
+    def raise_for_status(self):
+        raise requests.exceptions.HTTPError("403 Client Error: Forbidden")
+
+
+def test_sync_cik_map_degrades_gracefully_on_http_error(isolated, monkeypatch, capsys):
+    # Regression (2026-07-29 production incident): this used to raise and propagate all the
+    # way up through sync_fundamentals_data --force, killing the WHOLE deploy script (via its
+    # `set -e`) before it reached the media-file copy or health check — even though the
+    # essential parquet/meta artifacts had already synced successfully earlier in the same
+    # call. Must never raise; must print something an operator can find.
+    monkeypatch.setattr(data_source.requests, "get", lambda url, **kw: _FailingResp())
+    updated = data_source._sync_cik_map()
+    assert updated is False
+    assert data_source.get_cik_map() == {}
+    assert "Could not refresh the SEC ticker" in capsys.readouterr().out
+
+
+def test_sync_cik_map_degrades_gracefully_on_connection_error(isolated, monkeypatch):
+    def _boom(url, **kw):
+        raise requests.exceptions.ConnectionError("no route to host")
+
+    monkeypatch.setattr(data_source.requests, "get", _boom)
+    updated = data_source._sync_cik_map()  # must not raise
+    assert updated is False
     assert data_source.get_cik_map() == {}
