@@ -1019,7 +1019,7 @@ class CompanyListingRepository(DuckDBRepository):
             con.executemany("INSERT INTO scoped VALUES (?, ?, ?, ?, ?, ?, ?)", scope_rows)
 
             units = self._metric_units(con, columns)
-            cte, cte_params = self._pivot_cte(columns, alias)
+            cte, cte_params = self._pivot_cte_anchored(columns, alias)
             where = f" WHERE {_PRESET_WHERE[preset](alias, thresholds)}"
             select_cols = ", ".join(f"p.{alias[m]}, p.{alias[m]}_u" for m in columns)
             projection = (
@@ -1114,6 +1114,52 @@ class CompanyListingRepository(DuckDBRepository):
             "  WHERE period_type = 'FY' AND value IS NOT NULL AND list_contains(?, metric)"
             "    AND ticker IN (SELECT ticker FROM scoped)"
             "  QUALIFY row_number() OVER (PARTITION BY ticker, metric ORDER BY fiscal_year DESC) = 1"
+            "), pivoted AS ("
+            f"  SELECT ticker, {filters_sql} FROM latest GROUP BY ticker"
+            ") "
+        )
+        return cte, params
+
+    @staticmethod
+    def _pivot_cte_anchored(metrics: list[str], alias: dict[str, str]) -> tuple[str, list[Any]]:
+        """Like ``_pivot_cte``, but every metric is read from the SAME fiscal year per ticker —
+        that ticker's own most recent FY with at least one of `metrics` reported — instead of
+        each metric independently reaching back to its own latest non-NULL year.
+
+        Used only by `preset_screen` (Investor Presets), never `screen_table`: the general
+        multi-metric screener's per-metric-independent-latest behavior is deliberate there (a
+        user-composed column list may deliberately mix a fundamentals metric with an intrinsic-
+        value/TTM one that's only ever published for a different, partial fiscal year — see
+        `_pivot_cte`'s own docstring and `CompanyRepository._LATEST_METRICS_SQL`'s comment).
+        A preset's criteria are different: they're meant to describe one coherent "does this
+        company pass right now" snapshot, so blending metrics from different years is wrong, not
+        a feature. Confirmed as a real bug (2026-07): Lynch's Strict screen let a company through
+        on a PEG value computed for FY2024 (the last year EPS CAGR (5Y) % was still positive)
+        while displaying that SAME ticker's FY2025 EPS CAGR at -3.4% and its FY2019 Debt/Equity —
+        three different years stitched into one row. If a metric has no value in the ticker's
+        anchor year, it's NULL here (excluded by the preset's WHERE predicate), never silently
+        backfilled from an older year.
+        """
+        if not metrics:
+            return "", []
+        parts: list[str] = []
+        params: list[Any] = [metrics, metrics]  # anchor's IN-list, then latest's IN-list
+        for m in metrics:
+            parts.append(f"max(value) FILTER (WHERE metric = ?) AS {alias[m]}")
+            params.append(m)
+            parts.append(f"any_value(unit) FILTER (WHERE metric = ?) AS {alias[m]}_u")
+            params.append(m)
+        filters_sql = ", ".join(parts)
+        cte = (
+            "WITH anchor AS ("
+            "  SELECT ticker, max(fiscal_year) AS fiscal_year FROM dashboard_metrics"
+            "  WHERE period_type = 'FY' AND value IS NOT NULL AND list_contains(?, metric)"
+            "    AND ticker IN (SELECT ticker FROM scoped)"
+            "  GROUP BY ticker"
+            "), latest AS ("
+            "  SELECT m.ticker, m.metric, m.value, m.unit FROM dashboard_metrics AS m"
+            "  JOIN anchor AS a ON a.ticker = m.ticker AND a.fiscal_year = m.fiscal_year"
+            "  WHERE m.period_type = 'FY' AND m.value IS NOT NULL AND list_contains(?, m.metric)"
             "), pivoted AS ("
             f"  SELECT ticker, {filters_sql} FROM latest GROUP BY ticker"
             ") "

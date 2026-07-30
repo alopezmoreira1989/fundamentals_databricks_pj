@@ -282,7 +282,21 @@ metrics_wide = (
             F.coalesce(F.col("Short-term Debt"), F.lit(0))
         )
     )
-    .withColumn("Debt / Equity",  safe_div("Total Debt", "Total Stockholders Equity"))
+    # NULL (not a nonsensical negative ratio) when Total Stockholders Equity <= 0 — a company
+    # with negative book equity (accumulated deficit, buyback-funded balance sheet) divides by a
+    # negative denominator, producing a small-magnitude NEGATIVE ratio that trivially satisfies
+    # any "< threshold" low-leverage screen. Confirmed real case (2026-07): CCOI/LUMN showed
+    # Debt/Equity of -27x/-15x, passing fundamentals_screener's Buffett/Lynch de_max <= 0.4
+    # Investor Presets filters even though negative equity is a red flag, not low leverage.
+    # Mirrors this file's own "meaningless-sign" guard elsewhere (P/E, Earnings Yield NULL when
+    # Net Income <= 0) — Debt/Assets isn't guarded the same way since Total Assets is never
+    # negative in practice.
+    .withColumn("Debt / Equity",
+        F.when(
+            F.col("Total Stockholders Equity").isNotNull() & (F.col("Total Stockholders Equity") > 0),
+            safe_div("Total Debt", "Total Stockholders Equity"),
+        )
+    )
     .withColumn("Debt / Assets",  safe_div("Total Debt", "Total Assets"))
 
     # ── Solvency / Coverage ─────────────────────────────────────────────────────
