@@ -6,13 +6,13 @@ the data comes from DuckDB/parquet.
 
 from __future__ import annotations
 
-from infrastructure.filings import Filing, fetch_filings
 from infrastructure.news import NewsItem, fetch_yahoo_news
 from repositories.companies import PRICE_WINDOW_DAYS, PRICE_WINDOW_DEFAULT, CompanyRepository
 from repositories.dtos import (
     CompanyDetail,
     CompanyStatements,
     CompanySummary,
+    FilingRow,
     HeadlineKpi,
     MetricPoint,
     PricePoint,
@@ -66,9 +66,10 @@ def get_company_news(ticker: str) -> tuple[NewsItem, ...]:
     return fetch_yahoo_news(ticker)
 
 
-def get_company_filings(ticker: str) -> tuple[Filing, ...]:
-    """Latest 10-K/10-Q SEC filings for the ticker (cached; empty on any error)."""
-    return fetch_filings(ticker)
+def get_company_filings(ticker: str) -> tuple[FilingRow, ...]:
+    """The ticker's real SEC 10-K/10-Q filings (newest first), or ``()`` if none are
+    published — see ``CompanyRepository.get_filings``. No live SEC call of our own."""
+    return CompanyRepository().get_filings(ticker)
 
 
 # Metric categories that belong to the Valuation tab, not the Derived-metrics tab:

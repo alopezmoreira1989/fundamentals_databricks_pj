@@ -520,25 +520,41 @@
       </div>
     {% endif %}
 
-    <!-- Filings (issue #318): direct links to SEC EDGAR's own filing-browse page, resolved
-         from a ticker->CIK map cached at sync time (data_source.get_cik_map) -- no per-filing
-         data of our own, no request-time network (this app's CGI hosting has none at all).
-         Last tab, deliberately -- the least-used, reference-lookup tab belongs at the end. -->
+    <!-- Filings (issue #318): real SEC 10-K/10-Q filings, read straight from the pipeline's
+         own dashboard_filings artifact (15__fetch_sec_filings.py) -- no per-request SEC call,
+         no settings of our own needed. Last tab, deliberately -- the least-used,
+         reference-lookup tab belongs at the end. -->
     <div class="tab-pane fade" id="pane-filings" role="tabpanel" aria-labelledby="tab-filings" tabindex="0">
       <div class="card p-4">
-        <div class="eyebrow mb-2">SEC filings</div>
-        {% with tenk=s.cik|edgar_filings_url:"10-K" tenq=s.cik|edgar_filings_url:"10-Q" %}
-          {% if tenk %}
-            <p class="mb-2">
-              <a href="{{ tenk }}" target="_blank" rel="noopener noreferrer">10-K filings (annual reports) &rarr;</a>
-            </p>
-            <p class="mb-0">
-              <a href="{{ tenq }}" target="_blank" rel="noopener noreferrer">10-Q filings (quarterly reports) &rarr;</a>
-            </p>
-          {% else %}
-            <p class="text-muted small mb-0">Filings not available for this ticker.</p>
-          {% endif %}
-        {% endwith %}
+        <div class="eyebrow mb-2">SEC filings · 10-K &amp; 10-Q</div>
+        {% if filings %}
+          <div class="table-responsive">
+            <table class="table table-sm table-hover align-middle mb-0">
+              <thead>
+                <tr>
+                  <th scope="col">Form</th>
+                  <th scope="col">Description</th>
+                  <th scope="col">Filed</th>
+                  <th scope="col">Period</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for f in filings %}
+                  <tr>
+                    <td><span class="badge text-bg-secondary">{{ f.form }}</span></td>
+                    <td>
+                      <a href="{{ f.url }}" target="_blank" rel="noopener noreferrer">{{ f.description|default:f.form }}</a>
+                    </td>
+                    <td class="text-muted small">{{ f.filing_date|default:"—" }}</td>
+                    <td class="text-muted small">{{ f.report_date|default:"—" }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <p class="text-muted small mb-0">No filings found for this ticker.</p>
+        {% endif %}
       </div>
     </div>
   </div>

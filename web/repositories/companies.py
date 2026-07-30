@@ -15,6 +15,7 @@ from .base import DuckDBRepository
 from .dtos import (
     CompanyStatements,
     CompanySummary,
+    FilingRow,
     MetricPoint,
     PricePoint,
     QuarterGrid,
@@ -134,6 +135,17 @@ _PRICE_SERIES_SQL = """
     ORDER BY date
 """
 
+# Real SEC 10-K/10-Q filings for the company page's Filings tab — sourced from the pipeline's
+# own dashboard_filings artifact (15__fetch_sec_filings.py; see infrastructure/duckdb/engine.py's
+# "filings" view), not a live SEC call of our own (retired infrastructure/filings.py's per-
+# request fetch). Column aliases match FilingRow's field names exactly.
+_FILINGS_SQL = """
+    SELECT form, filing_date, report_date, description, url
+    FROM filings
+    WHERE ticker = ?
+    ORDER BY filing_date DESC
+"""
+
 # Quick-range windows (#231) — trailing day-count from the SERIES' OWN latest date (not "today",
 # which may lag real publish dates). "Max" is a pass-through (no filter). Approximate calendar
 # day-counts, not exact months/years — fine for a UI range button, avoids a date-arithmetic lib.
@@ -167,6 +179,15 @@ class CompanyRepository(DuckDBRepository):
                     has_logo=_as_bool(rec.get("has_logo")),
                 )
         return None
+
+    def get_filings(self, ticker: str) -> tuple[FilingRow, ...]:
+        """This ticker's real SEC 10-K/10-Q filings (newest first), or ``()`` if none are
+        published (unknown ticker, the pipeline's SEC fetch had nothing for it, or the
+        `filings` view is absent — same optional-artifact degradation as `usd_fx_rate` above)."""
+        try:
+            return self._fetch(_FILINGS_SQL, [ticker], FilingRow)
+        except duckdb.Error:
+            return ()
 
     def latest_metrics(self, ticker: str, *, limit: int = 400) -> tuple[MetricPoint, ...]:
         """The latest available value of each derived metric, ordered for grouped display."""

@@ -804,6 +804,7 @@ def company_detail(request: HttpRequest, ticker: str) -> HttpResponse:
     market_cap_kpi = services.get_market_cap_kpi(ticker, usd_lens=usd_lens)
     headline = (*headline, market_cap_kpi) if market_cap_kpi else headline
     compare_options = services.all_companies()
+    filings = services.get_company_filings(ticker)
     context = {
         "detail": detail,
         "statements": statements.statements,
@@ -828,6 +829,7 @@ def company_detail(request: HttpRequest, ticker: str) -> HttpResponse:
         "valuation_metrics": valuation_metrics,
         "iv_chart": iv_chart,
         "mos_scenarios": mos_scenarios,
+        "filings": filings,
     }
     net_net_ctx = _net_net_card_context(ticker)
     if net_net_ctx:

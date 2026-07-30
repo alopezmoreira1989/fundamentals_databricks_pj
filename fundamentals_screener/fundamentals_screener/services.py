@@ -25,6 +25,7 @@ from .dtos import (
     CompanyPage,
     CompanyStatements,
     CompanySummary,
+    FilingRow,
     HeadlineKpi,
     MetricPoint,
     MetricSeries,
@@ -110,6 +111,12 @@ def price_windows() -> tuple[str, ...]:
 def get_company_news(ticker: str) -> tuple[NewsItem, ...]:
     """Latest Yahoo Finance headlines for the ticker (cached; empty on any error)."""
     return fetch_yahoo_news(ticker)
+
+
+def get_company_filings(ticker: str) -> tuple[FilingRow, ...]:
+    """The ticker's real SEC 10-K/10-Q filings (newest first), or ``()`` if none are
+    published — see ``CompanyRepository.get_filings``."""
+    return CompanyRepository().get_filings(ticker)
 
 
 def _merge_peer_medians(

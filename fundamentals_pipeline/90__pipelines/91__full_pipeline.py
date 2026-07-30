@@ -297,6 +297,28 @@ _record_step("Dimensional 10-K", _t0)
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ## 5c. Ingestion — SEC filing list (Filings tab)
+# MAGIC `sec_filings` — 10-K/10-Q form + date + direct document link per ticker, published as
+# MAGIC `dashboard_filings` so neither frontend needs its own SEC credentials or live fetch.
+
+# COMMAND ----------
+
+print("=" * 55)
+print("STEP 3c / 12 — SEC Filings List")
+print("=" * 55)
+_t0 = time.monotonic()
+
+# COMMAND ----------
+
+# MAGIC %run "../10__ingestion/15__fetch_sec_filings"
+
+# COMMAND ----------
+
+_record_step("SEC Filings List", _t0)
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## 6. Ingestion — fetch market data from Yahoo Finance
 # MAGIC `market_data` — year-end prices + market cap
 

@@ -116,15 +116,3 @@ def sign_class(value: float | None) -> str:
     if value is None:
         return ""
     return "text-success" if value >= 0 else "text-danger"
-
-
-@register.filter
-def edgar_filings_url(cik: str | None, form_type: str) -> str | None:
-    """SEC EDGAR's own filing-browse page for `cik`, scoped to `form_type` ("10-K"/"10-Q") —
-    issue #318's Filings tab link-out. `None` when `cik` is unknown (never synced, or SEC
-    doesn't have this ticker) so the template can degrade to a "not available" message instead
-    of a broken link.
-    """
-    if not cik:
-        return None
-    return f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={cik}&type={form_type}"

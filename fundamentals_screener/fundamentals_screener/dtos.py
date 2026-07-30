@@ -35,10 +35,22 @@ class CompanySummary:
     employees: int | None = None
     founded: str | None = None
     has_logo: bool | None = None
-    # 10-digit SEC CIK, from data_source.get_cik_map() — NOT the meta artifact (issue #318's
-    # Filings tab link-out; see repositories/companies.py's get_summary()). None when the
-    # ticker->CIK cache hasn't been synced yet or SEC doesn't have this ticker.
-    cik: str | None = None
+
+
+@dataclass(frozen=True)
+class FilingRow:
+    """One real SEC filing (10-K/10-Q) for the company page's Filings tab — issue #318.
+
+    Sourced from the ``dashboard_filings`` artifact, written by the pipeline's
+    ``15__fetch_sec_filings.py`` — no live SEC call of our own; see
+    ``CompanyRepository.get_filings``.
+    """
+
+    form: str
+    filing_date: str | None
+    report_date: str | None
+    description: str | None
+    url: str
 
 
 @dataclass(frozen=True)

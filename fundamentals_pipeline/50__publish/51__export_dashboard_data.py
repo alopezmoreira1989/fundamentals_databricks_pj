@@ -10,6 +10,7 @@
 # MAGIC **Outputs**
 # MAGIC - `/tmp/dashboard_data.parquet`    — long-format financials joined with concept_hierarchy
 # MAGIC - `/tmp/dashboard_metrics.parquet` — long-format derived metrics joined with metrics_hierarchy
+# MAGIC - `/tmp/dashboard_filings.parquet` — SEC 10-K/10-Q filing list (see 15__fetch_sec_filings.py)
 # MAGIC - `/tmp/dashboard_meta.json`       — build timestamp, ticker list, row counts, schema version
 # MAGIC
 # MAGIC **Universe:** all tickers that have data in `financials`.
@@ -37,7 +38,9 @@ import pandas as pd
 # sys.path manipulation.
 from fundamentals_pipeline import schemas as _schemas
 
-SCHEMA_VERSION = 13  # +in_tsx_composite (S&P/TSX Composite membership) on ticker meta
+SCHEMA_VERSION = 14  # +dashboard_filings artifact (SEC 10-K/10-Q filing list — see
+                     # 15__fetch_sec_filings.py; both frontends' company-page Filings tab
+                     # reads this instead of making their own live SEC calls)
 FY_YEARS       = 10
 QUARTERS       = 12
 PRICE_YEARS    = 10                              # daily-price retention window (calendar years)
@@ -49,6 +52,7 @@ META_JSON      = OUT_DIR / "dashboard_meta.json"
 PRICE_PARQUET  = OUT_DIR / "dashboard_prices.parquet"
 BACKTEST_PARQUET = OUT_DIR / "dashboard_backtest.parquet"
 FX_PARQUET     = OUT_DIR / "dashboard_fx.parquet"
+FILINGS_PARQUET = OUT_DIR / "dashboard_filings.parquet"
 
 # COMMAND ----------
 
@@ -424,6 +428,37 @@ else:
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ## 3e. SEC filing list (sec_filings)
+# MAGIC
+# MAGIC Real 10-K/10-Q filings (form, filing date, report date, direct document link) written
+# MAGIC by `15__fetch_sec_filings.py`. Both frontends' company-page Filings tab reads this
+# MAGIC directly instead of making their own live SEC calls (see that stage's own docstring for
+# MAGIC the incident that motivated moving this into the pipeline).
+
+# COMMAND ----------
+
+FILINGS_COLUMNS = {"ticker": "object", "form": "object", "filing_date": "object",
+                    "report_date": "object", "description": "object", "url": "object"}
+try:
+    filings = spark.sql(f"""
+        SELECT ticker, form, filing_date, report_date, description, url
+        FROM {CATALOG}.{SCHEMA}.sec_filings
+        ORDER BY ticker, filing_date DESC
+    """).toPandas()
+    if filings.empty:
+        print("⚠️ sec_filings returned 0 rows — writing empty filings slice")
+except Exception as exc:  # noqa: BLE001 — table absent or unreadable: degrade, don't fail the export
+    print(f"⚠️ Could not read sec_filings ({type(exc).__name__}: {exc}) — writing empty filings slice")
+    filings = pd.DataFrame({c: pd.Series(dtype=t) for c, t in FILINGS_COLUMNS.items()})
+
+if filings.empty:
+    print("  filings rows: 0 (empty slice)")
+else:
+    print(f"  filings rows: {len(filings):,} ({filings['ticker'].nunique():,} ticker(s))")
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## 4. Write parquet + meta
 
 # COMMAND ----------
@@ -437,6 +472,7 @@ metrics.attrs = {}
 prices.attrs = {}
 backtest.attrs = {}
 fx_rates.attrs = {}
+filings.attrs = {}
 
 # Schema contract — fail the run LOUDLY rather than shipping an artifact the public app
 # can't read. assert_artifact raises SchemaError naming the offending artifact/column.
@@ -445,12 +481,14 @@ _schemas.assert_artifact("dashboard_metrics", metrics)
 _schemas.assert_artifact("dashboard_prices", prices)
 _schemas.assert_artifact("dashboard_backtest", backtest)
 _schemas.assert_artifact("dashboard_fx", fx_rates)
+_schemas.assert_artifact("dashboard_filings", filings)
 
 financials.to_parquet(DATA_PARQUET, index=False)
 metrics.to_parquet(METRIC_PARQUET, index=False)
 prices.to_parquet(PRICE_PARQUET, index=False)
 backtest.to_parquet(BACKTEST_PARQUET, index=False)
 fx_rates.to_parquet(FX_PARQUET, index=False)
+filings.to_parquet(FILINGS_PARQUET, index=False)
 
 # Per-ticker FY range — used by the Streamlit masthead.
 fy_ranges = (
@@ -473,6 +511,7 @@ meta = {
         "prices":       int(len(prices)),
         "backtest":     int(len(backtest)),
         "fx":           int(len(fx_rates)),
+        "filings":      int(len(filings)),
     },
     "retention": {
         "fy_years":     FY_YEARS,
@@ -489,6 +528,7 @@ print(f"  {METRIC_PARQUET} ({METRIC_PARQUET.stat().st_size / 1024:.1f} KB)")
 print(f"  {PRICE_PARQUET}  ({PRICE_PARQUET.stat().st_size / 1024:.1f} KB)")
 print(f"  {BACKTEST_PARQUET} ({BACKTEST_PARQUET.stat().st_size / 1024:.1f} KB)")
 print(f"  {FX_PARQUET}     ({FX_PARQUET.stat().st_size / 1024:.1f} KB)")
+print(f"  {FILINGS_PARQUET} ({FILINGS_PARQUET.stat().st_size / 1024:.1f} KB)")
 print(f"  {META_JSON}      (schema_version={SCHEMA_VERSION})")
 
 # COMMAND ----------
@@ -508,7 +548,8 @@ VOLUME_PATH    = "/Volumes/main/financials/_publish"   # must already exist
 
 if COPY_TO_VOLUME:
     dbutils.fs.mkdirs(VOLUME_PATH)
-    for f in [DATA_PARQUET, METRIC_PARQUET, PRICE_PARQUET, BACKTEST_PARQUET, FX_PARQUET, META_JSON]:
+    for f in [DATA_PARQUET, METRIC_PARQUET, PRICE_PARQUET, BACKTEST_PARQUET, FX_PARQUET,
+              FILINGS_PARQUET, META_JSON]:
         dest = f"{VOLUME_PATH}/{f.name}"
         dbutils.fs.cp(f"file:{f}", dest, recurse=False)
         print(f"  ✓ {f.name} → {dest}")
