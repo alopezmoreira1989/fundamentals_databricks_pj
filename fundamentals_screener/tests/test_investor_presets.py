@@ -32,6 +32,7 @@ _META = {
             "BUFFROE_SUSTAINED", "BUFFROE_ONEDIP", "BUFFROE_SHORTHISTORY", "BUFFROE_FAILSOTHER",
             "BUFFETT_LEVEL_MODERATE_ONLY",
             "LYNCH1", "LYNCHFAIL", "LYNCHPEGFAIL", "LYNCH_LEVEL_MODERATE_ONLY",
+            "LYNCH_STALE_PEG",
         )
     ]
 }
@@ -289,6 +290,20 @@ _METRIC_ROWS = [
     ("LYNCH_LEVEL_MODERATE_ONLY", "ROE %", "percent", 2024, 17.0, "FY"),
     ("LYNCH_LEVEL_MODERATE_ONLY", "EPS CAGR (5Y) %", "percent", 2024, 20.0, "FY"),
     ("LYNCH_LEVEL_MODERATE_ONLY", "PEG", "ratio", 2024, 0.5, "FY"),
+
+    # LYNCH_STALE_PEG: a real production case (DDS, 2026-07) — FY2024 (this ticker's true latest
+    # reported year) passes Debt/Equity, Current Ratio, and ROE outright, but EPS CAGR (5Y) % has
+    # turned negative, so the pipeline correctly left PEG NULL for FY2024 (PEG is gated on EPS
+    # CAGR > 0). A real, passing PEG value only exists in FY2023, an EARLIER year when growth was
+    # still positive. Must fail: the anchored pivot requires every criterion to come from the
+    # SAME (latest) fiscal year, so it must not reach back into FY2023 for PEG while displaying
+    # FY2024's negative growth — the exact cross-year blending bug this fixture guards against.
+    ("LYNCH_STALE_PEG", "Debt / Equity", "ratio", 2024, 0.2, "FY"),
+    ("LYNCH_STALE_PEG", "Current Ratio", "ratio", 2024, 2.0, "FY"),
+    ("LYNCH_STALE_PEG", "ROE %", "percent", 2024, 30.0, "FY"),
+    ("LYNCH_STALE_PEG", "EPS CAGR (5Y) %", "percent", 2024, -5.0, "FY"),
+    ("LYNCH_STALE_PEG", "EPS CAGR (5Y) %", "percent", 2023, 40.0, "FY"),
+    ("LYNCH_STALE_PEG", "PEG", "ratio", 2023, 0.3, "FY"),
 ] + _SUSTAINED_ROE_ROWS + _GRAHAM_MULTIYEAR_ROWS
 
 # ticker, concept, period_type, fiscal_year, value — dashboard_data (raw statement concepts),
@@ -707,6 +722,15 @@ def test_lynch_peg_at_or_above_one_fails(repo):
     Ratio, and ROE pass doesn't exempt a ticker from a PEG >= 1 failure."""
     rows, _, _ = repo.preset_screen(preset="lynch", level="moderate")
     assert "LYNCHPEGFAIL" not in {r.ticker for r in rows}
+
+
+def test_lynch_stale_peg_from_an_earlier_year_does_not_pass(repo):
+    """Regression for a real production case (DDS, 2026-07): every criterion must come from the
+    SAME (ticker's latest) fiscal year, so a passing PEG value from an OLDER year — back when
+    EPS CAGR was still positive — must not let a ticker through once its current-year growth has
+    turned negative and PEG is correctly NULL for that year."""
+    rows, _, _ = repo.preset_screen(preset="lynch", level="strict")
+    assert "LYNCH_STALE_PEG" not in {r.ticker for r in rows}
 
 
 def test_lynch_eps_cagr_criterion_is_live_not_pending():
