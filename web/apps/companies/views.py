@@ -65,6 +65,7 @@ def company_page(request: HttpRequest, ticker: str) -> HttpResponse:
     usd_lens = show_usd_toggle and request.GET.get("usd") == "1"
     market_cap_kpi = services.get_market_cap_kpi(ticker, usd_lens=usd_lens)
     headline = (*headline, market_cap_kpi) if market_cap_kpi else headline
+    filings = services.get_company_filings(ticker)
     in_favorites = False
     watchlists: list = []
     ticker_watchlist_ids: set = set()
@@ -98,6 +99,7 @@ def company_page(request: HttpRequest, ticker: str) -> HttpResponse:
             "watchlists": watchlists,
             "ticker_watchlist_ids": ticker_watchlist_ids,
             "in_favorites": in_favorites,
+            "filings": filings,
         },
     )
 
@@ -134,23 +136,4 @@ def company_news(request: HttpRequest, ticker: str) -> JsonResponse:
     news = services.get_company_news(ticker.upper())
     return JsonResponse(
         {"news": [{"title": n.title, "link": n.link, "published": n.published} for n in news]}
-    )
-
-
-def company_filings(request: HttpRequest, ticker: str) -> JsonResponse:
-    """Latest 10-K/10-Q SEC filings for the ticker (JSON, fetched async by the Filings tab)."""
-    filings = services.get_company_filings(ticker.upper())
-    return JsonResponse(
-        {
-            "filings": [
-                {
-                    "form": f.form,
-                    "filing_date": f.filing_date,
-                    "report_date": f.report_date,
-                    "description": f.description,
-                    "url": f.url,
-                }
-                for f in filings
-            ]
-        }
     )

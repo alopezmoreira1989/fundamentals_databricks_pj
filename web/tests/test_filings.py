@@ -1,115 +1,67 @@
-"""SEC EDGAR filings list tests — offline (SEC network calls are monkeypatched)."""
+"""CompanyRepository.get_filings — the company page's Filings tab. Sourced from the
+``filings`` view (backed by the ``dashboard_filings`` artifact, written by the pipeline's own
+``15__fetch_sec_filings.py``), not a live SEC call of our own (retired
+``infrastructure/filings.py``'s per-request fetch). Self-contained: in-memory DuckDB, injected
+connection — no fixtures/network needed.
+"""
 
 from __future__ import annotations
 
+import duckdb
 import pytest
-from infrastructure import filings
+from repositories.companies import CompanyRepository
+from repositories.dtos import FilingRow
 
-_TICKER_MAP_JSON = {"0": {"cik_str": 320193, "ticker": "AAPL", "title": "Apple Inc."}}
-
-_SUBMISSIONS_JSON = {
-    "filings": {
-        "recent": {
-            "form": ["10-K", "8-K", "10-Q"],
-            "filingDate": ["2025-11-01", "2025-10-15", "2025-08-01"],
-            "reportDate": ["2025-09-30", "", "2025-06-30"],
-            "accessionNumber": ["0000320193-25-000100", "0000320193-25-000090", "0000320193-25-000080"],
-            "primaryDocument": ["aapl-10k.htm", "aapl-8k.htm", "aapl-10q.htm"],
-            "primaryDocDescription": ["10-K", "8-K", "10-Q"],
-        }
-    }
-}
+# ticker, form, filing_date, report_date, description, url
+_FILING_ROWS = [
+    ("AAPL", "10-K", "2025-11-01", "2025-09-30", "10-K", "https://www.sec.gov/Archives/edgar/data/320193/x/aapl-10k.htm"),
+    ("AAPL", "10-Q", "2025-08-01", "2025-06-30", "10-Q", "https://www.sec.gov/Archives/edgar/data/320193/x/aapl-10q.htm"),
+    ("MSFT", "10-K", "2026-01-15", "2025-12-31", "Annual report", "https://www.sec.gov/Archives/edgar/data/789019/x/msft-10k.htm"),
+]
 
 
-class _Resp:
-    def __init__(self, payload: dict) -> None:
-        self._payload = payload
-
-    def raise_for_status(self) -> None:
-        pass
-
-    def json(self) -> dict:
-        return self._payload
-
-
-def test_fetch_filings_filters_to_10k_10q_and_builds_urls(monkeypatch):
-    from django.core.cache import cache
-
-    cache.clear()
-
-    def _get(url, **kw):
-        if "company_tickers" in url:
-            return _Resp(_TICKER_MAP_JSON)
-        return _Resp(_SUBMISSIONS_JSON)
-
-    monkeypatch.setattr(filings.requests, "get", _get)
-    result = filings.fetch_filings("AAPL")
-    assert [f.form for f in result] == ["10-K", "10-Q"]  # 8-K dropped
-    assert result[0].url == "https://www.sec.gov/Archives/edgar/data/320193/000032019325000100/aapl-10k.htm"
-    assert result[0].filing_date == "2025-11-01"
-
-
-def test_fetch_filings_caches_and_degrades(monkeypatch):
-    from django.core.cache import cache
-
-    cache.clear()
-    calls: list[str] = []
-
-    def _get(url, **kw):
-        calls.append(url)
-        if "company_tickers" in url:
-            return _Resp(_TICKER_MAP_JSON)
-        return _Resp(_SUBMISSIONS_JSON)
-
-    monkeypatch.setattr(filings.requests, "get", _get)
-    first = filings.fetch_filings("AAPL")
-    second = filings.fetch_filings("AAPL")  # served from cache → no repeat submissions call
-    assert first == second
-    assert calls.count("https://data.sec.gov/submissions/CIK0000320193.json") == 1
-
-    cache.clear()
-
-    def _boom(url, **kw):
-        raise filings.requests.RequestException("SEC down")
-
-    monkeypatch.setattr(filings.requests, "get", _boom)
-    assert filings.fetch_filings("MSFT") == ()  # any error → empty, never raises
-
-
-def test_fetch_filings_unknown_ticker_returns_empty(monkeypatch):
-    from django.core.cache import cache
-
-    cache.clear()
-    monkeypatch.setattr(filings.requests, "get", lambda url, **kw: _Resp(_TICKER_MAP_JSON))
-    assert filings.fetch_filings("NOPE") == ()
-
-
-@pytest.mark.django_db
-def test_company_filings_endpoint(client, monkeypatch):
-    from apps.companies import services
-
-    monkeypatch.setattr(
-        services,
-        "get_company_filings",
-        lambda t: (
-            filings.Filing(
-                form="10-K",
-                filing_date="2025-11-01",
-                report_date="2025-09-30",
-                description="10-K",
-                url="https://www.sec.gov/Archives/edgar/data/320193/x/aapl-10k.htm",
-            ),
-        ),
+@pytest.fixture
+def con():
+    conn = duckdb.connect(":memory:")
+    conn.execute(
+        "CREATE TABLE filings ("
+        " ticker VARCHAR, form VARCHAR, filing_date VARCHAR, report_date VARCHAR,"
+        " description VARCHAR, url VARCHAR)"
     )
-    resp = client.get("/companies/AAPL/filings/")
-    assert resp.status_code == 200
-    payload = resp.json()["filings"]
-    assert payload == [
-        {
-            "form": "10-K",
-            "filing_date": "2025-11-01",
-            "report_date": "2025-09-30",
-            "description": "10-K",
-            "url": "https://www.sec.gov/Archives/edgar/data/320193/x/aapl-10k.htm",
-        }
-    ]
+    conn.executemany("INSERT INTO filings VALUES (?,?,?,?,?,?)", _FILING_ROWS)
+    yield conn
+    conn.close()
+
+
+@pytest.fixture
+def repo(con):
+    return CompanyRepository(connection=con)
+
+
+def test_get_filings_returns_only_this_tickers_rows_newest_first(repo):
+    rows = repo.get_filings("AAPL")
+    assert len(rows) == 2
+    assert all(isinstance(r, FilingRow) for r in rows)
+    assert [r.filing_date for r in rows] == ["2025-11-01", "2025-08-01"]  # newest first
+
+
+def test_get_filings_row_shape(repo):
+    row = repo.get_filings("AAPL")[0]
+    assert row.form == "10-K"
+    assert row.report_date == "2025-09-30"
+    assert row.description == "10-K"
+    assert row.url == "https://www.sec.gov/Archives/edgar/data/320193/x/aapl-10k.htm"
+
+
+def test_get_filings_unknown_ticker_returns_empty(repo):
+    assert repo.get_filings("NOPE") == ()
+
+
+def test_get_filings_missing_view_degrades_to_empty():
+    """No ``filings`` view registered at all (optional artifact absent) → ``()``, never raise."""
+    empty_con = duckdb.connect(":memory:")
+    try:
+        repo = CompanyRepository(connection=empty_con)
+        assert repo.get_filings("AAPL") == ()
+    finally:
+        empty_con.close()

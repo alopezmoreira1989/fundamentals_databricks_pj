@@ -11,11 +11,11 @@ import duckdb
 from fundamentals_pipeline.statement_layout import resolve_indent
 from fundamentals_pipeline.statement_layout import row_class as _row_class
 
-from ..data_source import get_cik_map
 from ..data_source import get_meta as load_meta
 from ..dtos import (
     CompanyStatements,
     CompanySummary,
+    FilingRow,
     MetricPoint,
     MetricSeries,
     NetNetRow,
@@ -149,6 +149,17 @@ _STATEMENTS_SQL = """
 # The three statements, in the order the tabs present them.
 _STATEMENT_ORDER = ("Income Statement", "Balance Sheet", "Cash Flow")
 
+# Real SEC 10-K/10-Q filings for the company page's Filings tab (issue #318) — sourced from
+# the pipeline's own dashboard_filings artifact (15__fetch_sec_filings.py), not a live SEC
+# call of our own. Column aliases match FilingRow's field names exactly (see base.py's
+# _fetch docstring).
+_FILINGS_SQL = """
+    SELECT form, filing_date, report_date, description, url
+    FROM dashboard_filings
+    WHERE ticker = ?
+    ORDER BY filing_date DESC
+"""
+
 
 def _clean(value: Any) -> str | None:
     """Meta strings arrive stringified — treat empty / literal 'None' as missing."""
@@ -271,12 +282,7 @@ PRICE_WINDOW_DEFAULT = "1Y"
 
 class CompanyRepository(DuckDBRepository):
     def get_summary(self, ticker: str) -> CompanySummary | None:
-        """Descriptive facts from the meta artifact (``None`` if the ticker is unknown).
-
-        ``cik`` comes from a SEPARATE cached source (``data_source.get_cik_map()``, synced by
-        the cron-driven ``sync_fundamentals_data`` command — see its own docstring), not the
-        meta artifact itself — issue #318's Filings tab link-out.
-        """
+        """Descriptive facts from the meta artifact (``None`` if the ticker is unknown)."""
         records: list[dict[str, Any]] = load_meta().get("tickers", [])
         for rec in records:
             if rec.get("ticker") == ticker:
@@ -296,9 +302,14 @@ class CompanyRepository(DuckDBRepository):
                     employees=_as_int(rec.get("employees")),
                     founded=_clean(rec.get("founded")),
                     has_logo=_as_bool(rec.get("has_logo")),
-                    cik=get_cik_map().get(rec["ticker"]),
                 )
         return None
+
+    def get_filings(self, ticker: str) -> tuple[FilingRow, ...]:
+        """This ticker's real SEC 10-K/10-Q filings (newest first), or ``()`` if none are
+        published (unknown ticker, or the pipeline's SEC fetch had nothing for it) — see
+        ``_FILINGS_SQL``."""
+        return self._fetch(_FILINGS_SQL, [ticker], FilingRow)
 
     def latest_metrics(self, ticker: str, *, limit: int = 400) -> tuple[MetricPoint, ...]:
         """The latest available value of each derived metric, ordered for grouped display."""

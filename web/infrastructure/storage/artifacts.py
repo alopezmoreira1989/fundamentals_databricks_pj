@@ -46,6 +46,7 @@ PARQUET_FILES: dict[str, str] = {
     "dashboard_prices": "dashboard_prices.parquet",
     "dashboard_backtest": "dashboard_backtest.parquet",
     "dashboard_fx": "dashboard_fx.parquet",
+    "dashboard_filings": "dashboard_filings.parquet",
 }
 META_FILE = "dashboard_meta.json"
 

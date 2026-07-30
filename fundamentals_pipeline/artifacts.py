@@ -80,12 +80,28 @@ _BACKTEST_SPEC: dict[str, set[str]] = {
     "n_holdings": {"numeric"},
 }
 
+# Real SEC filing list (10-K/10-Q only — see 15__fetch_sec_filings.py), one row per filing.
+# `filing_date`/`report_date` accept {datetime, string} like every other date-like column
+# here — SEC's submissions API returns plain ISO date strings, and report_date is sometimes
+# blank for certain forms (kept nullable, not coalesced). Both frontends' company page
+# Filings tab reads this directly — neither needs its own SEC credentials or live fetch
+# anymore (see the pipeline stage's own docstring for the incident that motivated this).
+_FILINGS_SPEC: dict[str, set[str]] = {
+    "ticker": {"string"},
+    "form": {"string"},
+    "filing_date": {"datetime", "string"},
+    "report_date": {"datetime", "string"},
+    "description": {"string"},
+    "url": {"string"},
+}
+
 ARTIFACTS: dict[str, dict[str, set[str]]] = {
     "dashboard_data": _DATA_SPEC,
     "dashboard_metrics": _METRICS_SPEC,
     "dashboard_prices": _PRICES_SPEC,
     "dashboard_backtest": _BACKTEST_SPEC,
     "dashboard_fx": _FX_SPEC,
+    "dashboard_filings": _FILINGS_SPEC,
 }
 ARTIFACT_NAMES = tuple(ARTIFACTS)
 

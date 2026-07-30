@@ -34,6 +34,25 @@ class CompanySummary:
 
 
 @dataclass(frozen=True, slots=True)
+class FilingRow:
+    """One real SEC filing (10-K/10-Q) for the company page's Filings tab.
+
+    Sourced from the ``dashboard_filings`` artifact, written by the pipeline's own
+    ``15__fetch_sec_filings.py`` — no live SEC call of our own (this repository previously
+    fetched a ticker→CIK map and per-ticker filing list directly from SEC at request time via
+    ``infrastructure/filings.py``; that's retired in favor of reading the same published
+    artifact `fundamentals_screener` uses, so both apps share one source of truth and neither
+    needs its own SEC credentials).
+    """
+
+    form: str
+    filing_date: str | None
+    report_date: str | None
+    description: str | None
+    url: str
+
+
+@dataclass(frozen=True, slots=True)
 class MetricPoint:
     """One derived-metric value for a ticker at a fiscal year.
 

@@ -141,7 +141,8 @@ def test_company_page_has_price_and_quarterly_tabs(artifacts_from_fixtures, clie
 def test_company_page_has_filings_tab(artifacts_from_fixtures, client):
     body = client.get(f"/companies/{TICKER}/").content.decode()
     assert "Filings" in body and 'id="pane-filings"' in body
-    assert "data-filings-url" in body  # async filings placeholder
+    # No dashboard_filings.parquet fixture on disk → the view is absent, server-rendered as empty.
+    assert "No filings found for this ticker." in body
 
 
 def test_company_page_valuation_tab_and_no_iv_in_derived(artifacts_from_fixtures, client):
