@@ -83,6 +83,15 @@
      _screen_results.html pattern), dim briefly while a background fetch is in flight. */
   #derived-metrics-wrapper.dm-loading { opacity: .45; transition: opacity .15s ease .15s; pointer-events: none; }
   #derived-metrics-wrapper { transition: opacity .1s ease; }
+  /* Filings table — sortable headers + form-type filter (client-side: at most ~40 rows per
+     ticker, already fully rendered server-side, so no round trip is worth it). */
+  #filings-table th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+  #filings-table th.sortable::after {
+    content: ""; display: inline-block; width: 0; height: 0; margin-left: 6px; vertical-align: middle;
+    opacity: .3; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 5px solid currentColor;
+  }
+  #filings-table th.sortable.sort-asc::after { opacity: 1; transform: rotate(180deg); }
+  #filings-table th.sortable.sort-desc::after { opacity: 1; }
 </style>
 {% endblock %}
 
@@ -118,6 +127,69 @@
         }).join('');
       })
       .catch(function () { el.innerHTML = '<p class="text-muted small mb-0">News unavailable.</p>'; });
+
+    // Filings tab: client-side sort (click a column header) + form-type filter (All/10-K/10-Q).
+    // The whole table is already rendered server-side (capped at ~40 rows per ticker by the
+    // pipeline), so this never needs a server round trip.
+    var filingsTable = document.getElementById('filings-table');
+    if (filingsTable) {
+      var filingsBody = filingsTable.querySelector('tbody');
+      var sortHeaders = Array.prototype.slice.call(filingsTable.querySelectorAll('th.sortable'));
+      var sortState = { key: 'filing_date', dir: 'desc' };
+
+      var applyFilingsSort = function () {
+        var idx = sortHeaders.findIndex(function (h) { return h.dataset.sortKey === sortState.key; });
+        var rows = Array.prototype.slice.call(filingsBody.querySelectorAll('tr'));
+        rows.sort(function (a, b) {
+          var av = a.children[idx].dataset.sortValue || '';
+          var bv = b.children[idx].dataset.sortValue || '';
+          if (av < bv) return sortState.dir === 'asc' ? -1 : 1;
+          if (av > bv) return sortState.dir === 'asc' ? 1 : -1;
+          return 0;
+        });
+        rows.forEach(function (r) { filingsBody.appendChild(r); });
+        sortHeaders.forEach(function (h) {
+          h.classList.remove('sort-asc', 'sort-desc');
+          if (h.dataset.sortKey === sortState.key) h.classList.add('sort-' + sortState.dir);
+        });
+      };
+
+      sortHeaders.forEach(function (h) {
+        h.addEventListener('click', function () {
+          if (sortState.key === h.dataset.sortKey) {
+            sortState.dir = sortState.dir === 'asc' ? 'desc' : 'asc';
+          } else {
+            sortState.key = h.dataset.sortKey;
+            sortState.dir = 'asc';
+          }
+          applyFilingsSort();
+        });
+      });
+      applyFilingsSort();
+
+      var filingsFilterButtons = Array.prototype.slice.call(
+        document.querySelectorAll('#filings-form-filter [data-form-filter]')
+      );
+      var filingsEmptyMsg = document.getElementById('filings-empty-filtered');
+      filingsFilterButtons.forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          filingsFilterButtons.forEach(function (b) {
+            b.classList.remove('active', 'btn-dark');
+            b.classList.add('btn-outline-secondary');
+          });
+          btn.classList.add('active', 'btn-dark');
+          btn.classList.remove('btn-outline-secondary');
+          var filter = btn.dataset.formFilter;
+          var visible = 0;
+          Array.prototype.slice.call(filingsBody.querySelectorAll('tr')).forEach(function (r) {
+            var show = filter === 'all' || r.dataset.form === filter;
+            r.hidden = !show;
+            if (show) visible++;
+          });
+          if (filingsEmptyMsg) filingsEmptyMsg.hidden = visible !== 0;
+        });
+      });
+    }
   });
 
   document.addEventListener('DOMContentLoaded', function () {
@@ -526,32 +598,42 @@
          reference-lookup tab belongs at the end. -->
     <div class="tab-pane fade" id="pane-filings" role="tabpanel" aria-labelledby="tab-filings" tabindex="0">
       <div class="card p-4">
-        <div class="eyebrow mb-2">SEC filings · 10-K &amp; 10-Q</div>
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+          <div class="eyebrow mb-0">SEC filings · 10-K &amp; 10-Q</div>
+          {% if filings %}
+            <div class="btn-group btn-group-sm" role="group" aria-label="Filter by form type" id="filings-form-filter">
+              <button type="button" class="btn btn-dark active" data-form-filter="all">All</button>
+              <button type="button" class="btn btn-outline-secondary" data-form-filter="10-K">10-K</button>
+              <button type="button" class="btn btn-outline-secondary" data-form-filter="10-Q">10-Q</button>
+            </div>
+          {% endif %}
+        </div>
         {% if filings %}
           <div class="table-responsive">
-            <table class="table table-sm table-hover align-middle mb-0">
+            <table class="table table-sm table-hover align-middle mb-0" id="filings-table">
               <thead>
                 <tr>
-                  <th scope="col">Form</th>
-                  <th scope="col">Description</th>
-                  <th scope="col">Filed</th>
-                  <th scope="col">Period</th>
+                  <th scope="col" class="sortable" data-sort-key="form">Form</th>
+                  <th scope="col" class="sortable" data-sort-key="description">Description</th>
+                  <th scope="col" class="sortable sort-desc" data-sort-key="filing_date">Filed</th>
+                  <th scope="col" class="sortable" data-sort-key="report_date">Period</th>
                 </tr>
               </thead>
               <tbody>
                 {% for f in filings %}
-                  <tr>
-                    <td><span class="badge text-bg-secondary">{{ f.form }}</span></td>
-                    <td>
+                  <tr data-form="{{ f.form }}">
+                    <td data-sort-value="{{ f.form }}"><span class="badge text-bg-secondary">{{ f.form }}</span></td>
+                    <td data-sort-value="{{ f.description|default:f.form }}">
                       <a href="{{ f.url }}" target="_blank" rel="noopener noreferrer">{{ f.description|default:f.form }}</a>
                     </td>
-                    <td class="text-muted small">{{ f.filing_date|default:"—" }}</td>
-                    <td class="text-muted small">{{ f.report_date|default:"—" }}</td>
+                    <td class="text-muted small" data-sort-value="{{ f.filing_date|default:'' }}">{{ f.filing_date|default:"—" }}</td>
+                    <td class="text-muted small" data-sort-value="{{ f.report_date|default:'' }}">{{ f.report_date|default:"—" }}</td>
                   </tr>
                 {% endfor %}
               </tbody>
             </table>
           </div>
+          <p class="text-muted small mb-0 mt-2" id="filings-empty-filtered" hidden>No filings match this filter.</p>
         {% else %}
           <p class="text-muted small mb-0">No filings found for this ticker.</p>
         {% endif %}
