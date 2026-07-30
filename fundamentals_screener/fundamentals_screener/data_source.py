@@ -44,10 +44,20 @@ def data_dir() -> Path:
     return path
 
 
-def _download(filename: str, dest: Path) -> None:
+def _download(filename: str, dest: Path) -> bool:
+    """Download `filename` to `dest`. Returns ``False`` (dest left untouched) if the release
+    doesn't have this artifact yet (404) — e.g. an artifact just added to ``ARTIFACT_NAMES``
+    before the next pipeline run has actually published it (confirmed necessary in production
+    2026-07-30: ``dashboard_filings`` landed here a run before the pipeline first published it,
+    and an unconditional ``raise_for_status()`` crashed the whole cron sync over one missing
+    optional file). Any other HTTP/network error still raises — only "not published yet" is
+    expected and safe to skip."""
     response = requests.get(f"{RELEASE_BASE_URL}/{filename}", timeout=60)
+    if response.status_code == 404:
+        return False
     response.raise_for_status()
     dest.write_bytes(response.content)
+    return True
 
 
 def sync(force: bool = False) -> list[str]:
@@ -61,7 +71,8 @@ def sync(force: bool = False) -> list[str]:
     here for a ticker→CIK map, which needed its own ``SEC_USER_AGENT`` setting on every
     consumer host and caused a real production incident when one host's wasn't configured
     (2026-07-29). Moving the whole SEC-filing fetch into the pipeline
-    (``15__fetch_sec_filings.py``) removed that dependency entirely.
+    (``15__fetch_sec_filings.py``) removed that dependency entirely — but see ``_download``'s
+    own docstring for the follow-up incident this function's 404-tolerance fixes.
     """
     directory = data_dir()
     filenames = [f"{name}.parquet" for name in ARTIFACT_NAMES] + [META_FILE]
@@ -69,8 +80,8 @@ def sync(force: bool = False) -> list[str]:
     for filename in filenames:
         dest = directory / filename
         if force or not dest.exists():
-            _download(filename, dest)
-            updated.append(filename)
+            if _download(filename, dest):
+                updated.append(filename)
     return updated
 
 
