@@ -307,9 +307,14 @@ class CompanyRepository(DuckDBRepository):
 
     def get_filings(self, ticker: str) -> tuple[FilingRow, ...]:
         """This ticker's real SEC 10-K/10-Q filings (newest first), or ``()`` if none are
-        published (unknown ticker, or the pipeline's SEC fetch had nothing for it) — see
-        ``_FILINGS_SQL``."""
-        return self._fetch(_FILINGS_SQL, [ticker], FilingRow)
+        published (unknown ticker, the pipeline's SEC fetch had nothing for it, or the
+        `dashboard_filings` view is absent — same optional-artifact degradation as
+        `usd_fx_rate`/`price_series` above; confirmed necessary in production 2026-07-30 when
+        this artifact was declared but not yet published by a pipeline run)."""
+        try:
+            return self._fetch(_FILINGS_SQL, [ticker], FilingRow)
+        except duckdb.Error:
+            return ()
 
     def latest_metrics(self, ticker: str, *, limit: int = 400) -> tuple[MetricPoint, ...]:
         """The latest available value of each derived metric, ordered for grouped display."""

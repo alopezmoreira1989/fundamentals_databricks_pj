@@ -54,3 +54,14 @@ def test_get_filings_row_shape(repo):
 
 def test_get_filings_unknown_ticker_returns_empty(repo):
     assert repo.get_filings("NOPE") == ()
+
+
+def test_get_filings_missing_view_degrades_to_empty():
+    """No ``dashboard_filings`` view registered at all (artifact not yet published by a
+    pipeline run — the 2026-07-30 production incident) → ``()``, never raise."""
+    empty_con = duckdb.connect(":memory:")
+    try:
+        repo = CompanyRepository(connection=empty_con)
+        assert repo.get_filings("AAPL") == ()
+    finally:
+        empty_con.close()
