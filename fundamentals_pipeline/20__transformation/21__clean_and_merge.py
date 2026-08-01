@@ -93,11 +93,19 @@ if "tag_namespace" not in spark.table(full_tbl).columns:
 # COMMAND ----------
 
 raw = spark.table(raw_full).filter(F.col("scraped_at") == latest_scrape)
-# `raw` (the slice of the latest financials_raw scrape, ~81M rows) is re-scanned 3×: flow_fy,
-# stock_fy, and the _flow_fy_all for the orphan-DELETE in §4, each with its own predicate pushdown
-# over the full Delta table. localCheckpoint(eager) materializes it once and downstream filters
-# read from the on-disk local checkpoint instead of re-scanning the table. .cache()/.persist()
-# do NOT work on serverless ([NOT_SUPPORTED_WITH_SERVERLESS]); released when the session closes.
+# `raw` (the slice of the latest financials_raw scrape, ~81M rows) feeds flow_fy and stock_fy
+# just below, each with its own predicate pushdown over the full Delta table. localCheckpoint
+# (eager) materializes it once so those two reads share it instead of re-scanning the table
+# twice. .cache()/.persist() do NOT work on serverless ([NOT_SUPPORTED_WITH_SERVERLESS]);
+# released when the session closes.
+#
+# Deliberately NOT reused for §4's _flow_fy_all (below) — that read happens much later, after
+# the full clean_fy computation AND the §3 MERGE INTO write (long-running on ~81M rows), and a
+# LOCAL checkpoint lives on the executor's own disk, not a fault-tolerant store: confirmed in
+# production (2026-08-01) that a serverless executor can be reclaimed in that window, evicting
+# the checkpoint block and crashing the run with CHECKPOINT_RDD_BLOCK_ID_NOT_FOUND. §4 instead
+# re-reads the source table fresh (one extra ~81M-row scan, trivial next to this stage's overall
+# runtime) rather than depend on a checkpoint surviving that long.
 raw = raw.localCheckpoint(eager=True)
 
 # Flow FY rows: 10-K, fp='FY'. We do NOT use the strict period_shape='FY_or_TTM' filter
@@ -309,8 +317,11 @@ print(f"✓ MERGE complete → {full_tbl} (FY rows)")
 
 # Universe of FLOW keys with ANY fact fp='FY' in this scrape, collapsed to the canonical concept
 # (to match against `financials`). Includes the sub-annual shapes that `flow_fy` now excludes.
+# Fresh re-read of the source table, NOT the `raw` checkpoint from §1 — see that checkpoint's
+# own comment for why (a local checkpoint this far downstream, after the §3 MERGE, isn't
+# reliably still alive on serverless).
 _flow_fy_all = (
-    raw
+    spark.table(raw_full).filter(F.col("scraped_at") == latest_scrape)
     .filter(F.col("kind").isin("flow_additive", "flow_nonadditive"))
     .filter(F.col("form").isin("10-K", "10-K/A", "20-F", "20-F/A", "40-F", "40-F/A"))
     .filter(F.col("fp") == "FY")
