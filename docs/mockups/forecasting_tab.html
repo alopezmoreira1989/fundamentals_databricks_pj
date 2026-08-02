@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AAPL — Forecasting (mockup)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<style>
+/* ============================================================
+ * Tokens copied verbatim from web/static/css/app.css — no new
+ * hex values introduced anywhere in this mockup.
+ * ============================================================ */
+:root {
+  --bg: #FAF8F4;
+  --bg-card: #FFFFFF;
+  --bg-subtle: #F1EFE8;
+  --bg-hover: #ECEAE2;
+  --ink: #1C1B18;
+  --ink-2: #5F5E5A;
+  --ink-3: #888780;
+  --rule: #D3D1C7;
+  --rule-soft: #E8E5DC;
+  --accent: #185FA5;
+  --accent-soft: #E6F1FB;
+  --accent-ink: #0C447C;
+  --positive: #0F6E56;
+  --positive-soft: #E1F5EE;
+  --negative: #993C1D;
+  --negative-soft: #FAECE7;
+  --warning: #BA7517;
+  --display: "Fraunces", "Times New Roman", serif;
+  --sans: "Inter", system-ui, sans-serif;
+  --mono: "JetBrains Mono", "SF Mono", Menlo, monospace;
+}
+body { font-family: var(--sans); background: var(--bg); color: var(--ink); }
+h1, h2, h3, .display-face {
+  font-family: var(--display); font-weight: 500; letter-spacing: -0.018em;
+  font-variation-settings: "opsz" 144; color: var(--ink);
+}
+.eyebrow {
+  font-family: var(--mono); font-size: .72rem; letter-spacing: .16em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+.eyebrow.accent { color: var(--accent-ink); }
+.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.card, .bg-white { background: var(--bg-card) !important; color: var(--ink); border: 1px solid var(--rule); }
+.shadow-sm { box-shadow: none !important; border: 1px solid var(--rule); }
+.table { --bs-table-bg: var(--bg-card); --bs-table-color: var(--ink);
+  --bs-table-border-color: var(--rule-soft); --bs-table-hover-bg: var(--bg-subtle);
+  font-variant-numeric: tabular-nums; }
+.table > thead th { font-family: var(--mono); font-size: .64rem; letter-spacing: .09em;
+  text-transform: uppercase; color: var(--ink-3); font-weight: 400; border-bottom: 1px solid var(--ink); }
+.table > tbody td { font-size: .84rem; vertical-align: middle; }
+.nav-tabs { border-bottom: 1px solid var(--rule); }
+.nav-tabs .nav-link { color: var(--ink-3); font-weight: 500; font-size: .88rem; border: none;
+  border-bottom: 2px solid transparent; margin-bottom: -1px; border-radius: 0; padding: .55rem 1rem; }
+.nav-tabs .nav-link:hover { color: var(--ink); }
+.nav-tabs .nav-link.active { color: var(--accent-ink); background: transparent; border-color: transparent transparent var(--accent); }
+
+/* ============================================================
+ * NEW — Forecasting tab, appended block (would live in its own
+ * forecasting.css partial, never touching the shared :root above)
+ * ============================================================ */
+.fc-hero { padding: 1.75rem 2rem; border-radius: 6px; }
+.fc-badge {
+  font-family: var(--mono); font-size: .68rem; letter-spacing: .08em; text-transform: uppercase;
+  padding: 3px 9px; border-radius: 3px; border: 1px solid var(--rule);
+}
+.fc-scenario-row { display: flex; gap: .5rem; flex-wrap: wrap; }
+.fc-chip {
+  font-family: var(--mono); font-size: .7rem; letter-spacing: .04em;
+  padding: 5px 11px; border-radius: 20px; border: 1px solid var(--rule);
+  background: var(--bg-card); color: var(--ink-2); cursor: pointer; user-select: none;
+  transition: opacity .15s;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.fc-chip .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.fc-chip[data-active="false"] { opacity: .35; }
+.fc-chip--bear .dot { background: var(--negative); }
+.fc-chip--lowbear .dot { background: var(--negative); opacity: .55; }
+.fc-chip--crab .dot { background: var(--accent); }
+.fc-chip--lowbull .dot { background: var(--positive); opacity: .55; }
+.fc-chip--bull .dot { background: var(--positive); }
+
+.fc-chart-wrap { position: relative; }
+.fc-chart-wrap svg { width: 100%; height: auto; display: block; }
+.fc-axis-label { font-family: var(--mono); font-size: 9.5px; fill: var(--ink-3); }
+.fc-zone-label { font-family: var(--mono); font-size: 9.5px; letter-spacing: .06em; fill: var(--ink-3); text-transform: uppercase; }
+
+.fc-line { fill: none; stroke-width: 2; }
+.fc-line--hist { stroke: var(--ink); }
+.fc-line--bear { stroke: var(--negative); }
+.fc-line--lowbear { stroke: var(--negative); stroke-opacity: .55; stroke-dasharray: 3 2; }
+.fc-line--crab { stroke: var(--accent); }
+.fc-line--lowbull { stroke: var(--positive); stroke-opacity: .55; stroke-dasharray: 3 2; }
+.fc-line--bull { stroke: var(--positive); }
+.fc-line--terminal { stroke-dasharray: 1 3; }
+.fc-line[data-hidden="true"] { opacity: 0; }
+.fc-today-line { stroke: var(--rule); stroke-width: 1; stroke-dasharray: 2 2; }
+.fc-terminal-band { fill: var(--bg-subtle); }
+
+.fc-metric-note { font-size: .78rem; color: var(--ink-2); }
+.fc-model-footnote {
+  font-family: var(--mono); font-size: .68rem; color: var(--ink-3); line-height: 1.5;
+  border-top: 1px solid var(--rule-soft); padding-top: 10px; margin-top: 6px;
+}
+</style>
+</head>
+<body>
+<div class="container py-4" style="max-width:1040px;">
+
+  <!-- ---------- Masthead nav, existing pattern + new tab ---------- -->
+  <div class="d-flex align-items-baseline gap-4 mb-4 pb-2" style="border-bottom:1px solid var(--ink);">
+    <span class="eyebrow">fundamentals</span>
+    <nav class="d-flex gap-3 ms-auto" style="font-size:.85rem;">
+      <a href="#" class="text-decoration-none" style="color:var(--ink-2);">Screener</a>
+      <a href="#" class="text-decoration-none" style="color:var(--ink-2);">Company</a>
+      <a href="#" class="text-decoration-none" style="color:var(--ink-2);">Valuation</a>
+      <a href="#" class="text-decoration-none fw-medium" style="color:var(--accent-ink); border-bottom:2px solid var(--accent); padding-bottom:2px;">Forecasting</a>
+    </nav>
+  </div>
+
+  <!-- ---------- Hero ---------- -->
+  <div class="fc-hero bg-white shadow-sm mb-4">
+    <div class="d-flex align-items-baseline gap-3 flex-wrap mb-1">
+      <span class="eyebrow accent">Forecasting</span>
+      <span class="fc-badge" style="color:var(--ink-2);">10Y horizon</span>
+      <span class="fc-badge" style="color:var(--ink-2);">5 scenarios</span>
+      <a class="ms-auto small text-decoration-none" href="#" style="color:var(--accent-ink);">Valuation →</a>
+    </div>
+    <h1 class="h3 mb-1">AAPL <span class="text-muted fw-normal" style="font-size:1rem;">— Forward Financials</span></h1>
+    <p class="fc-metric-note mb-0">
+      Years 1–5 are produced by a cross-sectional quantile model (gradient boosting) trained on the full
+      coverage universe; years 6–10 converge toward each scenario's terminal growth rate — the same
+      two-stage logic already used by the DCF model.
+    </p>
+  </div>
+
+  <!-- ---------- Metric tabs ---------- -->
+  <ul class="nav nav-tabs mb-3" id="fc-metric-tabs">
+    <li class="nav-item"><button class="nav-link active" data-metric="revenue">Revenue</button></li>
+    <li class="nav-item"><button class="nav-link" data-metric="netincome">Net Income</button></li>
+    <li class="nav-item"><button class="nav-link" data-metric="fcf">Free Cash Flow</button></li>
+  </ul>
+
+  <!-- ---------- Chart card ---------- -->
+  <div class="bg-white shadow-sm p-4 mb-4" style="border-radius:6px;">
+    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+      <div>
+        <h2 class="h6 mb-0" id="fc-chart-title">Revenue <span class="text-muted fw-normal">· $ billions</span></h2>
+      </div>
+      <div class="fc-scenario-row" id="fc-legend">
+        <span class="fc-chip fc-chip--bear" data-scenario="bear" data-active="true"><span class="dot"></span>Bear</span>
+        <span class="fc-chip fc-chip--lowbear" data-scenario="lowbear" data-active="true"><span class="dot"></span>Low Bear</span>
+        <span class="fc-chip fc-chip--crab" data-scenario="crab" data-active="true"><span class="dot"></span>Crab</span>
+        <span class="fc-chip fc-chip--lowbull" data-scenario="lowbull" data-active="true"><span class="dot"></span>Low Bull</span>
+        <span class="fc-chip fc-chip--bull" data-scenario="bull" data-active="true"><span class="dot"></span>Bull</span>
+      </div>
+    </div>
+
+    <div class="fc-chart-wrap">
+      <svg viewBox="0 0 760 300" id="fc-svg">
+        <!-- terminal-convergence band (years 6-10) -->
+        <rect class="fc-terminal-band" x="470" y="10" width="260" height="240"></rect>
+        <text class="fc-zone-label" x="600" y="26" text-anchor="middle">terminal convergence</text>
+        <text class="fc-zone-label" x="280" y="26" text-anchor="middle">explicit ml forecast</text>
+
+        <!-- axis baseline -->
+        <line x1="40" y1="250" x2="730" y2="250" stroke="var(--rule)" stroke-width="1"></line>
+        <!-- today marker -->
+        <line class="fc-today-line" x1="200" y1="10" x2="200" y2="250"></line>
+        <text class="fc-axis-label" x="200" y="264" text-anchor="middle">FY0</text>
+        <text class="fc-axis-label" x="40" y="264" text-anchor="middle">FY-5</text>
+        <text class="fc-axis-label" x="470" y="264" text-anchor="middle">FY+5</text>
+        <text class="fc-axis-label" x="730" y="264" text-anchor="middle">FY+10</text>
+
+        <!-- historical (solid, ink) -->
+        <path class="fc-line fc-line--hist" id="ln-hist" d=""></path>
+
+        <!-- forecast scenarios, years 0-5 solid, 5-10 lighter/dashed (terminal) -->
+        <path class="fc-line fc-line--bear"    id="ln-bear"    d=""></path>
+        <path class="fc-line fc-line--lowbear" id="ln-lowbear" d=""></path>
+        <path class="fc-line fc-line--crab"    id="ln-crab"    d=""></path>
+        <path class="fc-line fc-line--lowbull" id="ln-lowbull" d=""></path>
+        <path class="fc-line fc-line--bull"    id="ln-bull"    d=""></path>
+      </svg>
+    </div>
+    <p class="fc-metric-note mt-2 mb-0">
+      Dot markers omitted for readability — hover states / tooltips (exact FY value per scenario) to be
+      wired once this is a live chart component.
+    </p>
+  </div>
+
+  <!-- ---------- Forward multiples table ---------- -->
+  <div class="bg-white shadow-sm p-4" style="border-radius:6px;">
+    <div class="d-flex justify-content-between align-items-baseline mb-3 flex-wrap gap-2">
+      <h2 class="h6 mb-0">Forward P/E &amp; FCF Yield <span class="text-muted fw-normal">· PV-discounted, scenario: <span class="eyebrow accent">Crab</span></span></h2>
+      <span class="small text-muted">Discounted at each scenario's own WACC — same rates as the DCF model</span>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-sm align-middle mb-0">
+        <thead>
+          <tr>
+            <th scope="col">Metric</th>
+            <th scope="col" class="text-end">FY+1</th>
+            <th scope="col" class="text-end">FY+2</th>
+            <th scope="col" class="text-end">FY+3</th>
+            <th scope="col" class="text-end">FY+5</th>
+            <th scope="col" class="text-end">FY+7</th>
+            <th scope="col" class="text-end">FY+10</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Forward P/E <span class="text-muted small">(PV-adj.)</span></td>
+            <td class="text-end mono">27.4×</td>
+            <td class="text-end mono">25.1×</td>
+            <td class="text-end mono">23.6×</td>
+            <td class="text-end mono">20.9×</td>
+            <td class="text-end mono">19.2×</td>
+            <td class="text-end mono">17.8×</td>
+          </tr>
+          <tr>
+            <td>FCF / P <span class="text-muted small">(yield)</span></td>
+            <td class="text-end mono" style="color:var(--positive);">3.1%</td>
+            <td class="text-end mono" style="color:var(--positive);">3.4%</td>
+            <td class="text-end mono" style="color:var(--positive);">3.7%</td>
+            <td class="text-end mono" style="color:var(--positive);">4.3%</td>
+            <td class="text-end mono" style="color:var(--positive);">4.8%</td>
+            <td class="text-end mono" style="color:var(--positive);">5.2%</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="fc-model-footnote mb-0">
+      Model: LightGBM quantile regression (p10/p25/p50/p75/p90 → Bear/Low Bear/Crab/Low Bull/Bull),
+      trained cross-sectionally on the full ticker universe, horizon treated as a numeric feature.
+      Years 6–10 blend toward each scenario's terminal growth rate. Not investment advice — for
+      illustration of the mockup only; all figures on this page are placeholders.
+    </p>
+  </div>
+
+</div>
+
+<script>
+// Mock data per metric — historical (FY-5..FY0, 6 pts) + forecast (FY0..FY10, 11 pts) per scenario.
+// Purely illustrative shapes for the design review; real values come from the published forecast artifact.
+const DATA = {
+  revenue: {
+    hist: [300,315,320,340,383,391],
+    bear:    [391,392,390,385,378,368,352,338,326,316,308],
+    lowbear: [391,398,402,405,406,406,404,401,398,396,394],
+    crab:    [391,404,417,431,446,461,478,495,512,528,543],
+    lowbull: [391,410,432,456,482,509,533,554,573,589,603],
+    bull:    [391,418,449,484,523,566,606,641,671,696,716]
+  },
+  netincome: {
+    hist: [57,60,61,65,97,94],
+    bear:    [94,92,89,85,80,74,68,63,59,56,53],
+    lowbear: [94,96,97,97,96,95,93,91,89,88,87],
+    crab:    [94,99,104,110,116,122,128,134,140,145,150],
+    lowbull: [94,102,111,120,130,140,148,155,161,166,170],
+    bull:    [94,106,119,133,148,163,177,189,199,207,213]
+  },
+  fcf: {
+    hist: [73,80,92,111,99,108],
+    bear:    [108,106,103,98,92,85,79,73,69,65,62],
+    lowbear: [108,110,111,111,110,109,107,105,103,101,100],
+    crab:    [108,114,120,127,134,141,148,154,160,165,169],
+    lowbull: [108,117,127,137,147,157,166,174,180,186,190],
+    bull:    [108,121,135,150,166,182,197,210,220,229,235]
+  }
+};
+const TITLES = { revenue: "Revenue · $ billions", netincome: "Net Income · $ billions", fcf: "Free Cash Flow · $ billions" };
+
+// Shared scale across hist + every scenario for the current metric, so a given dollar value
+// maps to the exact same y-pixel regardless of which line it's on — this is what makes all
+// forecast lines (and the historical line) originate from one shared FY0 point.
+function sharedScale(d) {
+  const all = [].concat(d.hist, d.bear, d.lowbear, d.crab, d.lowbull, d.bull);
+  const min = Math.min(...all), max = Math.max(...all);
+  const pad = (max - min) * 0.08 || 1;
+  return { lo: min - pad, hi: max + pad };
+}
+
+function toPath(values, x0, xStep, scale) {
+  return values.map((v, i) => {
+    const x = x0 + i * xStep;
+    const y = 250 - ((v - scale.lo) / (scale.hi - scale.lo)) * 230;
+    return (i === 0 ? "M" : "L") + x.toFixed(1) + "," + y.toFixed(1);
+  }).join(" ");
+}
+
+function render(metric) {
+  const d = DATA[metric];
+  document.getElementById("fc-chart-title").innerHTML =
+    TITLES[metric].split(" · ")[0] + ' <span class="text-muted fw-normal">· ' + TITLES[metric].split(" · ")[1] + "</span>";
+  const scale = sharedScale(d);
+  document.getElementById("ln-hist").setAttribute("d", toPath(d.hist, 40, 32, scale));
+  ["bear","lowbear","crab","lowbull","bull"].forEach(k => {
+    document.getElementById("ln-" + k).setAttribute("d", toPath(d[k], 200, 53, scale));
+  });
+}
+
+document.querySelectorAll("#fc-metric-tabs .nav-link").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll("#fc-metric-tabs .nav-link").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    render(btn.dataset.metric);
+  });
+});
+
+document.querySelectorAll(".fc-chip").forEach(chip => {
+  chip.addEventListener("click", () => {
+    const scenario = chip.dataset.scenario;
+    const active = chip.dataset.active === "true";
+    chip.dataset.active = (!active).toString();
+    document.getElementById("ln-" + scenario).setAttribute("data-hidden", active.toString());
+  });
+});
+
+render("revenue");
+</script>
+</body>
+</html>
