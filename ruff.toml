@@ -57,6 +57,7 @@ ignore = [
 # kwarg itself doesn't exist before 3.10 regardless of True/False. Both ignored only here, not
 # repo-wide — every other zip()/type-union in the codebase should keep taking the 3.10+ lints.
 "fundamentals_pipeline/backtest.py" = ["UP007", "B905"]
+"fundamentals_pipeline/forecasting.py" = ["UP007", "B905"]
 "fundamentals_pipeline/periods.py" = ["UP007"]
 "fundamentals_pipeline/valuation.py" = ["UP007"]
 "fundamentals_screener/fundamentals_screener/repositories/base.py" = ["B905"]
