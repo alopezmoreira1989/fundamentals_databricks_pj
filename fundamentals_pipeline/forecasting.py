@@ -342,11 +342,58 @@ def _prepare_features(panel: pd.DataFrame) -> pd.DataFrame:
     return features
 
 
+# Moderate regularization defaults for both train_* functions below — folded in ahead of
+# `**(lightgbm_params or {})` so a caller's own params still win. Addresses a real overfitting
+# concern raised in review: LightGBM (any GBM) can overfit with unlimited leaves/no minimum leaf
+# size, same as any other boosting library — this isn't a reason to switch away from LightGBM
+# (see train_quantile_models' own scikit-learn-avoidance docstring for why a from-scratch
+# scikit-learn-based alternative was rejected), just a reason to tune it properly.
+_REGULARIZATION_DEFAULTS: dict[str, Any] = {
+    "num_leaves": 31, "min_data_in_leaf": 20, "lambda_l1": 0.1, "lambda_l2": 0.1,
+}
+
+
+def _train_one_booster(
+    lgb: Any,
+    features: pd.DataFrame,
+    target: pd.Series,
+    val_features: pd.DataFrame | None,
+    val_target: pd.Series | None,
+    params: Mapping[str, Any],
+    num_boost_round: int,
+    early_stopping_rounds: int,
+) -> Any:
+    """Shared train_set/valid_set/early-stopping wiring for both train_quantile_models and
+    train_loss_classifiers, so the early-stopping logic lives in exactly one place.
+
+    ``val_features``/``val_target`` are ``None`` (no early stopping — trains for the fixed
+    ``num_boost_round``) unless the caller supplied a non-empty ``validation_panel`` with rows
+    for this same target column — see both callers' own docstrings for why the *split itself*
+    is the caller's responsibility, not this function's (it must come from
+    :func:`expanding_window_split`, never a random split).
+    """
+    train_set = lgb.Dataset(
+        features, label=target, categorical_feature=list(CATEGORICAL_FEATURES), free_raw_data=False,
+    )
+    if val_features is None or val_target is None or val_features.empty:
+        return lgb.train(dict(params), train_set, num_boost_round=num_boost_round)
+    val_set = lgb.Dataset(
+        val_features, label=val_target, categorical_feature=list(CATEGORICAL_FEATURES),
+        reference=train_set, free_raw_data=False,
+    )
+    return lgb.train(
+        dict(params), train_set, num_boost_round=num_boost_round, valid_sets=[val_set],
+        callbacks=[lgb.early_stopping(early_stopping_rounds, verbose=False)],
+    )
+
+
 def train_quantile_models(
     panel: pd.DataFrame,
     *,
+    validation_panel: pd.DataFrame | None = None,
     quantile_levels: Sequence[float] = QUANTILE_LEVELS,
     num_boost_round: int = 100,
+    early_stopping_rounds: int = 20,
     lightgbm_params: Mapping[str, Any] | None = None,
 ) -> dict[tuple[str, float], Any]:
     """One LightGBM quantile regressor per (target-metric suffix, quantile level) — trained on
@@ -357,7 +404,17 @@ def train_quantile_models(
     Uses ``lightgbm``'s native ``Dataset``/``train`` API, not the ``lightgbm.sklearn`` wrapper
     — the latter hard-requires ``scikit-learn`` to even be imported, which issue #329's Phase 0
     audit never verified installs on Databricks Free Edition serverless (only ``lightgbm``/
-    ``catboost`` were checked); the native API needs nothing beyond ``lightgbm`` itself.
+    ``catboost`` were checked); the native API needs nothing beyond ``lightgbm`` itself. This is
+    also why a Random-Forest-based alternative was rejected on review: plain
+    ``RandomForestRegressor`` has no native quantile-regression support, and a quantile-capable
+    RF variant would be a second unaudited dependency, not a lighter one.
+
+    ``validation_panel``, if given, enables early stopping (``early_stopping_rounds``) against
+    that metric's own non-null rows in it — build it via :func:`expanding_window_split` on a
+    cutoff BEFORE calling this function (never a random split; see that function's own
+    no-look-ahead rationale). ``None`` (the default) trains for the fixed ``num_boost_round``
+    with no early stopping. Moderate regularization defaults (see ``_REGULARIZATION_DEFAULTS``)
+    are applied unless overridden via ``lightgbm_params``.
     """
     import lightgbm as lgb
 
@@ -369,24 +426,34 @@ def train_quantile_models(
             continue
         features = _prepare_features(rows)
         target = rows[target_col]
+
+        val_features: pd.DataFrame | None = None
+        val_target: pd.Series | None = None
+        if validation_panel is not None:
+            val_rows = validation_panel[validation_panel[target_col].notna()]
+            if not val_rows.empty:
+                val_features = _prepare_features(val_rows)
+                val_target = val_rows[target_col]
+
         for level in quantile_levels:
             params: dict[str, Any] = {
                 "objective": "quantile", "alpha": level, "verbosity": -1,
-                **(lightgbm_params or {}),
+                **_REGULARIZATION_DEFAULTS, **(lightgbm_params or {}),
             }
-            train_set = lgb.Dataset(
-                features, label=target, categorical_feature=list(CATEGORICAL_FEATURES),
-                free_raw_data=False,
+            models[(suffix, level)] = _train_one_booster(
+                lgb, features, target, val_features, val_target, params,
+                num_boost_round, early_stopping_rounds,
             )
-            models[(suffix, level)] = lgb.train(params, train_set, num_boost_round=num_boost_round)
     return models
 
 
 def train_loss_classifiers(
     panel: pd.DataFrame,
     *,
+    validation_panel: pd.DataFrame | None = None,
     horizons: Sequence[int] = (1, 2, 3, 4, 5),
     num_boost_round: int = 100,
+    early_stopping_rounds: int = 20,
     lightgbm_params: Mapping[str, Any] | None = None,
 ) -> dict[tuple[str, int], Any]:
     """One binary LightGBM classifier per (target-metric suffix, horizon) predicting
@@ -400,8 +467,10 @@ def train_loss_classifiers(
     not a loss" (see :func:`predict_forecast`). Returns ``{(suffix, horizon): fitted_booster}``,
     which may have fewer than ``len(TARGET_METRICS) * len(horizons)`` entries.
 
-    Same native ``Dataset``/``train`` API as :func:`train_quantile_models`, for the same
-    scikit-learn-avoidance reason — see that function's own docstring.
+    Same native ``Dataset``/``train`` API, same ``validation_panel``-gated early stopping, and
+    same regularization defaults as :func:`train_quantile_models` — see that function's own
+    docstring for the full rationale on all three. Real classifier quality (not just "did it
+    overfit the training set") is best checked with :func:`cross_validate_loss_classifier`.
     """
     import lightgbm as lgb
 
@@ -414,15 +483,125 @@ def train_loss_classifiers(
                 continue
             features = _prepare_features(rows)
             target = rows[target_col]
+
+            val_features: pd.DataFrame | None = None
+            val_target: pd.Series | None = None
+            if validation_panel is not None:
+                val_rows = validation_panel[
+                    (validation_panel["horizon"] == horizon) & validation_panel[target_col].notna()
+                ]
+                if not val_rows.empty and val_rows[target_col].nunique() >= 2:
+                    val_features = _prepare_features(val_rows)
+                    val_target = val_rows[target_col]
+
             params: dict[str, Any] = {
-                "objective": "binary", "verbosity": -1, **(lightgbm_params or {}),
+                "objective": "binary", "verbosity": -1,
+                **_REGULARIZATION_DEFAULTS, **(lightgbm_params or {}),
             }
-            train_set = lgb.Dataset(
-                features, label=target, categorical_feature=list(CATEGORICAL_FEATURES),
-                free_raw_data=False,
+            models[(suffix, horizon)] = _train_one_booster(
+                lgb, features, target, val_features, val_target, params,
+                num_boost_round, early_stopping_rounds,
             )
-            models[(suffix, horizon)] = lgb.train(params, train_set, num_boost_round=num_boost_round)
     return models
+
+
+# ── classifier evaluation: ROC-AUC via walk-forward cross-validation ────────────────────────
+def roc_auc_score(y_true: Sequence[int], y_score: Sequence[float]) -> float | None:
+    """Area under the ROC curve, via the Mann-Whitney U / rank-sum equivalence — a small,
+    dependency-free implementation deliberately NOT ``sklearn.metrics.roc_auc_score``: issue
+    #329's Phase 0 audit never verified scikit-learn installs on Databricks Free Edition
+    serverless (only ``lightgbm``/``catboost`` were checked, and this module already hit that
+    exact gap once — see :func:`train_quantile_models`'s own docstring on why it uses
+    ``lightgbm``'s native API instead of the ``sklearn`` wrapper).
+
+    ``None`` when ``y_true`` has only one class (AUC is undefined with no negative or no
+    positive example to separate), never a fabricated 0.5.
+    """
+    y_true_arr = np.asarray(y_true)
+    y_score_arr = np.asarray(y_score, dtype=float)
+    n_pos = int((y_true_arr == 1).sum())
+    n_neg = int((y_true_arr == 0).sum())
+    if n_pos == 0 or n_neg == 0:
+        return None
+    order = np.argsort(y_score_arr, kind="mergesort")
+    sorted_scores = y_score_arr[order]
+    ranks = np.arange(1, len(y_score_arr) + 1, dtype=float)
+    # Average ranks across ties (equal predicted scores) so tied predictions don't arbitrarily
+    # favor whichever happened to sort first.
+    i = 0
+    while i < len(sorted_scores):
+        j = i
+        while j + 1 < len(sorted_scores) and sorted_scores[j + 1] == sorted_scores[i]:
+            j += 1
+        if j > i:
+            ranks[i:j + 1] = ranks[i:j + 1].mean()
+        i = j + 1
+    rank_by_original_position = np.empty(len(y_score_arr))
+    rank_by_original_position[order] = ranks
+    sum_ranks_pos = rank_by_original_position[y_true_arr == 1].sum()
+    return float((sum_ranks_pos - n_pos * (n_pos + 1) / 2) / (n_pos * n_neg))
+
+
+def cross_validate_loss_classifier(
+    panel: pd.DataFrame,
+    suffix: str,
+    horizon: int,
+    *,
+    n_folds: int = 5,
+    num_boost_round: int = 100,
+    lightgbm_params: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Walk-forward (expanding-window) cross-validated ROC-AUC for one (target metric, horizon)
+    loss classifier — answers "how good is this classifier really", never a random k-fold
+    split: ``n_folds`` cutoff dates, evenly spaced across this (metric, horizon)'s own
+    ``as_of_date`` range, each reusing :func:`expanding_window_split` (never a random
+    row-level split — same no-look-ahead discipline as everywhere else in this module). Each
+    fold trains fresh on every row eligible as of that fold's cutoff and scores
+    :func:`roc_auc_score` on the rows that become eligible before the NEXT fold's cutoff (or,
+    for the last fold, everything remaining).
+
+    Returns ``{"fold_scores": [...], "mean_auc": float | None}`` — a fold whose training rows
+    or validation slice is single-class contributes no score (skipped, not fabricated);
+    ``mean_auc`` is ``None`` if every fold was unscoreable (e.g. too few distinct ``as_of_date``
+    values for ``n_folds``, or the metric/horizon combo is rare enough that every fold ends up
+    single-class — mirrors :func:`train_loss_classifiers`' own single-class skip).
+    """
+    import lightgbm as lgb
+
+    target_col = f"is_loss_{suffix}"
+    rows = panel[
+        (panel["horizon"] == horizon) & panel[target_col].notna() & panel["as_of_date"].notna()
+    ]
+    dates = np.sort(rows["as_of_date"].unique())
+    if len(dates) < n_folds + 1:
+        return {"fold_scores": [], "mean_auc": None}
+
+    boundaries = [dates[int(len(dates) * i / (n_folds + 1))] for i in range(1, n_folds + 1)]
+    fold_scores: list[float] = []
+    for i, cutoff in enumerate(boundaries):
+        train_rows, remainder = expanding_window_split(rows, "as_of_date", cutoff)
+        next_cutoff = boundaries[i + 1] if i + 1 < len(boundaries) else None
+        fold_rows = (
+            expanding_window_split(remainder, "as_of_date", next_cutoff)[0]
+            if next_cutoff is not None else remainder
+        )
+        if train_rows[target_col].nunique() < 2 or fold_rows.empty or fold_rows[target_col].nunique() < 2:
+            continue
+        params: dict[str, Any] = {
+            "objective": "binary", "verbosity": -1,
+            **_REGULARIZATION_DEFAULTS, **(lightgbm_params or {}),
+        }
+        train_set = lgb.Dataset(
+            _prepare_features(train_rows), label=train_rows[target_col],
+            categorical_feature=list(CATEGORICAL_FEATURES), free_raw_data=False,
+        )
+        model = lgb.train(params, train_set, num_boost_round=num_boost_round)
+        predictions = model.predict(_prepare_features(fold_rows))
+        score = roc_auc_score(fold_rows[target_col].to_numpy(), predictions)
+        if score is not None:
+            fold_scores.append(score)
+    mean_auc = float(np.mean(fold_scores)) if fold_scores else None
+    return {"fold_scores": fold_scores, "mean_auc": mean_auc}
 
 
 # ── combining quantile regressors + loss classifier into one forecast path ─────────────────

@@ -4,7 +4,7 @@ forecasting.py)."""
 from __future__ import annotations
 
 import math
-from datetime import date
+from datetime import date, timedelta
 
 import numpy as np
 import pandas as pd
@@ -291,6 +291,9 @@ def _synthetic_training_panel(n: int = 300, seed: int = 0) -> pd.DataFrame:
         "Revenue": rng.uniform(100, 1000, n),
         "Net Income": rng.uniform(10, 200, n),
         "Free Cash Flow": rng.uniform(5, 150, n),
+        "as_of_date": [
+            date(2010, 1, 1) + timedelta(days=int(d)) for d in rng.integers(0, 365 * 10, n)
+        ],
     })
     for suffix in fc.TARGET_METRICS:
         panel[f"log_growth_{suffix}"] = rng.normal(0.05, 0.2, n)
@@ -354,3 +357,100 @@ def test_predict_forecast_empty_when_no_models_trained():
     assert list(forecasts.columns) == [
         "ticker", "fiscal_year", "horizon", "metric", "quantile_level", "forecast_value",
     ]
+
+
+# ── roc_auc_score (dependency-free, no scikit-learn) ────────────────────────────────
+def test_roc_auc_score_perfect_separation():
+    assert fc.roc_auc_score([0, 0, 0, 1, 1, 1], [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]) == 1.0
+
+
+def test_roc_auc_score_perfect_inversion():
+    assert fc.roc_auc_score([1, 1, 1, 0, 0, 0], [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]) == 0.0
+
+
+def test_roc_auc_score_tied_scores_gives_one_half():
+    assert fc.roc_auc_score([0, 1, 0, 1], [5.0, 5.0, 5.0, 5.0]) == pytest.approx(0.5)
+
+
+def test_roc_auc_score_none_when_single_class():
+    assert fc.roc_auc_score([1, 1, 1], [0.1, 0.2, 0.3]) is None
+    assert fc.roc_auc_score([0, 0, 0], [0.1, 0.2, 0.3]) is None
+
+
+def test_roc_auc_score_worked_example():
+    # y_true=[0,1,0,1], y_score=[0.1,0.4,0.35,0.8]: positives are 0.4 and 0.8, negatives are
+    # 0.1 and 0.35. Both positives beat both negatives -> perfect separation -> AUC = 1.0.
+    assert fc.roc_auc_score([0, 1, 0, 1], [0.1, 0.4, 0.35, 0.8]) == pytest.approx(1.0)
+
+
+# ── early stopping (validation_panel-gated) ─────────────────────────────────────────
+def _panel_with_real_signal(n: int = 400, seed: int = 1) -> pd.DataFrame:
+    """Like _synthetic_training_panel, but log_growth_revenue actually correlates with a
+    feature (ROE %), so a model has real signal to learn and early stopping has a genuine
+    "stop once validation loss stops improving" decision to make -- not just the degenerate
+    "no signal at all, stop after round 1" case."""
+    panel = _synthetic_training_panel(n=n, seed=seed)
+    rng = np.random.default_rng(seed)
+    panel["log_growth_revenue"] = panel["ROE %"] * 0.01 + rng.normal(0, 0.02, n)
+    return panel
+
+
+def test_train_quantile_models_with_validation_panel_enables_early_stopping():
+    panel = _panel_with_real_signal()
+    train_panel, validation_panel = panel.iloc[:300], panel.iloc[300:]
+
+    models_no_early_stop = fc.train_quantile_models(
+        panel, num_boost_round=200, lightgbm_params=_LGBM_PARAMS,
+    )
+    models_with_early_stop = fc.train_quantile_models(
+        train_panel, validation_panel=validation_panel, num_boost_round=200,
+        early_stopping_rounds=5, lightgbm_params=_LGBM_PARAMS,
+    )
+    # Early stopping must actually be ABLE to cut training short -- never train past the cap
+    # regardless, and (given real signal + a genuine held-out slice) shorter than the
+    # no-early-stopping run in at least one of the 15 models.
+    assert all(m.num_trees() <= 200 for m in models_with_early_stop.values())
+    assert any(
+        models_with_early_stop[key].num_trees() < models_no_early_stop[key].num_trees()
+        for key in models_with_early_stop
+    )
+
+
+def test_train_quantile_models_without_validation_panel_trains_full_rounds():
+    """No validation_panel (the default) -- no early stopping, trains for the full fixed
+    num_boost_round, exactly as issue #331 originally shipped."""
+    panel = _synthetic_training_panel(n=50)
+    models = fc.train_quantile_models(panel, num_boost_round=7, lightgbm_params=_LGBM_PARAMS)
+    assert all(m.num_trees() == 7 for m in models.values())
+
+
+# ── cross_validate_loss_classifier (walk-forward CV) ─────────────────────────────────
+def test_cross_validate_loss_classifier_returns_mean_auc_in_valid_range():
+    panel = _synthetic_training_panel(n=500)
+    result = fc.cross_validate_loss_classifier(
+        panel, "net_income", 3, n_folds=5, num_boost_round=10, lightgbm_params=_LGBM_PARAMS,
+    )
+    assert result["mean_auc"] is not None
+    assert 0.0 <= result["mean_auc"] <= 1.0
+    assert all(0.0 <= s <= 1.0 for s in result["fold_scores"])
+
+
+def test_cross_validate_loss_classifier_none_when_too_few_dates_for_folds():
+    # Collapse every row onto a single as_of_date -- nowhere near enough distinct dates for
+    # n_folds=5 (needs at least 6).
+    panel = _synthetic_training_panel(n=50)
+    panel["as_of_date"] = date(2020, 1, 1)
+    result = fc.cross_validate_loss_classifier(
+        panel, "net_income", 3, n_folds=5, num_boost_round=10, lightgbm_params=_LGBM_PARAMS,
+    )
+    assert result == {"fold_scores": [], "mean_auc": None}
+
+
+def test_cross_validate_loss_classifier_skips_revenue_single_class_metric():
+    """Revenue's is_loss column is a constant 0 in the fixture -- every fold's training rows
+    (and the overall series) are single-class, so no fold can be scored."""
+    panel = _synthetic_training_panel(n=500)
+    result = fc.cross_validate_loss_classifier(
+        panel, "revenue", 3, n_folds=5, num_boost_round=10, lightgbm_params=_LGBM_PARAMS,
+    )
+    assert result == {"fold_scores": [], "mean_auc": None}
