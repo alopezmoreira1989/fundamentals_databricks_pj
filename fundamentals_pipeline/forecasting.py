@@ -31,6 +31,7 @@ import pandas as pd
 
 from .backtest import as_of_date as _as_of_date
 from .backtest import as_of_eligible
+from .valuation import eps_cagr
 
 # `from __future__ import annotations` only defers *annotation* evaluation — this is a plain
 # assignment, so the RHS runs at import time. PEP 604 `float | int | None` needs `type.__or__`,
@@ -728,3 +729,110 @@ def predict_forecast(
                      "forecast_value"]
         )
     return pd.concat(frames, ignore_index=True)
+
+
+# ── terminal-year blend (years 6-10), issue #332 ────────────────────────────────────────────
+#
+# Years 1-5 come straight from predict_forecast (the explicit ML forecast); years 6-10 instead
+# converge each scenario's own growth rate toward the DCF model's existing terminal-growth
+# assumption (valuation_assumptions.json's bull/mid/bear "growth_terminal") — the "same
+# two-stage spirit as the existing DCF" issue #332 asks for, mirroring valuation.py's
+# dcf_value() (explicit stage, then a terminal regime), but producing a full per-year VALUE
+# PATH rather than one lump Gordon terminal value, since the Forecasting fan chart needs a
+# point at every FY, not a single terminal number.
+def terminal_growth_for_quantile(
+    quantile_level: float, bear_terminal: float, mid_terminal: float, bull_terminal: float,
+) -> float:
+    """Maps a quantile level to a terminal growth rate, anchored at ``q=0.10 -> bear_terminal``,
+    ``q=0.50 -> mid_terminal``, ``q=0.90 -> bull_terminal`` (the DCF model's own 3-scenario
+    terminal-growth assumptions) via linear interpolation across two segments:
+    ``[0.10, 0.50]`` (bear -> mid) and ``[0.50, 0.90]`` (mid -> bull).
+
+    Resolves a genuinely new design question issue #332 raised: the Forecasting feature has 5
+    quantile scenarios (Bear/Low Bear/Crab/Low Bull/Bull), but the existing DCF model only has
+    3 terminal-growth profiles. At ``q=0.10/0.50/0.90`` this returns EXACTLY bear/mid/bull; at
+    the mockup's Low Bear (``q=0.25``) and Low Bull (``q=0.75``) it's a principled
+    interpolation tied to the actual quantile level (e.g. 0.25 is 37.5% of the way from 0.10 to
+    0.50), not an arbitrary halfway split.
+
+    A ``quantile_level`` outside ``[0.10, 0.90]`` extrapolates linearly along whichever segment
+    it's closest to — this module's own :data:`QUANTILE_LEVELS` never go outside that range, so
+    this is just "don't silently clamp", not a case this feature actually exercises.
+    """
+    if quantile_level <= 0.50:
+        weight = (quantile_level - 0.10) / (0.50 - 0.10)
+        return bear_terminal + weight * (mid_terminal - bear_terminal)
+    weight = (quantile_level - 0.50) / (0.90 - 0.50)
+    return mid_terminal + weight * (bull_terminal - mid_terminal)
+
+
+def blend_terminal_years(
+    value_at_horizon5: Number,
+    exit_growth_rate: Number,
+    terminal_growth: Number,
+    *,
+    terminal_years: int = 5,
+) -> list[float] | None:
+    """Years 6-10's (or however many ``terminal_years``) absolute-value forecast path: linearly
+    blends the ANNUAL growth rate from ``exit_growth_rate`` (year 5's own realized CAGR — see
+    :func:`fundamentals_pipeline.valuation.eps_cagr`, reused directly since it's already generic
+    CAGR math despite the EPS-specific name) down/up to ``terminal_growth`` (see
+    :func:`terminal_growth_for_quantile`) by the final terminal year, compounding year over
+    year. Returns the list of ``terminal_years`` absolute values (years 6, 7, ..., 6+terminal_years-1).
+
+    ``value_at_horizon5 <= 0`` floors EVERY terminal year to ``0.0`` — same zero-floor
+    composition as :func:`reconstruct_forecast_value`: a scenario already in loss territory at
+    year 5 has no real growth-rate signal left to blend from, so extending it further would be
+    fabricating, not forecasting. ``None`` only when an input is itself missing (nothing to
+    blend from).
+    """
+    if (
+        _is_missing(value_at_horizon5)
+        or _is_missing(exit_growth_rate)
+        or _is_missing(terminal_growth)
+    ):
+        return None
+    if value_at_horizon5 <= 0:
+        return [0.0] * terminal_years
+    values: list[float] = []
+    current = float(value_at_horizon5)
+    for step in range(1, terminal_years + 1):
+        rate = exit_growth_rate + (terminal_growth - exit_growth_rate) * (step / terminal_years)
+        current = current * (1 + rate)
+        values.append(current)
+    return values
+
+
+def blend_terminal_years_from_values(
+    value_from: Number,
+    value_at_horizon5: Number,
+    terminal_growth: Number,
+    *,
+    terminal_years: int = 5,
+    explicit_years: int = 5,
+) -> list[float] | None:
+    """Convenience wrapper around :func:`blend_terminal_years`: computes the year-0-to-year-5
+    exit CAGR from ``value_from``/``value_at_horizon5`` via
+    :func:`fundamentals_pipeline.valuation.eps_cagr` (no separate CAGR formula), then delegates
+    to :func:`blend_terminal_years` — the call shape ``24__forecasting.py`` actually uses (it
+    has ``value_from`` and ``predict_forecast``'s own reconstructed year-5 value on hand, not a
+    pre-computed exit rate).
+
+    Order of checks matters here: ``value_at_horizon5 <= 0`` must floor to
+    ``[0.0] * terminal_years`` (matching :func:`blend_terminal_years`'s own zero-floor rule)
+    even though ``eps_cagr`` would also return ``None`` for that input — checked BEFORE calling
+    ``eps_cagr``, so that floor is never misread as "missing, return None". Only a non-positive
+    ``value_from`` (with a genuinely positive ``value_at_horizon5``) makes ``eps_cagr`` return
+    ``None`` here, in which case this returns ``None`` too — the same "no meaningful growth
+    rate from a non-positive base" convention :func:`log_growth` already uses.
+    """
+    if _is_missing(value_at_horizon5) or _is_missing(terminal_growth):
+        return None
+    if value_at_horizon5 <= 0:
+        return [0.0] * terminal_years
+    exit_growth_rate = eps_cagr(value_from, value_at_horizon5, explicit_years)
+    if exit_growth_rate is None:
+        return None
+    return blend_terminal_years(
+        value_at_horizon5, exit_growth_rate, terminal_growth, terminal_years=terminal_years,
+    )
