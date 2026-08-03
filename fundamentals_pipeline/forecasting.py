@@ -22,10 +22,11 @@ No-look-ahead is enforced via :mod:`fundamentals_pipeline.backtest`'s ``as_of_el
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import date
-from typing import Union
+from typing import Any, Union
 
+import numpy as np
 import pandas as pd
 
 from .backtest import as_of_date as _as_of_date
@@ -291,3 +292,260 @@ def build_training_panel(
         *[f"is_loss_{suffix}" for suffix in TARGET_METRICS],
     ]
     return panel.reindex(columns=feature_cols).reset_index(drop=True)
+
+
+# ── LightGBM quantile-regression model training (issue #331) ───────────────────────────────
+#
+# CONTRACT: `lightgbm` is imported lazily, inside the two train_* functions below, never at
+# module level — this module is imported by 24__forecasting.py (issue #332, Databricks) and by
+# this repo's own test suite (`requirements-dev.txt`, which does pin lightgbm), but nothing else
+# in this codebase needs it, and the panel-assembly/pure-math functions above must stay
+# importable in an environment that never installed it (mirrors this package's own
+# artifacts.py/schemas.py split — see that module's docstring for the identical rationale).
+#
+# Model count: 15 quantile regressors (3 target metrics x 5 quantile levels), `horizon` is a
+# numeric FEATURE within each one (never a separate model per horizon) per issue #331's own
+# instruction. Up to 15 binary loss classifiers (3 target metrics x 5 horizons) -- "up to",
+# because a (metric, horizon) whose training rows are single-class (e.g. Revenue essentially
+# never goes negative) can't fit a binary classifier and is skipped, not fabricated (see
+# train_loss_classifiers). horizon is NOT a feature there since each classifier is already
+# scoped to one horizon.
+
+#: The 5 quantile levels this feature trains regressors for (p10/p25/p50/p75/p90 in the
+#: mockup's Bear/Low Bear/Crab/Low Bull/Bull legend — the scenario NAME mapping is a display
+#: concern for a later issue; this module only ever deals in the numeric quantile level).
+QUANTILE_LEVELS: tuple[float, ...] = (0.10, 0.25, 0.50, 0.75, 0.90)
+
+# Cross-sectional predictor columns build_training_panel produces — every TARGET_METRICS/
+# log_growth_*/is_loss_* column is a label, not a feature, and is deliberately excluded here
+# (a model must never see its own target, or another horizon's/metric's target, as an input).
+FEATURE_COLUMNS: tuple[str, ...] = (
+    "sector", "industry", "size_decile", "horizon",
+    "Gross Margin %", "Operating Margin %", "Net Margin %", "ROE %",
+    "Debt / Equity", "Debt / Assets", "Net Debt / EBITDA",
+    "reinvestment_rate", "fcf_conversion",
+    "growth_trend_revenue", "growth_trend_net_income", "growth_trend_free_cash_flow",
+)
+
+# `sector`/`industry` are raw, un-one-hot categoricals per issue #330's own feature spec —
+# LightGBM's native categorical splitting needs pandas 'category' dtype (see _prepare_features).
+CATEGORICAL_FEATURES: tuple[str, ...] = ("sector", "industry")
+
+
+def _prepare_features(panel: pd.DataFrame) -> pd.DataFrame:
+    """`panel` (build_training_panel's output, or any frame carrying the same FEATURE_COLUMNS)
+    reduced to the model-input columns, with sector/industry cast to pandas 'category' dtype so
+    LightGBM treats them as native categoricals instead of raw strings."""
+    features = panel.reindex(columns=list(FEATURE_COLUMNS)).copy()
+    for col in CATEGORICAL_FEATURES:
+        features[col] = features[col].astype("category")
+    return features
+
+
+def train_quantile_models(
+    panel: pd.DataFrame,
+    *,
+    quantile_levels: Sequence[float] = QUANTILE_LEVELS,
+    num_boost_round: int = 100,
+    lightgbm_params: Mapping[str, Any] | None = None,
+) -> dict[tuple[str, float], Any]:
+    """One LightGBM quantile regressor per (target-metric suffix, quantile level) — trained on
+    that metric's own rows where ``log_growth_<metric>`` is non-null (a row with no known future
+    value, the common case for large horizons on recent fiscal years, is excluded from training
+    by construction, never imputed). Returns ``{(suffix, quantile_level): fitted_booster}``.
+
+    Uses ``lightgbm``'s native ``Dataset``/``train`` API, not the ``lightgbm.sklearn`` wrapper
+    — the latter hard-requires ``scikit-learn`` to even be imported, which issue #329's Phase 0
+    audit never verified installs on Databricks Free Edition serverless (only ``lightgbm``/
+    ``catboost`` were checked); the native API needs nothing beyond ``lightgbm`` itself.
+    """
+    import lightgbm as lgb
+
+    models: dict[tuple[str, float], Any] = {}
+    for suffix in TARGET_METRICS:
+        target_col = f"log_growth_{suffix}"
+        rows = panel[panel[target_col].notna()]
+        if rows.empty:
+            continue
+        features = _prepare_features(rows)
+        target = rows[target_col]
+        for level in quantile_levels:
+            params: dict[str, Any] = {
+                "objective": "quantile", "alpha": level, "verbosity": -1,
+                **(lightgbm_params or {}),
+            }
+            train_set = lgb.Dataset(
+                features, label=target, categorical_feature=list(CATEGORICAL_FEATURES),
+                free_raw_data=False,
+            )
+            models[(suffix, level)] = lgb.train(params, train_set, num_boost_round=num_boost_round)
+    return models
+
+
+def train_loss_classifiers(
+    panel: pd.DataFrame,
+    *,
+    horizons: Sequence[int] = (1, 2, 3, 4, 5),
+    num_boost_round: int = 100,
+    lightgbm_params: Mapping[str, Any] | None = None,
+) -> dict[tuple[str, int], Any]:
+    """One binary LightGBM classifier per (target-metric suffix, horizon) predicting
+    ``P(is_loss_<metric>)`` — scoped to a single horizon's own rows (unlike the quantile
+    regressors above, horizon is NOT a feature here, since each model already IS one horizon).
+
+    A (metric, horizon) combination whose ``is_loss_<metric>`` column is single-class in the
+    training rows (e.g. Revenue essentially never goes negative, or too little history exists
+    yet at a large horizon) is skipped — a binary classifier cannot be fit on one class, and
+    fabricating a constant-probability model would be worse than callers degrading to "assume
+    not a loss" (see :func:`predict_forecast`). Returns ``{(suffix, horizon): fitted_booster}``,
+    which may have fewer than ``len(TARGET_METRICS) * len(horizons)`` entries.
+
+    Same native ``Dataset``/``train`` API as :func:`train_quantile_models`, for the same
+    scikit-learn-avoidance reason — see that function's own docstring.
+    """
+    import lightgbm as lgb
+
+    models: dict[tuple[str, int], Any] = {}
+    for suffix in TARGET_METRICS:
+        target_col = f"is_loss_{suffix}"
+        for horizon in horizons:
+            rows = panel[(panel["horizon"] == horizon) & panel[target_col].notna()]
+            if rows[target_col].nunique() < 2:
+                continue
+            features = _prepare_features(rows)
+            target = rows[target_col]
+            params: dict[str, Any] = {
+                "objective": "binary", "verbosity": -1, **(lightgbm_params or {}),
+            }
+            train_set = lgb.Dataset(
+                features, label=target, categorical_feature=list(CATEGORICAL_FEATURES),
+                free_raw_data=False,
+            )
+            models[(suffix, horizon)] = lgb.train(params, train_set, num_boost_round=num_boost_round)
+    return models
+
+
+# ── combining quantile regressors + loss classifier into one forecast path ─────────────────
+def rearrange_quantiles(predictions: Mapping[float, Sequence[float]]) -> dict[float, np.ndarray]:
+    """Chernozhukov, Fernández-Val & Galichon (2010) rearrangement: independently-trained
+    quantile regressors have no constraint that they agree with each other, so a lower quantile
+    level can (and in practice sometimes does) predict a higher raw value than a higher quantile
+    level for the same row — "quantile crossing". This is a required correction, not an edge
+    case to skip: sorts each row's predicted values into non-decreasing order across quantile
+    levels, then reassigns the sorted values back to the SAME quantile-level keys (the smallest
+    value always lands on the lowest quantile level, regardless of which model produced it).
+
+    ``predictions`` maps quantile level -> that level's predicted values (one entry per row,
+    same length/order across all levels). Returns the same shape, monotonic per row.
+    """
+    levels = sorted(predictions)
+    stacked = np.column_stack([np.asarray(predictions[level], dtype=float) for level in levels])
+    rearranged = np.sort(stacked, axis=1)
+    return {level: rearranged[:, i] for i, level in enumerate(levels)}
+
+
+def reconstruct_forecast_value(
+    value_from: Number, log_growth_quantile: Number, quantile_level: float, p_loss: Number
+) -> float | None:
+    """Combines one quantile regressor's ``log_growth`` prediction with the loss classifier's
+    ``P(loss)`` into the single absolute-value forecast the Forecasting tab plots (issue #331's
+    "how do these combine" design question — see ``CLAUDE.md``'s Forecasting entry for the full
+    write-up):
+
+    - A quantile level ``q`` is, by definition, "the value below which a fraction ``q`` of the
+      distribution lies" — so if ``P(loss) >= q``, at least that much of the distribution's
+      lower tail is a loss, meaning the ``q``-th quantile itself falls in loss territory. This
+      is a property of quantiles, not a tuned threshold (e.g. ``P(loss)=0.85`` means the
+      p10/p25/p50/p75 quantiles are all losses, only p90 isn't).
+    - The quantile regressor never learned a loss MAGNITUDE (:func:`log_growth` is only defined,
+      and only ever trained on, positive-to-positive transitions) and this feature deliberately
+      caps model count at ~15 regressors + ~15 classifiers — no third "loss magnitude" model.
+      A quantile in loss territory is floored to ``0.0``: honest about "no magnitude estimate"
+      rather than fabricating a specific negative number.
+    - ``value_from`` itself already ``<= 0`` (the ticker is ALREADY in loss/breakeven territory
+      at the forecast's starting point) hits the same ``0.0`` floor, for the same reason: the
+      multiplicative reconstruction is undefined for a non-positive base (mirrors
+      :func:`log_growth`'s own training-time exclusion of non-positive endpoints), so a model
+      trained only on positive-``value_from`` rows would be extrapolating out of its domain,
+      not predicting. Confirmed as a real bug during manual smoke-testing (2026-08-01): without
+      this check, a negative ``value_from`` times a positive ``exp(growth)`` still comes out
+      negative, silently bypassing the "loss floors to 0" rule entirely for tickers that are
+      already unprofitable today.
+    - Otherwise (not in loss territory, or ``p_loss`` is missing/unavailable — e.g. no
+      classifier could be trained for this metric/horizon, see :func:`train_loss_classifiers`
+      — which degrades to "assume not a loss", never raises), reconstructs the usual
+      multiplicative way: ``value_from * exp(log_growth_quantile)``.
+
+    ``None`` only when ``value_from``/``log_growth_quantile`` themselves are missing (nothing to
+    reconstruct from).
+    """
+    if _is_missing(value_from) or _is_missing(log_growth_quantile):
+        return None
+    if value_from <= 0:
+        return 0.0
+    if not _is_missing(p_loss) and p_loss >= quantile_level:
+        return 0.0
+    return float(value_from) * math.exp(float(log_growth_quantile))
+
+
+def predict_forecast(
+    panel: pd.DataFrame,
+    quantile_models: Mapping[tuple[str, float], Any],
+    classifier_models: Mapping[tuple[str, int], Any],
+    *,
+    quantile_levels: Sequence[float] = QUANTILE_LEVELS,
+) -> pd.DataFrame:
+    """Applies trained models (:func:`train_quantile_models`/:func:`train_loss_classifiers`) to
+    ``panel`` (the same shape :func:`build_training_panel` returns — used here for INFERENCE, so
+    its target columns may be absent or all-``None``) and reconstructs one absolute-value
+    forecast per ``(row, target metric, quantile level)`` via :func:`rearrange_quantiles` +
+    :func:`reconstruct_forecast_value`.
+
+    Returns a long-format frame: ``ticker, fiscal_year, horizon, metric`` (the
+    :data:`TARGET_METRICS` suffix), ``quantile_level, forecast_value``. A ``(metric, quantile)``
+    or ``(metric, horizon)`` pair with no trained model (see the two train_* functions' own
+    "up to 15" / empty-rows notes) is simply absent from the output for that combination, rather
+    than raising.
+    """
+    features = _prepare_features(panel)
+    frames: list[pd.DataFrame] = []
+    for suffix, target_col in TARGET_METRICS.items():
+        value_from = panel[target_col].to_numpy(dtype=float)
+        raw_predictions = {
+            level: quantile_models[(suffix, level)].predict(features)
+            for level in quantile_levels
+            if (suffix, level) in quantile_models
+        }
+        if not raw_predictions:
+            continue
+        rearranged = rearrange_quantiles(raw_predictions)
+
+        p_loss = pd.Series(0.0, index=panel.index)
+        for horizon, group_index in panel.groupby("horizon").groups.items():
+            model = classifier_models.get((suffix, int(horizon)))
+            if model is None:
+                continue  # no classifier for this (metric, horizon) -- stays "assume not a loss"
+            # Native Booster.predict() for objective="binary" returns P(class=1) directly (a
+            # 1-D array), unlike sklearn's predict_proba()[:, 1] — see train_loss_classifiers'
+            # own docstring for why this module uses the native API at all.
+            p_loss.loc[group_index] = model.predict(features.loc[group_index])
+
+        for level, log_growth_values in rearranged.items():
+            forecast_values = [
+                reconstruct_forecast_value(vf, lg, level, pl)
+                for vf, lg, pl in zip(value_from, log_growth_values, p_loss.to_numpy())
+            ]
+            frames.append(pd.DataFrame({
+                "ticker": panel["ticker"].to_numpy(),
+                "fiscal_year": panel["fiscal_year"].to_numpy(),
+                "horizon": panel["horizon"].to_numpy(),
+                "metric": suffix,
+                "quantile_level": level,
+                "forecast_value": forecast_values,
+            }))
+    if not frames:
+        return pd.DataFrame(
+            columns=["ticker", "fiscal_year", "horizon", "metric", "quantile_level",
+                     "forecast_value"]
+        )
+    return pd.concat(frames, ignore_index=True)
