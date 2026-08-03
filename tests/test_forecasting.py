@@ -6,6 +6,7 @@ from __future__ import annotations
 import math
 from datetime import date
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -190,3 +191,166 @@ def test_build_training_panel_known_target_value():
     # None, so pd.isna() is the right check here (not `is None`).
     row_2022 = panel[panel["fiscal_year"] == 2022].iloc[0]
     assert pd.isna(row_2022["log_growth_revenue"])
+
+
+# ── rearrange_quantiles (Chernozhukov et al. quantile-crossing fix) ────────────────
+def test_rearrange_quantiles_leaves_already_monotonic_rows_unchanged():
+    predictions = {0.10: [1.0, -2.0], 0.50: [2.0, 0.0], 0.90: [3.0, 5.0]}
+    rearranged = fc.rearrange_quantiles(predictions)
+    assert rearranged[0.10].tolist() == [1.0, -2.0]
+    assert rearranged[0.50].tolist() == [2.0, 0.0]
+    assert rearranged[0.90].tolist() == [3.0, 5.0]
+
+
+def test_rearrange_quantiles_sorts_crossed_quantiles_per_row():
+    # Row 0: p10=5 > p50=2 > p90=1 -- fully inverted, must come out sorted ascending.
+    # Row 1: already monotonic, untouched.
+    predictions = {0.10: [5.0, 1.0], 0.50: [2.0, 2.0], 0.90: [1.0, 3.0]}
+    rearranged = fc.rearrange_quantiles(predictions)
+    assert rearranged[0.10].tolist() == [1.0, 1.0]
+    assert rearranged[0.50].tolist() == [2.0, 2.0]
+    assert rearranged[0.90].tolist() == [5.0, 3.0]
+
+
+def test_rearrange_quantiles_reassigns_to_the_same_level_keys():
+    predictions = {0.25: [10.0], 0.75: [10.0]}
+    rearranged = fc.rearrange_quantiles(predictions)
+    assert set(rearranged) == {0.25, 0.75}
+
+
+# ── reconstruct_forecast_value ──────────────────────────────────────────────────────
+def test_reconstruct_forecast_value_normal_case():
+    value = fc.reconstruct_forecast_value(100.0, math.log(1.1), 0.50, p_loss=0.0)
+    assert value == pytest.approx(110.0)
+
+
+def test_reconstruct_forecast_value_none_when_value_from_missing():
+    assert fc.reconstruct_forecast_value(None, math.log(1.1), 0.50, p_loss=0.0) is None
+
+
+def test_reconstruct_forecast_value_none_when_log_growth_missing():
+    assert fc.reconstruct_forecast_value(100.0, None, 0.50, p_loss=0.0) is None
+
+
+def test_reconstruct_forecast_value_floors_to_zero_when_already_non_positive():
+    """A ticker already at/below zero today: the multiplicative reconstruction is undefined for
+    a non-positive base (mirrors log_growth's own training-time exclusion) -- floors to 0.0
+    rather than negative_base * positive_exp_growth still coming out negative (the real bug
+    caught during manual smoke-testing, 2026-08-01)."""
+    assert fc.reconstruct_forecast_value(0.0, math.log(1.5), 0.50, p_loss=0.0) == 0.0
+    assert fc.reconstruct_forecast_value(-50.0, math.log(1.5), 0.50, p_loss=0.0) == 0.0
+
+
+def test_reconstruct_forecast_value_floors_to_zero_when_p_loss_exceeds_quantile_level():
+    # P(loss)=0.60 means the p10/p25/p50 quantiles are all in loss territory (0.60 >= each
+    # level), but p75/p90 are not.
+    assert fc.reconstruct_forecast_value(100.0, math.log(1.1), 0.50, p_loss=0.60) == 0.0
+    assert fc.reconstruct_forecast_value(100.0, math.log(1.1), 0.75, p_loss=0.60) == pytest.approx(110.0)
+
+
+def test_reconstruct_forecast_value_p_loss_exactly_equal_to_quantile_level_floors():
+    # "q is the value below which a fraction q of the distribution lies" -- P(loss) == q means
+    # that quantile itself is right at the loss boundary, treated as loss territory (>=, not >).
+    assert fc.reconstruct_forecast_value(100.0, math.log(1.1), 0.50, p_loss=0.50) == 0.0
+
+
+def test_reconstruct_forecast_value_missing_p_loss_degrades_to_not_a_loss():
+    """No classifier available for this (metric, horizon) -- see train_loss_classifiers'
+    "up to 15" skip -- degrades to the normal multiplicative reconstruction, never raises."""
+    value = fc.reconstruct_forecast_value(100.0, math.log(1.1), 0.50, p_loss=None)
+    assert value == pytest.approx(110.0)
+
+
+# ── LightGBM model training + prediction (end-to-end) ───────────────────────────────
+def _synthetic_training_panel(n: int = 300, seed: int = 0) -> pd.DataFrame:
+    """A cross-sectional panel shaped like build_training_panel's real output, big enough for
+    LightGBM to actually fit on (unlike _tiny_inputs' 4-row panel, which is for shape-checking
+    build_training_panel itself, not for training a real model)."""
+    rng = np.random.default_rng(seed)
+    sectors = rng.choice(["Technology", "Health Care"], n)
+    industries = rng.choice(["Software", "Biotechnology", "Hardware"], n)
+    panel = pd.DataFrame({
+        "ticker": [f"T{i}" for i in range(n)],
+        "fiscal_year": rng.integers(2015, 2023, n),
+        "horizon": rng.integers(1, 6, n),
+        "sector": sectors,
+        "industry": industries,
+        "size_decile": rng.integers(1, 11, n).astype(float),
+        "Gross Margin %": rng.normal(40, 10, n),
+        "Operating Margin %": rng.normal(15, 8, n),
+        "Net Margin %": rng.normal(10, 6, n),
+        "ROE %": rng.normal(15, 10, n),
+        "Debt / Equity": rng.uniform(0, 2, n),
+        "Debt / Assets": rng.uniform(0, 1, n),
+        "Net Debt / EBITDA": rng.normal(2, 1, n),
+        "reinvestment_rate": rng.normal(0.3, 0.1, n),
+        "fcf_conversion": rng.normal(0.8, 0.2, n),
+        "growth_trend_revenue": rng.normal(0.05, 0.05, n),
+        "growth_trend_net_income": rng.normal(0.05, 0.08, n),
+        "growth_trend_free_cash_flow": rng.normal(0.05, 0.08, n),
+        "Revenue": rng.uniform(100, 1000, n),
+        "Net Income": rng.uniform(10, 200, n),
+        "Free Cash Flow": rng.uniform(5, 150, n),
+    })
+    for suffix in fc.TARGET_METRICS:
+        panel[f"log_growth_{suffix}"] = rng.normal(0.05, 0.2, n)
+        panel[f"is_loss_{suffix}"] = rng.integers(0, 2, n)
+    # Revenue essentially never posts a loss -- the real-world degenerate single-class case
+    # train_loss_classifiers must skip rather than crash on.
+    panel["is_loss_revenue"] = 0
+    return panel
+
+
+_LGBM_PARAMS = {"min_child_samples": 1, "min_data_in_leaf": 1}
+
+
+def test_train_quantile_models_returns_one_model_per_metric_times_quantile_level():
+    panel = _synthetic_training_panel()
+    models = fc.train_quantile_models(panel, num_boost_round=5, lightgbm_params=_LGBM_PARAMS)
+    assert set(models) == {
+        (suffix, level) for suffix in fc.TARGET_METRICS for level in fc.QUANTILE_LEVELS
+    }
+
+
+def test_train_loss_classifiers_skips_single_class_metric_horizon_combos():
+    """Revenue's is_loss column is a constant 0 in the fixture (mirrors real data -- Revenue
+    essentially never goes negative) -- every (revenue, horizon) combo must be skipped, not
+    fabricated as a constant-probability model."""
+    panel = _synthetic_training_panel()
+    models = fc.train_loss_classifiers(panel, num_boost_round=5, lightgbm_params=_LGBM_PARAMS)
+    assert not any(suffix == "revenue" for suffix, _horizon in models)
+    assert any(suffix == "net_income" for suffix, _horizon in models)
+
+
+def test_predict_forecast_is_never_negative():
+    """Both zero-floor rules (already-non-positive value_from, and p_loss >= quantile_level)
+    compose correctly end-to-end through real trained models -- no reconstructed forecast value
+    is ever negative."""
+    panel = _synthetic_training_panel()
+    quantile_models = fc.train_quantile_models(panel, num_boost_round=5, lightgbm_params=_LGBM_PARAMS)
+    classifier_models = fc.train_loss_classifiers(panel, num_boost_round=5, lightgbm_params=_LGBM_PARAMS)
+    forecasts = fc.predict_forecast(panel, quantile_models, classifier_models)
+    assert len(forecasts) == len(panel) * len(fc.TARGET_METRICS) * len(fc.QUANTILE_LEVELS)
+    assert (forecasts["forecast_value"] >= 0).all()
+
+
+def test_predict_forecast_quantiles_are_monotonic_per_row():
+    panel = _synthetic_training_panel()
+    quantile_models = fc.train_quantile_models(panel, num_boost_round=5, lightgbm_params=_LGBM_PARAMS)
+    classifier_models = fc.train_loss_classifiers(panel, num_boost_round=5, lightgbm_params=_LGBM_PARAMS)
+    forecasts = fc.predict_forecast(panel, quantile_models, classifier_models)
+    pivot = forecasts.pivot_table(
+        index=["ticker", "fiscal_year", "horizon", "metric"],
+        columns="quantile_level", values="forecast_value",
+    )
+    # Every row's values, read left-to-right (ascending quantile level), must be non-decreasing.
+    assert (pivot.diff(axis=1).iloc[:, 1:] >= -1e-9).all(axis=None)
+
+
+def test_predict_forecast_empty_when_no_models_trained():
+    panel = _synthetic_training_panel(n=20)
+    forecasts = fc.predict_forecast(panel, quantile_models={}, classifier_models={})
+    assert forecasts.empty
+    assert list(forecasts.columns) == [
+        "ticker", "fiscal_year", "horizon", "metric", "quantile_level", "forecast_value",
+    ]
