@@ -454,3 +454,90 @@ def test_cross_validate_loss_classifier_skips_revenue_single_class_metric():
         panel, "revenue", 3, n_folds=5, num_boost_round=10, lightgbm_params=_LGBM_PARAMS,
     )
     assert result == {"fold_scores": [], "mean_auc": None}
+
+
+# ── terminal_growth_for_quantile (issue #332) ────────────────────────────────────────
+def test_terminal_growth_for_quantile_anchors_match_exactly():
+    assert fc.terminal_growth_for_quantile(0.10, bear_terminal=0.02, mid_terminal=0.025, bull_terminal=0.03) == pytest.approx(0.02)
+    assert fc.terminal_growth_for_quantile(0.50, bear_terminal=0.02, mid_terminal=0.025, bull_terminal=0.03) == pytest.approx(0.025)
+    assert fc.terminal_growth_for_quantile(0.90, bear_terminal=0.02, mid_terminal=0.025, bull_terminal=0.03) == pytest.approx(0.03)
+
+
+def test_terminal_growth_for_quantile_low_bear_interpolation():
+    # q=0.25 is (0.25-0.10)/(0.50-0.10) = 37.5% of the way from bear (0.10) to mid (0.50).
+    result = fc.terminal_growth_for_quantile(0.25, bear_terminal=0.02, mid_terminal=0.03, bull_terminal=0.04)
+    expected = 0.02 + 0.375 * (0.03 - 0.02)
+    assert result == pytest.approx(expected)
+
+
+def test_terminal_growth_for_quantile_low_bull_interpolation():
+    # q=0.75 is (0.75-0.50)/(0.90-0.50) = 62.5% of the way from mid (0.50) to bull (0.90).
+    result = fc.terminal_growth_for_quantile(0.75, bear_terminal=0.02, mid_terminal=0.03, bull_terminal=0.04)
+    expected = 0.03 + 0.625 * (0.04 - 0.03)
+    assert result == pytest.approx(expected)
+
+
+def test_terminal_growth_for_quantile_all_five_mockup_levels_are_monotonic():
+    """Bear/Low Bear/Crab/Low Bull/Bull must come out in non-decreasing terminal-growth order
+    (bear < mid < bull terminal assumptions, so every interpolated point in between must be
+    monotonic too)."""
+    values = [
+        fc.terminal_growth_for_quantile(q, bear_terminal=0.02, mid_terminal=0.025, bull_terminal=0.03)
+        for q in fc.QUANTILE_LEVELS
+    ]
+    assert values == sorted(values)
+
+
+# ── blend_terminal_years / blend_terminal_years_from_values ─────────────────────────
+def test_blend_terminal_years_converges_toward_terminal_growth():
+    values = fc.blend_terminal_years(100.0, exit_growth_rate=0.20, terminal_growth=0.03, terminal_years=5)
+    assert len(values) == 5
+    # Final year's implied growth rate should equal the terminal rate exactly (full blend).
+    final_year_rate = values[-1] / values[-2] - 1
+    assert final_year_rate == pytest.approx(0.03)
+    # First year's rate should be closer to the exit rate than the terminal rate.
+    first_year_rate = values[0] / 100.0 - 1
+    assert first_year_rate == pytest.approx(0.20 + (0.03 - 0.20) * (1 / 5))
+
+
+def test_blend_terminal_years_floors_to_zero_when_horizon5_non_positive():
+    assert fc.blend_terminal_years(0.0, exit_growth_rate=0.1, terminal_growth=0.03) == [0.0] * 5
+    assert fc.blend_terminal_years(-50.0, exit_growth_rate=0.1, terminal_growth=0.03) == [0.0] * 5
+
+
+def test_blend_terminal_years_none_when_inputs_missing():
+    assert fc.blend_terminal_years(None, exit_growth_rate=0.1, terminal_growth=0.03) is None
+    assert fc.blend_terminal_years(100.0, exit_growth_rate=None, terminal_growth=0.03) is None
+    assert fc.blend_terminal_years(100.0, exit_growth_rate=0.1, terminal_growth=None) is None
+
+
+def test_blend_terminal_years_respects_terminal_years_length():
+    values = fc.blend_terminal_years(100.0, exit_growth_rate=0.1, terminal_growth=0.03, terminal_years=3)
+    assert len(values) == 3
+
+
+def test_blend_terminal_years_from_values_computes_exit_rate_internally():
+    # value_from=100 -> value_at_horizon5=200 over 5 years is a 2x, i.e. 2**(1/5)-1 CAGR.
+    values = fc.blend_terminal_years_from_values(100.0, 200.0, terminal_growth=0.03)
+    expected_exit_rate = 2.0 ** (1 / 5) - 1
+    manual = fc.blend_terminal_years(200.0, expected_exit_rate, 0.03)
+    assert values == pytest.approx(manual)
+
+
+def test_blend_terminal_years_from_values_floors_to_zero_before_checking_value_from():
+    """value_at_horizon5 <= 0 must floor to zeros even when value_from is ALSO <= 0 -- the
+    zero-floor check happens before eps_cagr (which would otherwise return None for a
+    non-positive value_from and get misread as "missing", not "floor")."""
+    assert fc.blend_terminal_years_from_values(-10.0, 0.0, terminal_growth=0.03) == [0.0] * 5
+    assert fc.blend_terminal_years_from_values(-10.0, -5.0, terminal_growth=0.03) == [0.0] * 5
+
+
+def test_blend_terminal_years_from_values_none_when_value_from_non_positive_but_horizon5_positive():
+    """A genuinely non-positive starting point with a positive year-5 value has no meaningful
+    CAGR to compute (mirrors log_growth's own convention) -- None, not a fabricated rate."""
+    assert fc.blend_terminal_years_from_values(0.0, 150.0, terminal_growth=0.03) is None
+    assert fc.blend_terminal_years_from_values(-10.0, 150.0, terminal_growth=0.03) is None
+
+
+def test_blend_terminal_years_from_values_none_when_terminal_growth_missing():
+    assert fc.blend_terminal_years_from_values(100.0, 150.0, terminal_growth=None) is None

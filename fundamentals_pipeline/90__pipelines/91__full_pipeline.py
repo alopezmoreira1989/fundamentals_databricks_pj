@@ -561,6 +561,31 @@ _record_step("Backtest", _t0)
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ## 9c. Forecasting
+# MAGIC `financials_forecast` — 10-year cross-sectional ML scenario forecasts (Revenue/Net
+# MAGIC Income/FCF), LightGBM quantile regression for years 1-5, blended toward each scenario's
+# MAGIC own DCF terminal-growth assumption for years 6-10. Full overwrite each run, same spirit
+# MAGIC as `23__intrinsic_value`/`71__run_backtest`. Requires `22__derived_metrics` and
+# MAGIC `12__fetch_market_data` to have run first.
+
+# COMMAND ----------
+
+print("=" * 55)
+print("STEP 8c / 12 — Forecasting")
+print("=" * 55)
+_t0 = time.monotonic()
+
+# COMMAND ----------
+
+# MAGIC %run "../20__transformation/24__forecasting"
+
+# COMMAND ----------
+
+_record_step("Forecasting", _t0)
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## 10. Analysis
 # MAGIC Runs analysis queries — useful for validation after pipeline runs
 
