@@ -239,11 +239,21 @@ def build_training_panel(
     base["as_of_date"] = [
         _as_of_date(f, p) for f, p in zip(base["filed"], base["period_end"])
     ]
+    # `DataFrame.get("CapEx")` returns `None` (not a NaN-filled Series) when the "CapEx" metric
+    # never appears AT ALL in the input `metrics` rows (met_wide's own pivot only creates a
+    # column for a metric value that actually occurs) -- zip(None, ...) then raises TypeError.
+    # Confirmed as a real bug in production (2026-08-03): a narrow ticker scope whose rows
+    # happened to carry no CapEx/D&A metric rows crashed here. Explicit column-presence checks,
+    # not .get()'s bare default, so a genuinely-absent metric degrades to "reinvestment_rate is
+    # NULL for every row" (matching this function's own missing-input convention) instead of
+    # crashing the whole panel assembly.
+    _capex = base["CapEx"] if "CapEx" in base.columns else pd.Series(np.nan, index=base.index)
+    _dna = (
+        base["Depreciation & Amortization"] if "Depreciation & Amortization" in base.columns
+        else pd.Series(np.nan, index=base.index)
+    )
     base["reinvestment_rate"] = [
-        reinvestment_rate(capex, da, ni)
-        for capex, da, ni in zip(
-            base.get("CapEx"), base.get("Depreciation & Amortization"), base["Net Income"]
-        )
+        reinvestment_rate(capex, da, ni) for capex, da, ni in zip(_capex, _dna, base["Net Income"])
     ]
     base["fcf_conversion"] = [
         fcf_conversion(fcf, ni) for fcf, ni in zip(base["Free Cash Flow"], base["Net Income"])
@@ -289,6 +299,15 @@ def build_training_panel(
         "reinvestment_rate", "fcf_conversion",
         *[f"growth_trend_{suffix}" for suffix in TARGET_METRICS],
         "as_of_date",
+        # The current-FY raw values themselves (Revenue/Net Income/Free Cash Flow) — NOT a
+        # model feature (a model must never see its own target's own current-year level), but
+        # required downstream by predict_forecast/24__forecasting.py as `value_from` for
+        # reconstructing an absolute-value forecast from a predicted log_growth. Confirmed as a
+        # real bug in production (2026-08-03): omitting these here made every predict_forecast
+        # call crash with `KeyError: 'Revenue'` the first time it ran against this function's
+        # REAL output (the unit tests for predict_forecast happened to use a hand-built
+        # synthetic panel that included these columns directly, masking the gap).
+        *TARGET_METRICS.values(),
         *[f"log_growth_{suffix}" for suffix in TARGET_METRICS],
         *[f"is_loss_{suffix}" for suffix in TARGET_METRICS],
     ]
@@ -336,8 +355,19 @@ CATEGORICAL_FEATURES: tuple[str, ...] = ("sector", "industry")
 def _prepare_features(panel: pd.DataFrame) -> pd.DataFrame:
     """`panel` (build_training_panel's output, or any frame carrying the same FEATURE_COLUMNS)
     reduced to the model-input columns, with sector/industry cast to pandas 'category' dtype so
-    LightGBM treats them as native categoricals instead of raw strings."""
+    LightGBM treats them as native categoricals instead of raw strings, and every other feature
+    coerced to numeric.
+
+    The numeric coercion matters beyond the obvious case: a feature column that's entirely
+    ``None``/NaN for every row in ``panel`` (e.g. `reinvestment_rate` when CapEx/D&A never
+    appear at all for a narrow ticker scope) comes out of plain Python-list assignment as
+    pandas `object` dtype, not `float64` — LightGBM's `Dataset`/`predict` hard-require
+    int/float/bool dtypes and raise `ValueError: pandas dtypes must be int, float or bool` on
+    an all-missing `object` column. Confirmed as a real bug in production (2026-08-03).
+    """
     features = panel.reindex(columns=list(FEATURE_COLUMNS)).copy()
+    numeric_cols = [c for c in FEATURE_COLUMNS if c not in CATEGORICAL_FEATURES]
+    features[numeric_cols] = features[numeric_cols].apply(pd.to_numeric, errors="coerce")
     for col in CATEGORICAL_FEATURES:
         features[col] = features[col].astype("category")
     return features

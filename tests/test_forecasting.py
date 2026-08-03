@@ -174,7 +174,15 @@ def test_build_training_panel_shape_and_columns():
     for col in ("sector", "industry", "size_decile", "as_of_date",
                 "log_growth_revenue", "is_loss_revenue",
                 "log_growth_net_income", "is_loss_net_income",
-                "log_growth_free_cash_flow", "is_loss_free_cash_flow"):
+                "log_growth_free_cash_flow", "is_loss_free_cash_flow",
+                # The raw current-FY values themselves -- NOT model features, but required by
+                # predict_forecast as `value_from`. Regression test for a real production bug
+                # (2026-08-03): these were missing from build_training_panel's own output,
+                # which only surfaced once predict_forecast ran against this function's REAL
+                # output rather than a hand-built synthetic fixture that happened to include
+                # them (see test_predict_forecast_works_on_a_real_build_training_panel_output
+                # below for the full end-to-end regression).
+                "Revenue", "Net Income", "Free Cash Flow"):
         assert col in panel.columns
 
 
@@ -259,6 +267,74 @@ def test_reconstruct_forecast_value_missing_p_loss_degrades_to_not_a_loss():
     "up to 15" skip -- degrades to the normal multiplicative reconstruction, never raises."""
     value = fc.reconstruct_forecast_value(100.0, math.log(1.1), 0.50, p_loss=None)
     assert value == pytest.approx(110.0)
+
+
+# ── build_training_panel -> predict_forecast, real end-to-end (issue #332 regression) ──
+def _synthetic_raw_inputs(n_tickers: int = 60, seed: int = 0):
+    """Raw-shaped inputs (the SAME shape 24__forecasting.py's real Spark reads produce),
+    fed through the REAL build_training_panel — unlike _synthetic_training_panel below (a
+    hand-built panel shaped to look like build_training_panel's output), this exercises the
+    actual seam between #330's panel assembly and #331's model training/prediction, which is
+    exactly where a real production bug slipped through (2026-08-03): build_training_panel's
+    own feature_cols reindex silently dropped Revenue/Net Income/Free Cash Flow, and
+    predict_forecast's need for those columns as `value_from` was never caught because every
+    existing test fed it a hand-built panel that happened to already include them."""
+    rng = np.random.default_rng(seed)
+    years = list(range(2010, 2024))
+    tickers = [f"T{i}" for i in range(n_tickers)]
+
+    financials_rows = []
+    metrics_rows = []
+    market_cap_rows = []
+    filed_rows = []
+    for t in tickers:
+        revenue = 100.0
+        for y in years:
+            revenue *= rng.uniform(1.02, 1.15)
+            net_income = revenue * rng.uniform(0.05, 0.20)
+            fcf = net_income * rng.uniform(0.7, 1.1)
+            financials_rows.append({"ticker": t, "fiscal_year": y, "concept": "Revenue", "value": revenue})
+            financials_rows.append({"ticker": t, "fiscal_year": y, "concept": "Net Income", "value": net_income})
+            metrics_rows.append({"ticker": t, "fiscal_year": y, "metric": "Free Cash Flow", "value": fcf})
+            metrics_rows.append({"ticker": t, "fiscal_year": y, "metric": "ROE %", "value": rng.normal(15, 5)})
+            metrics_rows.append({"ticker": t, "fiscal_year": y, "metric": "Gross Margin %", "value": rng.normal(40, 8)})
+            market_cap_rows.append({"ticker": t, "fiscal_year": y, "market_cap": revenue * rng.uniform(1, 5)})
+            filed_rows.append({
+                "ticker": t, "fiscal_year": y,
+                "filed": date(y + 1, 2, 15), "period_end": date(y, 12, 31),
+            })
+
+    financials = pd.DataFrame(financials_rows)
+    metrics = pd.DataFrame(metrics_rows)
+    tickers_df = pd.DataFrame({
+        "ticker": tickers,
+        "sector": rng.choice(["Technology", "Health Care"], n_tickers),
+        "industry": rng.choice(["Software", "Biotechnology", "Hardware"], n_tickers),
+    })
+    market_cap = pd.DataFrame(market_cap_rows)
+    filed_dates = pd.DataFrame(filed_rows)
+    return financials, metrics, tickers_df, market_cap, filed_dates
+
+
+def test_predict_forecast_works_on_a_real_build_training_panel_output():
+    """Regression test for a real production bug (2026-08-03, caught the hard way via a
+    Databricks run of 24__forecasting.py): predict_forecast crashed with `KeyError: 'Revenue'`
+    the first time it ran against build_training_panel's REAL output, because that function's
+    feature_cols reindex dropped the raw current-FY value columns predict_forecast needs as
+    `value_from`. This builds the panel via the real function (not a hand-shaped fixture) and
+    runs it all the way through training + prediction."""
+    financials, metrics, tickers_df, market_cap, filed_dates = _synthetic_raw_inputs()
+    panel = fc.build_training_panel(financials, metrics, tickers_df, market_cap, filed_dates)
+
+    quantile_models = fc.train_quantile_models(panel, num_boost_round=5, lightgbm_params=_LGBM_PARAMS)
+    classifier_models = fc.train_loss_classifiers(panel, num_boost_round=5, lightgbm_params=_LGBM_PARAMS)
+
+    panel["_ticker_latest_fy"] = panel.groupby("ticker")["fiscal_year"].transform("max")
+    latest_panel = panel[panel["fiscal_year"] == panel["_ticker_latest_fy"]].drop(columns=["_ticker_latest_fy"])
+
+    forecasts = fc.predict_forecast(latest_panel, quantile_models, classifier_models)
+    assert len(forecasts) > 0
+    assert (forecasts["forecast_value"] >= 0).all()
 
 
 # ── LightGBM model training + prediction (end-to-end) ───────────────────────────────
