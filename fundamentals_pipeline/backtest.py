@@ -56,8 +56,16 @@ def as_of_date(filed: date | None, period_end: date | None, lag_days: int = 90) 
 def as_of_eligible(as_of: date | None, rebalance_date: date | None) -> bool:
     """True iff fundamentals dated ``as_of`` were knowable by ``rebalance_date`` (``as_of <=
     rebalance_date``). A missing date is never eligible — we refuse to assume knowledge.
+
+    Uses ``_is_missing`` (``None`` OR float NaN), not a bare ``is None`` check: a pandas column
+    built from a Python list of ``date | None`` values (e.g. ``forecasting.build_training_
+    panel``'s own ``as_of_date`` column) can silently turn some/all ``None`` entries into
+    ``float('nan')`` when pandas infers the column's dtype — confirmed as a real production
+    crash (2026-08-04, a full-universe pipeline run): ``as_of <= rebalance_date`` raised
+    ``TypeError: '<=' not supported between instances of 'float' and 'datetime.date'`` for a
+    NaN that a bare ``is None`` check let straight through.
     """
-    if as_of is None or rebalance_date is None:
+    if _is_missing(as_of) or _is_missing(rebalance_date):
         return False
     return as_of <= rebalance_date
 
