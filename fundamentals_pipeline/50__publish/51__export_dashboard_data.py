@@ -11,6 +11,7 @@
 # MAGIC - `/tmp/dashboard_data.parquet`    — long-format financials joined with concept_hierarchy
 # MAGIC - `/tmp/dashboard_metrics.parquet` — long-format derived metrics joined with metrics_hierarchy
 # MAGIC - `/tmp/dashboard_filings.parquet` — SEC 10-K/10-Q filing list (see 15__fetch_sec_filings.py)
+# MAGIC - `/tmp/dashboard_forecast.parquet` — 10-year ML scenario forecasts (see 24__forecasting.py)
 # MAGIC - `/tmp/dashboard_meta.json`       — build timestamp, ticker list, row counts, schema version
 # MAGIC
 # MAGIC **Universe:** all tickers that have data in `financials`.
@@ -38,9 +39,8 @@ import pandas as pd
 # sys.path manipulation.
 from fundamentals_pipeline import schemas as _schemas
 
-SCHEMA_VERSION = 14  # +dashboard_filings artifact (SEC 10-K/10-Q filing list — see
-                     # 15__fetch_sec_filings.py; both frontends' company-page Filings tab
-                     # reads this instead of making their own live SEC calls)
+SCHEMA_VERSION = 15  # +dashboard_forecast artifact (10-year cross-sectional ML scenario
+                     # forecasts — see 24__forecasting.py; issue #333)
 FY_YEARS       = 10
 QUARTERS       = 12
 PRICE_YEARS    = 10                              # daily-price retention window (calendar years)
@@ -53,6 +53,7 @@ PRICE_PARQUET  = OUT_DIR / "dashboard_prices.parquet"
 BACKTEST_PARQUET = OUT_DIR / "dashboard_backtest.parquet"
 FX_PARQUET     = OUT_DIR / "dashboard_fx.parquet"
 FILINGS_PARQUET = OUT_DIR / "dashboard_filings.parquet"
+FORECAST_PARQUET = OUT_DIR / "dashboard_forecast.parquet"
 
 # COMMAND ----------
 
@@ -459,6 +460,37 @@ else:
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ## 3f. Forecasting (financials_forecast)
+# MAGIC
+# MAGIC 10-year cross-sectional ML scenario forecasts (Revenue/Net Income/Free Cash Flow) written
+# MAGIC by `24__forecasting.py` — years 1-5 from LightGBM quantile regression, years 6-10 blended
+# MAGIC toward each scenario's DCF terminal-growth rate. `forecast_value` is already an absolute
+# MAGIC dollar value (never a raw growth rate), so consumers just read it directly.
+
+# COMMAND ----------
+
+FORECAST_COLUMNS = {"ticker": "object", "fiscal_year": "int64", "horizon": "int64",
+                     "metric": "object", "quantile_level": "float64", "forecast_value": "float64"}
+try:
+    forecast = spark.sql(f"""
+        SELECT ticker, fiscal_year, horizon, metric, quantile_level, forecast_value
+        FROM {CATALOG}.{SCHEMA}.financials_forecast
+        ORDER BY ticker, metric, quantile_level, horizon
+    """).toPandas()
+    if forecast.empty:
+        print("⚠️ financials_forecast returned 0 rows — writing empty forecast slice")
+except Exception as exc:  # noqa: BLE001 — table absent or unreadable: degrade, don't fail the export
+    print(f"⚠️ Could not read financials_forecast ({type(exc).__name__}: {exc}) — writing empty forecast slice")
+    forecast = pd.DataFrame({c: pd.Series(dtype=t) for c, t in FORECAST_COLUMNS.items()})
+
+if forecast.empty:
+    print("  forecast rows: 0 (empty slice)")
+else:
+    print(f"  forecast rows: {len(forecast):,} ({forecast['ticker'].nunique():,} ticker(s))")
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## 4. Write parquet + meta
 
 # COMMAND ----------
@@ -473,6 +505,7 @@ prices.attrs = {}
 backtest.attrs = {}
 fx_rates.attrs = {}
 filings.attrs = {}
+forecast.attrs = {}
 
 # Schema contract — fail the run LOUDLY rather than shipping an artifact the public app
 # can't read. assert_artifact raises SchemaError naming the offending artifact/column.
@@ -482,6 +515,7 @@ _schemas.assert_artifact("dashboard_prices", prices)
 _schemas.assert_artifact("dashboard_backtest", backtest)
 _schemas.assert_artifact("dashboard_fx", fx_rates)
 _schemas.assert_artifact("dashboard_filings", filings)
+_schemas.assert_artifact("dashboard_forecast", forecast)
 
 financials.to_parquet(DATA_PARQUET, index=False)
 metrics.to_parquet(METRIC_PARQUET, index=False)
@@ -489,6 +523,7 @@ prices.to_parquet(PRICE_PARQUET, index=False)
 backtest.to_parquet(BACKTEST_PARQUET, index=False)
 fx_rates.to_parquet(FX_PARQUET, index=False)
 filings.to_parquet(FILINGS_PARQUET, index=False)
+forecast.to_parquet(FORECAST_PARQUET, index=False)
 
 # Per-ticker FY range — used by the Streamlit masthead.
 fy_ranges = (
@@ -512,6 +547,7 @@ meta = {
         "backtest":     int(len(backtest)),
         "fx":           int(len(fx_rates)),
         "filings":      int(len(filings)),
+        "forecast":     int(len(forecast)),
     },
     "retention": {
         "fy_years":     FY_YEARS,
@@ -529,6 +565,7 @@ print(f"  {PRICE_PARQUET}  ({PRICE_PARQUET.stat().st_size / 1024:.1f} KB)")
 print(f"  {BACKTEST_PARQUET} ({BACKTEST_PARQUET.stat().st_size / 1024:.1f} KB)")
 print(f"  {FX_PARQUET}     ({FX_PARQUET.stat().st_size / 1024:.1f} KB)")
 print(f"  {FILINGS_PARQUET} ({FILINGS_PARQUET.stat().st_size / 1024:.1f} KB)")
+print(f"  {FORECAST_PARQUET} ({FORECAST_PARQUET.stat().st_size / 1024:.1f} KB)")
 print(f"  {META_JSON}      (schema_version={SCHEMA_VERSION})")
 
 # COMMAND ----------
@@ -549,7 +586,7 @@ VOLUME_PATH    = "/Volumes/main/financials/_publish"   # must already exist
 if COPY_TO_VOLUME:
     dbutils.fs.mkdirs(VOLUME_PATH)
     for f in [DATA_PARQUET, METRIC_PARQUET, PRICE_PARQUET, BACKTEST_PARQUET, FX_PARQUET,
-              FILINGS_PARQUET, META_JSON]:
+              FILINGS_PARQUET, FORECAST_PARQUET, META_JSON]:
         dest = f"{VOLUME_PATH}/{f.name}"
         dbutils.fs.cp(f"file:{f}", dest, recurse=False)
         print(f"  ✓ {f.name} → {dest}")

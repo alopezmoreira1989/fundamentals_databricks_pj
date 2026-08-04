@@ -41,6 +41,7 @@ ARTIFACTS = [
     Path("/tmp/dashboard_backtest.parquet"),
     Path("/tmp/dashboard_fx.parquet"),
     Path("/tmp/dashboard_filings.parquet"),
+    Path("/tmp/dashboard_forecast.parquet"),
     Path("/tmp/dashboard_meta.json"),
 ]
 

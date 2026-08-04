@@ -95,6 +95,22 @@ _FILINGS_SPEC: dict[str, set[str]] = {
     "url": {"string"},
 }
 
+# 10-year cross-sectional ML scenario forecasts (issue #332's 24__forecasting.py): one row
+# per (ticker, base fiscal_year, horizon 1-10, target metric, quantile level). `horizon` is
+# years ahead of `fiscal_year` (the ticker's own latest reported FY at the time the pipeline
+# ran); years 1-5 come from the LightGBM quantile regressors, years 6-10 from the
+# terminal-growth blend (see forecasting.py's own module docstring). `forecast_value` is an
+# absolute dollar value, never a growth rate — already reconstructed/floored (see
+# reconstruct_forecast_value) so consumers never need to re-derive it from a raw prediction.
+_FORECAST_SPEC: dict[str, set[str]] = {
+    "ticker": {"string"},
+    "fiscal_year": {"numeric"},
+    "horizon": {"numeric"},
+    "metric": {"string"},
+    "quantile_level": {"numeric"},
+    "forecast_value": {"numeric"},
+}
+
 ARTIFACTS: dict[str, dict[str, set[str]]] = {
     "dashboard_data": _DATA_SPEC,
     "dashboard_metrics": _METRICS_SPEC,
@@ -102,6 +118,7 @@ ARTIFACTS: dict[str, dict[str, set[str]]] = {
     "dashboard_backtest": _BACKTEST_SPEC,
     "dashboard_fx": _FX_SPEC,
     "dashboard_filings": _FILINGS_SPEC,
+    "dashboard_forecast": _FORECAST_SPEC,
 }
 ARTIFACT_NAMES = tuple(ARTIFACTS)
 
