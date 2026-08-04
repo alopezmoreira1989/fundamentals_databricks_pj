@@ -39,6 +39,19 @@ def test_as_of_eligible_monotonic_in_rebalance_date():
     assert bt.as_of_eligible(as_of, date(2030, 1, 1)) is True
 
 
+def test_as_of_eligible_treats_nan_the_same_as_none():
+    """Regression for a real production crash (2026-08-04, a full-universe pipeline run): a
+    pandas column built from a Python list of `date | None` values can silently turn some/all
+    `None` entries into `float('nan')` when pandas infers the column's dtype (confirmed via
+    forecasting.build_training_panel's own `as_of_date` column). A bare `is None` check let a
+    NaN straight through to `as_of <= rebalance_date`, raising TypeError — `_is_missing`
+    catches both forms uniformly."""
+    reb = date(2024, 3, 1)
+    assert bt.as_of_eligible(float("nan"), reb) is False
+    assert bt.as_of_eligible(date(2024, 2, 15), float("nan")) is False
+    assert bt.as_of_eligible(float("nan"), float("nan")) is False
+
+
 # ── latest_price_asof (no look-ahead, reference for 71's Spark entry/exit pricing) ────
 def test_latest_price_asof_picks_latest_not_after_as_of():
     dates = [date(2024, 1, 2), date(2024, 1, 3), date(2024, 1, 5)]
