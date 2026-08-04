@@ -177,3 +177,64 @@ def eps_cagr(eps_start: Number, eps_end: Number, n_years: int) -> float | None:
     if n_years < 1:
         return None
     return (float(eps_end) / float(eps_start)) ** (1.0 / int(n_years)) - 1.0
+
+
+# ── PV-discounted forward multiples (issue #334, Forecasting) ──────────────────────────────
+def pv_discount(future_value: Number, discount_rate: Number, years: int) -> float | None:
+    """Present value of a single future cash flow: ``future_value / (1 + discount_rate) **
+    years`` — the same discounting convention :func:`dcf_value` already uses per-period, made
+    a standalone building block for a single already-forecasted year (issue #332's Forecasting
+    feature hands this a per-year NI/FCF path, not a growth rate to compound itself).
+
+    ``None`` if ``future_value``/``discount_rate`` is missing, ``years < 0`` (can't discount
+    into the past), or ``discount_rate <= -1`` (would divide by zero or flip sign nonsensically
+    — a real WACC is always well above ``-100%``, but the guard costs nothing).
+    """
+    if _is_missing(future_value) or _is_missing(discount_rate):
+        return None
+    if years < 0:
+        return None
+    dr = float(discount_rate)
+    if dr <= -1:
+        return None
+    return float(future_value) / ((1 + dr) ** years)
+
+
+def forward_pe(
+    market_cap: Number, future_net_income: Number, discount_rate: Number, years: int
+) -> float | None:
+    """PV-adjusted forward P/E, ``years`` years ahead: ``market_cap / PV(future_net_income)`` —
+    explicitly PV-adjusted (the future earnings are brought back to present-value terms before
+    dividing), never the naive ``market_cap / raw_future_net_income`` a plain forward P/E would
+    use.
+
+    ``None`` if ``market_cap`` is missing/``<= 0``, or the PV-discounted earnings are missing/
+    ``<= 0`` — a negative or zero PV-adjusted P/E denominator is meaningless, mirroring this
+    project's existing "P/E is NULL when Net Income <= 0" convention
+    (``22__derived_metrics.py``'s own P/E gate) applied to the discounted figure instead of the
+    raw one.
+    """
+    pv_net_income = pv_discount(future_net_income, discount_rate, years)
+    if _is_missing(market_cap) or market_cap <= 0 or pv_net_income is None or pv_net_income <= 0:
+        return None
+    return float(market_cap) / pv_net_income
+
+
+def forward_fcf_yield(
+    market_cap: Number, future_fcf: Number, discount_rate: Number, years: int
+) -> float | None:
+    """PV-adjusted forward FCF yield, ``years`` years ahead: ``PV(future_fcf) / market_cap`` —
+    a decimal fraction (``0.031`` = 3.1%), matching this module's own "growth/yield/discount
+    rates are decimal fractions" convention (``×100`` for display, like :func:`eps_cagr`'s own
+    raw fraction, is the caller's job).
+
+    Deliberately NOT gated on ``future_fcf > 0`` (unlike :func:`forward_pe`'s earnings gate) —
+    a negative FCF yield is a real, meaningful signal (the company is projected to burn cash
+    that year), mirroring ``22__derived_metrics.py``'s existing sign-agnostic ``FCF Yield %``
+    (as opposed to ``Earnings Yield %``, which IS gated the same way ``forward_pe`` is here).
+    ``None`` only if ``market_cap`` is missing/``<= 0`` or the PV discount itself is undefined.
+    """
+    pv_fcf = pv_discount(future_fcf, discount_rate, years)
+    if _is_missing(market_cap) or market_cap <= 0 or pv_fcf is None:
+        return None
+    return pv_fcf / float(market_cap)
