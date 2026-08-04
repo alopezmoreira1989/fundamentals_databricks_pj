@@ -184,3 +184,85 @@ def test_eps_cagr_zero_years_is_none():
 def test_eps_cagr_near_zero_base_is_large_but_finite():
     out = v.eps_cagr(0.01, 5, 3)
     assert out is not None and out > 1.0 and math.isfinite(out)
+
+
+# ── pv_discount ───────────────────────────────────────────────────────────────
+def test_pv_discount_basic():
+    assert v.pv_discount(110.0, 0.10, 1) == pytest.approx(100.0)
+
+
+def test_pv_discount_zero_years_is_identity():
+    assert v.pv_discount(100.0, 0.10, 0) == pytest.approx(100.0)
+
+
+def test_pv_discount_compounds_over_multiple_years():
+    # 100 / 1.1**3
+    assert v.pv_discount(100.0, 0.10, 3) == pytest.approx(100.0 / 1.1**3)
+
+
+def test_pv_discount_none_when_missing():
+    assert v.pv_discount(None, 0.10, 1) is None
+    assert v.pv_discount(100.0, None, 1) is None
+
+
+def test_pv_discount_negative_years_is_none():
+    assert v.pv_discount(100.0, 0.10, -1) is None
+
+
+def test_pv_discount_rate_at_or_below_negative_one_is_none():
+    assert v.pv_discount(100.0, -1.0, 1) is None
+    assert v.pv_discount(100.0, -1.5, 1) is None
+
+
+def test_pv_discount_negative_future_value_still_discounts():
+    # A negative future cash flow (e.g. a loss year) still has a well-defined PV.
+    assert v.pv_discount(-110.0, 0.10, 1) == pytest.approx(-100.0)
+
+
+# ── forward_pe ────────────────────────────────────────────────────────────────
+def test_forward_pe_basic():
+    # PV(net_income) = 110 / 1.1 = 100; market_cap 2000 / 100 = 20x.
+    assert v.forward_pe(2000.0, 110.0, 0.10, 1) == pytest.approx(20.0)
+
+
+def test_forward_pe_none_when_market_cap_missing_or_non_positive():
+    assert v.forward_pe(None, 110.0, 0.10, 1) is None
+    assert v.forward_pe(0.0, 110.0, 0.10, 1) is None
+    assert v.forward_pe(-100.0, 110.0, 0.10, 1) is None
+
+
+def test_forward_pe_none_when_pv_net_income_non_positive():
+    # A loss-making forecasted year (or a PV that discounts to <= 0) makes P/E meaningless,
+    # mirroring 22__derived_metrics.py's own "P/E is NULL when Net Income <= 0" convention.
+    assert v.forward_pe(2000.0, -50.0, 0.10, 1) is None
+    assert v.forward_pe(2000.0, 0.0, 0.10, 1) is None
+
+
+def test_forward_pe_none_when_discount_undefined():
+    assert v.forward_pe(2000.0, 110.0, None, 1) is None
+    assert v.forward_pe(2000.0, 110.0, 0.10, -1) is None
+
+
+# ── forward_fcf_yield ─────────────────────────────────────────────────────────
+def test_forward_fcf_yield_basic():
+    # PV(fcf) = 110 / 1.1 = 100; yield = 100 / 2000 = 0.05 (5%, as a raw fraction).
+    assert v.forward_fcf_yield(2000.0, 110.0, 0.10, 1) == pytest.approx(0.05)
+
+
+def test_forward_fcf_yield_negative_fcf_gives_negative_yield_not_none():
+    """Deliberately sign-agnostic, unlike forward_pe -- a negative FCF yield (the company is
+    projected to burn cash that year) is a real signal, not an error, mirroring
+    22__derived_metrics.py's existing FCF Yield % convention (as opposed to Earnings Yield %,
+    which IS gated on a positive Net Income the same way forward_pe is)."""
+    assert v.forward_fcf_yield(2000.0, -110.0, 0.10, 1) == pytest.approx(-0.05)
+
+
+def test_forward_fcf_yield_none_when_market_cap_missing_or_non_positive():
+    assert v.forward_fcf_yield(None, 110.0, 0.10, 1) is None
+    assert v.forward_fcf_yield(0.0, 110.0, 0.10, 1) is None
+    assert v.forward_fcf_yield(-100.0, 110.0, 0.10, 1) is None
+
+
+def test_forward_fcf_yield_none_when_discount_undefined():
+    assert v.forward_fcf_yield(2000.0, 110.0, None, 1) is None
+    assert v.forward_fcf_yield(2000.0, 110.0, 0.10, -1) is None
