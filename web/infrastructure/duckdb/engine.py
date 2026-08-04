@@ -12,6 +12,8 @@ Views (each backed by one parquet artifact):
     backtest     ← dashboard_backtest.parquet    (archetype, fiscal_year, returns, values)
     fx           ← dashboard_fx.parquet          (base, quote, pair, date, rate)
     filings      ← dashboard_filings.parquet     (ticker, form, filing_date, report_date, url)
+    forecast     ← dashboard_forecast.parquet    (ticker, fiscal_year, horizon, metric,
+                                                    quantile_level, forecast_value)
 
 No financial logic lives here — repositories build domain reads on top of these views; all
 ratios/valuations come from ``fundamentals_pipeline``.
@@ -33,6 +35,7 @@ VIEWS: dict[str, str] = {
     "backtest": "dashboard_backtest",
     "fx": "dashboard_fx",
     "filings": "dashboard_filings",
+    "forecast": "dashboard_forecast",
 }
 
 

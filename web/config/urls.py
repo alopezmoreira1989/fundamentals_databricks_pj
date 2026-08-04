@@ -32,6 +32,7 @@ urlpatterns = [
     path("companies/", include("apps.companies.urls")),
     path("screener/", include("apps.screener.urls")),
     path("valuation/", include("apps.valuation.urls")),
+    path("forecasting/", include("apps.forecasting.urls")),
     # OpenAPI 3 schema (pinned to v1) + interactive docs (Swagger UI / Redoc). These exact
     # paths must precede the versioned API include below, whose greedy "<version>/" segment
     # would otherwise swallow "schema"/"docs"/"redoc" as an (invalid) version.

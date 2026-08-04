@@ -267,3 +267,34 @@ class FootballField:
 
     bars: tuple[FootballBar, ...]
     price: float | None
+
+
+@dataclass(frozen=True, slots=True)
+class ForecastPoint:
+    """One raw row from the ``dashboard_forecast`` artifact (issue #332's 10-year
+    cross-sectional ML scenario forecasts) — a single (metric, quantile level, horizon)
+    combination for one ticker. ``forecast_value`` is already an absolute dollar value (never
+    a raw growth rate), reconstructed/floored by the pipeline itself
+    (``fundamentals_pipeline.forecasting.reconstruct_forecast_value``), so this DTO is a pure
+    passthrough — the repository never recomputes it.
+    """
+
+    metric: str  # "revenue" | "net_income" | "free_cash_flow" (the TARGET_METRICS suffix)
+    horizon: int  # years ahead of the ticker's own latest reported fiscal year (1-10)
+    quantile_level: float  # 0.10 / 0.25 / 0.50 / 0.75 / 0.90 (Bear..Bull — see ForecastSeries)
+    forecast_value: float | None
+
+
+@dataclass(frozen=True, slots=True)
+class ForecastSeries:
+    """One metric's forecast path for a single quantile scenario, ordered by horizon (1-10) —
+    ready to plot as one line of the Forecasting fan chart (the mockup's Bear/Low Bear/Crab/
+    Low Bull/Bull legend). ``horizons``/``values`` are index-aligned (same length, same order),
+    the same parallel-arrays shape ``fundamentals_screener``'s own ``MetricSeries`` DTO uses
+    for its analogous history-series case.
+    """
+
+    metric: str
+    quantile_level: float
+    horizons: tuple[int, ...]
+    values: tuple[float | None, ...]

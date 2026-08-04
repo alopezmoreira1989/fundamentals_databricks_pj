@@ -50,6 +50,7 @@ LOCAL_APPS = [
     "apps.companies",
     "apps.screener",
     "apps.valuation",
+    "apps.forecasting",
     "apps.watchlists",
     "apps.favorites",
     "apps.history",
