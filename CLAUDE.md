@@ -10,7 +10,7 @@ Databricks analytical pipeline that ingests SEC EDGAR XBRL filings (10-K/10-Q) f
 
 - **File naming `NN__name.py` is mandatory.** Files use `<stage><order>__<purpose>` so the pipeline order is visible from filenames alone (e.g., `21__clean_and_merge.py`, `21b__derive_quarterly.py`). New files must follow the pattern.
 - **Naming convention: `NN__name`, double underscore after the numeric prefix.** Every folder or file that is a sequential stage of the pipeline — or a parallel consumer of a published stage's output (e.g. the frontends under `60__frontends/`) — is named `NN__descriptive_name`: two underscores between the number and the name, single underscores only to separate words *within* the name (e.g. `21b__derive_quarterly.py`, `60__frontends/61__streamlit/`). This is non-negotiable going forward — any new pipeline step, audit script, or frontend added from here on follows `NN__name`, never `NN_name` or an unprefixed name.
-  - **Exception — the importable library modules and tooling are never numbered.** The pure-Python public modules at the top of the `fundamentals_pipeline` package (`schemas.py`, `valuation.py`, `periods.py`, `backtest.py`, `splits.py`) are the project's single source of truth for financial logic + the data contract; they are library modules, not pipeline stages, so they keep plain names (no `NN__` prefix) and sit alongside the numbered stage dirs. `tests/` (root-level, standard Python convention, exercising those modules and the Streamlit `lib/` transversally) is likewise not a stage and stays unprefixed. The package is installable (`pyproject.toml` at the repo root) and is imported the same way by every consumer — pipeline notebooks, scripts, tests, and the Django web app — via `pip install -e .`, never via `sys.path`. A future addition that is genuinely transversal infrastructure rather than a step in the sequence follows this exception, not the `NN__` rule — flag it to the repo owner if which one applies is ambiguous.
+  - **Exception — the importable library modules and tooling are never numbered.** The pure-Python public modules at the top of the `fundamentals_pipeline` package (`schemas.py`, `valuation.py`, `periods.py`, `backtest.py`, `splits.py`) are the project's single source of truth for financial logic + the data contract; they are library modules, not pipeline stages, so they keep plain names (no `NN__` prefix) and sit alongside the numbered stage dirs. `tests/` (root-level, standard Python convention, exercising those modules and the Streamlit `lib/` transversally) is likewise not a stage and stays unprefixed. The package is installable (`pyproject.toml` at the repo root) and is imported the same way by every consumer — pipeline notebooks, scripts, tests, and `fundamentals_screener` — via `pip install -e .`, never via `sys.path`. A future addition that is genuinely transversal infrastructure rather than a step in the sequence follows this exception, not the `NN__` rule — flag it to the repo owner if which one applies is ambiguous.
 - **English for all new work; don't bulk-translate existing Spanish data labels.** All new documentation, code, identifiers, variable names, comments, and commit messages must be in English. (The owner may phrase requests in Spanish — that is never a cue to switch the output language.) **Caveat:** the existing Spanish concept/metric labels in `00__config/*.json` (`concept_hierarchy.json`, `metrics_hierarchy.json`) are used as Delta join keys and dashboard display values — renaming them is a breaking data change. Leave existing identifiers as-is unless explicitly asked to migrate them, and only with the data/dashboard impact handled.
 - **`Q4 = FY − YTD_Q3` is intentional, not a bug.** `20__transformation/21b__derive_quarterly.py` derives Q4 by subtracting the YTD-Q3 figure from the annual FY to capture year-end audit adjustments. Do not "fix" this to `Q1+Q2+Q3+Q4`. Q1–Q3 use standalone SEC reports or YTD deltas based on each concept's `kind` (flow_additive / flow_nonadditive / stock).
 - **Balance Sheet dedup**: SEC re-reports prior snapshots in later 10-Qs. Dedup by `(ticker, concept, period_end)` keeping the latest `filed` — preserve this when touching ingestion/merge.
@@ -263,7 +263,7 @@ Databricks analytical pipeline that ingests SEC EDGAR XBRL filings (10-K/10-Q) f
 ## Layout
 
 - `00__config/` — tickers list, XBRL concept map, metric hierarchies, master-table builders, `valuation_assumptions.json`, `backtest_archetypes.json`
-- `fundamentals_pipeline/` — the installable package (`pyproject.toml` at repo root) and the project's single source of truth. Its **importable** public modules (pure Python, no Spark/Streamlit/Django dep, unit-tested) sit at the top of the package alongside the numbered stage dirs: `artifacts.py` (pandas-free: `ARTIFACT_NAMES`, `SchemaError`, `META_REQUIRED_KEYS`/`validate_meta`/`assert_meta` and the raw column-spec dicts), `schemas.py` (re-exports everything in `artifacts.py` for backward compat, plus the pandas-dependent dtype-level checks — `dtype_family`/`validate_artifact`/`assert_artifact`; split from `artifacts.py` 2026-07 because a caller needing only the artifact-name constants — `fundamentals_screener`'s request-path DuckDB connection setup — was paying pandas's ~400ms cold-import cost on every request under its CGI deployment just to read a plain string tuple; see the AJAX-mode-switching entry above for why that mattered), `valuation.py` (scalar Graham/DCF/Owner-Earnings/EPS-CAGR refs), `periods.py` (Q4 arithmetic), `backtest.py` (as-of/no-look-ahead, predicate eval, CAGR/drawdown/vol/Sharpe), `splits.py` (cumulative split factor), `identity.py` (cross-market ticker-collision guard + company-name matching), `tickers_universe.py` (pure CSV parsing for non-US ticker-universe sources), `fx.py` (currency-conversion helper — see the currency-alignment convention above). The `NN__` subdirectories (below) are Databricks notebook stages — not importable. The Django `web/` app imports these modules as a public API and never reimplements them. Exempt from the `NN__` filename rule (they're library modules, not stages) — see the naming-convention exception under Conventions.
+- `fundamentals_pipeline/` — the installable package (`pyproject.toml` at repo root) and the project's single source of truth. Its **importable** public modules (pure Python, no Spark/Streamlit/Django dep, unit-tested) sit at the top of the package alongside the numbered stage dirs: `artifacts.py` (pandas-free: `ARTIFACT_NAMES`, `SchemaError`, `META_REQUIRED_KEYS`/`validate_meta`/`assert_meta` and the raw column-spec dicts), `schemas.py` (re-exports everything in `artifacts.py` for backward compat, plus the pandas-dependent dtype-level checks — `dtype_family`/`validate_artifact`/`assert_artifact`; split from `artifacts.py` 2026-07 because a caller needing only the artifact-name constants — `fundamentals_screener`'s request-path DuckDB connection setup — was paying pandas's ~400ms cold-import cost on every request under its CGI deployment just to read a plain string tuple; see the AJAX-mode-switching entry above for why that mattered), `valuation.py` (scalar Graham/DCF/Owner-Earnings/EPS-CAGR refs), `periods.py` (Q4 arithmetic), `backtest.py` (as-of/no-look-ahead, predicate eval, CAGR/drawdown/vol/Sharpe), `splits.py` (cumulative split factor), `identity.py` (cross-market ticker-collision guard + company-name matching), `tickers_universe.py` (pure CSV parsing for non-US ticker-universe sources), `fx.py` (currency-conversion helper — see the currency-alignment convention above). The `NN__` subdirectories (below) are Databricks notebook stages — not importable. The `fundamentals_screener` Django app imports these modules as a public API and never reimplements them. Exempt from the `NN__` filename rule (they're library modules, not stages) — see the naming-convention exception under Conventions.
 - `10__ingestion/` — parallel SEC (8-worker, rate-limited) and yfinance fetch. `12` also prices `BENCHMARK_TICKERS` (SPY) into `market_prices_daily` for the backtester (not in `config.tickers` — no fundamentals).
 - `20__transformation/` — annual merge, quarterly derivation, pruning, derived metrics, intrinsic value
 - `30__analysis/` — ad-hoc validation queries; `36__run_log_report.py` reads the run-log
@@ -271,9 +271,15 @@ Databricks analytical pipeline that ingests SEC EDGAR XBRL filings (10-K/10-Q) f
 - `50__publish/` — `51` exports parquet artifacts (data/metrics/prices/backtest + meta, schema-asserted against `fundamentals_pipeline/schemas.py`); `52` uploads them to the GitHub Release `latest`
 - `60__frontends/` — frontend consumers of the published Release artifacts (no Databricks dependency)
   - `61__streamlit/` — public Streamlit Cloud app (Screener / Company / Backtest pages)
-  - (The former `62__web/` Next.js frontend was removed — the decoupled web frontend is now the Django `web/` app below, not a `60__frontends/` static build.)
-- `web/` — Django presentation + application layer (auth, templates, REST API, user data), a **separate consumer** of the published Release artifacts, not a pipeline stage (so exempt from `NN__`). Imports `fundamentals_pipeline` as a normal dependency and never reimplements financial logic. **Strict, one-directional layering — enforce it on every change (see `docs/architecture.md`):** `views → services → repositories → infrastructure (DuckDB / PostgreSQL) → fundamentals_pipeline`. Every access to persistent data goes through the **repository** tier; views never execute SQL/read Parquet/hold business logic, services never execute raw SQL, repositories never implement financial/valuation/screening logic (that's `fundamentals_pipeline`). **Repositories are mandatory for analytical storage — DuckDB, Parquet artifacts, future Databricks SQL — always, no matter how simple the query.** But use judgment, not boilerplate: **trivial Django-ORM CRUD (e.g. CustomUser) may use the ORM directly from a service** rather than a pass-through repository; promote to a repository only when it adds real value (complex query, DTO mapping, aggregation, caching, multiple sources, storage/infra isolation). **Design goal (litmus test): swapping the storage engine (DuckDB → Databricks SQL / Postgres / Snowflake / BigQuery) must touch only `repositories/` + `infrastructure/` — never a view, service, or the pipeline.** Dirs: `apps/<name>/` (per-app views/urls/services, + models only when the app owns Postgres data), `services/` (cross-cutting use-case orchestration), `repositories/` (shared data gateway → DTOs), `infrastructure/` (`storage` = artifact fetch/cache, `duckdb` = query engine over the cached parquet). Reads artifacts via DuckDB; PostgreSQL holds only app data; no Databricks queries at request time. **Read-model rules:** repositories own ALL SQL (none elsewhere), return immutable DTOs/frozen dataclasses (never raw rows/dicts/DataFrames — views/services never touch SQL column names), parameterize every query, no `SELECT *` (list only needed columns), and push filter/aggregate/LIMIT into DuckDB (predicate+projection pushdown; never load a whole parquet to filter in Python). Services stay storage-agnostic. **New Django code must pass mypy + django-stubs** (`web/mypy.ini`, settings `config.settings.dev`); run from `web/`. **Every application model uses an explicit UUID primary key (`UUIDField(primary_key=True, default=uuid.uuid4, editable=False)`) — never Auto/BigAutoField** (`DEFAULT_AUTO_FIELD` stays BigAutoField only for framework tables). **Custom user model is live:** `apps/users` `User(AbstractUser)` with UUID pk + unique/required email + `AUTH_USER_MODEL="users.User"` (set before the first migration); users CRUD uses the ORM directly from the service layer, no repository. Web tests run on SQLite in-memory (`config.settings.test`), no Postgres needed.
-- `fundamentals_screener/` — a second, standalone installable Django app (own `pyproject.toml` at `fundamentals_screener/`, package code at `fundamentals_screener/fundamentals_screener/`), extracted from `web/`'s `apps/companies` + `apps/screener` + `apps/valuation` for reuse by an external Django project (originally alopezm.xyz's `/apps/screener/`). Not a pipeline stage (exempt from `NN__`), and not part of `web/`'s own INSTALLED_APPS — a fully separate distribution with its own README. See **External consumers** below for the versioning contract and the reasons its internals (view names, cache strategy, settings) deliberately diverge from `web/`'s.
+  - (The former `62__web/` Next.js frontend was removed early on. A Django app, `web/`, was
+    subsequently built as its Django-based successor — see ADR-0002 — but was retired in turn
+    (ADR-0008, 2026-08): it was never actually deployed, and `fundamentals_screener` below had
+    become the repo's one real, live Django presentation layer. Don't resurrect `web/`'s
+    layering conventions (strict `views → services → repositories → infrastructure`, UUID pks,
+    a repository tier for analytical storage, etc.) for `fundamentals_screener` without a fresh
+    decision — see `docs/adr/0008-retire-web-consolidate-on-fundamentals-screener.md` for why
+    they don't automatically carry over.)
+- `fundamentals_screener/` — a standalone installable Django app (own `pyproject.toml` at `fundamentals_screener/`, package code at `fundamentals_screener/fundamentals_screener/`), originally extracted from the now-deleted `web/`'s `apps/companies` + `apps/screener` + `apps/valuation` for reuse by an external Django project (alopezm.xyz's `/apps/screener/`), and since `web/`'s retirement (ADR-0008) the repo's **only** Django presentation layer. Not a pipeline stage (exempt from `NN__`) and not part of any host project's own `INSTALLED_APPS` in this repo — a fully separate distribution with its own README. See **External consumers** below for the versioning contract and its own architecture (no auth, no PostgreSQL, CGI-safe synchronous data layer, Python 3.9 floor).
 - `70__backtest/71__run_backtest.py` — applies `backtest_archetypes.json` screens to history (no look-ahead) → `backtest_results` + `backtest_summary`
 - `90__pipelines/` — `91__full_pipeline.py` orchestration entry point; `93__delta_maintenance.py` (OPTIMIZE/VACUUM, gated on `run_optimization`)
 - `tests/` — pytest suite (repo root) for the `fundamentals_pipeline` importable modules + Streamlit `lib/`; transversal tooling, intentionally unprefixed (not an `NN__` stage — see the naming-convention exception under Conventions)
@@ -310,13 +316,13 @@ GitHub `main` is the single source of truth. The Databricks Repo (synced by
 `fundamentals_screener/` (see Layout above) is a separately-versioned installable Django app
 consumed by an external repo (the owner's personal site, not in this workspace) as
 `pip install git+https://github.com/alopezmoreira1989/fundamentals_databricks_pj.git#subdirectory=fundamentals_screener`.
-It reads this repo's published GitHub Release `latest` artifacts (the same 5
-`dashboard_*.parquet` + `dashboard_meta.json` files the Streamlit app and `web/` read) and
-depends on `fundamentals_pipeline` (for `schemas`/`statement_layout`/`fx`) the normal way,
-but is otherwise a fully independent codebase from `web/` — it does **not** import from
-`web/`, and changes to `web/`'s `apps/companies`/`apps/screener`/`apps/valuation` do not
-automatically propagate to it (they were extracted once, then diverged deliberately — see
-below).
+It reads this repo's published GitHub Release `latest` artifacts (the `dashboard_*.parquet`
+files — one per `fundamentals_pipeline.artifacts.ARTIFACT_NAMES` entry — + `dashboard_meta.json`,
+the same set the Streamlit app reads) and depends on `fundamentals_pipeline` (for
+`schemas`/`statement_layout`/`fx`) the normal way. It was originally extracted from the
+now-deleted `web/` Django app (ADR-0002/ADR-0008), but is a fully independent codebase — no
+import from anything that used to be `web/`, and no code anywhere in this repo still depends
+on it existing.
 
 - **Release/deploy pipeline is automatic end-to-end, except for one manual approval gate —
   check for it every time a `fundamentals_screener` version is cut.** Merging a
@@ -348,33 +354,31 @@ below).
   bump `fundamentals_screener/pyproject.toml`'s version and tag the commit *before* the
   consumer updates its pinned `git+https://...@vX.Y.Z` install — never let the consumer track
   a moving ref.
-- **Deliberately diverges from `web/`'s internals, on purpose, do not "fix" these to match
-  `web/`:**
-  - **Data layer**: `web/` fetches artifacts lazily on the request path (cache miss/stale
-    triggers a download, with a background-thread refresh) — correct for `web/`'s real WSGI
-    server, but wrong for `fundamentals_screener`'s reference deployment (plain CGI, no
-    persistent process between requests, so a background thread never survives to complete).
-    `fundamentals_screener` instead ships `manage.py sync_fundamentals_data` (a cron-driven
-    command) + a `data_source.py`/`repository.py` pair that only ever reads what's already on
-    disk — no network on the request path, ever. This split (`data_source.py` = fetch/cache/
-    validate, `repository.py` = bare `connection()` with views registered) mirrors what the
-    consuming project had already independently built and proven (2,627 tickers, 1.57M rows)
-    before this package existed; `fundamentals_screener` was built to match that proven
-    interface exactly, specifically so it can be a drop-in replacement for those three files
-    rather than a second, parallel implementation of the same job.
+- **Design decisions specific to this package — grounded in its actual deployment target, not
+  arbitrary, don't "simplify" these away:**
+  - **Data layer**: no network on the request path, ever. `fundamentals_screener` ships
+    `manage.py sync_fundamentals_data` (a cron-driven command) + a `data_source.py`/
+    `repository.py` pair that only ever reads what's already on disk. This is deliberate for
+    the reference deployment (plain CGI, no persistent process between requests — a
+    background-thread refresh-on-stale pattern would never survive to complete) — see the
+    package README's "Keeping data fresh" section. This split (`data_source.py` = fetch/
+    cache/validate, `repository.py` = bare `connection()` with views registered) mirrors what
+    the consuming project had already independently built and proven (2,627 tickers, 1.57M
+    rows) before this package existed; it was built to match that proven interface exactly,
+    specifically so it can be a drop-in replacement for those three files rather than a
+    second, parallel implementation of the same job.
   - **DuckDB view names**: `dashboard_data`/`dashboard_metrics`/`dashboard_prices`/
-    `dashboard_backtest`/`dashboard_fx` (the literal artifact names, sourced dynamically from
-    `fundamentals_pipeline.schemas.ARTIFACT_NAMES`) — not `web/`'s short aliases
-    (`financials`/`metrics`/`prices`/`backtest`/`fx`). Any SQL ported between the two packages
-    needs its table names translated, not copy-pasted verbatim.
-  - **Settings**: a single `FUNDAMENTALS_DATA_PATH` (a local directory), not `web/`'s
-    `ARTIFACTS_BASE_URL`/`ARTIFACTS_CACHE_DIR`/`ARTIFACTS_TTL`/`ARTIFACTS_LOCAL_DIR`/
-    `ARTIFACTS_REFRESH_ASYNC` five-variable scheme.
-  - **Python floor**: `>=3.9` (the real production constraint on the target host — Python
-    3.9.2, no compiler, so `duckdb`/`pandas` are pinned to exact versions
+    `dashboard_backtest`/`dashboard_forecast`/`dashboard_fx`/`dashboard_filings` (the literal
+    artifact names, sourced dynamically from `fundamentals_pipeline.artifacts.ARTIFACT_NAMES`)
+    — not short aliases. Any SQL written against this repository must use these names.
+  - **Settings**: a single `FUNDAMENTALS_DATA_PATH` (a local directory) is the one required
+    setting — see the package README for the full list (optional `LOGO_DEV_KEY`, recommended
+    `CACHES`).
+  - **Python floor**: `>=3.9` — the real production constraint on the target host (Python
+    3.9.2, no compiler), so `duckdb`/`pandas` are pinned to exact versions
     (`duckdb==1.4.5`/`pandas==2.3.3`) verified to still support 3.9; their later releases
-    dropped it), vs. `web/`'s `>=3.12`. Do not introduce Python ≥3.10-only syntax
-    (`dataclass(slots=True)`, `match`/`case`, etc.) anywhere in `fundamentals_screener/`. Two
+    dropped it. Do not introduce Python ≥3.10-only syntax (`dataclass(slots=True)`,
+    `match`/`case`, etc.) anywhere in `fundamentals_screener/`. Two
     non-obvious 3.10-only patterns already caused real import-time/runtime failures on a real
     Python 3.9.2 retest (both fixed, 2026-07-20) — watch for them in review, since a plain
     `grep` for `match`/`case`/`slots=True` won't catch either: (1) a **module-level assignment**
@@ -396,9 +400,12 @@ below).
     `statement_layout`/`fx`, plus `backtest`/`periods`/`valuation` transitively via
     `fundamentals_pipeline/__init__.py`'s eager imports) stayed 3.9-compatible. Keep the two
     floors in lockstep; don't raise the root one without re-checking this.
-  - **No personalization, no i18n**: favorites/watchlists/history (all present in `web/`'s
-    `company_page`) are not ported — they depend on login-scoped apps this package doesn't
-    assume the host has. The async Yahoo Finance news widget IS ported (`/<ticker>/news/`,
+  - **No personalization, no i18n**: favorites/watchlists/history are not implemented — they'd
+    depend on login-scoped apps this package doesn't assume the host has (see
+    ADR-0008/`docs/adr/0008-retire-web-consolidate-on-fundamentals-screener.md` — build them
+    here, from scratch, if actually needed; don't assume the deleted `web/` app's
+    implementation is a template to resurrect, its architecture was deliberately different).
+    The async Yahoo Finance news widget IS built (`/<ticker>/news/`,
     cached via Django's generic `django.core.cache` API) — the host must configure a
     persistent `CACHES` backend (e.g. `FileBasedCache`) for it to actually cache under CGI;
     unconfigured it still works, just re-fetches Yahoo on every request (see the package

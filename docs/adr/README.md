@@ -1,9 +1,15 @@
 # Architecture Decision Records
 
-This log records the significant, hard-to-reverse decisions behind the codebase — the *why* and
-the alternatives behind the "locked" rules summarized in [`../architecture.md`](../architecture.md).
-`architecture.md` is the always-current *what*; the ADRs are the durable *why*. See
+This log records the significant, hard-to-reverse decisions behind the codebase — the *why*
+behind each one, the alternatives weighed, and the trade-offs accepted. See
 [ADR-0001](0001-record-architecture-decisions.md) for the rationale of keeping this log at all.
+
+(A companion `docs/architecture.md` — the always-current summary of *what* the architecture
+was — existed alongside this log until [ADR-0008](0008-retire-web-consolidate-on-fundamentals-screener.md):
+it covered exclusively `web/`'s layering, so it was retired along with `web/` itself rather
+than kept as a stale summary of deleted code. If this repo's Django presentation layer
+(`fundamentals_screener`) ever grows enough architecture to warrant a living summary doc of
+its own, write a new one — don't resurrect the old file's content by reference.)
 
 ## When to write an ADR
 
@@ -26,11 +32,12 @@ code must be written. Routine choices don't need an ADR; this is not a change lo
 | ADR | Title | Status |
 |-----|-------|--------|
 | [0001](0001-record-architecture-decisions.md) | Record architecture decisions in ADRs | Accepted |
-| [0002](0002-django-presentation-and-application-layer.md) | Django as the presentation + application layer (replacing the decoupled Next.js frontend) | Accepted |
-| [0003](0003-strict-layering-with-repository-tier.md) | Strict one-directional layering with a repository tier | Accepted |
-| [0004](0004-artifact-fed-read-model-via-duckdb.md) | Artifact-fed read model via DuckDB — no Databricks at request time | Accepted |
-| [0005](0005-uuid-primary-keys-for-application-models.md) | UUID primary keys for application models | Accepted |
-| [0006](0006-repositories-mandatory-for-analytical-storage.md) | Repositories mandatory for analytical storage; trivial ORM CRUD may skip them | Accepted |
-| [0007](0007-custom-user-model-from-first-migration.md) | Custom user model, set before the first migration | Accepted |
+| [0002](0002-django-presentation-and-application-layer.md) | Django as the presentation + application layer (replacing the decoupled Next.js frontend) | Superseded by [0008](0008-retire-web-consolidate-on-fundamentals-screener.md) |
+| [0003](0003-strict-layering-with-repository-tier.md) | Strict one-directional layering with a repository tier | Superseded by [0008](0008-retire-web-consolidate-on-fundamentals-screener.md) |
+| [0004](0004-artifact-fed-read-model-via-duckdb.md) | Artifact-fed read model via DuckDB — no Databricks at request time | Superseded by [0008](0008-retire-web-consolidate-on-fundamentals-screener.md) |
+| [0005](0005-uuid-primary-keys-for-application-models.md) | UUID primary keys for application models | Superseded by [0008](0008-retire-web-consolidate-on-fundamentals-screener.md) |
+| [0006](0006-repositories-mandatory-for-analytical-storage.md) | Repositories mandatory for analytical storage; trivial ORM CRUD may skip them | Superseded by [0008](0008-retire-web-consolidate-on-fundamentals-screener.md) |
+| [0007](0007-custom-user-model-from-first-migration.md) | Custom user model, set before the first migration | Superseded by [0008](0008-retire-web-consolidate-on-fundamentals-screener.md) |
+| [0008](0008-retire-web-consolidate-on-fundamentals-screener.md) | Retire `web/`, consolidate the presentation layer on `fundamentals_screener` | Accepted |
 
 _Template: [`0000-template.md`](0000-template.md)._

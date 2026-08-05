@@ -41,16 +41,18 @@ pip install "fundamentals-screener @ git+https://github.com/alopezmoreira1989/fu
 
    Reverse with `{% url 'fundamentals_screener:screen' %}`,
    `{% url 'fundamentals_screener:company_detail' ticker %}`,
-   `{% url 'fundamentals_screener:valuation' ticker %}`.
+   `{% url 'fundamentals_screener:valuation' ticker %}`,
+   `{% url 'fundamentals_screener:forecasting' ticker %}`.
 3. Set the one required setting:
 
    ```python
    FUNDAMENTALS_DATA_PATH = env("FUNDAMENTALS_DATA_PATH", default=str(BASE_DIR / "data" / "fundamentals"))
    ```
 
-   This is a local directory the app reads 6 `dashboard_*.parquet` files + `dashboard_meta.json`
-   from. **Nothing in this package downloads them on the request path** — see "Keeping data
-   fresh" below.
+   This is a local directory the app reads the `dashboard_*.parquet` files (one per
+   `fundamentals_pipeline.artifacts.ARTIFACT_NAMES` entry — currently data/metrics/prices/
+   backtest/filings/forecast/fx) + `dashboard_meta.json` from. **Nothing in this package
+   downloads them on the request path** — see "Keeping data fresh" below.
 4. Optional setting: `LOGO_DEV_KEY` (a [Logo.dev](https://logo.dev) publishable key) — enables
    real company logos instead of the monogram fallback. Unset ⇒ always monogram, no error.
 5. Recommended setting: a persistent `CACHES` backend, for the "Latest news" widget on the
@@ -92,10 +94,10 @@ never needs any SEC-specific setting of its own.
 
 This is deliberate, not a missing feature: the reference deployment for this package is plain
 CGI hosting (`mod_cgi`, no persistent process between requests), where a lazy
-fetch-on-request-with-background-refresh pattern (which is what `fundamentals_databricks_pj`'s
-own `web/` app does, since it runs under a real WSGI server) simply wouldn't survive from one
-request to the next. If your host DOES run a persistent process, you can still just run the
-sync command via cron/deploy-hook — there's no reason not to.
+fetch-on-request-with-background-refresh pattern simply wouldn't survive from one request to
+the next (a background thread never gets to complete before the process exits). If your host
+DOES run a persistent process, you can still just run the sync command via cron/deploy-hook —
+there's no reason not to.
 
 ## What v1 covers (and what it deliberately doesn't)
 
@@ -156,7 +158,16 @@ Ported from `web/`'s `apps/companies`, `apps/screener`, `apps/valuation`:
   no SEC call, no SEC-specific setting, of this package's own, ever (see "Keeping data fresh").
 - **Valuation** (`/<ticker>/valuation/`): a standalone version of the same football field + MoS
   table + Net-Net card.
-- JSON siblings of all three (`/data/`, `/<ticker>/data/`, `/<ticker>/valuation/data/`).
+- **Forecasting** (`/<ticker>/forecasting/`): a 10-year cross-sectional ML scenario fan chart
+  (Revenue / Net Income / Free Cash Flow, 5 quantile scenarios — Bear/Low Bear/Crab/Low
+  Bull/Bull — years 1-5 from a LightGBM quantile-regression model, years 6-10 blended toward
+  each scenario's DCF terminal-growth rate) plus a PV-discounted forward P/E / FCF Yield table
+  (mid/"Crab" scenario). Not ported from `web/` — built directly in this package. Sourced from
+  the `dashboard_forecast` artifact (written by the upstream pipeline's `24__forecasting.py`);
+  a ticker with no published forecast yet shows a plain "not available" state rather than
+  erroring.
+- JSON siblings of all four (`/data/`, `/<ticker>/data/`, `/<ticker>/valuation/data/`,
+  `/<ticker>/forecasting/data/`).
 
 **Not ported** — these existed in the source app but depend on things this package
 deliberately doesn't assume the host project has:

@@ -168,8 +168,9 @@ fundamentals_databricks_pj/
 > pure `fundamentals_pipeline` modules and the Streamlit `lib/` masks/formatters — no Spark or
 > network needed. (`requirements.txt` stays minimal; it is the Streamlit Cloud runtime manifest.)
 >
-> This tree omits `web/` (the Django app, a separate consumer of the published artifacts — see
-> [Django Web Application](#django-web-application-web) below) and `docs/` for brevity.
+> This tree omits `fundamentals_screener/` (the Django app, a separate consumer of the
+> published artifacts — see its own `fundamentals_screener/README.md`) and `docs/` for
+> brevity.
 
 ---
 
@@ -310,8 +311,8 @@ XBRL ingestion as every US filer. No separate ingestion adapter, no SEDAR+ integ
 - **Frontend.** The Streamlit dashboard exposes a **Market** filter (US/Canada, independent of
   Universe) and a **"S&P/TSX Composite"** Universe option, a currency badge on any non-USD
   figure, and a "View in USD" toggle that converts Market Cap/Price using the same date-anchored
-  FX lookup as the pipeline. The Django web app does not yet have equivalent multi-market
-  support — see the note under [Django Web Application](#django-web-application-web) below.
+  FX lookup as the pipeline. `fundamentals_screener` does not yet have equivalent multi-market
+  support.
 - **Still out of scope, deliberately:** IFRS-specific XBRL concept mapping, dual-currency
   (native + USD) storage anywhere in the pipeline, and re-keying `financials`/`market_prices_daily`/
   `market_cap_asof` off bare `ticker` instead of `(ticker, market)`.
@@ -838,80 +839,6 @@ The company detail page (Derived metrics tab) renders a horizontal "football fie
 - **`Graham Number` is intentionally excluded** — it's suppressed upstream for distorted-book firms and is often a wild outlier that would crush the shared x-scale. Only Graham Revised, DCF, and Owner Earnings are shown (`FF_METHODS`). For Energy / Financials / Real Estate names the DCF and Owner Earnings bars are absent (sector-skipped upstream), so the field shows Graham Revised alone — by design.
 - **Over/under-valued color rule:** a method's base **above** the price line → undervalued → green (`--positive`); **below** → overvalued → red (`--negative`); neutral blue when no price is available. So "every bar below the line" reads instantly as overvalued (e.g. AAPL), "every bar above" as undervalued (e.g. VZ).
 - **Graceful degradation:** no methods → the card is hidden (returns `""`); a single method still renders (with a note); no market cap price → bars render neutral with no price line and a "no market price" caption; non-finite or ≤0 base values are skipped.
-
----
-
-## Django Web Application (`web/`)
-
-A second, decoupled frontend: a full Django app (session auth, watchlists/favorites/history, a
-read-only REST API + OpenAPI docs) that reads the same published GitHub Release artifacts via
-DuckDB and keeps its own PostgreSQL for user data. Strict one-directional layering
-(`views → services → repositories → infrastructure`) is documented in `docs/architecture.md`.
-No Databricks access at request time.
-
-> **Multi-market gap, not yet closed:** unlike the Streamlit dashboard, the Django app has no
-> awareness yet of `market`/`reporting_currency`/`in_tsx_composite`, doesn't fetch the FX
-> artifact, and two spots render a Canadian ticker's native-currency Price/Market Cap as if it
-> were USD ([#219](https://github.com/alopezmoreira1989/fundamentals_databricks_pj/issues/219) —
-> bug). Market filter, "S&P/TSX Composite" Universe option, and a "View in USD" toggle
-> equivalent to the Streamlit ones are tracked as feature-parity work in
-> [#220](https://github.com/alopezmoreira1989/fundamentals_databricks_pj/issues/220).
-
-```mermaid
-flowchart LR
-    gh{{GitHub Release · latest}} -->|parquet + meta.json| cache[(local artifact cache)]
-    cache --> duckdb[DuckDB queries]
-    duckdb --> repo[repositories/]
-    repo --> svc[services/]
-    svc --> views[apps/*/views + REST API]
-    views --> user((Browser / API client))
-
-    pg[(PostgreSQL — Neon)] --> orm[Django ORM]
-    orm --> svc
-```
-
-### Local development
-
-Zero-setup quick start — no Docker, no Postgres server:
-```sh
-cd web
-pip install -r requirements/dev.txt
-python manage.py migrate
-python manage.py runserver
-```
-`DATABASE_URL` is unset, so `config.settings.base` falls back to a local SQLite file
-(`web/db.sqlite3`, gitignored) automatically. `web/.env.example` documents every environment
-variable (dev and production) — copy it to `web/.env` to override any of them.
-
-Prefer testing against real Postgres locally (e.g. to catch Postgres-specific behavior before
-deploying)? Set `DATABASE_URL` in `web/.env`, or use the docker-compose stack, which boots Django
-+ a local Postgres container and applies migrations automatically:
-```sh
-docker compose -f web/docker/docker-compose.yml up --build
-```
-
-### Deployment — Render (free) + Neon PostgreSQL (free, permanent)
-
-The app deploys at zero cost to [Render](https://render.com) (Docker web service) paired with a
-free, permanent [Neon](https://neon.tech) PostgreSQL project — Render's own free Postgres expires
-after 90 days, Neon's free plan doesn't and needs no card. Full runbook, environment variable
-reference, and troubleshooting table: **[`docs/deploy-render.md`](docs/deploy-render.md)**.
-
-Quick summary:
-1. Create a free Neon project → copy its (pooled) connection string (keep `?sslmode=require`
-   — passed straight through to Django's DB backend by `django-environ`, no code change needed).
-2. In Render: **New + → Blueprint**, point at this repo (reads the committed `render.yaml`).
-3. Set the secret env vars (`DJANGO_SECRET_KEY`, `DJANGO_ALLOWED_HOSTS`,
-   `DJANGO_CSRF_TRUSTED_ORIGINS`, `DATABASE_URL`) in the Render dashboard — never committed.
-4. Push to the connected branch — Render builds `web/docker/Dockerfile.prod` and deploys
-   automatically on every push.
-
-Health checks: `GET /healthz` (liveness) and `GET /readyz` (readiness — DB + artifact-cache
-status), gating traffic so a booting instance never receives requests early.
-
-> An alternative Fly.io runbook (`fly.toml`, `docs/deploy-fly.md`) also lives in the repo, but Fly
-> requires payment info on the account before it will create even a free-tier app, so Render +
-> Neon is the recommended zero-cost path.
 
 ---
 

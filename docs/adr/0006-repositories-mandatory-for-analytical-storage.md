@@ -1,6 +1,6 @@
 # ADR-0006: Repositories mandatory for analytical storage; trivial ORM CRUD may skip them
 
-- **Status:** Accepted
+- **Status:** Superseded by [ADR-0008](0008-retire-web-consolidate-on-fundamentals-screener.md)
 - **Date:** 2026-07-03  <!-- recorded retroactively; refined while building users/watchlists/favorites -->
 - **Deciders:** repo owner
 

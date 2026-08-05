@@ -1,6 +1,6 @@
 # ADR-0005: UUID primary keys for application models
 
-- **Status:** Accepted
+- **Status:** Superseded by [ADR-0008](0008-retire-web-consolidate-on-fundamentals-screener.md)
 - **Date:** 2026-07-03  <!-- recorded retroactively; established with the first application models -->
 - **Deciders:** repo owner
 

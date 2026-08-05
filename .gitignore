@@ -29,18 +29,6 @@ CLAUDE.local.md
 # Dashboards generados (HTML autocontenidos)
 fundamentals_pipeline/40_dashboards/output/
 
-# Django web layer (web/) — local secrets, DB, and collected assets
-web/.env
-web/db.sqlite3
-web/staticfiles/
-web/media/
-web/.artifact_cache/
-web/*.sqlite3
-# Coverage outputs (pytest-cov)
-web/.coverage
-web/coverage.xml
-web/htmlcov/
-
 # Sistema
 Thumbs.db
 .DS_Store

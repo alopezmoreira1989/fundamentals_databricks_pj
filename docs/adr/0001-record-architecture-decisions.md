@@ -4,6 +4,14 @@
 - **Date:** 2026-07-03
 - **Deciders:** repo owner
 
+> **2026-08-05 note:** the `architecture.md` this record refers to below covered exclusively
+> `web/`'s layering and was retired along with `web/` itself in
+> [ADR-0008](0008-retire-web-consolidate-on-fundamentals-screener.md) — it is no longer a
+> living document. The decision below (keep an ADR log) is unaffected; only the "and
+> `architecture.md` stays current" half of it no longer has a companion doc to stay current.
+> Left as originally written, per this log's own "immutable once Accepted" rule — this note is
+> a pointer, not an edit to the substance.
+
 ## Context
 
 The project's significant architecture decisions — the strict layering, the artifact-fed read

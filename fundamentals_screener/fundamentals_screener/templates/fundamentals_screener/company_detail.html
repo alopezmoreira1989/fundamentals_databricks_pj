@@ -510,6 +510,10 @@
     <!-- Valuation (intrinsic-value football field + MoS + multiples) -->
     {% if iv_chart or mos_scenarios or valuation_metrics %}
       <div class="tab-pane fade" id="pane-valuation" role="tabpanel" aria-labelledby="tab-valuation" tabindex="0">
+        <div class="d-flex justify-content-end gap-3 mb-2 small">
+          <a class="text-decoration-none" href="{% url 'fundamentals_screener:valuation' detail.summary.ticker %}">Full valuation page →</a>
+          <a class="text-decoration-none" href="{% url 'fundamentals_screener:forecasting' detail.summary.ticker %}">Forecasting →</a>
+        </div>
         {% if iv_chart %}
           <div class="card p-4 mb-4">
             <div class="d-flex justify-content-between align-items-baseline mb-3 flex-wrap gap-2">

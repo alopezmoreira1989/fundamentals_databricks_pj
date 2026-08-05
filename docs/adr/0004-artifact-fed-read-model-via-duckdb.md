@@ -1,6 +1,6 @@
 # ADR-0004: Artifact-fed read model via DuckDB — no Databricks at request time
 
-- **Status:** Accepted
+- **Status:** Superseded by [ADR-0008](0008-retire-web-consolidate-on-fundamentals-screener.md)
 - **Date:** 2026-07-03  <!-- recorded retroactively; established with the web infrastructure tier -->
 - **Deciders:** repo owner
 

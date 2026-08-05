@@ -17,6 +17,7 @@ from collections.abc import Sequence
 from dataclasses import replace
 from typing import Any
 
+from fundamentals_pipeline.forecasting import TARGET_METRICS as _FORECAST_TARGET_METRICS
 from fundamentals_pipeline.fx import convert_price
 
 from .dtos import (
@@ -26,6 +27,10 @@ from .dtos import (
     CompanyStatements,
     CompanySummary,
     FilingRow,
+    ForecastChart,
+    ForecastHistoryPoint,
+    ForecastMetricChart,
+    ForwardMultipleRow,
     HeadlineKpi,
     MetricPoint,
     MetricSeries,
@@ -52,6 +57,7 @@ from .repositories.company_listing import (
     SortSpec,
     preset_thresholds,
 )
+from .repositories.forecasting import ForecastRepository
 from .repositories.screener import ScreenerRepository
 from .repositories.valuation import ValuationRepository
 
@@ -635,3 +641,82 @@ def get_margin_of_safety_scenarios(ticker: str):
 def get_intrinsic_value_field(ticker: str):
     """Per-method TTM intrinsic-value ranges + market price (the football field)."""
     return ValuationRepository().intrinsic_value_field(ticker)
+
+
+# ── forecasting ──────────────────────────────────────────────────────────────────────────
+_FORECAST_HISTORY_YEARS = 6
+
+
+def get_forecast_chart(ticker: str) -> ForecastChart | None:
+    """The Forecasting page's full data for `ticker`: each target metric's recent reported
+    history plus every quantile scenario's forward path, and the mid-scenario ("Crab")
+    forward-multiples table.
+
+    `None` only for an entirely unknown ticker (no summary); a known ticker with no published
+    forecast yet still returns a `ForecastChart` with empty `metrics`/`forward_multiples`, so
+    the view can render a "not available" state rather than 404ing.
+    """
+    if CompanyRepository().get_summary(ticker) is None:
+        return None
+
+    company_repo = CompanyRepository()
+    statements = company_repo.get_statements(ticker, max_years=_FORECAST_HISTORY_YEARS)
+    income_statement = next((s for s in statements.statements if s.name == "Income Statement"), None)
+    history_by_concept: dict[str, tuple[ForecastHistoryPoint, ...]] = {}
+    if income_statement is not None:
+        years = tuple(reversed(income_statement.years))  # chronological, ends at FY0
+        for line in income_statement.lines:
+            if line.display_name in ("Revenue", "Net Income"):
+                values = tuple(reversed(line.values))
+                history_by_concept[line.display_name] = tuple(
+                    ForecastHistoryPoint(fiscal_year=y, value=v)
+                    for y, v in zip(years, values, strict=True)
+                )
+
+    fcf_series = next(
+        (s for s in company_repo.metric_history(ticker, years=_FORECAST_HISTORY_YEARS)
+         if s.metric == "Free Cash Flow"),
+        None,
+    )
+    fcf_unit: str | None = None
+    if fcf_series is not None:
+        fcf_years = tuple(reversed(fcf_series.fiscal_years))
+        fcf_values = tuple(reversed(fcf_series.values))
+        history_by_concept["Free Cash Flow"] = tuple(
+            ForecastHistoryPoint(fiscal_year=y, value=v)
+            for y, v in zip(fcf_years, fcf_values, strict=True)
+        )
+        fcf_unit = fcf_series.unit
+
+    forecast_by_metric: dict[str, list] = {}
+    for s in ForecastRepository().forecast_series(ticker):
+        forecast_by_metric.setdefault(s.metric, []).append(s)
+
+    metrics: list[ForecastMetricChart] = []
+    for suffix, concept in _FORECAST_TARGET_METRICS.items():
+        historical = history_by_concept.get(concept, ())
+        raw_scenarios = sorted(forecast_by_metric.get(suffix, ()), key=lambda s: s.quantile_level)
+        if historical:
+            # Pre-pend each scenario's own FY0 anchor (this metric's latest reported value) so
+            # every line — historical AND every scenario — shares one array origin point; see
+            # ForecastMetricChart's own docstring for why this is what makes a single shared
+            # y-scale trivial on the JS side.
+            anchor = historical[-1].value
+            scenarios = tuple(
+                replace(s, horizons=(0, *s.horizons), values=(anchor, *s.values)) for s in raw_scenarios
+            )
+        else:
+            scenarios = tuple(raw_scenarios)
+        if not historical and not scenarios:
+            continue
+        metrics.append(ForecastMetricChart(
+            metric=suffix, label=concept,
+            unit=fcf_unit if suffix == "free_cash_flow" else None,
+            historical=historical, scenarios=scenarios,
+        ))
+
+    forward_multiples = tuple(
+        ForwardMultipleRow(metric=p.metric, horizon=p.horizon, value=p.forecast_value)
+        for p in ForecastRepository().forward_multiples(ticker)
+    )
+    return ForecastChart(ticker=ticker, metrics=tuple(metrics), forward_multiples=forward_multiples)
