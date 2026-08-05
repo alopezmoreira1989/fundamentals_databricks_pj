@@ -805,6 +805,8 @@ def company_detail(request: HttpRequest, ticker: str) -> HttpResponse:
     headline = (*headline, market_cap_kpi) if market_cap_kpi else headline
     compare_options = services.all_companies()
     filings = services.get_company_filings(ticker)
+    forecast_chart = services.get_forecast_chart(ticker)
+    forecast_chart_data = _forecast_chart_json(forecast_chart) if forecast_chart else None
     context = {
         "detail": detail,
         "statements": statements.statements,
@@ -830,6 +832,8 @@ def company_detail(request: HttpRequest, ticker: str) -> HttpResponse:
         "iv_chart": iv_chart,
         "mos_scenarios": mos_scenarios,
         "filings": filings,
+        "forecast_chart": forecast_chart,
+        "forecast_chart_data": forecast_chart_data,
     }
     net_net_ctx = _net_net_card_context(ticker)
     if net_net_ctx:
