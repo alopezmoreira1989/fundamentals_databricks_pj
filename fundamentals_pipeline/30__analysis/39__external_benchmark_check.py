@@ -12,7 +12,7 @@
 # MAGIC **The critical design constraint (see issue #236): separate valid methodological
 # MAGIC divergence from a genuine error.** Our plain `"P/E"` / `"P/B"` / `"Market Cap"` metrics
 # MAGIC are *deliberately* priced at each FY's own `period_end` close (`market_cap_asof`'s
-# MAGIC fiscal-close design, documented in `web/templates/help.html`) — comparing these against
+# MAGIC fiscal-close design, documented in this repo's own `CLAUDE.md`) — comparing these against
 # MAGIC yfinance's live-price figure will "diverge" any time the stock has moved since that FY
 # MAGIC closed, and that is NOT a bug. Our `"... (TTM, live)"` metrics (`23__intrinsic_value.py`
 # MAGIC §5) are different: they are deliberately priced off TODAY's close, same as yfinance's

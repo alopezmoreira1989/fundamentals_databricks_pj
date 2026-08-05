@@ -1,16 +1,17 @@
 """Fetches and caches the daily fundamentals data export from fundamentals_databricks_pj.
 
-That pipeline publishes 6 parquet artifacts + a meta JSON to a GitHub Release tagged
-"latest" (a moving tag, republished daily). This module downloads and caches them locally
-under ``FUNDAMENTALS_DATA_PATH``, validated against the ``fundamentals_pipeline`` schema
-contract — it never queries Databricks or the pipeline repo directly.
+That pipeline publishes one parquet artifact per ``fundamentals_pipeline.artifacts.
+ARTIFACT_NAMES`` entry + a meta JSON to a GitHub Release tagged "latest" (a moving tag,
+republished daily). This module downloads and caches them locally under
+``FUNDAMENTALS_DATA_PATH``, validated against the ``fundamentals_pipeline`` schema contract
+— it never queries Databricks or the pipeline repo directly.
 
 Deliberately cron-driven, not lazy-fetch-on-read: the target hosting for this package's
 original consumer is plain CGI (mod_cgi, no persistent process between requests), so a
-background-thread refresh — the pattern the pipeline's own ``web/`` Django app uses — would
-never survive from one request to the next. Call :func:`sync` from a scheduled job (a cron
-running ``manage.py sync_fundamentals_data``, see ``management/commands/``); the repository
-layer then only ever reads what's already on disk, no network on the request path at all.
+background-thread refresh-on-stale pattern would never survive from one request to the next.
+Call :func:`sync` from a scheduled job (a cron running ``manage.py sync_fundamentals_data``,
+see ``management/commands/``); the repository layer then only ever reads what's already on
+disk, no network on the request path at all.
 """
 
 from __future__ import annotations

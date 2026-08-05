@@ -1,1 +1,0 @@
-"""favorites — user favorites (PostgreSQL)."""

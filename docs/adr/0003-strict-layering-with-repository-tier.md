@@ -1,6 +1,6 @@
 # ADR-0003: Strict one-directional layering with a repository tier
 
-- **Status:** Accepted
+- **Status:** Superseded by [ADR-0008](0008-retire-web-consolidate-on-fundamentals-screener.md)
 - **Date:** 2026-07-03  <!-- recorded retroactively; established as the web layer was built -->
 - **Deciders:** repo owner
 

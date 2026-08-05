@@ -1,6 +1,6 @@
 # ADR-0002: Django as the presentation + application layer (replacing the decoupled Next.js frontend)
 
-- **Status:** Accepted
+- **Status:** Superseded by [ADR-0008](0008-retire-web-consolidate-on-fundamentals-screener.md)
 - **Date:** 2026-07-03  <!-- recorded retroactively; decided during the web-layer initiative on dev_alm -->
 - **Deciders:** repo owner
 

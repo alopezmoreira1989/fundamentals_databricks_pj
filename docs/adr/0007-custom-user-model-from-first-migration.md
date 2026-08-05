@@ -1,6 +1,6 @@
 # ADR-0007: Custom user model, set before the first migration
 
-- **Status:** Accepted
+- **Status:** Superseded by [ADR-0008](0008-retire-web-consolidate-on-fundamentals-screener.md)
 - **Date:** 2026-07-03  <!-- recorded retroactively; decided before any migration ran -->
 - **Deciders:** repo owner
 
