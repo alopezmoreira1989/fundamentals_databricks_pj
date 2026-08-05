@@ -670,7 +670,7 @@ def get_forecast_chart(ticker: str) -> ForecastChart | None:
                 values = tuple(reversed(line.values))
                 history_by_concept[line.display_name] = tuple(
                     ForecastHistoryPoint(fiscal_year=y, value=v)
-                    for y, v in zip(years, values, strict=True)
+                    for y, v in zip(years, values)
                 )
 
     fcf_series = next(
@@ -684,7 +684,7 @@ def get_forecast_chart(ticker: str) -> ForecastChart | None:
         fcf_values = tuple(reversed(fcf_series.values))
         history_by_concept["Free Cash Flow"] = tuple(
             ForecastHistoryPoint(fiscal_year=y, value=v)
-            for y, v in zip(fcf_years, fcf_values, strict=True)
+            for y, v in zip(fcf_years, fcf_values)
         )
         fcf_unit = fcf_series.unit
 
