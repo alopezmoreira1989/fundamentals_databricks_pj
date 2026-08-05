@@ -16,11 +16,16 @@
 # MAGIC `sec_filings` and `23__intrinsic_value.py`'s own tables — no incremental MERGE, no
 # MAGIC `force_full_refresh` branching).
 # MAGIC
+# MAGIC **Also writes (section 5b):** PV-discounted forward P/E / FCF Yield (issue #334's
+# MAGIC `fundamentals_pipeline.valuation.forward_pe`/`forward_fcf_yield`, wired in here so
+# MAGIC `fundamentals_screener` has something to read — issue #334 itself only added the pure
+# MAGIC functions) — appended to the same `financials_forecast` table as `forward_pe`/
+# MAGIC `forward_fcf_yield` `metric` rows, discounted at each quantile's own interpolated WACC.
+# MAGIC
 # MAGIC **Out of scope (per issue #332):** touching `23__intrinsic_value.py`'s existing scenario
 # MAGIC math or `valuation_assumptions.json`'s existing bull/mid/bear DCF parameters (only *read*
-# MAGIC here), publishing the `dashboard_forecast` artifact (issue #333), PV-discounting /
-# MAGIC forward P/E / FCF-Yield (issue #334), any `web/`/`fundamentals_screener`/UI change
-# MAGIC (issues #335-336).
+# MAGIC here), publishing the `dashboard_forecast` artifact (issue #333), any
+# MAGIC `fundamentals_screener`/UI change.
 
 # COMMAND ----------
 
@@ -68,6 +73,7 @@ from pyspark.sql.types import (
 )
 
 from fundamentals_pipeline import forecasting as fc
+from fundamentals_pipeline import valuation as fpv
 
 # ── Paths & table names ──────────────────────────────────────────────────────
 ASSUMPTIONS_JSON_PATH = "../00__config/valuation_assumptions.json"
@@ -152,6 +158,25 @@ TERMINAL_GROWTH_BY_TICKER: dict[str, dict[str, float]] = {
     for ticker in ACTIVE_TICKERS
 }
 print(f"✓ Resolved growth_terminal (bull/mid/bear) for {len(TERMINAL_GROWTH_BY_TICKER):,} tickers")
+
+
+def _wacc_for(ticker: str, scenario: str) -> float:
+    merged = _merge_scenario_aware(SCENARIOS[scenario], OVERRIDES.get(ticker, {}), scenario)
+    return float(merged["dcf"]["wacc"])
+
+
+# Same precompute shape as TERMINAL_GROWTH_BY_TICKER above, for the forward P/E / FCF Yield
+# step (section 5b) -- each scenario's own WACC, resolved once per ticker rather than
+# re-merging per (ticker, metric, quantile) row.
+WACC_BY_TICKER: dict[str, dict[str, float]] = {
+    ticker: {
+        "bear": _wacc_for(ticker, "bear"),
+        "mid": _wacc_for(ticker, "mid"),
+        "bull": _wacc_for(ticker, "bull"),
+    }
+    for ticker in ACTIVE_TICKERS
+}
+print(f"✓ Resolved WACC (bull/mid/bear) for {len(WACC_BY_TICKER):,} tickers")
 
 # COMMAND ----------
 
@@ -320,11 +345,74 @@ print(f"✓ Years 6-10 forecast: {len(terminal_forecasts):,} rows"
 
 # COMMAND ----------
 
-# MAGIC %md ## 6. Write financials_forecast (full overwrite)
+# MAGIC %md ## 5b. Forward P/E / FCF Yield (issue #334's PV-discounted multiples, wired in)
+# MAGIC
+# MAGIC Reuses `fundamentals_pipeline.valuation.forward_pe`/`forward_fcf_yield` (issue #334) --
+# MAGIC discounts each `(ticker, horizon, quantile_level)` Net Income / Free Cash Flow forecast
+# MAGIC back to present value at that quantile's own interpolated WACC (via
+# MAGIC `terminal_growth_for_quantile`'s generic 3-anchor linear interpolation across
+# MAGIC bear/mid/bull -- the same function the terminal-growth blend above already uses; it
+# MAGIC isn't specific to growth rates), against each ticker's own latest-FY market cap. Appends
+# MAGIC `forward_pe`/`forward_fcf_yield` `metric` rows to the same long-format table -- no new
+# MAGIC artifact/schema needed (`metric` is already a free-text column).
 
 # COMMAND ----------
 
 all_forecasts = pd.concat([explicit_forecasts, terminal_forecasts], ignore_index=True)
+
+# Each ticker's own market cap as of its latest fiscal year (same year latest_panel/
+# _base_values key off) -- a ticker with no market_cap_asof row for that year is skipped
+# below, never fabricated.
+_latest_fy_by_ticker = latest_panel.drop_duplicates("ticker")[["ticker", "fiscal_year"]]
+_current_market_cap_pdf = _market_cap_pdf.merge(_latest_fy_by_ticker, on=["ticker", "fiscal_year"], how="inner")
+MARKET_CAP_BY_TICKER: dict[str, float] = dict(
+    zip(_current_market_cap_pdf["ticker"], _current_market_cap_pdf["market_cap"], strict=True)
+)
+
+_multiple_rows: list[dict] = []
+_failed_multiples: list[dict] = []
+for row in all_forecasts.itertuples(index=False):
+    if row.metric not in ("net_income", "free_cash_flow"):
+        continue
+    try:
+        market_cap = MARKET_CAP_BY_TICKER.get(row.ticker)
+        wacc_by_scenario = WACC_BY_TICKER.get(row.ticker)
+        if market_cap is None or wacc_by_scenario is None:
+            continue  # no market cap / no resolved assumptions -- skip, don't fabricate
+        wacc = fc.terminal_growth_for_quantile(
+            row.quantile_level, bear_terminal=wacc_by_scenario["bear"],
+            mid_terminal=wacc_by_scenario["mid"], bull_terminal=wacc_by_scenario["bull"],
+        )
+        if row.metric == "net_income":
+            value = fpv.forward_pe(market_cap, row.forecast_value, wacc, row.horizon)
+            out_metric = "forward_pe"
+        else:
+            value = fpv.forward_fcf_yield(market_cap, row.forecast_value, wacc, row.horizon)
+            out_metric = "forward_fcf_yield"
+        if value is None:
+            continue  # ungated (e.g. non-positive PV earnings for forward_pe) -- skip
+        _multiple_rows.append({
+            "ticker": row.ticker, "fiscal_year": row.fiscal_year, "horizon": row.horizon,
+            "metric": out_metric, "quantile_level": row.quantile_level, "forecast_value": value,
+        })
+    except Exception as e:  # noqa: BLE001 -- one row's forward-multiple failure must not abort the run
+        _failed_multiples.append({
+            "ticker": row.ticker,
+            "error": {"error_type": "forward_multiple_failed", "error_message": str(e)[:500]},
+        })
+
+forward_multiples = pd.DataFrame(_multiple_rows) if _multiple_rows else pd.DataFrame(
+    columns=["ticker", "fiscal_year", "horizon", "metric", "quantile_level", "forecast_value"]
+)
+all_forecasts = pd.concat([all_forecasts, forward_multiples], ignore_index=True)
+print(f"✓ Forward P/E / FCF Yield: {len(forward_multiples):,} rows"
+      + (f" ({len(_failed_multiples)} row(s) failed)" if _failed_multiples else ""))
+
+# COMMAND ----------
+
+# MAGIC %md ## 6. Write financials_forecast (full overwrite)
+
+# COMMAND ----------
 
 _forecast_schema = StructType([
     StructField("ticker", StringType(), False),
@@ -364,7 +452,8 @@ spark.sql(f"""
     )
 """)
 
-if _failed_terminal:
+_all_failures = _failed_terminal + _failed_multiples
+if _all_failures:
     _scraped_at = datetime.utcnow()
     _fail_schema = StructType([
         StructField("ticker", StringType(), False),
@@ -379,7 +468,7 @@ if _failed_terminal:
         "error_message": f["error"]["error_message"],
         "step": "forecasting",
         "scraped_at": _scraped_at,
-    } for f in _failed_terminal]
+    } for f in _all_failures]
     (spark.createDataFrame(_fail_records, schema=_fail_schema)
      .write.mode("append").saveAsTable(failures_tbl))
     print(f"✓ Logged {len(_fail_records):,} failure(s) to {failures_tbl}")
