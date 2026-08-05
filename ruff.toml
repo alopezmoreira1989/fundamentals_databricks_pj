@@ -62,6 +62,11 @@ ignore = [
 "fundamentals_pipeline/valuation.py" = ["UP007"]
 "fundamentals_screener/fundamentals_screener/repositories/base.py" = ["B905"]
 "fundamentals_screener/fundamentals_screener/charts.py" = ["B905"]
+# services.get_forecast_chart zips two DTO-derived tuples that are always the same length by
+# construction (get_statements/metric_history build values sized exactly to their own years/
+# fiscal_years tuple) -- caused a real Python 3.9.2 production 500 (zip(..., strict=True) was
+# used here initially; strict= itself doesn't exist before 3.10, see the note above).
+"fundamentals_screener/fundamentals_screener/services.py" = ["B905"]
 
 [format]
 quote-style = "double"
