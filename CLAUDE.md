@@ -228,6 +228,91 @@ Databricks analytical pipeline that ingests SEC EDGAR XBRL filings (10-K/10-Q) f
     metric) — not a bug to chase if you see it, but worth flagging to the repo owner if a new
     preset criterion depends on a metric that was *just* added to the pipeline.
 
+- **Forecasting (2026-08) — 10-year cross-sectional ML scenario forecasts, published as
+  `dashboard_forecast`, surfaced in `fundamentals_screener`'s Forecasting page/tab.**
+  `fundamentals_pipeline/forecasting.py` + the pipeline stage `20__transformation/
+  24__forecasting.py` train **LightGBM quantile regression** (5 quantile levels — p10/p25/p50/
+  p75/p90, i.e. Bear/Low Bear/Crab/Low Bull/Bull) cross-sectionally across the full ticker
+  universe for years 1-5 of Revenue/Net Income/Free Cash Flow, using LightGBM's **native
+  `Dataset`/`train` API, not the `sklearn` wrapper** — deliberate: issue #329's Phase 0 audit
+  only verified `lightgbm`/`catboost` install on Databricks Free Edition serverless, never
+  `scikit-learn`, and a real local run confirmed `LGBMRegressor(...)` hard-fails there
+  (`LightGBMError: scikit-learn is required`). A friend's suggestion mid-build to switch to
+  Random Forest + `GridSearchCV` was assessed and declined for the same reason (RF has no
+  native quantile-regression support without an unverified dependency; `GridSearchCV` needs
+  full scikit-learn) — the legitimate part of that feedback (no regularization/early-stopping/
+  held-out evaluation discipline) was addressed instead: `_REGULARIZATION_DEFAULTS`, an
+  optional `validation_panel` kwarg enabling `lgb.early_stopping`, a pure-numpy
+  `roc_auc_score` (deliberately not `sklearn.metrics`, same install-risk reasoning), and
+  `cross_validate_loss_classifier` (walk-forward/expanding-window CV, never a random split —
+  this project's own no-look-ahead discipline).
+  - **Two-part (hurdle) target design**: a continuous `log_growth` regressor (positive-to-
+    positive only) plus an independent binary `is_loss` classifier per horizon, combined via
+    `reconstruct_forecast_value` — `value_t = value_from * exp(predicted_growth)`
+    structurally cannot represent a company going into losses, so growth alone isn't enough.
+    Combination rule: a quantile level `q` is "the value below which fraction `q` of the
+    distribution lies," so `P(loss) >= q` (or `value_from` itself already non-positive) floors
+    that quantile's forecast to `0.0` — no separate "loss magnitude" model.
+  - **Chernozhukov et al. (2010) quantile rearrangement** (`rearrange_quantiles`) sorts the 5
+    independently-predicted quantiles into monotonic order per row before use — 5 separately
+    trained models have no structural guarantee p10 ≤ p25 ≤ ... ≤ p90 without it.
+  - **Years 6-10 blend toward each scenario's own DCF terminal-growth rate** —
+    `terminal_growth_for_quantile` maps a quantile level to a terminal growth rate via linear
+    interpolation across `valuation_assumptions.json`'s existing bear/mid/bull `dcf.
+    growth_terminal` profiles (anchored at q=0.10/0.50/0.90; q=0.25/0.75 are a principled
+    interpolation, not an arbitrary halfway split) — resolving the "5 quantile scenarios vs. 3
+    DCF profiles" mismatch by reusing the DCF model's own scenario assumptions rather than
+    inventing new ones. `blend_terminal_years`/`blend_terminal_years_from_values` produce the
+    full years-6-10 value path (not one lump Gordon terminal value, since the fan chart needs
+    a point at every FY), mirroring `valuation.py`'s own two-stage DCF spirit. The exact same
+    3-anchor interpolation function is reused a second time for **WACC** (not just growth) to
+    compute PV-discounted forward multiples — `terminal_growth_for_quantile`'s parameter names
+    are cosmetic, it's generic linear interpolation across bear/mid/bull, not growth-specific.
+  - **PV-discounted forward P/E / FCF Yield** (`valuation.py`'s `pv_discount`/`forward_pe`/
+    `forward_fcf_yield`, issue #334) were added as pure functions before anything called
+    them — issue #336's tab UI was deliberately scoped to only *consume* published data, so
+    nothing in the original milestone breakdown ever wired them in. Fixed by extending
+    `24__forecasting.py` itself: each `(ticker, quantile_level, horizon)` net_income/
+    free_cash_flow forecast is discounted at that quantile's interpolated WACC against the
+    ticker's own latest market cap, appended as `forward_pe`/`forward_fcf_yield` **`metric`**
+    rows in the **same** `financials_forecast` table/`dashboard_forecast` artifact — no new
+    artifact or schema version needed, since `metric` is already a free-text column. Flag this
+    kind of gap early in future milestones: a "pure function only" issue followed by a
+    "UI only, consume what's published" issue can silently skip the wiring step in between.
+  - **Consumer-side (`fundamentals_screener`)**: `ForecastRepository` reads `dashboard_forecast`
+    directly (this package's own DuckDB view naming — the artifact name itself, not a short
+    alias), explicitly filtering `metric` to the 3 raw target metrics for the fan chart vs.
+    `forward_pe`/`forward_fcf_yield` (mid/"Crab" scenario only) for the multiples table, since
+    both live in the same table. `services.get_forecast_chart` composes it with
+    `CompanyRepository`'s existing statement/metric-history reads for historical context, and
+    **pre-pends each scenario's own FY0 historical value server-side** before the JS chart ever
+    computes its shared min/max scale — this is what makes "every line (historical + all 5
+    scenarios) shares one y-scale/domain, visually originating from the same FY0 point" (issue
+    #336's explicit required test) trivial on the JS side rather than something the chart code
+    has to engineer. The Forecasting page/tab was originally built against `web/` (issue #335,
+    PR #346) and had to be rebuilt from scratch in `fundamentals_screener` once `web/` was
+    retired mid-milestone — see ADR-0008.
+  - **A real production 500 (2026-08-05, fixed same-day)**: `services.get_forecast_chart`
+    used `zip(a, b, strict=True)` — the exact Python 3.10-only pitfall this file's own "Python
+    floor" note (under External consumers) already documents from a prior 2026-07-20 incident
+    — written fresh into new code despite that documented history. `ruff.toml`'s repo-wide
+    `target-version = "py310"` does not catch this for `fundamentals_screener/` specifically;
+    only hitting a real per-ticker URL after deploy did (`curl -s -o /dev/null -w "%{http_code}"
+    https://alopezm.xyz/apps/screener/AAPL/`) — the consumer's own deploy health check only
+    pings the general screener landing page, which exercises no per-ticker view code at all.
+    **When writing new code in `fundamentals_screener/`, actively check for `zip(...,
+    strict=...)` and module-level PEP 604 unions — don't rely on remembering the floor, and
+    don't trust a clean `ruff check` alone as proof.**
+  - **The daily GitHub Release publish can silently regress a working release to a `draft`**
+    (encountered twice now: 2026-05-31, 2026-07-30/2026-08-05) **well after
+    `52__publish_to_github.py`'s own retry-and-verify loop reported success** — a draft has no
+    public `releases/download/<tag>/…` URL, so every consumer 404s despite the Databricks job
+    itself showing `SUCCESS`. Diagnostic: `gh api repos/.../releases --paginate -q '.[] |
+    select(.tag_name=="latest") | {id, draft}'`; fix is a one-line `gh api -X PATCH
+    repos/.../releases/<id> -f draft=false` (exactly what the script's own `publish_release()`
+    does) — no pipeline re-run needed. If this recurs often, it may be worth a periodic
+    post-hoc re-verification rather than trusting the publish-time check alone.
+
 ## Operational gotchas
 
 - **SEC User-Agent must be set before running ingestion.** `00__config/01__tickers.py` ships with placeholder `"MyCompany myemail@example.com"`. SEC blocks requests without a real org/email. Flag this if you see it unchanged when working near ingestion.
@@ -380,18 +465,25 @@ on it existing.
     dropped it. Do not introduce Python ≥3.10-only syntax (`dataclass(slots=True)`,
     `match`/`case`, etc.) anywhere in `fundamentals_screener/`. Two
     non-obvious 3.10-only patterns already caused real import-time/runtime failures on a real
-    Python 3.9.2 retest (both fixed, 2026-07-20) — watch for them in review, since a plain
-    `grep` for `match`/`case`/`slots=True` won't catch either: (1) a **module-level assignment**
-    of a PEP 604 union, e.g. `Number = float | int | None` — `from __future__ import
-    annotations` only defers *annotation* evaluation, not a normal assignment's right-hand
-    side, so this still raises `TypeError` at import time pre-3.10; use `typing.Union[...]`
-    instead. (2) `zip(..., strict=True)` (or `strict=False`) — the `strict=` keyword itself
-    doesn't exist before 3.10, regardless of its value; do a manual `len(a) != len(b)` check
-    and call plain `zip(a, b)` instead. `ruff.toml`'s `target-version = "py310"` makes ruff
-    actively suggest reintroducing both (`UP007`, `B905`) — the affected files
+    Python 3.9.2 retest (both originally fixed 2026-07-20) — watch for them in review, since a
+    plain `grep` for `match`/`case`/`slots=True` won't catch either: (1) a **module-level
+    assignment** of a PEP 604 union, e.g. `Number = float | int | None` — `from __future__
+    import annotations` only defers *annotation* evaluation, not a normal assignment's
+    right-hand side, so this still raises `TypeError` at import time pre-3.10; use
+    `typing.Union[...]` instead. (2) `zip(..., strict=True)` (or `strict=False`) — the
+    `strict=` keyword itself doesn't exist before 3.10, regardless of its value; do a manual
+    `len(a) != len(b)` check and call plain `zip(a, b)` instead. **Pattern (2) recurred a third
+    time, 2026-08-05, and this time reached production** (a real 500 on the live site) — see
+    the Forecasting entry above — despite being written by the same session that had *just*
+    read this exact paragraph, underscoring that knowing about the pitfall and catching it
+    while writing new code are not the same thing; `ruff check` passing is not proof, since
+    `ruff.toml`'s repo-wide `target-version = "py310"` doesn't know this one package has a
+    lower floor. `ruff.toml`'s `target-version = "py310"` makes ruff actively suggest
+    reintroducing both (`UP007`, `B905`) — the affected files
     (`fundamentals_pipeline/{backtest,periods,valuation}.py`,
-    `fundamentals_screener/fundamentals_screener/repositories/base.py`) have targeted
-    per-file-ignores for exactly those two rules, nowhere else. The root `fundamentals_pipeline`
+    `fundamentals_screener/fundamentals_screener/{repositories/base,charts,services}.py`) have
+    targeted per-file-ignores for exactly those two rules, nowhere else. The root
+    `fundamentals_pipeline`
     package's own `pyproject.toml` `requires-python` is **also**
     `>=3.9` for the same reason — `pip` enforces that metadata before even looking at the
     code, so `fundamentals_screener`'s git dependency on it would hard-fail to install on
