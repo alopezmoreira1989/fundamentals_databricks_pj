@@ -1,0 +1,131 @@
+{% extends "fundamentals_screener/base_screener.html" %}
+{% load static %}
+{% block title %}{{ ticker }} — Forecasting{% endblock %}
+{% block content %}
+  <div class="fc-hero bg-white rounded-3 shadow-sm mb-4">
+    <div class="d-flex align-items-baseline gap-3 flex-wrap mb-1">
+      <span class="eyebrow accent">Forecasting</span>
+      <span class="fc-badge">10Y horizon</span>
+      <span class="fc-badge">5 scenarios</span>
+      <a class="ms-auto small text-decoration-none" href="{% url 'fundamentals_screener:valuation' ticker %}">Valuation →</a>
+      <a class="small text-decoration-none" href="{% url 'fundamentals_screener:company_detail' ticker %}">Company detail →</a>
+    </div>
+    <h1 class="h3 mb-1">{{ ticker }} <span class="text-muted fw-normal" style="font-size:1rem;">— Forward Financials</span></h1>
+    <p class="fc-metric-note mb-0">
+      Years 1–5 are produced by a cross-sectional quantile model (gradient boosting) trained on the full
+      coverage universe; years 6–10 converge toward each scenario's terminal growth rate — the same
+      two-stage logic already used by the DCF model.
+    </p>
+  </div>
+
+  {% if chart.metrics %}
+    {{ chart_data|json_script:"fc-data" }}
+
+    <ul class="nav nav-tabs mb-3" id="fc-metric-tabs">
+      {% for m in chart.metrics %}
+        <li class="nav-item">
+          <button class="nav-link{% if forloop.first %} active{% endif %}" data-metric="{{ m.metric }}" type="button">
+            {{ m.label }}
+          </button>
+        </li>
+      {% endfor %}
+    </ul>
+
+    <div class="bg-white shadow-sm p-4 mb-4 rounded-3">
+      <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+        <h2 class="h6 mb-0" id="fc-chart-title"></h2>
+        <div class="fc-scenario-row" id="fc-legend">
+          <span class="fc-chip fc-chip--bear" data-scenario="bear" data-active="true"><span class="dot"></span>Bear</span>
+          <span class="fc-chip fc-chip--lowbear" data-scenario="lowbear" data-active="true"><span class="dot"></span>Low Bear</span>
+          <span class="fc-chip fc-chip--crab" data-scenario="crab" data-active="true"><span class="dot"></span>Crab</span>
+          <span class="fc-chip fc-chip--lowbull" data-scenario="lowbull" data-active="true"><span class="dot"></span>Low Bull</span>
+          <span class="fc-chip fc-chip--bull" data-scenario="bull" data-active="true"><span class="dot"></span>Bull</span>
+        </div>
+      </div>
+
+      <div class="fc-chart-wrap">
+        <svg viewBox="0 0 760 300" id="fc-svg">
+          <rect class="fc-terminal-band" x="470" y="10" width="260" height="240"></rect>
+          <text class="fc-zone-label" x="600" y="26" text-anchor="middle">terminal convergence</text>
+          <text class="fc-zone-label" x="280" y="26" text-anchor="middle">explicit ml forecast</text>
+
+          <line x1="40" y1="250" x2="730" y2="250" stroke="var(--rule)" stroke-width="1"></line>
+          <line class="fc-today-line" x1="200" y1="10" x2="200" y2="250"></line>
+          <text class="fc-axis-label" x="200" y="264" text-anchor="middle">FY0</text>
+          <text class="fc-axis-label" x="40" y="264" text-anchor="middle">FY-5</text>
+          <text class="fc-axis-label" x="470" y="264" text-anchor="middle">FY+5</text>
+          <text class="fc-axis-label" x="730" y="264" text-anchor="middle">FY+10</text>
+
+          <path class="fc-line fc-line--hist" id="ln-hist" d=""></path>
+          <path class="fc-line fc-line--bear" id="ln-bear" d=""></path>
+          <path class="fc-line fc-line--lowbear" id="ln-lowbear" d=""></path>
+          <path class="fc-line fc-line--crab" id="ln-crab" d=""></path>
+          <path class="fc-line fc-line--lowbull" id="ln-lowbull" d=""></path>
+          <path class="fc-line fc-line--bull" id="ln-bull" d=""></path>
+        </svg>
+      </div>
+      <p class="fc-metric-note mt-2 mb-0">
+        Bear/Low Bear/Crab/Low Bull/Bull correspond to the model's p10/p25/p50/p75/p90 predicted
+        quantiles. Click a legend chip to toggle that scenario's line.
+      </p>
+    </div>
+
+    {% if chart.forward_multiples %}
+      <div class="bg-white shadow-sm p-4 rounded-3">
+        <div class="d-flex justify-content-between align-items-baseline mb-3 flex-wrap gap-2">
+          <h2 class="h6 mb-0">Forward P/E &amp; FCF Yield <span class="text-muted fw-normal">· PV-discounted, scenario: <span class="eyebrow accent">Crab</span></span></h2>
+          <span class="small text-muted">Discounted at each scenario's own WACC — same rates as the DCF model</span>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-sm align-middle mb-0" id="fc-multiples-table">
+            <thead>
+              <tr>
+                <th scope="col">Metric</th>
+                <th scope="col" class="text-end">FY+1</th>
+                <th scope="col" class="text-end">FY+2</th>
+                <th scope="col" class="text-end">FY+3</th>
+                <th scope="col" class="text-end">FY+5</th>
+                <th scope="col" class="text-end">FY+7</th>
+                <th scope="col" class="text-end">FY+10</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr data-multiple-row="forward_pe">
+                <td>Forward P/E <span class="text-muted small">(PV-adj.)</span></td>
+                <td class="text-end mono" data-horizon="1">—</td>
+                <td class="text-end mono" data-horizon="2">—</td>
+                <td class="text-end mono" data-horizon="3">—</td>
+                <td class="text-end mono" data-horizon="5">—</td>
+                <td class="text-end mono" data-horizon="7">—</td>
+                <td class="text-end mono" data-horizon="10">—</td>
+              </tr>
+              <tr data-multiple-row="forward_fcf_yield">
+                <td>FCF / P <span class="text-muted small">(yield)</span></td>
+                <td class="text-end mono" data-horizon="1">—</td>
+                <td class="text-end mono" data-horizon="2">—</td>
+                <td class="text-end mono" data-horizon="3">—</td>
+                <td class="text-end mono" data-horizon="5">—</td>
+                <td class="text-end mono" data-horizon="7">—</td>
+                <td class="text-end mono" data-horizon="10">—</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="fc-model-footnote mb-0">
+          Model: LightGBM quantile regression (p10/p25/p50/p75/p90 → Bear/Low Bear/Crab/Low Bull/Bull),
+          trained cross-sectionally on the full ticker universe, horizon treated as a numeric feature.
+          Years 6–10 blend toward each scenario's terminal growth rate. For illustration only — not
+          investment advice.
+        </p>
+      </div>
+    {% endif %}
+  {% else %}
+    <div class="bg-white shadow-sm p-4 rounded-3 fc-empty">
+      No forecast published yet for {{ ticker }}.
+    </div>
+  {% endif %}
+{% endblock %}
+
+{% block extra_scripts %}
+  <script src="{% static 'fundamentals_screener/js/forecasting.js' %}"></script>
+{% endblock %}

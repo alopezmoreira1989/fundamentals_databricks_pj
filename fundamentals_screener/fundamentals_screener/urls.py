@@ -22,4 +22,6 @@ urlpatterns = [
     path("<str:ticker>/news/", views.company_news, name="company_news"),
     path("<str:ticker>/valuation/", views.valuation, name="valuation"),
     path("<str:ticker>/valuation/data/", views.valuation_data, name="valuation_data"),
+    path("<str:ticker>/forecasting/", views.forecasting, name="forecasting"),
+    path("<str:ticker>/forecasting/data/", views.forecasting_data, name="forecasting_data"),
 ]

@@ -450,3 +450,79 @@ class FootballField:
 
     bars: tuple[FootballBar, ...]
     price: float | None
+
+
+@dataclass(frozen=True)
+class ForecastPoint:
+    """One raw forecast row: a ticker's forecast for ``metric`` at ``horizon`` years out, at
+    one quantile scenario. Sourced from the ``dashboard_forecast`` artifact, written by the
+    pipeline's ``24__forecasting.py`` (issue #332) — this DTO never recomputes a forecast."""
+
+    metric: str
+    horizon: int
+    quantile_level: float
+    forecast_value: float | None
+
+
+@dataclass(frozen=True)
+class ForecastSeries:
+    """One ``(metric, quantile level)`` forecast path, ready to plot as one line of the
+    Forecasting fan chart — ``horizons``/``values`` are index-aligned, ascending by horizon."""
+
+    metric: str
+    quantile_level: float
+    horizons: tuple[int, ...]
+    values: tuple[float | None, ...]
+
+
+@dataclass(frozen=True)
+class ForecastHistoryPoint:
+    """One historical (reported, not forecasted) fiscal-year value for a Forecasting metric."""
+
+    fiscal_year: int
+    value: float | None
+
+
+@dataclass(frozen=True)
+class ForecastMetricChart:
+    """One target metric's (Revenue/Net Income/Free Cash Flow) full Forecasting fan-chart
+    data: recent reported history plus every quantile scenario's forward path.
+
+    ``historical`` is chronological (oldest first, ending at the ticker's latest reported
+    fiscal year — "FY0"). When history exists, each ``scenarios`` entry's own ``horizons``/
+    ``values`` are pre-pended with ``(0, historical[-1].value)`` — the FY0 anchor — as their
+    first element, so every line the chart draws — historical AND every scenario — shares one
+    array origin point; this is what makes a single shared y-scale/domain across all lines
+    trivial on the JS side (issue #336's explicit requirement) rather than something the chart
+    code has to engineer itself. With no history, scenarios are left un-anchored (raw horizons
+    1-10).
+    """
+
+    metric: str
+    label: str
+    unit: str | None
+    historical: tuple[ForecastHistoryPoint, ...]
+    scenarios: tuple[ForecastSeries, ...]
+
+
+@dataclass(frozen=True)
+class ForwardMultipleRow:
+    """One PV-discounted forward multiple (``"forward_pe"`` or ``"forward_fcf_yield"``) at one
+    horizon, for the mid/"Crab" (quantile 0.50) scenario only — see
+    ``ForecastRepository.forward_multiples``."""
+
+    metric: str
+    horizon: int
+    value: float | None
+
+
+@dataclass(frozen=True)
+class ForecastChart:
+    """The Forecasting page's full data for one ticker: every target metric's fan-chart data
+    plus the forward-multiples table. ``metrics``/``forward_multiples`` are both empty (not
+    ``None``) when the ticker is known but has no published forecast yet — the page renders a
+    "not available" state rather than 404ing."""
+
+    ticker: str
+    metrics: tuple[ForecastMetricChart, ...]
+    forward_multiples: tuple[ForwardMultipleRow, ...]
