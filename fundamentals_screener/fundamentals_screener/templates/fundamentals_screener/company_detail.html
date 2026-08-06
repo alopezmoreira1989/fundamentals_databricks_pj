@@ -632,29 +632,37 @@
           </div>
 
           <div class="fc-chart-wrap">
-            <svg viewBox="0 0 760 300" id="fc-svg">
-              <rect class="fc-terminal-band" x="470" y="10" width="260" height="240"></rect>
-              <text class="fc-zone-label" x="600" y="26" text-anchor="middle">terminal convergence</text>
-              <text class="fc-zone-label" x="280" y="26" text-anchor="middle">explicit ml forecast</text>
+            <svg viewBox="0 0 1120 400" id="fc-svg">
+              <rect id="zone-terminal" class="fc-terminal-band"></rect>
+              <g id="fc-gridlines-y"></g>
+              <g id="fc-ticks-x"></g>
 
-              <line x1="40" y1="250" x2="730" y2="250" stroke="var(--rule)" stroke-width="1"></line>
-              <line class="fc-today-line" x1="200" y1="10" x2="200" y2="250"></line>
-              <text class="fc-axis-label" x="200" y="264" text-anchor="middle">FY0</text>
-              <text class="fc-axis-label" x="40" y="264" text-anchor="middle">FY-5</text>
-              <text class="fc-axis-label" x="470" y="264" text-anchor="middle">FY+5</text>
-              <text class="fc-axis-label" x="730" y="264" text-anchor="middle">FY+10</text>
+              <text class="fc-zone-label" id="zone-label-hist" text-anchor="middle" y="30">historical</text>
+              <text class="fc-zone-label" id="zone-label-explicit" text-anchor="middle" y="30">explicit ml forecast</text>
+              <text class="fc-zone-label" id="zone-label-terminal" text-anchor="middle" y="30">terminal convergence</text>
+
+              <line id="fc-baseline" stroke="var(--rule)" stroke-width="1"></line>
+              <line class="fc-today-line" id="fc-line-fy0"></line>
+              <line class="fc-zone-divider" id="fc-line-fy10"></line>
 
               <path class="fc-line fc-line--hist" id="ln-hist" d=""></path>
-              <path class="fc-line fc-line--bear" id="ln-bear" d=""></path>
-              <path class="fc-line fc-line--lowbear" id="ln-lowbear" d=""></path>
-              <path class="fc-line fc-line--crab" id="ln-crab" d=""></path>
-              <path class="fc-line fc-line--lowbull" id="ln-lowbull" d=""></path>
-              <path class="fc-line fc-line--bull" id="ln-bull" d=""></path>
+
+              <path class="fc-line fc-line--bear"    id="ln-bear-explicit"    d=""></path>
+              <path class="fc-line fc-line--lowbear" id="ln-lowbear-explicit" d=""></path>
+              <path class="fc-line fc-line--crab"    id="ln-crab-explicit"    d=""></path>
+              <path class="fc-line fc-line--lowbull" id="ln-lowbull-explicit" d=""></path>
+              <path class="fc-line fc-line--bull"    id="ln-bull-explicit"    d=""></path>
+
+              <path class="fc-line fc-line--bear fc-line--terminal"    id="ln-bear-terminal"    d=""></path>
+              <path class="fc-line fc-line--lowbear fc-line--terminal" id="ln-lowbear-terminal" d=""></path>
+              <path class="fc-line fc-line--crab fc-line--terminal"    id="ln-crab-terminal"    d=""></path>
+              <path class="fc-line fc-line--lowbull fc-line--terminal" id="ln-lowbull-terminal" d=""></path>
+              <path class="fc-line fc-line--bull fc-line--terminal"    id="ln-bull-terminal"    d=""></path>
             </svg>
           </div>
           <p class="fc-metric-note mt-2 mb-0">
-            Bear/Low Bear/Crab/Low Bull/Bull correspond to the model's p10/p25/p50/p75/p90 predicted
-            quantiles. Click a legend chip to toggle that scenario's line.
+            Gridlines mark every 5 years on the x-axis (with minor year ticks between) and every quartile
+            of the visible value range on the y-axis. Click a legend chip to toggle that scenario's line.
           </p>
         </div>
 
@@ -675,6 +683,8 @@
                     <th scope="col" class="text-end">FY+5</th>
                     <th scope="col" class="text-end">FY+7</th>
                     <th scope="col" class="text-end">FY+10</th>
+                    <th scope="col" class="text-end">FY+15</th>
+                    <th scope="col" class="text-end">FY+20</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -686,6 +696,8 @@
                     <td class="text-end mono" data-horizon="5">—</td>
                     <td class="text-end mono" data-horizon="7">—</td>
                     <td class="text-end mono" data-horizon="10">—</td>
+                    <td class="text-end mono" data-horizon="15">—</td>
+                    <td class="text-end mono" data-horizon="20">—</td>
                   </tr>
                   <tr data-multiple-row="forward_fcf_yield">
                     <td>FCF / P <span class="text-muted small">(yield)</span></td>
@@ -695,6 +707,8 @@
                     <td class="text-end mono" data-horizon="5">—</td>
                     <td class="text-end mono" data-horizon="7">—</td>
                     <td class="text-end mono" data-horizon="10">—</td>
+                    <td class="text-end mono" data-horizon="15">—</td>
+                    <td class="text-end mono" data-horizon="20">—</td>
                   </tr>
                 </tbody>
               </table>

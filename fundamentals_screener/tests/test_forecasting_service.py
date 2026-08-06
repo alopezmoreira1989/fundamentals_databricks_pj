@@ -59,10 +59,10 @@ class _FakeCompanyRepo:
     def get_summary(self, ticker):
         return self._summary
 
-    def get_statements(self, ticker, *, max_years=6):
+    def get_statements(self, ticker, *, max_years=11):
         return self._statements
 
-    def metric_history(self, ticker, *, years=6):
+    def metric_history(self, ticker, *, years=11):
         return self._fcf_series
 
 
