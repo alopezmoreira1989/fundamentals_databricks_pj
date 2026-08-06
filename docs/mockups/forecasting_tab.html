@@ -3,14 +3,15 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AAPL — Forecasting (mockup)</title>
+<title>AAPL — Forecasting v2 (mockup)</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
 <style>
 /* ============================================================
- * Tokens copied verbatim from web/static/css/app.css — no new
- * hex values introduced anywhere in this mockup.
+ * Tokens copied verbatim from docs/mockups/forecasting_tab.html
+ * (which copied them verbatim from web/static/css/app.css) —
+ * no new hex values introduced anywhere in this mockup.
  * ============================================================ */
 :root {
   --bg: #FAF8F4;
@@ -60,8 +61,8 @@ h1, h2, h3, .display-face {
 .nav-tabs .nav-link.active { color: var(--accent-ink); background: transparent; border-color: transparent transparent var(--accent); }
 
 /* ============================================================
- * NEW — Forecasting tab, appended block (would live in its own
- * forecasting.css partial, never touching the shared :root above)
+ * Forecasting tab block — v2. Additions vs. the original mockup
+ * are called out inline; nothing here touches :root.
  * ============================================================ */
 .fc-hero { padding: 1.75rem 2rem; border-radius: 6px; }
 .fc-badge {
@@ -86,8 +87,15 @@ h1, h2, h3, .display-face {
 
 .fc-chart-wrap { position: relative; }
 .fc-chart-wrap svg { width: 100%; height: auto; display: block; }
-.fc-axis-label { font-family: var(--mono); font-size: 9.5px; fill: var(--ink-3); }
+
+/* NEW — axis system: real gridlines + per-year ticks instead of 4 bare labels */
+.fc-grid-y { stroke: var(--rule-soft); stroke-width: 1; }
+.fc-axis-label { font-family: var(--mono); font-size: 10px; fill: var(--ink-3); }
+.fc-axis-label--y { text-anchor: end; }
+.fc-tick-minor { stroke: var(--rule); stroke-width: 1; }
+.fc-tick-major { stroke: var(--ink-3); stroke-width: 1; }
 .fc-zone-label { font-family: var(--mono); font-size: 9.5px; letter-spacing: .06em; fill: var(--ink-3); text-transform: uppercase; }
+.fc-zone-divider { stroke: var(--rule); stroke-width: 1; stroke-dasharray: 2 3; }
 
 .fc-line { fill: none; stroke-width: 2; }
 .fc-line--hist { stroke: var(--ink); }
@@ -96,9 +104,12 @@ h1, h2, h3, .display-face {
 .fc-line--crab { stroke: var(--accent); }
 .fc-line--lowbull { stroke: var(--positive); stroke-opacity: .55; stroke-dasharray: 3 2; }
 .fc-line--bull { stroke: var(--positive); }
-.fc-line--terminal { stroke-dasharray: 1 3; }
+/* NEW — terminal segment gets its own lighter/thinner treatment so it reads as
+   "the same line, entering a qualitatively calmer regime" rather than a literal
+   continuation of the explicit-forecast slope. */
+.fc-line--terminal { stroke-width: 1.5; opacity: .78; }
 .fc-line[data-hidden="true"] { opacity: 0; }
-.fc-today-line { stroke: var(--rule); stroke-width: 1; stroke-dasharray: 2 2; }
+.fc-today-line { stroke: var(--ink-3); stroke-width: 1; stroke-dasharray: 2 2; }
 .fc-terminal-band { fill: var(--bg-subtle); }
 
 .fc-metric-note { font-size: .78rem; color: var(--ink-2); }
@@ -109,9 +120,9 @@ h1, h2, h3, .display-face {
 </style>
 </head>
 <body>
-<div class="container py-4" style="max-width:1040px;">
+<div class="container py-4" style="max-width:1180px;">
 
-  <!-- ---------- Masthead nav, existing pattern + new tab ---------- -->
+  <!-- ---------- Masthead nav ---------- -->
   <div class="d-flex align-items-baseline gap-4 mb-4 pb-2" style="border-bottom:1px solid var(--ink);">
     <span class="eyebrow">fundamentals</span>
     <nav class="d-flex gap-3 ms-auto" style="font-size:.85rem;">
@@ -126,15 +137,19 @@ h1, h2, h3, .display-face {
   <div class="fc-hero bg-white shadow-sm mb-4">
     <div class="d-flex align-items-baseline gap-3 flex-wrap mb-1">
       <span class="eyebrow accent">Forecasting</span>
-      <span class="fc-badge" style="color:var(--ink-2);">10Y horizon</span>
+      <span class="fc-badge" style="color:var(--ink-2);">10Y history</span>
+      <span class="fc-badge" style="color:var(--ink-2);">20Y horizon</span>
       <span class="fc-badge" style="color:var(--ink-2);">5 scenarios</span>
       <a class="ms-auto small text-decoration-none" href="#" style="color:var(--accent-ink);">Valuation →</a>
     </div>
     <h1 class="h3 mb-1">AAPL <span class="text-muted fw-normal" style="font-size:1rem;">— Forward Financials</span></h1>
     <p class="fc-metric-note mb-0">
-      Years 1–5 are produced by a cross-sectional quantile model (gradient boosting) trained on the full
-      coverage universe; years 6–10 converge toward each scenario's terminal growth rate — the same
-      two-stage logic already used by the DCF model.
+      Years 1–10 are produced by a cross-sectional quantile model (gradient boosting) trained on the full
+      coverage universe; years 11–20 decay toward each scenario's own DCF terminal growth rate. Convergence
+      is front-loaded — most of the deceleration happens in the first 2–3 terminal years — so growth
+      visibly slows right after FY+10 instead of drifting at close to the explicit-forecast rate for most
+      of the decade. The five terminal rates also sit much closer together than the five explicit rates,
+      so the scenario fan stops widening at the same pace.
     </p>
   </div>
 
@@ -161,35 +176,47 @@ h1, h2, h3, .display-face {
     </div>
 
     <div class="fc-chart-wrap">
-      <svg viewBox="0 0 760 300" id="fc-svg">
-        <!-- terminal-convergence band (years 6-10) -->
-        <rect class="fc-terminal-band" x="470" y="10" width="260" height="240"></rect>
-        <text class="fc-zone-label" x="600" y="26" text-anchor="middle">terminal convergence</text>
-        <text class="fc-zone-label" x="280" y="26" text-anchor="middle">explicit ml forecast</text>
+      <svg viewBox="0 0 1120 400" id="fc-svg">
+        <!-- zone bands -->
+        <rect id="zone-terminal" class="fc-terminal-band"></rect>
+        <!-- gridlines + axes injected by JS: #fc-gridlines-y, #fc-ticks-x -->
+        <g id="fc-gridlines-y"></g>
+        <g id="fc-ticks-x"></g>
 
-        <!-- axis baseline -->
-        <line x1="40" y1="250" x2="730" y2="250" stroke="var(--rule)" stroke-width="1"></line>
-        <!-- today marker -->
-        <line class="fc-today-line" x1="200" y1="10" x2="200" y2="250"></line>
-        <text class="fc-axis-label" x="200" y="264" text-anchor="middle">FY0</text>
-        <text class="fc-axis-label" x="40" y="264" text-anchor="middle">FY-5</text>
-        <text class="fc-axis-label" x="470" y="264" text-anchor="middle">FY+5</text>
-        <text class="fc-axis-label" x="730" y="264" text-anchor="middle">FY+10</text>
+        <text class="fc-zone-label" id="zone-label-hist" text-anchor="middle" y="30">historical</text>
+        <text class="fc-zone-label" id="zone-label-explicit" text-anchor="middle" y="30">explicit ml forecast</text>
+        <text class="fc-zone-label" id="zone-label-terminal" text-anchor="middle" y="30">terminal convergence</text>
+
+        <!-- baseline -->
+        <line id="fc-baseline" stroke="var(--rule)" stroke-width="1"></line>
+        <!-- FY0 marker (today) -->
+        <line class="fc-today-line" id="fc-line-fy0"></line>
+        <!-- FY+10 divider (explicit -> terminal) -->
+        <line class="fc-zone-divider" id="fc-line-fy10"></line>
 
         <!-- historical (solid, ink) -->
         <path class="fc-line fc-line--hist" id="ln-hist" d=""></path>
 
-        <!-- forecast scenarios, years 0-5 solid, 5-10 lighter/dashed (terminal) -->
-        <path class="fc-line fc-line--bear"    id="ln-bear"    d=""></path>
-        <path class="fc-line fc-line--lowbear" id="ln-lowbear" d=""></path>
-        <path class="fc-line fc-line--crab"    id="ln-crab"    d=""></path>
-        <path class="fc-line fc-line--lowbull" id="ln-lowbull" d=""></path>
-        <path class="fc-line fc-line--bull"    id="ln-bull"    d=""></path>
+        <!-- explicit forecast, years 0-10 -->
+        <path class="fc-line fc-line--bear"    id="ln-bear-explicit"    d=""></path>
+        <path class="fc-line fc-line--lowbear" id="ln-lowbear-explicit" d=""></path>
+        <path class="fc-line fc-line--crab"    id="ln-crab-explicit"    d=""></path>
+        <path class="fc-line fc-line--lowbull" id="ln-lowbull-explicit" d=""></path>
+        <path class="fc-line fc-line--bull"    id="ln-bull-explicit"    d=""></path>
+
+        <!-- terminal convergence, years 10-20: separate <path> per scenario so it can carry
+             the .fc-line--terminal treatment (thinner/lighter) independent of the explicit segment -->
+        <path class="fc-line fc-line--bear fc-line--terminal"    id="ln-bear-terminal"    d=""></path>
+        <path class="fc-line fc-line--lowbear fc-line--terminal" id="ln-lowbear-terminal" d=""></path>
+        <path class="fc-line fc-line--crab fc-line--terminal"    id="ln-crab-terminal"    d=""></path>
+        <path class="fc-line fc-line--lowbull fc-line--terminal" id="ln-lowbull-terminal" d=""></path>
+        <path class="fc-line fc-line--bull fc-line--terminal"    id="ln-bull-terminal"    d=""></path>
       </svg>
     </div>
     <p class="fc-metric-note mt-2 mb-0">
-      Dot markers omitted for readability — hover states / tooltips (exact FY value per scenario) to be
-      wired once this is a live chart component.
+      Gridlines mark every 5 years on the x-axis (with minor year ticks between) and every quartile of the
+      visible value range on the y-axis. Dot markers / tooltips (exact FY value per scenario) to be wired
+      once this is a live chart component.
     </p>
   </div>
 
@@ -210,6 +237,8 @@ h1, h2, h3, .display-face {
             <th scope="col" class="text-end">FY+5</th>
             <th scope="col" class="text-end">FY+7</th>
             <th scope="col" class="text-end">FY+10</th>
+            <th scope="col" class="text-end">FY+15</th>
+            <th scope="col" class="text-end">FY+20</th>
           </tr>
         </thead>
         <tbody>
@@ -221,6 +250,8 @@ h1, h2, h3, .display-face {
             <td class="text-end mono">20.9×</td>
             <td class="text-end mono">19.2×</td>
             <td class="text-end mono">17.8×</td>
+            <td class="text-end mono">15.6×</td>
+            <td class="text-end mono">14.1×</td>
           </tr>
           <tr>
             <td>FCF / P <span class="text-muted small">(yield)</span></td>
@@ -230,79 +261,210 @@ h1, h2, h3, .display-face {
             <td class="text-end mono" style="color:var(--positive);">4.3%</td>
             <td class="text-end mono" style="color:var(--positive);">4.8%</td>
             <td class="text-end mono" style="color:var(--positive);">5.2%</td>
+            <td class="text-end mono" style="color:var(--positive);">5.9%</td>
+            <td class="text-end mono" style="color:var(--positive);">6.4%</td>
           </tr>
         </tbody>
       </table>
     </div>
     <p class="fc-model-footnote mb-0">
       Model: LightGBM quantile regression (p10/p25/p50/p75/p90 → Bear/Low Bear/Crab/Low Bull/Bull),
-      trained cross-sectionally on the full ticker universe, horizon treated as a numeric feature.
-      Years 6–10 blend toward each scenario's terminal growth rate. Not investment advice — for
-      illustration of the mockup only; all figures on this page are placeholders.
+      trained cross-sectionally on the full ticker universe, horizon treated as a numeric feature, years
+      1–10 explicit. Years 11–20 decay each scenario's own growth rate toward its DCF terminal-growth
+      profile (bear/mid/bull anchors, quantile-interpolated) via front-loaded exponential convergence, not
+      a 10-year linear blend — not investment advice, all figures on this page are placeholders for design
+      review only.
     </p>
   </div>
 
 </div>
 
 <script>
-// Mock data per metric — historical (FY-5..FY0, 6 pts) + forecast (FY0..FY10, 11 pts) per scenario.
-// Purely illustrative shapes for the design review; real values come from the published forecast artifact.
-const DATA = {
-  revenue: {
-    hist: [300,315,320,340,383,391],
-    bear:    [391,392,390,385,378,368,352,338,326,316,308],
-    lowbear: [391,398,402,405,406,406,404,401,398,396,394],
-    crab:    [391,404,417,431,446,461,478,495,512,528,543],
-    lowbull: [391,410,432,456,482,509,533,554,573,589,603],
-    bull:    [391,418,449,484,523,566,606,641,671,696,716]
-  },
-  netincome: {
-    hist: [57,60,61,65,97,94],
-    bear:    [94,92,89,85,80,74,68,63,59,56,53],
-    lowbear: [94,96,97,97,96,95,93,91,89,88,87],
-    crab:    [94,99,104,110,116,122,128,134,140,145,150],
-    lowbull: [94,102,111,120,130,140,148,155,161,166,170],
-    bull:    [94,106,119,133,148,163,177,189,199,207,213]
-  },
-  fcf: {
-    hist: [73,80,92,111,99,108],
-    bear:    [108,106,103,98,92,85,79,73,69,65,62],
-    lowbear: [108,110,111,111,110,109,107,105,103,101,100],
-    crab:    [108,114,120,127,134,141,148,154,160,165,169],
-    lowbull: [108,117,127,137,147,157,166,174,180,186,190],
-    bull:    [108,121,135,150,166,182,197,210,220,229,235]
-  }
+/* ============================================================
+ * Layout constants — uniform px-per-year across the full 30-year
+ * span (10 hist + 10 explicit + 10 terminal) so the x-axis reads
+ * at a consistent, legible resolution end to end.
+ * ============================================================ */
+const YEARS_HIST = 10, YEARS_EXPLICIT = 10, YEARS_TERMINAL = 10;
+const PX_PER_YEAR = 34;
+const X0 = 70;                              // FY-10
+const X_FY0 = X0 + YEARS_HIST * PX_PER_YEAR;        // FY0
+const X_FY10 = X_FY0 + YEARS_EXPLICIT * PX_PER_YEAR; // FY+10
+const X_FY20 = X_FY10 + YEARS_TERMINAL * PX_PER_YEAR; // FY+20
+const Y_TOP = 44, Y_BASE = 320, PLOT_H = Y_BASE - Y_TOP;
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+/* ============================================================
+ * Mock data — illustrative only (matches the growth-rate
+ * reconstruction formula the pipeline actually uses:
+ * value_t = value_from * exp(predicted_growth)).
+ *
+ * Explicit-forecast growth = a scenario base rate + hand-tuned
+ * noise per year (mimics independent per-horizon model output).
+ * Terminal growth = smooth linear interpolation from the last
+ * explicit growth rate to the scenario's own terminal rate — no
+ * noise, and the five terminal rates sit much closer together
+ * than the five explicit base rates. That's the mechanism behind
+ * "terminal can't look like more of the same explicit forecast."
+ * ============================================================ */
+const SCENARIOS = {
+  bear:    { base: -0.020, terminal: 0.010 },
+  lowbear: { base:  0.020, terminal: 0.020 },
+  crab:    { base:  0.060, terminal: 0.030 },
+  lowbull: { base:  0.100, terminal: 0.038 },
+  bull:    { base:  0.150, terminal: 0.045 }
+};
+// Convergence is front-loaded (exponential decay of the gap toward the terminal rate)
+// rather than spread evenly across all 10 terminal years — most of the deceleration
+// happens in years 11-13, so the line visibly bends right after FY+10 instead of
+// drifting for a decade before it settles down.
+const TERMINAL_DECAY = 0.55;
+const NOISE = {
+  bear:    [0.012,-0.018,0.008,-0.022,0.015,-0.010,0.006,-0.014,0.011,-0.008],
+  lowbear: [-0.008,0.014,-0.011,0.009,-0.013,0.010,-0.007,0.012,-0.009,0.006],
+  crab:    [0.006,-0.009,0.011,-0.007,0.008,-0.010,0.007,-0.006,0.009,-0.005],
+  lowbull: [-0.010,0.013,-0.008,0.011,-0.009,0.007,-0.011,0.008,-0.006,0.010],
+  bull:    [0.015,-0.020,0.018,-0.016,0.019,-0.014,0.017,-0.013,0.016,-0.011]
+};
+
+const HIST = {
+  revenue:   [198,215,229,246,266,260,297,365,383,394,391],
+  netincome: [46,49,53,57,60,55,65,95,100,97,94],
+  fcf:       [53,58,66,72,64,80,93,105,111,101,108]
 };
 const TITLES = { revenue: "Revenue · $ billions", netincome: "Net Income · $ billions", fcf: "Free Cash Flow · $ billions" };
 
-// Shared scale across hist + every scenario for the current metric, so a given dollar value
-// maps to the exact same y-pixel regardless of which line it's on — this is what makes all
-// forecast lines (and the historical line) originate from one shared FY0 point.
-function sharedScale(d) {
-  const all = [].concat(d.hist, d.bear, d.lowbear, d.crab, d.lowbull, d.bull);
+function buildScenarioValues(startValue, key) {
+  const s = SCENARIOS[key], noise = NOISE[key];
+  const explicitGrowth = [];
+  for (let i = 0; i < YEARS_EXPLICIT; i++) explicitGrowth.push(s.base + noise[i]);
+  const lastExplicitGrowth = explicitGrowth[YEARS_EXPLICIT - 1];
+  const terminalGrowth = [];
+  let gap = lastExplicitGrowth - s.terminal;
+  for (let i = 1; i <= YEARS_TERMINAL; i++) {
+    gap *= TERMINAL_DECAY;
+    terminalGrowth.push(s.terminal + gap);
+  }
+  const values = [startValue];
+  explicitGrowth.forEach(g => values.push(values[values.length - 1] * Math.exp(g)));
+  terminalGrowth.forEach(g => values.push(values[values.length - 1] * Math.exp(g)));
+  return values; // length 21: index 0 = FY0 ... index 20 = FY+20
+}
+
+function sharedScale(metric) {
+  const hist = HIST[metric];
+  let all = hist.slice();
+  Object.keys(SCENARIOS).forEach(k => { all = all.concat(buildScenarioValues(hist[hist.length - 1], k)); });
   const min = Math.min(...all), max = Math.max(...all);
-  const pad = (max - min) * 0.08 || 1;
+  const pad = (max - min) * 0.06 || 1;
   return { lo: min - pad, hi: max + pad };
 }
 
-function toPath(values, x0, xStep, scale) {
-  return values.map((v, i) => {
-    const x = x0 + i * xStep;
-    const y = 250 - ((v - scale.lo) / (scale.hi - scale.lo)) * 230;
-    return (i === 0 ? "M" : "L") + x.toFixed(1) + "," + y.toFixed(1);
+function toY(v, scale) { return Y_BASE - ((v - scale.lo) / (scale.hi - scale.lo)) * PLOT_H; }
+
+function histPath(metric, scale) {
+  const hist = HIST[metric];
+  return hist.map((v, i) => {
+    const x = X0 + i * PX_PER_YEAR;
+    return (i === 0 ? "M" : "L") + x.toFixed(1) + "," + toY(v, scale).toFixed(1);
   }).join(" ");
 }
 
+// explicit segment: FY0 (index0) .. FY+10 (index10) of the 21-pt scenario array
+function explicitPath(values, scale) {
+  return values.slice(0, YEARS_EXPLICIT + 1).map((v, i) => {
+    const x = X_FY0 + i * PX_PER_YEAR;
+    return (i === 0 ? "M" : "L") + x.toFixed(1) + "," + toY(v, scale).toFixed(1);
+  }).join(" ");
+}
+// terminal segment: FY+10 (index10) .. FY+20 (index20) — starts where explicit ends
+function terminalPath(values, scale) {
+  return values.slice(YEARS_EXPLICIT).map((v, i) => {
+    const x = X_FY10 + i * PX_PER_YEAR;
+    return (i === 0 ? "M" : "L") + x.toFixed(1) + "," + toY(v, scale).toFixed(1);
+  }).join(" ");
+}
+
+function el(tag, attrs, text) {
+  const e = document.createElementNS(SVG_NS, tag);
+  Object.keys(attrs || {}).forEach(k => e.setAttribute(k, attrs[k]));
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+
+function fmtY(v) {
+  const abs = Math.abs(v);
+  const s = abs >= 100 ? Math.round(v).toString() : v.toFixed(1);
+  return "$" + s + "B";
+}
+
+function renderStaticAxes() {
+  document.getElementById("zone-terminal").setAttribute("x", X_FY10);
+  document.getElementById("zone-terminal").setAttribute("y", Y_TOP - 14);
+  document.getElementById("zone-terminal").setAttribute("width", X_FY20 - X_FY10);
+  document.getElementById("zone-terminal").setAttribute("height", Y_BASE - Y_TOP + 14);
+
+  document.getElementById("zone-label-hist").setAttribute("x", (X0 + X_FY0) / 2);
+  document.getElementById("zone-label-explicit").setAttribute("x", (X_FY0 + X_FY10) / 2);
+  document.getElementById("zone-label-terminal").setAttribute("x", (X_FY10 + X_FY20) / 2);
+
+  const baseline = document.getElementById("fc-baseline");
+  baseline.setAttribute("x1", X0); baseline.setAttribute("y1", Y_BASE);
+  baseline.setAttribute("x2", X_FY20); baseline.setAttribute("y2", Y_BASE);
+
+  const fy0 = document.getElementById("fc-line-fy0");
+  fy0.setAttribute("x1", X_FY0); fy0.setAttribute("y1", Y_TOP - 14);
+  fy0.setAttribute("x2", X_FY0); fy0.setAttribute("y2", Y_BASE);
+
+  const fy10 = document.getElementById("fc-line-fy10");
+  fy10.setAttribute("x1", X_FY10); fy10.setAttribute("y1", Y_TOP - 14);
+  fy10.setAttribute("x2", X_FY10); fy10.setAttribute("y2", Y_BASE);
+
+  // x-axis ticks: minor every year, major (labeled) every 5 years, FY0 always labeled
+  const ticksG = document.getElementById("fc-ticks-x");
+  ticksG.innerHTML = "";
+  for (let yr = -YEARS_HIST; yr <= YEARS_EXPLICIT + YEARS_TERMINAL; yr++) {
+    const x = X_FY0 + yr * PX_PER_YEAR;
+    const isMajor = yr % 5 === 0;
+    ticksG.appendChild(el(isMajor ? "line" : "line", {
+      class: isMajor ? "fc-tick-major" : "fc-tick-minor",
+      x1: x, y1: Y_BASE, x2: x, y2: Y_BASE + (isMajor ? 8 : 4)
+    }));
+    if (isMajor) {
+      const label = yr === 0 ? "FY0" : (yr > 0 ? "FY+" + yr : "FY" + yr);
+      ticksG.appendChild(el("text", { class: "fc-axis-label", x: x, y: Y_BASE + 22, "text-anchor": "middle" }, label));
+    }
+  }
+}
+
+function renderYGrid(scale) {
+  const g = document.getElementById("fc-gridlines-y");
+  g.innerHTML = "";
+  const levels = 4; // quartile gridlines
+  for (let i = 0; i <= levels; i++) {
+    const v = scale.lo + (scale.hi - scale.lo) * (i / levels);
+    const y = toY(v, scale);
+    g.appendChild(el("line", { class: "fc-grid-y", x1: X0, y1: y.toFixed(1), x2: X_FY20, y2: y.toFixed(1) }));
+    g.appendChild(el("text", { class: "fc-axis-label fc-axis-label--y", x: X0 - 10, y: (y + 3).toFixed(1) }, fmtY(v)));
+  }
+}
+
 function render(metric) {
-  const d = DATA[metric];
   document.getElementById("fc-chart-title").innerHTML =
     TITLES[metric].split(" · ")[0] + ' <span class="text-muted fw-normal">· ' + TITLES[metric].split(" · ")[1] + "</span>";
-  const scale = sharedScale(d);
-  document.getElementById("ln-hist").setAttribute("d", toPath(d.hist, 40, 32, scale));
-  ["bear","lowbear","crab","lowbull","bull"].forEach(k => {
-    document.getElementById("ln-" + k).setAttribute("d", toPath(d[k], 200, 53, scale));
+  const scale = sharedScale(metric);
+  renderYGrid(scale);
+  document.getElementById("ln-hist").setAttribute("d", histPath(metric, scale));
+  const hist = HIST[metric];
+  Object.keys(SCENARIOS).forEach(key => {
+    const values = buildScenarioValues(hist[hist.length - 1], key);
+    document.getElementById("ln-" + key + "-explicit").setAttribute("d", explicitPath(values, scale));
+    document.getElementById("ln-" + key + "-terminal").setAttribute("d", terminalPath(values, scale));
   });
 }
+
+renderStaticAxes();
 
 document.querySelectorAll("#fc-metric-tabs .nav-link").forEach(btn => {
   btn.addEventListener("click", () => {
@@ -317,7 +479,10 @@ document.querySelectorAll(".fc-chip").forEach(chip => {
     const scenario = chip.dataset.scenario;
     const active = chip.dataset.active === "true";
     chip.dataset.active = (!active).toString();
-    document.getElementById("ln-" + scenario).setAttribute("data-hidden", active.toString());
+    ["explicit", "terminal"].forEach(seg => {
+      const line = document.getElementById("ln-" + scenario + "-" + seg);
+      if (line) line.setAttribute("data-hidden", active.toString());
+    });
   });
 });
 

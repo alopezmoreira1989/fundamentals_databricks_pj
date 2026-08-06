@@ -802,13 +802,27 @@ def blend_terminal_years(
     terminal_growth: Number,
     *,
     terminal_years: int = 5,
+    decay: float = 0.55,
 ) -> list[float] | None:
-    """Years 6-10's (or however many ``terminal_years``) absolute-value forecast path: linearly
-    blends the ANNUAL growth rate from ``exit_growth_rate`` (year 5's own realized CAGR — see
+    """Years 6-10's (or however many ``terminal_years``) absolute-value forecast path:
+    front-loads the deceleration from ``exit_growth_rate`` (year 5's own realized CAGR — see
     :func:`fundamentals_pipeline.valuation.eps_cagr`, reused directly since it's already generic
-    CAGR math despite the EPS-specific name) down/up to ``terminal_growth`` (see
-    :func:`terminal_growth_for_quantile`) by the final terminal year, compounding year over
-    year. Returns the list of ``terminal_years`` absolute values (years 6, 7, ..., 6+terminal_years-1).
+    CAGR math despite the EPS-specific name) toward ``terminal_growth`` (see
+    :func:`terminal_growth_for_quantile`) via exponential decay of the gap between them, rather
+    than spreading the change evenly across every terminal year. Returns the list of
+    ``terminal_years`` absolute values (years 6, 7, ..., 6+terminal_years-1).
+
+    Each step multiplies the REMAINING gap by ``decay`` (default ``0.55``) rather than
+    subtracting a fixed linear fraction: ``gap = exit_growth_rate - terminal_growth; rate_step =
+    terminal_growth + gap * (decay ** step)``. A linear blend (the old behavior) only moves
+    ``1/terminal_years`` of the way to the target rate per step — with ``terminal_years=10`` the
+    first terminal year is still ~90% of the way to the explicit exit rate, so growth barely
+    visibly slows for most of the terminal window. Exponential decay puts most of the
+    deceleration in the first 2-3 terminal years instead (``decay=0.55`` means the gap shrinks
+    to ~30% by step 2, ~17% by step 3), so the chart visibly bends right after the explicit
+    forecast ends. Unlike the linear form, this NEVER reaches ``terminal_growth`` exactly at the
+    final step — only asymptotically close (``decay ** terminal_years`` of the original gap
+    remains) — that's an accepted trade-off of front-loading the convergence, not a bug.
 
     ``value_at_horizon5 <= 0`` floors EVERY terminal year to ``0.0`` — same zero-floor
     composition as :func:`reconstruct_forecast_value`: a scenario already in loss territory at
@@ -826,8 +840,9 @@ def blend_terminal_years(
         return [0.0] * terminal_years
     values: list[float] = []
     current = float(value_at_horizon5)
+    gap = exit_growth_rate - terminal_growth
     for step in range(1, terminal_years + 1):
-        rate = exit_growth_rate + (terminal_growth - exit_growth_rate) * (step / terminal_years)
+        rate = terminal_growth + gap * (decay ** step)
         current = current * (1 + rate)
         values.append(current)
     return values
@@ -840,6 +855,7 @@ def blend_terminal_years_from_values(
     *,
     terminal_years: int = 5,
     explicit_years: int = 5,
+    decay: float = 0.55,
 ) -> list[float] | None:
     """Convenience wrapper around :func:`blend_terminal_years`: computes the year-0-to-year-5
     exit CAGR from ``value_from``/``value_at_horizon5`` via
@@ -855,6 +871,9 @@ def blend_terminal_years_from_values(
     ``value_from`` (with a genuinely positive ``value_at_horizon5``) makes ``eps_cagr`` return
     ``None`` here, in which case this returns ``None`` too — the same "no meaningful growth
     rate from a non-positive base" convention :func:`log_growth` already uses.
+
+    ``decay`` is threaded straight through to :func:`blend_terminal_years` — see its own
+    docstring for the front-loaded-convergence formula.
     """
     if _is_missing(value_at_horizon5) or _is_missing(terminal_growth):
         return None
@@ -864,5 +883,6 @@ def blend_terminal_years_from_values(
     if exit_growth_rate is None:
         return None
     return blend_terminal_years(
-        value_at_horizon5, exit_growth_rate, terminal_growth, terminal_years=terminal_years,
+        value_at_horizon5, exit_growth_rate, terminal_growth,
+        terminal_years=terminal_years, decay=decay,
     )

@@ -644,7 +644,7 @@ def get_intrinsic_value_field(ticker: str):
 
 
 # ── forecasting ──────────────────────────────────────────────────────────────────────────
-_FORECAST_HISTORY_YEARS = 6
+_FORECAST_HISTORY_YEARS = 11  # 10 prior years + FY0, matching the chart's 10-year history window
 
 
 def get_forecast_chart(ticker: str) -> ForecastChart | None:

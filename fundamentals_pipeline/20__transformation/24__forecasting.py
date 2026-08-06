@@ -6,10 +6,13 @@
 # MAGIC (`fundamentals_pipeline/forecasting.py`, issues #330/#331) for the full ticker
 # MAGIC universe, each pipeline run: assembles the cross-sectional training panel, trains 15
 # MAGIC quantile regressors + up to 15 binary loss classifiers, predicts each ticker's own
-# MAGIC latest fiscal year forward for years 1-5, then blends years 6-10 by converging each
-# MAGIC scenario's own growth rate toward the DCF model's existing terminal-growth assumption
-# MAGIC (`00__config/valuation_assumptions.json`) — the same two-stage spirit as `23__intrinsic_value`,
-# MAGIC not a new concept.
+# MAGIC latest fiscal year forward for years 1-10, then blends years 11-20 by front-loaded
+# MAGIC exponential decay of each scenario's own growth rate toward the DCF model's existing
+# MAGIC terminal-growth assumption (`00__config/valuation_assumptions.json`) — the same
+# MAGIC two-stage spirit as `23__intrinsic_value`, not a new concept. (Horizon extended from
+# MAGIC 1-5/6-10 to 1-10/11-20, and the terminal blend changed from linear to front-loaded decay,
+# MAGIC in the "horizon extension & terminal-convergence fix" milestone — a 5-year linear blend
+# MAGIC barely visibly decelerated for most of a 10-year terminal window.)
 # MAGIC
 # MAGIC **Writes to:** `{catalog}.{schema}.financials_forecast` — full overwrite each run (this
 # MAGIC table is always fully recomputed from scratch, same pattern as `15__fetch_sec_filings.py`'s
@@ -86,8 +89,13 @@ tickers_tbl = f"{CATALOG}.config.tickers"
 forecast_tbl = f"{CATALOG}.{SCHEMA}.financials_forecast"
 failures_tbl = f"{CATALOG}.{SCHEMA}.ingestion_failures"
 
-EXPLICIT_HORIZONS = (1, 2, 3, 4, 5)
-TERMINAL_YEARS = 5  # years 6-10
+EXPLICIT_HORIZONS = tuple(range(1, 11))
+TERMINAL_YEARS = 10  # years 11-20
+# Front-loaded exponential decay rate for the terminal blend (see forecasting.py's
+# blend_terminal_years) -- not a magic number at the call site. 0.55 puts most of the
+# deceleration from the explicit exit rate toward the terminal rate into the first 2-3
+# terminal years rather than spreading it evenly across all 10.
+TERMINAL_DECAY = 0.55
 
 print(f"Financials source : {financials_tbl}")
 print(f"Metrics source     : {metrics_tbl}")
@@ -277,13 +285,15 @@ else:
 quantile_models = fc.train_quantile_models(train_panel, validation_panel=validation_panel)
 print(f"✓ Trained {len(quantile_models)} quantile regressors")
 
-classifier_models = fc.train_loss_classifiers(train_panel, validation_panel=validation_panel)
+classifier_models = fc.train_loss_classifiers(
+    train_panel, validation_panel=validation_panel, horizons=EXPLICIT_HORIZONS,
+)
 print(f"✓ Trained {len(classifier_models)} loss classifiers (of up to "
       f"{len(fc.TARGET_METRICS) * len(EXPLICIT_HORIZONS)})")
 
 # COMMAND ----------
 
-# MAGIC %md ## 4. Predict years 1-5 for each ticker's own latest fiscal year
+# MAGIC %md ## 4. Predict years 1-10 for each ticker's own latest fiscal year
 
 # COMMAND ----------
 
@@ -291,11 +301,11 @@ panel["_ticker_latest_fy"] = panel.groupby("ticker")["fiscal_year"].transform("m
 latest_panel = panel[panel["fiscal_year"] == panel["_ticker_latest_fy"]].drop(columns=["_ticker_latest_fy"])
 
 explicit_forecasts = fc.predict_forecast(latest_panel, quantile_models, classifier_models)
-print(f"✓ Years 1-5 forecast: {len(explicit_forecasts):,} rows")
+print(f"✓ Years 1-10 forecast: {len(explicit_forecasts):,} rows")
 
 # COMMAND ----------
 
-# MAGIC %md ## 5. Blend years 6-10 toward each scenario's own terminal growth rate
+# MAGIC %md ## 5. Blend years 11-20 toward each scenario's own terminal growth rate (front-loaded decay)
 
 # COMMAND ----------
 
@@ -306,11 +316,15 @@ _base_values = (
     .set_index("ticker")[list(fc.TARGET_METRICS.values())]
 )
 
-_horizon5 = explicit_forecasts[explicit_forecasts["horizon"] == 5]
+# The last explicit-forecast horizon (10) is the terminal segment's own anchor point --
+# named off EXPLICIT_HORIZONS rather than hard-coded so the two stay in lockstep if the
+# explicit window's length ever changes again.
+_last_explicit_horizon = EXPLICIT_HORIZONS[-1]
+_horizon10 = explicit_forecasts[explicit_forecasts["horizon"] == _last_explicit_horizon]
 
 _terminal_rows: list[dict] = []
 _failed_terminal: list[dict] = []
-for row in _horizon5.itertuples(index=False):
+for row in _horizon10.itertuples(index=False):
     try:
         value_from = _base_values.loc[row.ticker, fc.TARGET_METRICS[row.metric]]
         terminal = TERMINAL_GROWTH_BY_TICKER.get(row.ticker)
@@ -320,14 +334,23 @@ for row in _horizon5.itertuples(index=False):
             row.quantile_level, bear_terminal=terminal["bear"],
             mid_terminal=terminal["mid"], bull_terminal=terminal["bull"],
         )
+        # explicit_years=_last_explicit_horizon (not the old implicit default of 5): the exit
+        # CAGR is computed over the actual FY0-to-anchor span, now 10 years, not 5 -- passing
+        # this explicitly rather than relying on blend_terminal_years_from_values's own default
+        # is exactly the kind of silent-drift risk Phase 0 flagged (the default would have kept
+        # computing the exit rate over a 5-year span even though the anchor is 10 years out,
+        # roughly doubling the implied growth rate).
         blended = fc.blend_terminal_years_from_values(
-            value_from, row.forecast_value, terminal_growth, terminal_years=TERMINAL_YEARS,
+            value_from, row.forecast_value, terminal_growth,
+            terminal_years=TERMINAL_YEARS, explicit_years=_last_explicit_horizon,
+            decay=TERMINAL_DECAY,
         )
         if blended is None:
             continue  # no meaningful exit CAGR (non-positive base) -- skip, don't fabricate
         for step, value in enumerate(blended, start=1):
             _terminal_rows.append({
-                "ticker": row.ticker, "fiscal_year": row.fiscal_year, "horizon": 5 + step,
+                "ticker": row.ticker, "fiscal_year": row.fiscal_year,
+                "horizon": _last_explicit_horizon + step,
                 "metric": row.metric, "quantile_level": row.quantile_level,
                 "forecast_value": value,
             })
@@ -340,7 +363,7 @@ for row in _horizon5.itertuples(index=False):
 terminal_forecasts = pd.DataFrame(_terminal_rows) if _terminal_rows else pd.DataFrame(
     columns=["ticker", "fiscal_year", "horizon", "metric", "quantile_level", "forecast_value"]
 )
-print(f"✓ Years 6-10 forecast: {len(terminal_forecasts):,} rows"
+print(f"✓ Years 11-20 forecast: {len(terminal_forecasts):,} rows"
       + (f" ({len(_failed_terminal)} ticker/metric/quantile combo(s) failed)" if _failed_terminal else ""))
 
 # COMMAND ----------

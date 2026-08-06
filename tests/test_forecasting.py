@@ -568,12 +568,40 @@ def test_terminal_growth_for_quantile_all_five_mockup_levels_are_monotonic():
 def test_blend_terminal_years_converges_toward_terminal_growth():
     values = fc.blend_terminal_years(100.0, exit_growth_rate=0.20, terminal_growth=0.03, terminal_years=5)
     assert len(values) == 5
-    # Final year's implied growth rate should equal the terminal rate exactly (full blend).
+    # Front-loaded exponential decay (default decay=0.55) never reaches terminal_growth
+    # EXACTLY the way the old linear blend did at the final step -- only asymptotically close
+    # (decay ** terminal_years of the original gap remains). With a 17pp gap and 5 steps, the
+    # residual is ~17pp * 0.55**5 ≈ 0.8pp, so a loose approx is the right check here, not exact.
     final_year_rate = values[-1] / values[-2] - 1
-    assert final_year_rate == pytest.approx(0.03)
-    # First year's rate should be closer to the exit rate than the terminal rate.
+    assert final_year_rate == pytest.approx(0.03, abs=0.01)
+    # First year's rate should be MUCH closer to the terminal rate than a linear blend would
+    # place it (front-loaded: most of the gap closes in the first step, not spread evenly).
     first_year_rate = values[0] / 100.0 - 1
-    assert first_year_rate == pytest.approx(0.20 + (0.03 - 0.20) * (1 / 5))
+    decay_first_year_rate = 0.03 + (0.20 - 0.03) * (0.55 ** 1)
+    linear_first_year_rate = 0.20 + (0.03 - 0.20) * (1 / 5)
+    assert first_year_rate == pytest.approx(decay_first_year_rate)
+    assert abs(first_year_rate - 0.03) < abs(linear_first_year_rate - 0.03)
+
+
+def test_blend_terminal_years_front_loaded_convergence_beats_linear():
+    """Regression guard for the milestone's actual point: at step=1, front-loaded decay must
+    land closer to terminal_growth than the old linear blend would have -- catches a future
+    accidental revert back to linear weighting."""
+    exit_rate, terminal_rate = 0.20, 0.03
+    values = fc.blend_terminal_years(100.0, exit_growth_rate=exit_rate, terminal_growth=terminal_rate, terminal_years=10)
+    rate_step1 = values[0] / 100.0 - 1
+    linear_rate_step1 = exit_rate + (terminal_rate - exit_rate) * (1 / 10)
+    assert abs(rate_step1 - terminal_rate) < abs(linear_rate_step1 - terminal_rate)
+
+
+def test_blend_terminal_years_decay_parameter_controls_convergence_speed():
+    """A smaller decay (faster-shrinking gap) converges closer to terminal_growth sooner than
+    a larger decay, all else equal -- confirms the parameter actually does something."""
+    fast = fc.blend_terminal_years(100.0, exit_growth_rate=0.20, terminal_growth=0.03, terminal_years=5, decay=0.3)
+    slow = fc.blend_terminal_years(100.0, exit_growth_rate=0.20, terminal_growth=0.03, terminal_years=5, decay=0.8)
+    fast_rate1 = fast[0] / 100.0 - 1
+    slow_rate1 = slow[0] / 100.0 - 1
+    assert abs(fast_rate1 - 0.03) < abs(slow_rate1 - 0.03)
 
 
 def test_blend_terminal_years_floors_to_zero_when_horizon5_non_positive():

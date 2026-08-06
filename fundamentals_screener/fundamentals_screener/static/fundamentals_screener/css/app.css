@@ -572,8 +572,9 @@ body.fs-app { font-family: var(--sans); background: var(--bg); color: var(--ink)
 .fs-footer a:hover { color: var(--accent-ink); }
 
 /* ============================================================
- * Forecasting tab (issue #336) — appended block, ported from docs/mockups/forecasting_tab.html.
- * Every rule below references this file's own existing :root tokens (var(--ink), var(--accent),
+ * Forecasting tab (issue #336, extended by the "horizon extension & terminal-convergence fix"
+ * milestone) — appended block, ported from docs/mockups/forecasting_tab.html (v2). Every rule
+ * below references this file's own existing :root tokens (var(--ink), var(--accent),
  * var(--positive), var(--negative), var(--bg-subtle), var(--rule), var(--mono), ...) by name —
  * the mockup was prototyped against a different palette, but since it only ever used the SAME
  * token names, this block inherits fundamentals_screener's navy/cyan/orange palette automatically.
@@ -601,8 +602,15 @@ body.fs-app { font-family: var(--sans); background: var(--bg); color: var(--ink)
 
 .fs-app .fc-chart-wrap { position: relative; }
 .fs-app .fc-chart-wrap svg { width: 100%; height: auto; display: block; }
-.fs-app .fc-axis-label { font-family: var(--mono); font-size: 9.5px; fill: var(--ink-3); }
+.fs-app .fc-axis-label { font-family: var(--mono); font-size: 10px; fill: var(--ink-3); }
+.fs-app .fc-axis-label--y { text-anchor: end; }
 .fs-app .fc-zone-label { font-family: var(--mono); font-size: 9.5px; letter-spacing: .06em; fill: var(--ink-3); text-transform: uppercase; }
+
+/* NEW (v2) — axis system: real gridlines + per-year ticks instead of 4 bare labels. */
+.fs-app .fc-grid-y { stroke: var(--rule-soft); stroke-width: 1; }
+.fs-app .fc-tick-minor { stroke: var(--rule); stroke-width: 1; }
+.fs-app .fc-tick-major { stroke: var(--ink-3); stroke-width: 1; }
+.fs-app .fc-zone-divider { stroke: var(--rule); stroke-width: 1; stroke-dasharray: 2 3; }
 
 .fs-app .fc-line { fill: none; stroke-width: 2; }
 .fs-app .fc-line--hist { stroke: var(--ink); }
@@ -611,8 +619,12 @@ body.fs-app { font-family: var(--sans); background: var(--bg); color: var(--ink)
 .fs-app .fc-line--crab { stroke: var(--accent); }
 .fs-app .fc-line--lowbull { stroke: var(--positive); stroke-opacity: .55; stroke-dasharray: 3 2; }
 .fs-app .fc-line--bull { stroke: var(--positive); }
+/* NEW (v2) — terminal segment gets its own lighter/thinner treatment so it reads as "the same
+   line, entering a qualitatively calmer regime" rather than a literal continuation of the
+   explicit-forecast slope. */
+.fs-app .fc-line--terminal { stroke-width: 1.5; opacity: .78; }
 .fs-app .fc-line[data-hidden="true"] { opacity: 0; }
-.fs-app .fc-today-line { stroke: var(--rule); stroke-width: 1; stroke-dasharray: 2 2; }
+.fs-app .fc-today-line { stroke: var(--ink-3); stroke-width: 1; stroke-dasharray: 2 2; }
 .fs-app .fc-terminal-band { fill: var(--bg-subtle); }
 
 .fs-app .fc-metric-note { font-size: .78rem; color: var(--ink-2); }
