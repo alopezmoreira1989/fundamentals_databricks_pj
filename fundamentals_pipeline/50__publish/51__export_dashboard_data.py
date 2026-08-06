@@ -138,12 +138,26 @@ spark.createDataFrame([(t,) for t in tickers], "ticker string").createOrReplaceT
 # COMMAND ----------
 
 # Precise retention done IN SQL so toPandas() pulls only the final slice (no driver-side
-# loop over ~2.5k tickers). DENSE_RANK over DISTINCT period_end — not ROW_NUMBER over rows —
-# keeps ALL concept rows for the last N periods regardless of how many concepts a period has
-# (the old ROW_NUMBER `* 30` cap was a guess that broke as concept counts grew, and forced an
-# over-pull + pandas trim_recent loop that pushed 51 past its 600s timeout). FY and the
-# quarterly bucket (Q1..Q4 combined) are ranked independently, matching the previous behaviour:
-# last FY_YEARS distinct FY period_ends + last QUARTERS distinct quarter period_ends per ticker.
+# loop over ~2.5k tickers). DENSE_RANK over DISTINCT period_end/fiscal_year — not ROW_NUMBER
+# over rows — keeps ALL concept rows for the last N periods regardless of how many concepts a
+# period has (the old ROW_NUMBER `* 30` cap was a guess that broke as concept counts grew, and
+# forced an over-pull + pandas trim_recent loop that pushed 51 past its 600s timeout). FY and
+# the quarterly bucket (Q1..Q4 combined) are ranked independently: last FY_YEARS distinct FY
+# *fiscal years* + last QUARTERS distinct quarter period_ends per ticker.
+#
+# FY ranks by fiscal_year, NOT period_end (real bug, found + fixed during the "horizon
+# extension" milestone, 2026-08-06): `Shares Outstanding (Cover Page)` legitimately carries the
+# 10-K's cover-page "as-of" date (~3 weeks after fiscal close) rather than the fiscal year-end
+# date every other concept in that same fiscal year uses -- e.g. AAPL FY2025's ~40 other
+# concepts all have period_end=2025-09-27, but that one concept has period_end=2025-10-17. A
+# period_end-based DENSE_RANK treats those as two separate rank tiers per fiscal year, so
+# FY_YEARS=10 was silently only ever retaining 5 real fiscal years (confirmed against real
+# production data: AAPL's exported Income Statement history was capped at 2021-2025 despite 17
+# years, 2009-2025, existing in the source `financials` table). fiscal_year has no such
+# multi-value-per-year quirk, so ranking on it directly is both correct and simpler. The
+# quarterly bucket's own period_end-based ranking is untouched -- this fix is scoped to the FY
+# bucket, where the problem was confirmed; quarterly retention wasn't shown to have the same
+# issue and isn't in scope here.
 financials = spark.sql(f"""
     WITH base AS (
       SELECT
@@ -162,14 +176,17 @@ financials = spark.sql(f"""
       SELECT *,
         DENSE_RANK() OVER (
           PARTITION BY ticker, pt_bucket ORDER BY period_end DESC
-        ) AS period_rank
+        ) AS period_rank,
+        DENSE_RANK() OVER (
+          PARTITION BY ticker, pt_bucket ORDER BY fiscal_year DESC
+        ) AS fy_rank
       FROM base
     )
     SELECT
       ticker, period_type, period_end, fiscal_year,
       stmt, section, `group`, concept, display_name, sort_order, value
     FROM ranked
-    WHERE (pt_bucket = 'FY' AND period_rank <= {FY_YEARS})
+    WHERE (pt_bucket = 'FY' AND fy_rank <= {FY_YEARS})
        OR (pt_bucket = 'Q'  AND period_rank <= {QUARTERS})
 """).toPandas()
 
