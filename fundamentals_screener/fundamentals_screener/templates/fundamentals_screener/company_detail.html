@@ -737,6 +737,8 @@
                   <th scope="col" class="sortable" data-sort-key="description">Description</th>
                   <th scope="col" class="sortable sort-desc" data-sort-key="filing_date">Filed</th>
                   <th scope="col" class="sortable" data-sort-key="report_date">Period</th>
+                  <th scope="col" class="sortable" data-sort-key="fiscal_year">FY</th>
+                  <th scope="col" class="sortable" data-sort-key="period_type">Quarter</th>
                 </tr>
               </thead>
               <tbody>
@@ -748,6 +750,10 @@
                     </td>
                     <td class="text-muted small" data-sort-value="{{ f.filing_date|default:'' }}">{{ f.filing_date|default:"—" }}</td>
                     <td class="text-muted small" data-sort-value="{{ f.report_date|default:'' }}">{{ f.report_date|default:"—" }}</td>
+                    <td class="text-muted small" data-sort-value="{{ f.fiscal_year|default:'' }}">{{ f.fiscal_year|default:"—" }}</td>
+                    <td class="text-muted small" data-sort-value="{{ f.period_type|default:'' }}">
+                      {% if f.period_type == "FY" %}Annual{% else %}{{ f.period_type|default:"—" }}{% endif %}
+                    </td>
                   </tr>
                 {% endfor %}
               </tbody>

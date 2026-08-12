@@ -43,7 +43,9 @@ class FilingRow:
 
     Sourced from the ``dashboard_filings`` artifact, written by the pipeline's
     ``15__fetch_sec_filings.py`` — no live SEC call of our own; see
-    ``CompanyRepository.get_filings``.
+    ``CompanyRepository.get_filings``. ``fiscal_year``/``period_type`` are joined in from
+    ``dashboard_data`` (matched on this filing's own ``report_date``), not derived from the
+    date ourselves — ``None`` when no matching period is published yet.
     """
 
     form: str
@@ -51,6 +53,8 @@ class FilingRow:
     report_date: str | None
     description: str | None
     url: str
+    fiscal_year: int | None = None
+    period_type: str | None = None
 
 
 @dataclass(frozen=True)

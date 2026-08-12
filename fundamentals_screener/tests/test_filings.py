@@ -2,6 +2,11 @@
 the dashboard_filings artifact (written by the pipeline's 15__fetch_sec_filings.py), not a
 live SEC call of our own. Self-contained: in-memory DuckDB, injected connection, same pattern
 as test_net_net_snapshot.py.
+
+fiscal_year/period_type are joined in from dashboard_data (matched on report_date ==
+period_end for the same ticker) rather than derived from the date — the fixture below
+includes a dashboard_data table so that join has something real to match against, plus one
+filing (MSFT's) with no matching period to exercise the LEFT JOIN's NULL fallback.
 """
 
 from __future__ import annotations
@@ -18,6 +23,13 @@ _FILING_ROWS = [
     ("MSFT", "10-K", "2026-01-15", "2025-12-31", "Annual report", "https://sec.gov/MSFT/10k-2026.htm"),
 ]
 
+# ticker, period_end, fiscal_year, period_type — only AAPL's periods are present, so MSFT's
+# filing above has nothing to join against.
+_PERIOD_ROWS = [
+    ("AAPL", "2025-12-31", 2025, "FY"),
+    ("AAPL", "2025-09-30", 2025, "Q3"),
+]
+
 
 @pytest.fixture
 def con():
@@ -28,6 +40,11 @@ def con():
         " description VARCHAR, url VARCHAR)"
     )
     conn.executemany("INSERT INTO dashboard_filings VALUES (?,?,?,?,?,?)", _FILING_ROWS)
+    conn.execute(
+        "CREATE TABLE dashboard_data ("
+        " ticker VARCHAR, period_end VARCHAR, fiscal_year INTEGER, period_type VARCHAR)"
+    )
+    conn.executemany("INSERT INTO dashboard_data VALUES (?,?,?,?)", _PERIOD_ROWS)
     yield conn
     conn.close()
 
@@ -50,6 +67,21 @@ def test_get_filings_row_shape(repo):
     assert row.report_date == "2025-12-31"
     assert row.description == "Annual report"
     assert row.url == "https://sec.gov/AAPL/10k-2026.htm"
+
+
+def test_get_filings_joins_fiscal_year_and_period_type(repo):
+    rows = repo.get_filings("AAPL")
+    by_form = {r.form: r for r in rows}
+    assert by_form["10-K"].fiscal_year == 2025
+    assert by_form["10-K"].period_type == "FY"
+    assert by_form["10-Q"].fiscal_year == 2025
+    assert by_form["10-Q"].period_type == "Q3"
+
+
+def test_get_filings_no_matching_period_leaves_fiscal_year_none(repo):
+    row = repo.get_filings("MSFT")[0]
+    assert row.fiscal_year is None
+    assert row.period_type is None
 
 
 def test_get_filings_unknown_ticker_returns_empty(repo):
