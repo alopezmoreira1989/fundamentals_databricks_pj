@@ -12,7 +12,12 @@
 # MAGIC two-stage spirit as `23__intrinsic_value`, not a new concept. (Horizon extended from
 # MAGIC 1-5/6-10 to 1-10/11-20, and the terminal blend changed from linear to front-loaded decay,
 # MAGIC in the "horizon extension & terminal-convergence fix" milestone — a 5-year linear blend
-# MAGIC barely visibly decelerated for most of a 10-year terminal window.)
+# MAGIC barely visibly decelerated for most of a 10-year terminal window.) The terminal growth
+# MAGIC rate a scenario decays toward is floored at `INFLATION_FLOOR` (2%, section 5) — an
+# MAGIC explicit, enforced floor rather than a coincidental byproduct of today's config values, so
+# MAGIC a 20-year nominal-dollar forecast never implicitly assumes a scenario grows slower than
+# MAGIC real-world inflation. Applies to the terminal rate only, never to the explicit years-1-10
+# MAGIC ML forecasts, which stay free to show a genuinely declining company as declining.
 # MAGIC
 # MAGIC **Writes to:** `{catalog}.{schema}.financials_forecast` — full overwrite each run (this
 # MAGIC table is always fully recomputed from scratch, same pattern as `15__fetch_sec_filings.py`'s
@@ -96,6 +101,15 @@ TERMINAL_YEARS = 10  # years 11-20
 # deceleration from the explicit exit rate toward the terminal rate into the first 2-3
 # terminal years rather than spreading it evenly across all 10.
 TERMINAL_DECAY = 0.55
+# Explicit, enforced floor on the terminal (years 11-20) growth rate a scenario decays toward
+# -- today's valuation_assumptions.json growth_terminal values (bear 2%/mid 2.5%/bull 3%)
+# already clear this, but only coincidentally: nothing stopped a future config edit or a
+# per-ticker override from dropping a scenario's terminal growth below real-world inflation,
+# which a 20-year nominal-dollar forecast should never do. Applied only to the terminal growth
+# rate itself (below) -- NOT to terminal_growth_for_quantile's WACC reuse (section 5b), where
+# "inflation floor" isn't a meaningful concept, and NOT to the explicit years-1-10 ML forecasts,
+# which must stay free to show a genuinely declining company as declining.
+INFLATION_FLOOR = 0.02
 
 print(f"Financials source : {financials_tbl}")
 print(f"Metrics source     : {metrics_tbl}")
@@ -330,9 +344,12 @@ for row in _horizon10.itertuples(index=False):
         terminal = TERMINAL_GROWTH_BY_TICKER.get(row.ticker)
         if terminal is None:
             raise KeyError(f"no growth_terminal resolved for {row.ticker!r}")
-        terminal_growth = fc.terminal_growth_for_quantile(
-            row.quantile_level, bear_terminal=terminal["bear"],
-            mid_terminal=terminal["mid"], bull_terminal=terminal["bull"],
+        terminal_growth = max(
+            fc.terminal_growth_for_quantile(
+                row.quantile_level, bear_terminal=terminal["bear"],
+                mid_terminal=terminal["mid"], bull_terminal=terminal["bull"],
+            ),
+            INFLATION_FLOOR,
         )
         # explicit_years=_last_explicit_horizon (not the old implicit default of 5): the exit
         # CAGR is computed over the actual FY0-to-anchor span, now 10 years, not 5 -- passing
