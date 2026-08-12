@@ -3,12 +3,15 @@ the dashboard_filings artifact (written by the pipeline's 15__fetch_sec_filings.
 live SEC call of our own. Self-contained: in-memory DuckDB, injected connection, same pattern
 as test_net_net_snapshot.py.
 
-fiscal_year/period_type are bracketed against dashboard_data's period_type='FY' period_end
-dates (see companies.py's own comment on _FILINGS_SQL for why FY anchors, not a direct join
-against the short-retention Q1-Q4 rows) — the fixture below models two consecutive fiscal
-years' worth of FY anchors plus a mix of 10-K/10-Q filings, including one filing older than
-the earliest known anchor (to exercise the NULL fallback) and one ticker (MSFT) with no
-dashboard_data rows at all.
+fiscal_year/period_type are matched via an ASOF JOIN against dashboard_data's
+period_type='FY' period_end dates (see companies.py's own comment on _FILINGS_SQL for why FY
+anchors + ASOF, not a direct join against the short-retention Q1-Q4 rows, and not a
+between-two-anchors bracket) — the fixture below models two consecutive *closed* fiscal
+years' worth of FY anchors, a mix of 10-K/10-Q filings, PLUS three 10-Qs from a still-*open*
+fiscal year (FY2026, whose own 10-K hasn't been filed yet -- confirmed live for AAPL 2026-08-12,
+the regression the between-two-anchors version of this query introduced), one filing older
+than the earliest known anchor (NULL fallback), and one ticker (MSFT) with no dashboard_data
+rows at all.
 """
 
 from __future__ import annotations
@@ -20,12 +23,16 @@ from fundamentals_screener.repositories.companies import CompanyRepository
 
 # ticker, form, filing_date, report_date, description, url
 _FILING_ROWS = [
+    # FY2026 -- open fiscal year: 3 10-Qs already filed, no 10-K yet.
+    ("AAPL", "10-Q", "2026-07-31", "2026-06-27", "Q3 FY26", "https://sec.gov/AAPL/10q-2026q3.htm"),
+    ("AAPL", "10-Q", "2026-05-01", "2026-03-28", "Q2 FY26", "https://sec.gov/AAPL/10q-2026q2.htm"),
+    ("AAPL", "10-Q", "2026-01-30", "2025-12-27", "Q1 FY26", "https://sec.gov/AAPL/10q-2026q1.htm"),
     ("AAPL", "10-K", "2025-10-31", "2025-09-27", "Annual report FY25", "https://sec.gov/AAPL/10k-2025.htm"),
     ("AAPL", "10-Q", "2025-08-01", "2025-06-28", "Q3 FY25", "https://sec.gov/AAPL/10q-2025q3.htm"),
     ("AAPL", "10-Q", "2025-05-02", "2025-03-29", "Q2 FY25", "https://sec.gov/AAPL/10q-2025q2.htm"),
     ("AAPL", "10-Q", "2025-01-31", "2024-12-28", "Q1 FY25", "https://sec.gov/AAPL/10q-2025q1.htm"),
     ("AAPL", "10-K", "2024-11-01", "2024-09-28", "Annual report FY24", "https://sec.gov/AAPL/10k-2024.htm"),
-    # Older than the earliest known FY anchor (FY2024) below -- no prev_fy_end to bracket into.
+    # Older than the earliest known FY anchor (FY2024) below -- no preceding anchor to match.
     ("AAPL", "10-Q", "2023-08-04", "2023-07-01", "Old 10-Q", "https://sec.gov/AAPL/10q-old.htm"),
     ("MSFT", "10-K", "2026-01-15", "2025-12-31", "Annual report", "https://sec.gov/MSFT/10k-2026.htm"),
 ]
@@ -63,17 +70,30 @@ def repo(con):
 
 def test_get_filings_returns_only_this_tickers_rows_newest_first(repo):
     rows = repo.get_filings("AAPL")
-    assert len(rows) == 6
+    assert len(rows) == 9
     assert all(isinstance(r, FilingRow) for r in rows)
-    assert [r.filing_date for r in rows][:3] == ["2025-10-31", "2025-08-01", "2025-05-02"]  # newest first
+    assert [r.filing_date for r in rows][:3] == ["2026-07-31", "2026-05-01", "2026-01-30"]  # newest first
 
 
 def test_get_filings_row_shape(repo):
     row = repo.get_filings("AAPL")[0]
-    assert row.form == "10-K"
-    assert row.report_date == "2025-09-27"
-    assert row.description == "Annual report FY25"
-    assert row.url == "https://sec.gov/AAPL/10k-2025.htm"
+    assert row.form == "10-Q"
+    assert row.report_date == "2026-06-27"
+    assert row.description == "Q3 FY26"
+    assert row.url == "https://sec.gov/AAPL/10q-2026q3.htm"
+
+
+def test_get_filings_open_fiscal_year_10qs_resolve_without_a_closing_anchor(repo):
+    """FY2026 hasn't closed yet (no 10-K filed), so there's no upper-bound anchor -- only the
+    prior year's (FY2025). Must still resolve via the nearest-preceding-anchor ASOF match,
+    not come back blank the way the older between-two-anchors version regressed to."""
+    rows = {r.report_date: r for r in repo.get_filings("AAPL")}
+    assert rows["2025-12-27"].fiscal_year == 2026
+    assert rows["2025-12-27"].period_type == "Q1"
+    assert rows["2026-03-28"].fiscal_year == 2026
+    assert rows["2026-03-28"].period_type == "Q2"
+    assert rows["2026-06-27"].fiscal_year == 2026
+    assert rows["2026-06-27"].period_type == "Q3"
 
 
 def test_get_filings_10k_matches_fy_anchor_exactly(repo):
@@ -111,7 +131,8 @@ def test_get_filings_never_duplicates_rows_for_a_filing(repo):
     short quarterly-retention window -- confirmed in production 2026-08-12 to fan out into
     two rows per 10-K under a naive period_end-equality join. Bracketing against FY-only
     anchors must never do that: exactly one row per input filing."""
-    assert len(repo.get_filings("AAPL")) == len(_FILING_ROWS) - 1  # minus MSFT's row
+    aapl_filings = sum(1 for row in _FILING_ROWS if row[0] == "AAPL")
+    assert len(repo.get_filings("AAPL")) == aapl_filings
 
 
 def test_get_filings_unknown_ticker_returns_empty(repo):
