@@ -80,8 +80,21 @@ from pyspark.sql.types import (
     TimestampType,
 )
 
-from fundamentals_pipeline import forecasting as fc
-from fundamentals_pipeline import valuation as fpv
+# Normally installed once in 91__full_pipeline's session-dependencies cell, but this
+# notebook has no guarantee of that shared session if it's ever run standalone or as its
+# own Databricks Job task (a task gets a fresh Python env, independent of the %pip install
+# lightgbm cell above, which only ever installs that one separate package) — same
+# reinstall-on-ImportError pattern already used by 11__fetch_sec_xbrl.py.
+try:
+    from fundamentals_pipeline import forecasting as fc
+    from fundamentals_pipeline import valuation as fpv
+except ImportError:
+    import subprocess
+    import sys
+
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "-e", "../.."])
+    from fundamentals_pipeline import forecasting as fc
+    from fundamentals_pipeline import valuation as fpv
 
 # ── Paths & table names ──────────────────────────────────────────────────────
 ASSUMPTIONS_JSON_PATH = "../00__config/valuation_assumptions.json"

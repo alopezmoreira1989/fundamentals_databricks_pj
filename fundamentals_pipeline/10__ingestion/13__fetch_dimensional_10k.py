@@ -36,7 +36,21 @@ from datetime import date
 
 import pandas as pd
 import requests
-from lxml import etree
+
+# lxml isn't a core Databricks Runtime library -- 91__full_pipeline.py's own %pip cell installs
+# it once per shared session, but this notebook has no guarantee of that session if it's ever
+# run standalone or as its own Databricks Job task (a task gets a fresh Python env, no shared
+# %pip install from a sibling task) -- same reinstall-on-ImportError pattern already used by
+# 11__fetch_sec_xbrl.py for fundamentals_pipeline itself.
+try:
+    from lxml import etree
+except ImportError:
+    import subprocess
+    import sys
+
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "lxml"])
+    from lxml import etree
+
 from pyspark.sql import functions as F
 from pyspark.sql.types import (
     DateType,
