@@ -44,18 +44,42 @@
     { key: "sma200", name: "SMA 200", color: COLOR_SMA200, lineWidth: 1 },
   ];
 
+  // key -> LineSeries, so the legend toggles below can show/hide each one independently.
+  var seriesByKey = {};
   var legendHtml = "";
   SERIES.forEach(function (s) {
     var points = DATA.filter(function (p) { return p[s.key] !== null && p[s.key] !== undefined; })
       .map(function (p) { return { time: p.date, value: p[s.key] }; });
     if (points.length < 2) return; // matches price_chart_data's own "need >=2 points" guard, per series
-    var lineSeries = chart.addSeries(LightweightCharts.LineSeries, { color: s.color, lineWidth: s.lineWidth });
+    var lineSeries = chart.addSeries(LightweightCharts.LineSeries, {
+      color: s.color,
+      lineWidth: s.lineWidth,
+      // Lightweight Charts draws a dashed horizontal ruler + axis label at each series' last
+      // value by default -- with 4 series on screen at once (Price + 3 SMAs) that reads as
+      // clutter, not a useful reference, so it's off for every series here.
+      priceLineVisible: false,
+    });
     lineSeries.setData(points);
-    legendHtml += '<span><span class="dot" style="background:' + s.color + '"></span>' + s.name + "</span>";
+    seriesByKey[s.key] = lineSeries;
+    legendHtml += '<span data-toggle-key="' + s.key + '"><span class="dot" style="background:' + s.color
+      + '"></span>' + s.name + "</span>";
   });
 
   var legendEl = document.getElementById("price-chart-legend");
-  if (legendEl) legendEl.innerHTML = legendHtml;
+  if (legendEl) {
+    legendEl.innerHTML = legendHtml;
+    legendEl.classList.add("chart-legend--toggleable");
+    // Click a legend chip to show/hide that line -- classList.toggle's return value IS the
+    // new state (true = class just added = now hidden), so no separate state tracking needed.
+    legendEl.addEventListener("click", function (e) {
+      var chip = e.target.closest("[data-toggle-key]");
+      if (!chip) return;
+      var series = seriesByKey[chip.dataset.toggleKey];
+      if (!series) return;
+      var nowHidden = chip.classList.toggle("is-off");
+      series.applyOptions({ visible: !nowHidden });
+    });
+  }
 
   chart.timeScale().fitContent();
 
