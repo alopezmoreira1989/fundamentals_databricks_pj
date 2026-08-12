@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cash Flow Chartjs (mockup)</title>
+<!--
+  Mockup-first gate (per the fundamentals_screener charts-migration prompt). This file loads
+  the REAL vendored library file and the REAL app.css from fundamentals_screener -- not a
+  copied/hardcoded palette -- so what's approved here is what Phase 1 will actually ship.
+  All chart colors are read at runtime via getComputedStyle() against app.css's :root custom
+  properties (--ink/--accent/--positive/--negative/--orange/--rule/--mono/--display/--sans),
+  never hardcoded hex in JS, per the prompt's CSS discipline requirement.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<link href="../../fundamentals_screener/fundamentals_screener/static/fundamentals_screener/css/app.css" rel="stylesheet">
+<style>
+  body { background: var(--bg); color: var(--ink); font-family: var(--sans); padding: 32px; }
+  .mock-shell { max-width: 1040px; margin: 0 auto; }
+  .mock-banner { font-family: var(--mono); font-size: .72rem; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--accent-ink); background: var(--accent-soft); border: 1px solid var(--accent);
+    border-radius: 4px; padding: 8px 14px; margin-bottom: 20px; }
+  .eyebrow { font-family: var(--mono); font-size: .72rem; letter-spacing: .16em; text-transform: uppercase; color: var(--ink-3); }
+  .price-last { font-family: var(--display); font-size: 1.8rem; font-weight: 500; font-variation-settings: "opsz" 144; line-height: 1; }
+  .chart-legend { display: flex; flex-wrap: wrap; gap: 16px; font-family: var(--mono);
+    font-size: .68rem; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2); }
+  .chart-legend .dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+  .mock-canvas-wrap { position: relative; height: 340px; }
+  .mock-lwc-wrap { position: relative; height: 340px; }
+  .bs-comp { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
+  .bs-col-head { display: flex; justify-content: space-between; align-items: baseline;
+    font-family: var(--mono); font-size: .66rem; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--ink-3); padding-bottom: 8px; border-bottom: 1px solid var(--ink); margin-bottom: 10px; }
+  @media (max-width: 640px) { .bs-comp { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="mock-shell">
+  <div class="mock-banner">Mockup -- Phase 0, fundamentals_screener chart migration -- not wired to the live app</div>
+
+  <div class="card p-4 mb-3">
+    <div class="chart-legend mb-2" id="mock-legend"></div>
+    <div class="mock-canvas-wrap"><canvas id="mock-chart"></canvas></div>
+  </div>
+  <p class="text-muted small">
+    Two overlapping bar datasets on the same category (wide OCF behind, narrower FCF in
+    front) approximate <code>charts._ocf_fcf_chart_svg</code>'s visual -- the OCF&rarr;FCF gap
+    still reads as CapEx. Achieved with per-dataset <code>barPercentage</code> +
+    <code>order</code>, no custom plugin needed (unlike the Balance Sheet mockup).
+  </p>
+
+<script src="../../fundamentals_screener/fundamentals_screener/static/fundamentals_screener/js/vendor/chart.umd.js"></script>
+<script>
+(function () {
+  "use strict";
+  var LABELS = ["'18", "'19", "'20", "'21", "'22", "'23", "'24", "'25"];
+  var OCF = [7000000000.0, 7600000000.0, 6000000000.0, 11500000000.0, 13000000000.0, 13800000000.0, 15500000000.0, 18000000000.0];
+  var FCF = [5800000000, 6300000000, 4900000000, 9800000000, 11000000000, 11600000000, 13000000000, 15000000000];
+
+  var root = getComputedStyle(document.documentElement);
+  var tok = function (name) { return root.getPropertyValue(name).trim(); };
+  var COLOR_ACCENT = tok('--accent');
+  var COLOR_ACCENT_SOFT = tok('--accent-soft');
+  var COLOR_POSITIVE = tok('--positive');
+  var COLOR_INK3 = tok('--ink-3');
+  var COLOR_RULE = tok('--rule');
+  var FONT_MONO = tok('--mono');
+
+  function compact(v) {
+    var a = Math.abs(v);
+    if (a >= 1e9) return (v / 1e9).toFixed(1) + 'B';
+    if (a >= 1e6) return (v / 1e6).toFixed(1) + 'M';
+    return v.toFixed(0);
+  }
+
+  var ctx = document.getElementById('mock-chart').getContext('2d');
+  new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: LABELS,
+      datasets: [
+        {
+          label: 'Operating CF', data: OCF, backgroundColor: COLOR_ACCENT_SOFT,
+          borderColor: COLOR_ACCENT, borderWidth: 1, borderRadius: 2,
+          barPercentage: 0.9, categoryPercentage: 0.7, order: 2,
+        },
+        {
+          label: 'Free CF (= OCF - CapEx)', data: FCF, backgroundColor: COLOR_POSITIVE,
+          borderRadius: 2, barPercentage: 0.42, categoryPercentage: 0.7, order: 1,
+        },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      scales: {
+        x: { grid: { display: false }, ticks: { color: COLOR_INK3, font: { family: FONT_MONO, size: 11 } } },
+        y: {
+          grid: { color: COLOR_RULE }, border: { display: false },
+          ticks: { color: COLOR_INK3, font: { family: FONT_MONO, size: 11 }, callback: compact },
+        },
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: function (c) { return c.dataset.label + ': $' + compact(c.parsed.y); } } },
+      },
+    },
+  });
+
+  document.getElementById('mock-legend').innerHTML =
+    '<span><span class="dot" style="background:' + COLOR_ACCENT + '"></span>Operating CF</span>' +
+    '<span><span class="dot" style="background:' + COLOR_POSITIVE + '"></span>Free CF (= OCF &minus; CapEx)</span>';
+})();
+</script>
+
+</div>
+</body>
+</html>

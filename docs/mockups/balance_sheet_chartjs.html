@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Balance Sheet Chartjs (mockup)</title>
+<!--
+  Mockup-first gate (per the fundamentals_screener charts-migration prompt). This file loads
+  the REAL vendored library file and the REAL app.css from fundamentals_screener -- not a
+  copied/hardcoded palette -- so what's approved here is what Phase 1 will actually ship.
+  All chart colors are read at runtime via getComputedStyle() against app.css's :root custom
+  properties (--ink/--accent/--positive/--negative/--orange/--rule/--mono/--display/--sans),
+  never hardcoded hex in JS, per the prompt's CSS discipline requirement.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<link href="../../fundamentals_screener/fundamentals_screener/static/fundamentals_screener/css/app.css" rel="stylesheet">
+<style>
+  body { background: var(--bg); color: var(--ink); font-family: var(--sans); padding: 32px; }
+  .mock-shell { max-width: 1040px; margin: 0 auto; }
+  .mock-banner { font-family: var(--mono); font-size: .72rem; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--accent-ink); background: var(--accent-soft); border: 1px solid var(--accent);
+    border-radius: 4px; padding: 8px 14px; margin-bottom: 20px; }
+  .eyebrow { font-family: var(--mono); font-size: .72rem; letter-spacing: .16em; text-transform: uppercase; color: var(--ink-3); }
+  .price-last { font-family: var(--display); font-size: 1.8rem; font-weight: 500; font-variation-settings: "opsz" 144; line-height: 1; }
+  .chart-legend { display: flex; flex-wrap: wrap; gap: 16px; font-family: var(--mono);
+    font-size: .68rem; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2); }
+  .chart-legend .dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+  .mock-canvas-wrap { position: relative; height: 340px; }
+  .mock-lwc-wrap { position: relative; height: 340px; }
+  .bs-comp { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
+  .bs-col-head { display: flex; justify-content: space-between; align-items: baseline;
+    font-family: var(--mono); font-size: .66rem; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--ink-3); padding-bottom: 8px; border-bottom: 1px solid var(--ink); margin-bottom: 10px; }
+  @media (max-width: 640px) { .bs-comp { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="mock-shell">
+  <div class="mock-banner">Mockup -- Phase 0, fundamentals_screener chart migration -- not wired to the live app</div>
+
+  <div class="card p-4 mb-3">
+    <div class="d-flex justify-content-between align-items-baseline mb-3 flex-wrap gap-2">
+      <div class="eyebrow">Balance sheet composition</div>
+      <select class="form-select form-select-sm w-auto" id="mock-year-select">
+<option value="2024">FY 2024</option><option value="2025">FY 2025</option>
+      </select>
+    </div>
+    <div class="mock-canvas-wrap" style="height:220px"><canvas id="mock-chart"></canvas></div>
+    <div class="bs-comp mt-3">
+      <div><div class="bs-col-head"><span>Assets</span><span class="mono" id="mock-assets-total"></span></div>
+        <div id="mock-assets-legend"></div></div>
+      <div><div class="bs-col-head"><span>Liabilities &amp; Equity</span><span class="mono" id="mock-le-total"></span></div>
+        <div id="mock-le-legend"></div></div>
+    </div>
+  </div>
+  <p class="text-muted small">
+    <strong>Flagged for review</strong> (see Phase 0 report): this is the one chart that doesn't
+    map cleanly onto a stock Chart.js type. Modeled as a horizontal 100%-stacked bar with 2
+    categories (Assets / Liabilities &amp; Equity); each stack's segments are a different
+    "dataset slot" per position so per-segment names/colors/tooltips can differ between the two
+    bars (a real per-category dataset, not shared labels). The current/non-current divider (the
+    black rule in the current SVG) needed a small custom Chart.js plugin
+    (<code>afterDatasetsDraw</code>) -- there's no built-in for it. The year selector swaps
+    <code>chart.data.datasets</code> and calls <code>chart.update()</code> client-side, reusing
+    the same all-years-embedded-in-one-payload approach the current <code>bsShowYear()</code>
+    hide/show already uses (confirmed in company_detail.html: all years are already rendered
+    server-side and toggled via a hidden <code>.bs-year</code> div per year, not a server
+    re-render -- so this is a drop-in replacement for that mechanism, not a new one).
+  </p>
+
+<script src="../../fundamentals_screener/fundamentals_screener/static/fundamentals_screener/js/vendor/chart.umd.js"></script>
+<script>
+(function () {
+  "use strict";
+  var YEARS = [{"year": 2024, "assets": {"total": 33400000000.0, "segments": [{"name": "Cash & Equivalents", "value": 8100000000.0, "pct": 24.251, "color": "#0B2545"}, {"name": "Accounts Receivable", "value": 5400000000.0, "pct": 16.168, "color": "#325069"}, {"name": "Inventory", "value": 3200000000.0, "pct": 9.581, "color": "#5A7C8E"}, {"name": "PP&E", "value": 12600000000.0, "pct": 37.725, "color": "#81A7B2"}, {"name": "Other Assets", "value": 4100000000.0, "pct": 12.275, "color": "#A8D2D6"}], "boundary_index": 3}, "liabilities_equity": {"total": 33400000000.0, "segments": [{"name": "Accounts Payable", "value": 4800000000.0, "pct": 14.371, "color": "#7A2D16"}, {"name": "Accrued Liabilities", "value": 2100000000.0, "pct": 6.287, "color": "#A15F47"}, {"name": "Long-Term Debt", "value": 9500000000.0, "pct": 28.443, "color": "#C99177"}, {"name": "Other Liabilities", "value": 2600000000.0, "pct": 7.784, "color": "#F0C3A8"}, {"name": "Equity", "value": 14400000000.0, "pct": 43.114, "color": "#0F6E56"}], "boundary_index": 2}}, {"year": 2025, "assets": {"total": 37800000000.0, "segments": [{"name": "Cash & Equivalents", "value": 9600000000.0, "pct": 25.397, "color": "#0B2545"}, {"name": "Accounts Receivable", "value": 6000000000.0, "pct": 15.873, "color": "#325069"}, {"name": "Inventory", "value": 3500000000.0, "pct": 9.259, "color": "#5A7C8E"}, {"name": "PP&E", "value": 14100000000.0, "pct": 37.302, "color": "#81A7B2"}, {"name": "Other Assets", "value": 4600000000.0, "pct": 12.169, "color": "#A8D2D6"}], "boundary_index": 3}, "liabilities_equity": {"total": 37800000000.0, "segments": [{"name": "Accounts Payable", "value": 5200000000.0, "pct": 13.757, "color": "#7A2D16"}, {"name": "Accrued Liabilities", "value": 2300000000.0, "pct": 6.085, "color": "#A15F47"}, {"name": "Long-Term Debt", "value": 10200000000.0, "pct": 26.984, "color": "#C99177"}, {"name": "Other Liabilities", "value": 2800000000.0, "pct": 7.407, "color": "#F0C3A8"}, {"name": "Equity", "value": 17300000000.0, "pct": 45.767, "color": "#0F6E56"}], "boundary_index": 2}}];
+
+  var root = getComputedStyle(document.documentElement);
+  var tok = function (name) { return root.getPropertyValue(name).trim(); };
+  var COLOR_INK = tok('--ink');
+  var COLOR_INK3 = tok('--ink-3');
+  var FONT_MONO = tok('--mono');
+
+  function compact(v) {
+    var a = Math.abs(v);
+    if (a >= 1e9) return '$' + (v / 1e9).toFixed(1) + 'B';
+    if (a >= 1e6) return '$' + (v / 1e6).toFixed(1) + 'M';
+    return '$' + v.toFixed(0);
+  }
+
+  // Custom plugin: draws the current/non-current divider rule inside each bar, at the
+  // cumulative-percent offset of that bar's boundary_index segment.
+  var dividerPlugin = {
+    id: 'segDivider',
+    afterDatasetsDraw: function (chart) {
+      var meta0 = chart.getDatasetMeta(0);
+      if (!meta0 || !meta0.data.length) return;
+      var boundaries = chart.data.boundaries || [];
+      var ctx = chart.ctx;
+      var yScale = chart.scales.y;
+      boundaries.forEach(function (b, catIndex) {
+        if (b == null) return;
+        var bar = meta0.data[catIndex];
+        if (!bar) return;
+        var xScale = chart.scales.x;
+        var xPix = xScale.getPixelForValue(b);
+        var top = yScale.getPixelForValue(catIndex) - bar.height / 2;
+        var bottom = yScale.getPixelForValue(catIndex) + bar.height / 2;
+        ctx.save();
+        ctx.strokeStyle = COLOR_INK;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(xPix, top);
+        ctx.lineTo(xPix, bottom);
+        ctx.stroke();
+        ctx.restore();
+      });
+    },
+  };
+
+  function buildDatasets(stackKeyA, stackKeyB) {
+    // stackKeyA -> row 0 (Assets), stackKeyB -> row 1 (Liabilities & Equity). Each dataset is
+    // one "slot" (position within its own stack); the other category's value is null so
+    // Chart.js draws nothing there (not a zero-width segment).
+    var maxSlots = Math.max(stackKeyA.segments.length, stackKeyB.segments.length);
+    var datasets = [];
+    for (var i = 0; i < maxSlots; i++) {
+      var segA = stackKeyA.segments[i] || null;
+      var segB = stackKeyB.segments[i] || null;
+      datasets.push({
+        label: 'slot' + i,
+        data: [segA ? segA.pct : null, segB ? segB.pct : null],
+        backgroundColor: [segA ? segA.color : 'transparent', segB ? segB.color : 'transparent'],
+        segmentNames: [segA ? segA.name : null, segB ? segB.name : null],
+        segmentValues: [segA ? segA.value : null, segB ? segB.value : null],
+        stack: 'composition',
+        barPercentage: 0.6,
+      });
+    }
+    return datasets;
+  }
+
+  var ctx = document.getElementById('mock-chart').getContext('2d');
+  var chart = new Chart(ctx, {
+    type: 'bar',
+    data: { labels: ['Assets', 'Liabilities & Equity'], datasets: [], boundaries: [] },
+    options: {
+      indexAxis: 'y',
+      responsive: true, maintainAspectRatio: false,
+      scales: {
+        x: { stacked: true, min: 0, max: 100, display: false },
+        y: { stacked: true, grid: { display: false }, ticks: { color: COLOR_INK3, font: { family: FONT_MONO, size: 12 } } },
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: function (c) {
+              var name = c.dataset.segmentNames[c.dataIndex];
+              if (!name) return null;
+              var val = c.dataset.segmentValues[c.dataIndex];
+              return name + ': ' + compact(val) + ' (' + c.raw.toFixed(1) + '%)';
+            },
+          },
+        },
+      },
+    },
+    plugins: [dividerPlugin],
+  });
+
+  function renderLegend(elId, stack) {
+    document.getElementById(elId).innerHTML = stack.segments.map(function (s) {
+      return '<div class="d-flex justify-content-between small py-1" style="border-bottom:1px solid var(--rule-soft)">' +
+        '<span><span class="d-inline-block me-2" style="width:10px;height:10px;border-radius:2px;background:' + s.color + '"></span>' + s.name + '</span>' +
+        '<span class="mono">' + compact(s.value) + '</span></div>';
+    }).join('');
+  }
+
+  function showYear(year) {
+    var y = YEARS.filter(function (r) { return String(r.year) === String(year); })[0];
+    if (!y) return;
+    chart.data.datasets = buildDatasets(y.assets, y.liabilities_equity);
+    chart.data.boundaries = [
+      y.assets.segments.slice(0, y.assets.boundary_index).reduce(function (s, seg) { return s + seg.pct; }, 0),
+      y.liabilities_equity.segments.slice(0, y.liabilities_equity.boundary_index).reduce(function (s, seg) { return s + seg.pct; }, 0),
+    ];
+    chart.update();
+    document.getElementById('mock-assets-total').textContent = compact(y.assets.total);
+    document.getElementById('mock-le-total').textContent = compact(y.liabilities_equity.total);
+    renderLegend('mock-assets-legend', y.assets);
+    renderLegend('mock-le-legend', y.liabilities_equity);
+  }
+
+  document.getElementById('mock-year-select').addEventListener('change', function (e) { showYear(e.target.value); });
+  showYear(YEARS[0].year);
+})();
+</script>
+
+</div>
+</body>
+</html>

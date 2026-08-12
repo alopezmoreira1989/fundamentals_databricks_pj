@@ -55,6 +55,7 @@ fundamentals_screener = [
     "templates/fundamentals_screener/*.html",
     "static/fundamentals_screener/css/*.css",
     "static/fundamentals_screener/js/*.js",
+    "static/fundamentals_screener/js/vendor/*.js",
     "static/fundamentals_screener/portraits/*.png",
     "static/fundamentals_screener/icons/*.png",
 ]

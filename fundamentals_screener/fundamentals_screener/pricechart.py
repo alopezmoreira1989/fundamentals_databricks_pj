@@ -1,7 +1,8 @@
 """Presentation helper: headline price stats (last/min/max close) for the Price tab's KPI row.
 
-Pure layout math (no I/O, no financial logic). The visual chart itself (line + SMAs + axis +
-legend) is :func:`fundamentals_screener.charts.price_line_chart` — this module only derives
+Pure layout math (no I/O, no financial logic). The visual chart itself (line + SMAs, rendered
+client-side by price_chart.js) is fed by :func:`fundamentals_screener.charts.price_chart_data`
+— this module only derives
 the scalar figures shown above/below it. Kept out of the view so it stays unit-testable —
 same split as :mod:`fundamentals_screener.football`.
 """
