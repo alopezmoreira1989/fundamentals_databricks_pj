@@ -975,3 +975,7 @@ All monetary values are displayed in **millions or billions USD** in the dashboa
 **Performance: `localCheckpoint(eager=True)`, not `cache()`.** This is a serverless-only workspace, where `.cache()` / `.persist()` / `.unpersist()` raise `[NOT_SUPPORTED_WITH_SERVERLESS]`. To stop expensive Spark frames from being recomputed every time they're consumed (`count()` + a MERGE + a downstream join all re-trigger the full lineage), the transformation notebooks materialize reused frames once with `localCheckpoint(eager=True)`, which also truncates the lineage. It's applied where a frame is consumed 2× or more on top of a costly upstream (a full scan of the ~81M-row `financials_raw` slice, a wide pivot, or a multi-window dedup): `raw` and `clean_fy` in `21__clean_and_merge`, `flow_dedup` / `flow_quarterly` / `stock_quarterly` in `21b__derive_quarterly`, `wide` / `long_base` / `long_val` in `22__derived_metrics`, and `fin_subset` / `quarters_ranked` in `23__intrinsic_value`. Checkpoints live on the cluster's local disk and are released when the session closes.
 
 **Performance: vectorized record-building, no `iterrows`.** Hot per-row loops in the Python-side stages were replaced with vectorized NumPy/pandas: `11__fetch_sec_xbrl` builds per-ticker rows column-wise (the old `df.apply(..., axis=1)` was GIL-bound and dominated stage-11 CPU), and `23__intrinsic_value` computes all four valuation methods over the whole frame at once instead of `pdf.iterrows()` × 4 methods.
+
+## License
+
+[MIT](LICENSE).
