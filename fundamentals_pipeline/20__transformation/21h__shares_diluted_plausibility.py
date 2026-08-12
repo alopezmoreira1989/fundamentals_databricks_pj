@@ -25,7 +25,7 @@
 # MAGIC was placed in `21__clean_and_merge` — moving it here (after quarterly data actually
 # MAGIC exists) is the fix.
 # MAGIC
-# MAGIC Four checks, run in this specific order — each later check depends on the deletions of
+# MAGIC Five checks, run in this specific order — each later check depends on the deletions of
 # MAGIC the ones before it, for the same reason: a neighbor-relative check can be poisoned by
 # MAGIC leaving an absolutely-implausible value in its comparison pool (see check 2's own doc
 # MAGIC for the concrete, confirmed-at-scale failure mode this produces if skipped).
@@ -76,17 +76,34 @@
 # MAGIC itself, not a flaw in this comparison logic.
 # MAGIC
 # MAGIC **4. Neighbor-based iterative check — Shares Outstanding (Cover Page) (runs after check
-# MAGIC 2's second pass + check 3).** `dei:EntityCommonStockSharesOutstanding`, added 2026-07 for
-# MAGIC the "live" Market Cap / NCAV features — see 00__config/01__tickers.py. A universe-wide
-# MAGIC scan comparing cover-page shares against Shares Diluted (triggered by a GENI market-cap
-# MAGIC bug report) found the SAME isolated single-quarter scale-error failure mode already fixed
-# MAGIC for Shares Diluted — confirmed real cases: ADV, AGL, PTCT, BKNG, MCHB. Identical
-# MAGIC mechanism to check 3 (same ratio thresholds, same iterative pool convergence) — only the
-# MAGIC concept differs — implemented as one shared function,
+# MAGIC 2's second pass + check 3 + check 5 below).** `dei:EntityCommonStockSharesOutstanding`,
+# MAGIC added 2026-07 for the "live" Market Cap / NCAV features — see 00__config/01__tickers.py.
+# MAGIC A universe-wide scan comparing cover-page shares against Shares Diluted (triggered by a
+# MAGIC GENI market-cap bug report) found the SAME isolated single-quarter scale-error failure
+# MAGIC mode already fixed for Shares Diluted — confirmed real cases: ADV, AGL, PTCT, BKNG, MCHB.
+# MAGIC Identical mechanism to check 3 (same ratio thresholds, same iterative pool convergence) —
+# MAGIC only the concept differs — implemented as one shared function,
 # MAGIC `_run_neighbor_plausibility_check(concept, error_type)`, called once per concept. Check 1
 # MAGIC (the absolute TCA-based check) is NOT extended to cover-page shares — it is specific to
 # MAGIC Shares Diluted's own "assets per share vs. traded price" signal; check 2 (the isolation
-# MAGIC guard) covers cover-page shares' own boundary-anchor vulnerability instead.
+# MAGIC guard) covers cover-page shares' own boundary-anchor vulnerability instead, and check 5
+# MAGIC (below) covers the whole-history-wrong pattern check 2/4 can't (see check 5's own doc).
+# MAGIC
+# MAGIC **5. Small-ratio guard — Shares Outstanding (Cover Page) only (runs after check 3, before
+# MAGIC check 4).** The mirror-image direction check 2's own Signal 2 deliberately left out (see
+# MAGIC its doc above): a cover-page count implausibly SMALL relative to Shares Diluted, in the
+# MAGIC SAME magnitude range (~10-25x) as a genuine reverse split, so a bare ratio threshold can't
+# MAGIC tell a real corporate action apart from a filer-side tagging bug — confirmed concretely by
+# MAGIC GENI's own case (2026-08 market-cap bug report): cover-page shares wrong in EVERY reported
+# MAGIC period (10M-18.5M vs. a real, sensibly-growing 150M-255M Shares Diluted) — a whole-history
+# MAGIC pattern check 4's neighbor-relative pool logic structurally cannot flag (there is no
+# MAGIC genuinely-correct period anywhere in GENI's own history to compare against — the exact
+# MAGIC same structural gap check 1 fills for Shares Diluted, but explicitly not extended to
+# MAGIC cover-page shares, per check 4's own doc above). Resolved the way this file's own check-2
+# MAGIC doc already flagged as the needed fix: cross-reference `stock_splits` as a tie-breaker — a
+# MAGIC candidate ratio with a real matching split on record (any tolerance-matched ratio, any
+# MAGIC date) survives untouched; one with NO matching split gets flagged. GENI has zero rows in
+# MAGIC `stock_splits` — confirmed not a real reverse split.
 # MAGIC
 # MAGIC **Why check 1/2 must run before check 3/4, not after or merged into one pass (found via
 # MAGIC pre-implementation simulation against real data, not just reasoned about):** a ticker
@@ -533,6 +550,120 @@ def _run_neighbor_plausibility_check(concept: str, error_type: str) -> None:
 
 
 _run_neighbor_plausibility_check("Shares Diluted", "implausible_shares_diluted")
+
+# COMMAND ----------
+
+# MAGIC %md ## 5. Small-ratio guard — Shares Outstanding (Cover Page) only (runs after check 3,
+# MAGIC before check 4)
+# MAGIC
+# MAGIC See the header doc's "5. Small-ratio guard" section for the full story. Reference
+# MAGIC concept is Shares Diluted, already cleaned by checks 1/3 above by the time this runs.
+
+# COMMAND ----------
+
+_SMALL_RATIO_CEILING = 5.0      # candidate < reference / 5 -- see header doc: unlike check 2's
+                                 # own 100x "too large" ceiling (chosen to sit safely ABOVE the
+                                 # largest confirmed real split, ~25x), this direction's whole
+                                 # point is that genuine reverse splits and tagging bugs occupy
+                                 # the SAME ~10-25x magnitude range -- so this ceiling only needs
+                                 # to be low enough to exclude ordinary WA-vs-point-in-time share
+                                 # count variation (which should never approach a 5x gap), not to
+                                 # discriminate real vs. bug itself; the stock_splits tie-breaker
+                                 # below does that.
+_SPLIT_RATIO_TOLERANCE = 0.30   # 30% band around a real split's own ratio
+
+
+def _run_small_ratio_guard(concept: str, reference_concept: str, error_type: str) -> None:
+    """Absolute pre-filter for `concept` values implausibly SMALL relative to
+    `reference_concept`, gated by a `stock_splits` cross-reference tie-breaker -- the mirror
+    direction check 2's own Signal 2 deliberately leaves out (see the header doc's "5."
+    section and check 2's own Signal 2 doc for why)."""
+    _candidates = (
+        spark.table(full_tbl)
+        .filter((F.col("concept") == concept) & F.col("value").isNotNull() & (F.col("value") > 0))
+        .select("ticker", "period_type", "fiscal_year", "period_end", "value")
+    )
+    _reference = (
+        spark.table(full_tbl)
+        .filter((F.col("concept") == reference_concept) & F.col("value").isNotNull())
+        .select("ticker", F.col("period_end").alias("ref_end"), F.col("value").alias("ref_value"))
+    )
+    _w_ref_asof = Window.partitionBy("ticker", "period_type", "fiscal_year").orderBy(F.col("ref_end").desc())
+    _ref_asof = (
+        _candidates.select("ticker", "period_type", "fiscal_year", "period_end").distinct()
+        .join(_reference, on="ticker", how="inner")
+        .filter(F.col("ref_end") <= F.col("period_end"))
+        .withColumn("_rn", F.row_number().over(_w_ref_asof))
+        .filter(F.col("_rn") == 1)
+        .select("ticker", "period_type", "fiscal_year", F.col("ref_value").alias("ref_asof"))
+    )
+    _w_ref_latest = Window.partitionBy("ticker").orderBy(F.col("ref_end").desc())
+    _ref_latest = (
+        _reference
+        .withColumn("_rn", F.row_number().over(_w_ref_latest))
+        .filter(F.col("_rn") == 1)
+        .select("ticker", F.col("ref_value").alias("ref_latest"))
+    )
+    _candidates_with_ratio = (
+        _candidates
+        .join(_ref_asof, on=["ticker", "period_type", "fiscal_year"], how="left")
+        .join(_ref_latest, on="ticker", how="left")
+        .withColumn("reference", F.coalesce(F.col("ref_asof"), F.col("ref_latest")))
+        .filter(F.col("reference").isNotNull() & (F.col("reference") > 0))
+        .withColumn("ratio", F.col("value") / F.col("reference"))
+        .filter(F.col("ratio") < 1.0 / _SMALL_RATIO_CEILING)
+    )
+
+    # Tie-breaker: does this ticker have a real recorded split whose own ratio explains the
+    # observed candidate/reference ratio? (a reverse split stores ratio < 1, e.g. a 1-for-10
+    # split -> 0.1 -- see splits.py's own contract doc.) Any tolerance-matched split at all
+    # survives, regardless of exact date alignment -- a candidate's own tagging date doesn't
+    # have to line up precisely with the split's ex-date.
+    _splits = (
+        spark.table(f"{CATALOG}.{SCHEMA}.stock_splits")
+        .select("ticker", F.col("ratio").alias("split_ratio"))
+    )
+    _flagged = (
+        _candidates_with_ratio
+        .join(_splits, on="ticker", how="left")
+        .withColumn(
+            "explained_by_split",
+            (F.col("split_ratio").isNotNull()
+             & (F.abs(F.col("ratio") - F.col("split_ratio")) / F.col("ratio") < _SPLIT_RATIO_TOLERANCE)
+             ).cast("int")
+        )
+        .groupBy("ticker", "period_type", "fiscal_year", "value", "reference", "ratio")
+        .agg(F.max("explained_by_split").alias("explained_by_split"))
+        .filter((F.col("explained_by_split") == 0) | F.col("explained_by_split").isNull())
+        .collect()
+    )
+
+    _excluded = {(r.ticker, r.period_type, r.fiscal_year) for r in _flagged}
+    print(f"Small-ratio-guard implausible {concept} values found: {len(_excluded):,}")
+
+    _scraped_at = datetime.utcnow()
+    _records = [{
+        "ticker": r.ticker,
+        "error_type": error_type,
+        "error_message": (
+            f"{concept} {r.period_type} FY{r.fiscal_year}={r.value:,.0f} is only {r.ratio:.4g}x "
+            f"the ticker's own nearest-in-time {reference_concept}={r.reference:,.0f}, and no "
+            f"recorded stock_splits row for this ticker explains a ratio near {r.ratio:.4g} -- "
+            f"consistent with a filer-side share-class/dimensional tagging error (e.g. a "
+            f"cover-page count reporting only one of several share classes), not a real reverse "
+            f"split. Excluded from financials this run."
+        ),
+        "step": "shares_diluted_plausibility",
+        "scraped_at": _scraped_at,
+    } for r in _flagged]
+
+    _delete_implausible_rows(concept, _excluded, _records)
+
+
+_run_small_ratio_guard(
+    "Shares Outstanding (Cover Page)", "Shares Diluted",
+    "implausible_shares_outstanding_cover_page_small_ratio",
+)
 
 # COMMAND ----------
 
