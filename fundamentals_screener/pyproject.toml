@@ -7,6 +7,7 @@ name = "fundamentals-screener"
 version = "0.8.2"
 description = "Installable Django app: a self-contained SEC EDGAR fundamentals screener, company detail, and valuation views, reading published Parquet artifacts via DuckDB. Extracted from fundamentals_databricks_pj's web/ Django app for reuse by external Django projects (originally: alopezm.xyz's /apps/screener/)."
 readme = "README.md"
+license = {text = "MIT"}
 requires-python = ">=3.9"
 # duckdb/pandas pinned to exact versions VERIFIED (by the consuming project) to install and
 # run on Python 3.9.2, the target production host — their later releases dropped Python 3.9

@@ -202,3 +202,7 @@ formats, and renders.
 the shape of `dtos.py` are what any consuming project's own templates/overrides couple
 against. Changing any of them is a breaking change: bump the version (tag this repo) before a
 consumer updates its pinned `git+https://...@vX.Y.Z` install.
+
+## License
+
+[MIT](LICENSE).
