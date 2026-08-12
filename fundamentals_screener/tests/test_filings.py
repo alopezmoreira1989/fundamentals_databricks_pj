@@ -3,10 +3,12 @@ the dashboard_filings artifact (written by the pipeline's 15__fetch_sec_filings.
 live SEC call of our own. Self-contained: in-memory DuckDB, injected connection, same pattern
 as test_net_net_snapshot.py.
 
-fiscal_year/period_type are joined in from dashboard_data (matched on report_date ==
-period_end for the same ticker) rather than derived from the date — the fixture below
-includes a dashboard_data table so that join has something real to match against, plus one
-filing (MSFT's) with no matching period to exercise the LEFT JOIN's NULL fallback.
+fiscal_year/period_type are bracketed against dashboard_data's period_type='FY' period_end
+dates (see companies.py's own comment on _FILINGS_SQL for why FY anchors, not a direct join
+against the short-retention Q1-Q4 rows) — the fixture below models two consecutive fiscal
+years' worth of FY anchors plus a mix of 10-K/10-Q filings, including one filing older than
+the earliest known anchor (to exercise the NULL fallback) and one ticker (MSFT) with no
+dashboard_data rows at all.
 """
 
 from __future__ import annotations
@@ -18,16 +20,21 @@ from fundamentals_screener.repositories.companies import CompanyRepository
 
 # ticker, form, filing_date, report_date, description, url
 _FILING_ROWS = [
-    ("AAPL", "10-K", "2026-03-17", "2025-12-31", "Annual report", "https://sec.gov/AAPL/10k-2026.htm"),
-    ("AAPL", "10-Q", "2025-11-10", "2025-09-30", "Quarterly report", "https://sec.gov/AAPL/10q-2025q3.htm"),
+    ("AAPL", "10-K", "2025-10-31", "2025-09-27", "Annual report FY25", "https://sec.gov/AAPL/10k-2025.htm"),
+    ("AAPL", "10-Q", "2025-08-01", "2025-06-28", "Q3 FY25", "https://sec.gov/AAPL/10q-2025q3.htm"),
+    ("AAPL", "10-Q", "2025-05-02", "2025-03-29", "Q2 FY25", "https://sec.gov/AAPL/10q-2025q2.htm"),
+    ("AAPL", "10-Q", "2025-01-31", "2024-12-28", "Q1 FY25", "https://sec.gov/AAPL/10q-2025q1.htm"),
+    ("AAPL", "10-K", "2024-11-01", "2024-09-28", "Annual report FY24", "https://sec.gov/AAPL/10k-2024.htm"),
+    # Older than the earliest known FY anchor (FY2024) below -- no prev_fy_end to bracket into.
+    ("AAPL", "10-Q", "2023-08-04", "2023-07-01", "Old 10-Q", "https://sec.gov/AAPL/10q-old.htm"),
     ("MSFT", "10-K", "2026-01-15", "2025-12-31", "Annual report", "https://sec.gov/MSFT/10k-2026.htm"),
 ]
 
-# ticker, period_end, fiscal_year, period_type — only AAPL's periods are present, so MSFT's
-# filing above has nothing to join against.
+# ticker, period_end, fiscal_year, period_type — FY-only anchors (the long-retention bucket).
+# MSFT has none, so its filing above has nothing to bracket against.
 _PERIOD_ROWS = [
-    ("AAPL", "2025-12-31", 2025, "FY"),
-    ("AAPL", "2025-09-30", 2025, "Q3"),
+    ("AAPL", "2024-09-28", 2024, "FY"),
+    ("AAPL", "2025-09-27", 2025, "FY"),
 ]
 
 
@@ -56,32 +63,55 @@ def repo(con):
 
 def test_get_filings_returns_only_this_tickers_rows_newest_first(repo):
     rows = repo.get_filings("AAPL")
-    assert len(rows) == 2
+    assert len(rows) == 6
     assert all(isinstance(r, FilingRow) for r in rows)
-    assert [r.filing_date for r in rows] == ["2026-03-17", "2025-11-10"]  # newest first
+    assert [r.filing_date for r in rows][:3] == ["2025-10-31", "2025-08-01", "2025-05-02"]  # newest first
 
 
 def test_get_filings_row_shape(repo):
     row = repo.get_filings("AAPL")[0]
     assert row.form == "10-K"
-    assert row.report_date == "2025-12-31"
-    assert row.description == "Annual report"
-    assert row.url == "https://sec.gov/AAPL/10k-2026.htm"
+    assert row.report_date == "2025-09-27"
+    assert row.description == "Annual report FY25"
+    assert row.url == "https://sec.gov/AAPL/10k-2025.htm"
 
 
-def test_get_filings_joins_fiscal_year_and_period_type(repo):
-    rows = repo.get_filings("AAPL")
-    by_form = {r.form: r for r in rows}
-    assert by_form["10-K"].fiscal_year == 2025
-    assert by_form["10-K"].period_type == "FY"
-    assert by_form["10-Q"].fiscal_year == 2025
-    assert by_form["10-Q"].period_type == "Q3"
+def test_get_filings_10k_matches_fy_anchor_exactly(repo):
+    rows = {r.report_date: r for r in repo.get_filings("AAPL")}
+    assert rows["2025-09-27"].fiscal_year == 2025
+    assert rows["2025-09-27"].period_type == "FY"
+    assert rows["2024-09-28"].fiscal_year == 2024
+    assert rows["2024-09-28"].period_type == "FY"
+
+
+def test_get_filings_10q_brackets_into_fy_with_ordinal_quarter(repo):
+    rows = {r.report_date: r for r in repo.get_filings("AAPL")}
+    assert rows["2024-12-28"].fiscal_year == 2025
+    assert rows["2024-12-28"].period_type == "Q1"
+    assert rows["2025-03-29"].fiscal_year == 2025
+    assert rows["2025-03-29"].period_type == "Q2"
+    assert rows["2025-06-28"].fiscal_year == 2025
+    assert rows["2025-06-28"].period_type == "Q3"
 
 
 def test_get_filings_no_matching_period_leaves_fiscal_year_none(repo):
     row = repo.get_filings("MSFT")[0]
     assert row.fiscal_year is None
     assert row.period_type is None
+
+
+def test_get_filings_10q_older_than_earliest_anchor_leaves_fiscal_year_none(repo):
+    rows = {r.report_date: r for r in repo.get_filings("AAPL")}
+    assert rows["2023-07-01"].fiscal_year is None
+    assert rows["2023-07-01"].period_type is None
+
+
+def test_get_filings_never_duplicates_rows_for_a_filing(repo):
+    """A 10-K's period_end can also carry a same-dated Q4 row in dashboard_data within the
+    short quarterly-retention window -- confirmed in production 2026-08-12 to fan out into
+    two rows per 10-K under a naive period_end-equality join. Bracketing against FY-only
+    anchors must never do that: exactly one row per input filing."""
+    assert len(repo.get_filings("AAPL")) == len(_FILING_ROWS) - 1  # minus MSFT's row
 
 
 def test_get_filings_unknown_ticker_returns_empty(repo):
