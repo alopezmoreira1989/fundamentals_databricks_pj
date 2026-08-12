@@ -256,3 +256,18 @@ if _issues:
     for i in _issues:
         print(f"    ✗ {i}")
 print("Eyeball §2 (NVDA) against the pre-fix baseline in the header to confirm the regression is gone.")
+
+# COMMAND ----------
+
+# Surfaces SPLIT_ADJUST_OK to a future downstream Databricks Job Task (dbutils.jobs.taskValues
+# is the platform-native cross-task value-passing mechanism -- see the "split 91 into a
+# multi-task job" effort). This notebook is still run inline via %run today (see the header doc
+# on why: non-raising by design, and %run's own dbutils.notebook.exit()-kills-the-parent
+# semantics rule out a conditional %run), so 91__full_pipeline.py's own step-status logging
+# still reads the plain SPLIT_ADJUST_OK global via globals() -- this call is purely additive,
+# a no-op wrapped defensively for the case where this notebook runs outside any Job Task context
+# at all (e.g. an interactive/standalone run), where taskValues has nothing to attach to.
+try:
+    dbutils.jobs.taskValues.set(key="split_adjust_ok", value=SPLIT_ADJUST_OK)
+except Exception:
+    pass

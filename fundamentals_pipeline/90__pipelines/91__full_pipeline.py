@@ -153,6 +153,21 @@ if not ACTIVE_TICKERS:
 pipeline_start = datetime.utcnow()
 print(f"Pipeline started at {pipeline_start.isoformat()} UTC")
 
+# `_run_id` (same name/format the run-log telemetry section below already uses) also gets
+# published via dbutils.jobs.taskValues here, this early -- forward-compatible plumbing for the
+# "split 91 into a multi-task job" effort: a future bootstrap task would need to publish run_id
+# THIS early so every other task can read the SAME value at ITS OWN start (dbutils.jobs.taskValues
+# is the Databricks-native cross-task value-passing mechanism; this repo doesn't use it anywhere
+# yet). Purely additive today -- the telemetry section below still independently (re)computes
+# `_run_id` from `pipeline_start` exactly as before (same deterministic value, unchanged
+# behavior), this is just also publishing it early. Wrapped defensively: outside any Job Task
+# context (e.g. an interactive/standalone run) taskValues has nothing to attach to and raises.
+_run_id = pipeline_start.strftime("%Y%m%dT%H%M%SZ")
+try:
+    dbutils.jobs.taskValues.set(key="run_id", value=_run_id)
+except Exception:
+    pass
+
 # COMMAND ----------
 
 # MAGIC %md

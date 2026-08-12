@@ -49,10 +49,18 @@ import pyspark.sql.functions as F
 import pyspark.sql.types as T
 
 # The pure backtest helpers ship in the installable `fundamentals_pipeline` package
-# (fundamentals_pipeline/backtest.py). Installed once in 91__full_pipeline's session-
-# dependencies cell, so this %run-included notebook imports it directly — no sys.path
-# manipulation (see 51 for the same pattern).
-from fundamentals_pipeline import backtest as bt
+# (fundamentals_pipeline/backtest.py). Normally installed once in 91__full_pipeline's
+# session-dependencies cell, but this notebook has no guarantee of that shared session if
+# it's ever run standalone or as its own Databricks Job task (a task gets a fresh Python
+# env) — same reinstall-on-ImportError pattern already used by 11__fetch_sec_xbrl.py.
+try:
+    from fundamentals_pipeline import backtest as bt
+except ImportError:
+    import subprocess
+    import sys
+
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "-e", "../.."])
+    from fundamentals_pipeline import backtest as bt
 
 # ── Paths & table names ──────────────────────────────────────────────────────────
 ARCHETYPES_JSON_PATH = "../00__config/backtest_archetypes.json"
