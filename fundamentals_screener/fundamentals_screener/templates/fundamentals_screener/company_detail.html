@@ -455,7 +455,7 @@
             <thead>
               <tr>
                 <th scope="col">Line item</th>
-                {% for y in st.years %}<th scope="col" class="num">FY {{ y }}</th>{% endfor %}
+                {% for y in st.years|slice:"::-1" %}<th scope="col" class="num">FY {{ y }}</th>{% endfor %}
                 <th scope="col" class="spark">Trend</th>
               </tr>
             </thead>
@@ -468,7 +468,7 @@
                 {% for line in sec.list %}
                   <tr class="{{ line.row_class }}">
                     <td class="label indent-{{ line.indent }}">{{ line.display_name }}</td>
-                    {% for v in line.values %}<td class="num">{{ v|compact_money }}</td>{% endfor %}
+                    {% for v in line.values|slice:"::-1" %}<td class="num">{{ v|compact_money }}</td>{% endfor %}
                     <td class="spark">{{ line.values|sparkline }}</td>
                   </tr>
                 {% endfor %}
@@ -496,7 +496,7 @@
             <thead>
               <tr>
                 <th scope="col">Line item</th>
-                {% for c in quarterly.columns %}<th scope="col" class="num">{{ c }}</th>{% endfor %}
+                {% for c in quarterly.columns|slice:"::-1" %}<th scope="col" class="num">{{ c }}</th>{% endfor %}
                 <th scope="col" class="spark">Trend</th>
               </tr>
             </thead>
@@ -504,7 +504,7 @@
               {% for line in quarterly.lines %}
                 <tr class="{{ line.row_class }}">
                   <td class="label indent-{{ line.indent }}">{{ line.display_name }}</td>
-                  {% for v in line.values %}<td class="num">{{ v|compact_money }}</td>{% endfor %}
+                  {% for v in line.values|slice:"::-1" %}<td class="num">{{ v|compact_money }}</td>{% endfor %}
                   <td class="spark">{{ line.values|sparkline }}</td>
                 </tr>
               {% endfor %}
