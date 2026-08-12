@@ -164,52 +164,66 @@ _STATEMENT_ORDER = ("Income Statement", "Balance Sheet", "Cash Flow")
 # periods (~3 years) -- a direct period_end-equality join against those short-retention rows
 # left most historical 10-Q filings (and, for 10-Ks whose period_end also has a same-dated
 # Q4 row within that ~3y window, a duplicate row) unlabeled or doubled, confirmed against
-# real production data 2026-08-12. FY-only anchors don't have that problem (10-year
-# retention), so:
-#   - a 10-K's report_date should exactly equal one FY anchor -> that anchor's fiscal_year,
-#     period_type 'FY'.
-#   - a 10-Q's report_date falls strictly between two consecutive FY anchors (prev_fy_end,
-#     fy_end) -> the later anchor's fiscal_year (the FY this quarter leads into), and its
-#     quarter number is its chronological rank among 10-Qs bracketed into that same
-#     ticker+fiscal_year (1st -> Q1, 2nd -> Q2, 3rd -> Q3) -- ordinal position, not a
-#     calendar-day-ratio estimate, since a fiscal year's Q1/Q2/Q3 10-Qs are always filed (and
-#     therefore always sort) before its own 10-K by construction.
+# real production data 2026-08-12.
+#
+# Uses an ASOF JOIN (DuckDB-native "nearest preceding row" join) against each ticker's FY
+# anchors, matching every filing to the closest FY period_end at or before its own
+# report_date -- not a between-two-anchors bracket (tried first, then reverted 2026-08-12):
+# that version required BOTH the prior FY end AND the *next* one to already exist, so a
+# still-open fiscal year's already-filed 10-Qs (the current FY's own 10-K not published yet
+# -- confirmed live for AAPL's FY2026 Q1-Q3) had no upper bound to bracket into and came back
+# blank, a real regression from the plain-join version this replaced. The ASOF match only
+# ever needs the *preceding* anchor, so it resolves correctly whether or not that filing's
+# own fiscal year has closed yet:
+#   - a 10-K's report_date should exactly equal its own matched anchor -> that anchor's
+#     fiscal_year, period_type 'FY'.
+#   - a 10-Q's report_date should fall within a year of its matched (necessarily prior) FY
+#     anchor -> anchor's fiscal_year + 1 (the FY this quarter leads into, closed or not), and
+#     its quarter number is its chronological rank among the 10-Qs sharing that same derived
+#     fiscal_year (1st -> Q1, 2nd -> Q2, 3rd -> Q3) -- ordinal position, not a calendar-day-
+#     ratio estimate. The BETWEEN 1 AND 400 guard rejects a match against a stale anchor far
+#     older than 400 days back (e.g. a 10-Q filed after a multi-year gap in FY retention),
+#     rather than silently mislabeling it into the wrong fiscal year.
 # A filing whose report_date matches neither pattern (older than the oldest known FY anchor,
 # or genuinely un-ingested) gets fiscal_year/period_type = NULL, same "real gap reads
 # NULL/absent" convention as every other optional field in this codebase -- not a guess.
 _FILINGS_SQL = """
     WITH fy_anchors AS (
-        SELECT ticker, fy_end, fiscal_year,
-               LAG(fy_end) OVER (PARTITION BY ticker ORDER BY fy_end) AS prev_fy_end
-        FROM (
-            SELECT DISTINCT ticker, period_end AS fy_end, fiscal_year
-            FROM dashboard_data
-            WHERE ticker = ? AND period_type = 'FY'
-        )
+        SELECT DISTINCT ticker, CAST(period_end AS DATE) AS fy_end, fiscal_year
+        FROM dashboard_data
+        WHERE ticker = ? AND period_type = 'FY'
+    ),
+    bracketed AS (
+        SELECT f.form, f.filing_date, f.report_date, f.description, f.url,
+               CASE
+                   WHEN f.form = '10-K' AND a.fy_end = CAST(f.report_date AS DATE) THEN a.fiscal_year
+                   WHEN f.form = '10-Q' AND a.fy_end IS NOT NULL
+                        AND CAST(f.report_date AS DATE) - a.fy_end BETWEEN 1 AND 400
+                   THEN a.fiscal_year + 1
+                   ELSE NULL
+               END AS fiscal_year,
+               CASE
+                   WHEN f.form = '10-K' AND a.fy_end = CAST(f.report_date AS DATE) THEN 'FY'
+                   WHEN f.form = '10-Q' AND a.fy_end IS NOT NULL
+                        AND CAST(f.report_date AS DATE) - a.fy_end BETWEEN 1 AND 400
+                   THEN 'Q'
+                   ELSE NULL
+               END AS period_kind
+        FROM dashboard_filings f
+        ASOF LEFT JOIN fy_anchors a
+          ON a.ticker = f.ticker AND a.fy_end <= CAST(f.report_date AS DATE)
+        WHERE f.ticker = ?
     )
-    SELECT f.form, f.filing_date, f.report_date, f.description, f.url,
-           a.fiscal_year,
-           CASE
-               WHEN f.form = '10-K' AND CAST(a.fy_end AS DATE) = CAST(f.report_date AS DATE) THEN 'FY'
-               WHEN f.form = '10-Q' AND a.prev_fy_end IS NOT NULL
-                    AND CAST(f.report_date AS DATE) > CAST(a.prev_fy_end AS DATE)
-                    AND CAST(f.report_date AS DATE) < CAST(a.fy_end AS DATE)
-               THEN 'Q' || CAST(ROW_NUMBER() OVER (
-                        PARTITION BY f.ticker, a.fiscal_year ORDER BY f.report_date
-                    ) AS VARCHAR)
-               ELSE NULL
+    SELECT form, filing_date, report_date, description, url,
+           fiscal_year,
+           CASE WHEN period_kind = 'Q'
+                THEN 'Q' || CAST(ROW_NUMBER() OVER (
+                         PARTITION BY fiscal_year, period_kind ORDER BY report_date
+                     ) AS VARCHAR)
+                ELSE period_kind
            END AS period_type
-    FROM dashboard_filings f
-    LEFT JOIN fy_anchors a
-      ON a.ticker = f.ticker
-     AND (
-           (f.form = '10-K' AND CAST(a.fy_end AS DATE) = CAST(f.report_date AS DATE))
-        OR (f.form = '10-Q' AND a.prev_fy_end IS NOT NULL
-            AND CAST(f.report_date AS DATE) > CAST(a.prev_fy_end AS DATE)
-            AND CAST(f.report_date AS DATE) < CAST(a.fy_end AS DATE))
-    )
-    WHERE f.ticker = ?
-    ORDER BY f.filing_date DESC
+    FROM bracketed
+    ORDER BY filing_date DESC
 """
 
 
