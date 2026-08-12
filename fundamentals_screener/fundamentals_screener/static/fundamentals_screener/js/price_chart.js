@@ -61,13 +61,23 @@
 
   // The Price tab-pane is `display:none` (Bootstrap tab) at page load unless it's the
   // active tab, so the container's width was ~0 when fitContent() ran above — that
-  // computed logical range then stays stuck once autoSize's ResizeObserver widens the
-  // canvas on tab-show, leaving only a few most-recent bars visible, right-anchored,
-  // with the rest of the chart empty. Re-fit once the pane actually becomes visible.
+  // computed logical range then stays stuck once the canvas widens later, leaving only a
+  // few most-recent bars visible, right-anchored, with the rest of the chart empty. Re-fit
+  // once the pane actually becomes visible (also covers the ?window= range buttons, which
+  // do a full-page reload back onto the Price tab via a #pane-price hash restore — see
+  // base template's DOMContentLoaded hash handling).
+  //
+  // Deferred via setTimeout, not called inline: with autoSize:true, chart.resize() is a
+  // documented no-op (the library's own resize() short-circuits whenever autoSize is
+  // active), and `shown.bs.tab` fires synchronously the moment Bootstrap's fade-in
+  // transition ends — before the container's ResizeObserver callback (queued for a later
+  // turn of the event loop) has actually widened the canvas. Calling fitContent() inline
+  // here would just recompute the same wrong range against the still-stale canvas width.
+  // Pushing it to a macrotask lets that pending resize land first.
   var tabTrigger = document.getElementById("tab-price");
   if (tabTrigger) {
     tabTrigger.addEventListener("shown.bs.tab", function () {
-      chart.timeScale().fitContent();
+      setTimeout(function () { chart.timeScale().fitContent(); }, 50);
     });
   }
 })();
