@@ -50,6 +50,10 @@
   .chart-legend { display: flex; flex-wrap: wrap; gap: 16px; font-family: var(--mono);
     font-size: .68rem; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2); }
   .chart-legend .dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+  /* Price tab: legend chips double as SMA/Price show-hide toggles (price_chart.js). */
+  .chart-legend--toggleable span[data-toggle-key] { cursor: pointer; user-select: none; }
+  .chart-legend--toggleable span[data-toggle-key]:hover { color: var(--ink); }
+  .chart-legend--toggleable span[data-toggle-key].is-off { opacity: .4; text-decoration: line-through; }
   .price-last { font-family: var(--display); font-size: 1.8rem; font-weight: 500; font-variation-settings: "opsz" 144; line-height: 1; }
   /* CHART LIBRARY INTEGRATION — Lightweight Charts (Price) / Chart.js (bar/combo/stacked)
      container sizing. Chart.js/Lightweight Charts both size to their container via
