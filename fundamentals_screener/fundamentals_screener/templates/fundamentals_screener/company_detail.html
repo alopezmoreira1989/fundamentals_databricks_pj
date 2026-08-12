@@ -103,12 +103,11 @@
 {% endblock %}
 
 {% block extra_scripts %}
-{% if forecast_chart.metrics %}<script src="{% static 'fundamentals_screener/js/forecasting.js' %}"></script>{% endif %}
 {% if price_tab_data %}
   <script src="{% static 'fundamentals_screener/js/vendor/lightweight-charts.standalone.production.js' %}"></script>
   <script src="{% static 'fundamentals_screener/js/price_chart.js' %}"></script>
 {% endif %}
-{% if statement_chart_data or quarterly_chart_data or bs_compositions_data %}
+{% if statement_chart_data or quarterly_chart_data or bs_compositions_data or forecast_chart.metrics %}
   <script src="{% static 'fundamentals_screener/js/vendor/chart.umd.js' %}"></script>
 {% endif %}
 {% if statement_chart_data or quarterly_chart_data %}
@@ -117,6 +116,7 @@
 {% if bs_compositions_data %}
   <script src="{% static 'fundamentals_screener/js/balance_sheet_chart.js' %}"></script>
 {% endif %}
+{% if forecast_chart.metrics %}<script src="{% static 'fundamentals_screener/js/forecasting.js' %}"></script>{% endif %}
 <script>
   document.addEventListener('DOMContentLoaded', function () {
     // Re-select the tab named by the URL hash (e.g. #pane-price) after a full page reload —
@@ -515,9 +515,6 @@
     <!-- Valuation (intrinsic-value football field + MoS + multiples) -->
     {% if iv_chart or mos_scenarios or valuation_metrics %}
       <div class="tab-pane fade" id="pane-valuation" role="tabpanel" aria-labelledby="tab-valuation" tabindex="0">
-        <div class="d-flex justify-content-end gap-3 mb-2 small">
-          <a class="text-decoration-none" href="{% url 'fundamentals_screener:valuation' detail.summary.ticker %}">Full valuation page →</a>
-        </div>
         {% if iv_chart %}
           <div class="card p-4 mb-4">
             <div class="d-flex justify-content-between align-items-baseline mb-3 flex-wrap gap-2">
@@ -600,12 +597,26 @@
       </div>
     {% endif %}
 
-    <!-- Forecasting: 10-year cross-sectional ML scenario fan chart + forward-multiples table,
-         embedded here (in addition to the standalone /<ticker>/forecasting/ page) mirroring
-         how the Valuation tab-pane above coexists with its own standalone page. -->
+    <!-- Forecasting: 10-year cross-sectional ML scenario fan chart + forward-multiples table. -->
     {% if forecast_chart.metrics %}
       <div class="tab-pane fade" id="pane-forecasting" role="tabpanel" aria-labelledby="tab-forecasting" tabindex="0">
         {{ forecast_chart_data|json_script:"fc-data" }}
+
+        <div class="card p-4 mb-4 fc-about">
+          <h2 class="h6 mb-2">How this forecast is built</h2>
+          <p class="fc-metric-note mb-0">
+            Years 1–10 come from a machine-learning model (LightGBM quantile regression) trained
+            cross-sectionally on every company we cover, predicting five outcomes per year — Bear,
+            Low Bear, Crab (the median case), Low Bull, and Bull — rather than a single number.
+            Years 11–20 aren't modeled directly: each scenario's growth rate decays toward this
+            company's own long-run DCF assumption (its terminal growth rate, floored at 2% so no
+            scenario implicitly grows slower than inflation), front-loaded so most of the
+            deceleration happens in the first few years after FY+10. The Forward P/E and FCF
+            Yield table below discounts each year's forecast back to today's dollars at that
+            scenario's own discount rate (WACC). This is a statistical projection, not investment
+            advice — treat the spread between scenarios as the real signal, not any single line.
+          </p>
+        </div>
 
         <ul class="nav nav-tabs mb-3" id="fc-metric-tabs">
           {% for m in forecast_chart.metrics %}
@@ -629,38 +640,12 @@
             </div>
           </div>
 
-          <div class="fc-chart-wrap">
-            <svg viewBox="0 0 1120 400" id="fc-svg">
-              <rect id="zone-terminal" class="fc-terminal-band"></rect>
-              <g id="fc-gridlines-y"></g>
-              <g id="fc-ticks-x"></g>
-
-              <text class="fc-zone-label" id="zone-label-hist" text-anchor="middle" y="30">historical</text>
-              <text class="fc-zone-label" id="zone-label-explicit" text-anchor="middle" y="30">explicit ml forecast</text>
-              <text class="fc-zone-label" id="zone-label-terminal" text-anchor="middle" y="30">terminal convergence</text>
-
-              <line id="fc-baseline" stroke="var(--rule)" stroke-width="1"></line>
-              <line class="fc-today-line" id="fc-line-fy0"></line>
-              <line class="fc-zone-divider" id="fc-line-fy10"></line>
-
-              <path class="fc-line fc-line--hist" id="ln-hist" d=""></path>
-
-              <path class="fc-line fc-line--bear"    id="ln-bear-explicit"    d=""></path>
-              <path class="fc-line fc-line--lowbear" id="ln-lowbear-explicit" d=""></path>
-              <path class="fc-line fc-line--crab"    id="ln-crab-explicit"    d=""></path>
-              <path class="fc-line fc-line--lowbull" id="ln-lowbull-explicit" d=""></path>
-              <path class="fc-line fc-line--bull"    id="ln-bull-explicit"    d=""></path>
-
-              <path class="fc-line fc-line--bear fc-line--terminal"    id="ln-bear-terminal"    d=""></path>
-              <path class="fc-line fc-line--lowbear fc-line--terminal" id="ln-lowbear-terminal" d=""></path>
-              <path class="fc-line fc-line--crab fc-line--terminal"    id="ln-crab-terminal"    d=""></path>
-              <path class="fc-line fc-line--lowbull fc-line--terminal" id="ln-lowbull-terminal" d=""></path>
-              <path class="fc-line fc-line--bull fc-line--terminal"    id="ln-bull-terminal"    d=""></path>
-            </svg>
+          <div class="cjs-chart-wrap">
+            <canvas id="fc-canvas"></canvas>
           </div>
           <p class="fc-metric-note mt-2 mb-0">
-            Gridlines mark every 5 years on the x-axis (with minor year ticks between) and every quartile
-            of the visible value range on the y-axis. Click a legend chip to toggle that scenario's line.
+            The shaded band marks the terminal-convergence years (FY+11 and later). Click a legend
+            chip to show or hide that scenario's line; hover the chart for exact values.
           </p>
         </div>
 
@@ -668,7 +653,6 @@
           <div class="card p-4">
             <div class="d-flex justify-content-between align-items-baseline mb-3 flex-wrap gap-2">
               <h2 class="h6 mb-0">Forward P/E &amp; FCF Yield <span class="text-muted fw-normal">· PV-discounted, scenario: <span class="eyebrow accent">Crab</span></span></h2>
-              <a class="small text-decoration-none" href="{% url 'fundamentals_screener:forecasting' detail.summary.ticker %}">Full forecasting page →</a>
             </div>
             <div class="table-responsive">
               <table class="table table-sm align-middle mb-0" id="fc-multiples-table">

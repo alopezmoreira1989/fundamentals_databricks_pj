@@ -573,18 +573,13 @@ body.fs-app { font-family: var(--sans); background: var(--bg); color: var(--ink)
 
 /* ============================================================
  * Forecasting tab (issue #336, extended by the "horizon extension & terminal-convergence fix"
- * milestone) — appended block, ported from docs/mockups/forecasting_tab.html (v2). Every rule
- * below references this file's own existing :root tokens (var(--ink), var(--accent),
- * var(--positive), var(--negative), var(--bg-subtle), var(--rule), var(--mono), ...) by name —
- * the mockup was prototyped against a different palette, but since it only ever used the SAME
- * token names, this block inherits fundamentals_screener's navy/cyan/orange palette automatically.
- * No new colors, :root untouched.
+ * milestone, migrated from a hand-rolled inline-<svg> chart to Chart.js in the "forecast chart
+ * library migration" pass — see forecasting.js). Every rule below references this file's own
+ * existing :root tokens by name, no new colors, :root untouched. The chart's own line
+ * colors/dashing/terminal-segment fade are set in forecasting.js at chart-config time (Chart.js
+ * has no CSS styling hook for canvas-drawn strokes) -- only the legend chips below are still
+ * real DOM elements needing their own rules.
  * ============================================================ */
-.fs-app .fc-hero { padding: 1.75rem 2rem; border-radius: 6px; }
-.fs-app .fc-badge {
-  font-family: var(--mono); font-size: .68rem; letter-spacing: .08em; text-transform: uppercase;
-  padding: 3px 9px; border-radius: 3px; border: 1px solid var(--rule); color: var(--ink-2);
-}
 .fs-app .fc-scenario-row { display: flex; gap: .5rem; flex-wrap: wrap; }
 .fs-app .fc-chip {
   font-family: var(--mono); font-size: .7rem; letter-spacing: .04em;
@@ -600,36 +595,5 @@ body.fs-app { font-family: var(--sans); background: var(--bg); color: var(--ink)
 .fs-app .fc-chip--lowbull .dot { background: var(--positive); opacity: .55; }
 .fs-app .fc-chip--bull .dot { background: var(--positive); }
 
-.fs-app .fc-chart-wrap { position: relative; }
-.fs-app .fc-chart-wrap svg { width: 100%; height: auto; display: block; }
-.fs-app .fc-axis-label { font-family: var(--mono); font-size: 10px; fill: var(--ink-3); }
-.fs-app .fc-axis-label--y { text-anchor: end; }
-.fs-app .fc-zone-label { font-family: var(--mono); font-size: 9.5px; letter-spacing: .06em; fill: var(--ink-3); text-transform: uppercase; }
-
-/* NEW (v2) — axis system: real gridlines + per-year ticks instead of 4 bare labels. */
-.fs-app .fc-grid-y { stroke: var(--rule-soft); stroke-width: 1; }
-.fs-app .fc-tick-minor { stroke: var(--rule); stroke-width: 1; }
-.fs-app .fc-tick-major { stroke: var(--ink-3); stroke-width: 1; }
-.fs-app .fc-zone-divider { stroke: var(--rule); stroke-width: 1; stroke-dasharray: 2 3; }
-
-.fs-app .fc-line { fill: none; stroke-width: 2; }
-.fs-app .fc-line--hist { stroke: var(--ink); }
-.fs-app .fc-line--bear { stroke: var(--negative); }
-.fs-app .fc-line--lowbear { stroke: var(--negative); stroke-opacity: .55; stroke-dasharray: 3 2; }
-.fs-app .fc-line--crab { stroke: var(--accent); }
-.fs-app .fc-line--lowbull { stroke: var(--positive); stroke-opacity: .55; stroke-dasharray: 3 2; }
-.fs-app .fc-line--bull { stroke: var(--positive); }
-/* NEW (v2) — terminal segment gets its own lighter/thinner treatment so it reads as "the same
-   line, entering a qualitatively calmer regime" rather than a literal continuation of the
-   explicit-forecast slope. */
-.fs-app .fc-line--terminal { stroke-width: 1.5; opacity: .78; }
-.fs-app .fc-line[data-hidden="true"] { opacity: 0; }
-.fs-app .fc-today-line { stroke: var(--ink-3); stroke-width: 1; stroke-dasharray: 2 2; }
-.fs-app .fc-terminal-band { fill: var(--bg-subtle); }
-
 .fs-app .fc-metric-note { font-size: .78rem; color: var(--ink-2); }
-.fs-app .fc-model-footnote {
-  font-family: var(--mono); font-size: .68rem; color: var(--ink-3); line-height: 1.5;
-  border-top: 1px solid var(--rule-soft); padding-top: 10px; margin-top: 6px;
-}
-.fs-app .fc-empty { color: var(--ink-3); font-size: .9rem; }
+.fs-app .fc-about { border-left: 3px solid var(--accent); }

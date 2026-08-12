@@ -51,10 +51,6 @@ _BASIS_ORDER = ("TTM", "FY")
 
 
 class ValuationRepository(DuckDBRepository):
-    def margin_of_safety(self, ticker: str, *, limit: int = 100) -> tuple[MetricPoint, ...]:
-        """Latest Margin-of-Safety metrics for the ticker (empty if none/unknown)."""
-        return self._fetch(_MOS_SQL, [ticker, limit], MetricPoint)
-
     def margin_of_safety_scenarios(self, ticker: str) -> tuple[MosScenario, ...]:
         """MoS pivoted to one row per (method, basis) with Bear / Mid / Bull columns, ordered by
         method then basis — so the scattered ``MoS % (…)``/``… — Bear``/``… — Bull`` metrics read

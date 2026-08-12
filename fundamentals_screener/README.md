@@ -40,9 +40,7 @@ pip install "fundamentals-screener @ git+https://github.com/alopezmoreira1989/fu
    ```
 
    Reverse with `{% url 'fundamentals_screener:screen' %}`,
-   `{% url 'fundamentals_screener:company_detail' ticker %}`,
-   `{% url 'fundamentals_screener:valuation' ticker %}`,
-   `{% url 'fundamentals_screener:forecasting' ticker %}`.
+   `{% url 'fundamentals_screener:company_detail' ticker %}`.
 3. Set the one required setting:
 
    ```python
@@ -156,18 +154,18 @@ Ported from `web/`'s `apps/companies`, `apps/screener`, `apps/valuation`:
   **Filings** tab listing the ticker's real SEC 10-K/10-Q filings (form, date, direct document
   link), read straight from the `dashboard_filings` artifact the upstream pipeline publishes —
   no SEC call, no SEC-specific setting, of this package's own, ever (see "Keeping data fresh").
-- **Valuation** (`/<ticker>/valuation/`): a standalone version of the same football field + MoS
-  table + Net-Net card.
-- **Forecasting** (`/<ticker>/forecasting/`): a 10-year cross-sectional ML scenario fan chart
-  (Revenue / Net Income / Free Cash Flow, 5 quantile scenarios — Bear/Low Bear/Crab/Low
-  Bull/Bull — years 1-5 from a LightGBM quantile-regression model, years 6-10 blended toward
-  each scenario's DCF terminal-growth rate) plus a PV-discounted forward P/E / FCF Yield table
-  (mid/"Crab" scenario). Not ported from `web/` — built directly in this package. Sourced from
-  the `dashboard_forecast` artifact (written by the upstream pipeline's `24__forecasting.py`);
-  a ticker with no published forecast yet shows a plain "not available" state rather than
-  erroring.
-- JSON siblings of all four (`/data/`, `/<ticker>/data/`, `/<ticker>/valuation/data/`,
-  `/<ticker>/forecasting/data/`).
+- **Forecasting** — a Company Detail tab (not a standalone page): a 30-year cross-sectional ML
+  scenario fan chart (Revenue / Net Income / Free Cash Flow, 5 quantile scenarios — Bear/Low
+  Bear/Crab/Low Bull/Bull — years 1-10 from a LightGBM quantile-regression model, years 11-20
+  front-loaded-decay toward each scenario's own DCF terminal-growth rate, floored at 2% so no
+  scenario implicitly grows slower than inflation) plus a PV-discounted forward P/E / FCF Yield
+  table (mid/"Crab" scenario), rendered with Chart.js. Not ported from `web/` — built directly
+  in this package. Sourced from the `dashboard_forecast` artifact (written by the upstream
+  pipeline's `24__forecasting.py`); a ticker with no published forecast yet simply omits the tab.
+  Valuation (football field + Margin of Safety + Net-Net card) is likewise a Company Detail
+  tab only — both used to also have their own standalone `/<ticker>/valuation/` and
+  `/<ticker>/forecasting/` pages, removed as purely redundant with the tab.
+- JSON siblings of the remaining two (`/data/`, `/<ticker>/data/`).
 
 **Not ported** — these existed in the source app but depend on things this package
 deliberately doesn't assume the host project has:

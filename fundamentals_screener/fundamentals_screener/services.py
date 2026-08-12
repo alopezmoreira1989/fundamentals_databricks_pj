@@ -628,11 +628,6 @@ def available_metrics() -> tuple[str, ...]:
 
 
 # ── valuation ────────────────────────────────────────────────────────────────────────────
-def get_margin_of_safety(ticker: str) -> tuple[MetricPoint, ...]:
-    """Latest Margin-of-Safety metrics for the ticker (empty if none/unknown)."""
-    return ValuationRepository().margin_of_safety(ticker)
-
-
 def get_margin_of_safety_scenarios(ticker: str):
     """MoS organized per (method, basis) with Bear / Mid / Bull columns (empty if none)."""
     return ValuationRepository().margin_of_safety_scenarios(ticker)

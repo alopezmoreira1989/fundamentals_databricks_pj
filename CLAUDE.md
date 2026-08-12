@@ -312,6 +312,48 @@ Databricks analytical pipeline that ingests SEC EDGAR XBRL filings (10-K/10-Q) f
     repos/.../releases/<id> -f draft=false` (exactly what the script's own `publish_release()`
     does) — no pipeline re-run needed. If this recurs often, it may be worth a periodic
     post-hoc re-verification rather than trusting the publish-time check alone.
+  - **Terminal growth rate floored at 2% inflation (2026-08-12).** `24__forecasting.py`'s
+    `INFLATION_FLOOR = 0.02` wraps the terminal-growth call at the years-11-20 blend step:
+    `max(fc.terminal_growth_for_quantile(...), INFLATION_FLOOR)`. Today's
+    `valuation_assumptions.json` `growth_terminal` values (bear 2%/mid 2.5%/bull 3%) already
+    clear this, but only coincidentally — the floor makes it an enforced invariant a future
+    config edit or per-ticker override can't silently violate. Deliberately scoped to the
+    terminal rate only: NOT applied to `terminal_growth_for_quantile`'s second reuse for WACC
+    (section 5b — "inflation floor" isn't meaningful for a discount rate), and NOT applied to
+    the explicit years-1-10 ML forecasts, which must stay free to show a genuinely declining
+    company as declining.
+  - **Standalone Forecasting/Valuation pages removed (2026-08-12) — both are Company Detail
+    tabs only now.** `fundamentals_screener/urls.py` no longer has `forecasting`/
+    `forecasting_data`/`valuation`/`valuation_data` routes; `forecasting.html`/`valuation.html`
+    and their view functions are deleted (`services.get_margin_of_safety`/
+    `ValuationRepository.margin_of_safety`, which only those views used, went with them —
+    `company_detail`'s own Valuation tab already used `get_margin_of_safety_scenarios`
+    independently). Both standalone pages had become pure duplicates of their own Company
+    Detail tab (the Valuation tab is actually a superset — it also has the Multiples & yields
+    card the old standalone page never had) — the "Full forecasting/valuation page →" links
+    were the confusing, purposeless artifact. `valuation.html`'s own "Forecasting →" cross-link
+    is gone with the file; the Valuation page's other inbound link (Company Detail's own
+    Forecasting tab) now points at `{% url 'company_detail' ticker %}#pane-valuation`, using
+    the existing hash-based tab-restore JS (`DOMContentLoaded` handler in
+    `company_detail.html`) rather than a page navigation.
+  - **Fan chart migrated from hand-rolled inline-`<svg>` to Chart.js (2026-08-12)** — same
+    chart-library migration already done for Price/Income Statement/Balance Sheet/Cash
+    Flow/Quarterly (see the "CHART LIBRARY INTEGRATION" note under Layout). `forecasting.js`
+    now builds one Chart.js `line` dataset per scenario on a **linear numeric x-axis** (years
+    relative to FY0), not category labels — a ticker with less than 10 years of history just
+    has a shorter historical dataset, the numeric-scale equivalent of the old SVG's variable-
+    length `histX(index, len)`. The terminal (FY+11 and later) segment's lighter/dashed
+    treatment is Chart.js's per-segment `segment: {borderColor, borderDash}` styling keyed off
+    `ctx.p0.parsed.x >= 10`, not a second dataset — legend-chip toggling and tooltips are
+    simpler with one dataset per scenario. The shaded terminal-zone band + FY0 reference line
+    are drawn by a small custom Chart.js plugin (`beforeDatasetsDraw`, canvas `fillRect`/
+    `stroke` using `chart.scales.x.getPixelForValue`) since Chart.js has no built-in region-
+    shading primitive. **Script load order matters**: `forecasting.js` must load AFTER
+    `chart.umd.js` (moved to the end of `company_detail.html`'s `extra_scripts` block) — it was
+    originally ordered before, which would have left `Chart` undefined when it ran; the
+    `chart.umd.js` load condition also had to gain `or forecast_chart.metrics` (it previously
+    only fired for `statement_chart_data`/`quarterly_chart_data`/`bs_compositions_data`, a real
+    gap for any ticker that somehow has forecast data without those).
 
 ## Operational gotchas
 
