@@ -23,10 +23,11 @@ from django.shortcuts import render
 
 from . import football, pricechart, services
 from .charts import (
+    TabChartData,
     balance_sheet_compositions,
     cash_flow_chart,
     income_statement_chart,
-    price_line_chart,
+    price_chart_data,
     quarterly_chart,
 )
 from .currency import quote_currency
@@ -727,6 +728,46 @@ def screen_data(request: HttpRequest) -> JsonResponse:
 
 
 # ── company detail ──────────────────────────────────────────────────────────────────────
+def _tab_chart_json(data: TabChartData) -> dict:
+    """Plain-dict shape for a Chart.js bar/combo chart's ``json_script`` payload — one entry
+    per :class:`~.charts.ChartSeries`, colors assigned client-side (see statement_charts.js)."""
+    return {
+        "labels": list(data.labels),
+        "series": [{"name": s.name, "kind": s.kind, "values": list(s.values)} for s in data.series],
+    }
+
+
+def _price_chart_json(points: tuple) -> list[dict]:
+    """Plain-dict shape for the Price tab's Lightweight Charts ``json_script`` payload."""
+    return [
+        {
+            "date": p.date, "close": p.close, "adj_close": p.adj_close,
+            "sma20": p.sma20, "sma50": p.sma50, "sma200": p.sma200,
+        }
+        for p in points
+    ]
+
+
+def _balance_sheet_json(compositions: tuple) -> list[dict]:
+    """Plain-dict shape for the Balance Sheet composition's Chart.js ``json_script`` payload —
+    every fiscal year embedded in one payload so the year selector can dataset-swap client-side
+    (mirrors the previous ``bsShowYear()`` hide/show, which also embedded every year server-side)."""
+
+    def stack_json(stack) -> dict:
+        return {
+            "total": stack.total,
+            "segments": [
+                {"name": s.name, "value": s.value, "pct": s.pct, "color": s.color, "boundary": s.boundary}
+                for s in stack.segments
+            ],
+        }
+
+    return [
+        {"year": c.year, "assets": stack_json(c.assets), "liabilities_equity": stack_json(c.liabilities_equity)}
+        for c in compositions
+    ]
+
+
 def company_detail(request: HttpRequest, ticker: str) -> HttpResponse:
     """Server-rendered company detail page: overview KPIs, financial statements, derived
     metrics, valuation football field, price chart."""
@@ -779,7 +820,8 @@ def company_detail(request: HttpRequest, ticker: str) -> HttpResponse:
         price_window = services.PRICE_WINDOW_DEFAULT
     price_series = services.get_price_series(ticker, window=price_window)
     price_chart = pricechart.build_price_chart(price_series)
-    price_tab_chart = price_line_chart(price_series)
+    price_tab_points = price_chart_data(price_series)
+    price_tab_data = _price_chart_json(price_tab_points) if price_tab_points else None
     quarterly = services.get_quarterly(ticker)
     # Income/Cash-flow get a headline bar chart; the Balance Sheet gets a single-year
     # composition (rendered below), so it's excluded from the per-statement bar-chart map.
@@ -791,9 +833,14 @@ def company_detail(request: HttpRequest, ticker: str) -> HttpResponse:
         (st, _chart_for[st.name](st) if st.name in _chart_for else None)
         for st in statements.statements
     ]
+    statement_chart_data = {
+        st.name: _tab_chart_json(chart) for st, chart in statement_panes if chart is not None
+    }
     balance_sheet = next((s for s in statements.statements if s.name == "Balance Sheet"), None)
     bs_compositions = balance_sheet_compositions(balance_sheet) if balance_sheet else ()
-    quarterly_chart_svg = quarterly_chart(quarterly) if quarterly.lines else None
+    bs_compositions_data = _balance_sheet_json(bs_compositions) if bs_compositions else None
+    quarterly_chart_obj = quarterly_chart(quarterly) if quarterly.lines else None
+    quarterly_chart_data = _tab_chart_json(quarterly_chart_obj) if quarterly_chart_obj else None
     # Valuation section: intrinsic-value football field + MoS + price multiples. Intrinsic-
     # value metrics are dropped from the derived-metrics list to avoid duplicating the
     # football field. valuation_metrics comes from detail.metrics (unchanged, single-value
@@ -813,15 +860,17 @@ def company_detail(request: HttpRequest, ticker: str) -> HttpResponse:
         "statement_panes": statement_panes,
         "headline": headline,
         "price_chart": price_chart,
-        "price_tab_chart": price_tab_chart,
+        "price_tab_data": price_tab_data,
         "price_windows": price_windows,
         "price_window": price_window,
         "price_currency": price_currency,
         "show_usd_toggle": show_usd_toggle,
         "usd_lens": usd_lens,
         "quarterly": quarterly,
-        "quarterly_chart": quarterly_chart_svg,
+        "quarterly_chart_data": quarterly_chart_data,
+        "statement_chart_data": statement_chart_data,
         "bs_compositions": bs_compositions,
+        "bs_compositions_data": bs_compositions_data,
         "derived_metrics": derived_metrics,
         "bench_ctx": bench_ctx,
         "bench": bench,

@@ -1,59 +1,29 @@
-"""Server-side inline-SVG chart helpers for the company page.
+"""Server-side chart-data helpers for the company page.
 
-Pure geometry, no I/O and no financial logic. Kept unit-testable, like
+Pure data derivation, no I/O and no financial logic. Kept unit-testable, like
 :mod:`fundamentals_screener.pricechart`.
+
+Geometry lives client-side now (Lightweight Charts for the Price tab, Chart.js for the
+bar/combo/stacked charts -- see static/fundamentals_screener/js/price_chart.js,
+statement_charts.js, balance_sheet_chart.js). These functions return small
+dataclasses/tuples ready to pass through Django's ``json_script`` filter, not inline SVG.
+Colors are read client-side from app.css's ``:root`` custom properties via
+``getComputedStyle()``, never hardcoded here -- except :func:`sparkline_svg`'s, which is
+untouched and out of scope for that migration (see its own docstring).
 """
 
 from __future__ import annotations
 
-import math
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from .dtos import PricePoint, QuarterGrid, Statement
 
-# Editorial tokens (kept in sync with static/fundamentals_screener/css/app.css).
+# Editorial token used only as sparkline_svg's inline-<svg> default. sparkline_svg itself is
+# untouched by the Chart.js/Lightweight Charts migration -- a JS chart instance per table row
+# (the Derived Metrics / statement tables can have 30+ rows) would tank page-render performance
+# at the size these trend cells render (84x22px), so it stays hand-rolled SVG.
 _ACCENT = "#0EA5B0"
-_ACCENT_SOFT = "#E3F6F8"
-_POSITIVE = "#0F6E56"
-_NEGATIVE = "#B0301A"
-_INK3 = "#7C8DA6"
-_RULE = "#D7DEE8"
-_MONO = "JetBrains Mono, monospace"
-
-
-def _compact(v: float) -> str:
-    """Axis-tick label: ``391B`` / ``15.3M`` / ``6.1K`` / a bare number under 1,000."""
-    magnitude = abs(v)
-    if magnitude >= 1e12:
-        return f"{v / 1e12:,.1f}T"
-    if magnitude >= 1e9:
-        return f"{v / 1e9:,.1f}B"
-    if magnitude >= 1e6:
-        return f"{v / 1e6:,.1f}M"
-    if magnitude >= 1e3:
-        return f"{v / 1e3:,.1f}K"
-    return f"{v:,.0f}"
-
-
-def _nice_ceil(val: float) -> float:
-    """Round up to a "nice" chart bound (multiples of 1.5/2/3/5/7.5/10 at the value's
-    magnitude), so axis ticks land on round numbers instead of the raw data max."""
-    if val <= 0:
-        return 10.0
-    magnitude = 10 ** math.floor(math.log10(val))
-    residual = val / magnitude
-    for cap, mult in ((1.5, 1.5), (2, 2), (3, 3), (5, 5), (7.5, 7.5)):
-        if residual <= cap:
-            return mult * magnitude
-    return 10 * magnitude
-
-
-def _nice_ticks(lo: float, hi: float, n_ticks: int = 5) -> list[float]:
-    """``n_ticks`` evenly spaced values from ``lo`` to ``hi`` inclusive."""
-    span = hi - lo
-    step = span / (n_ticks - 1) if n_ticks > 1 else span
-    return [lo + i * step for i in range(n_ticks)]
 
 
 def sparkline_svg(
@@ -96,91 +66,7 @@ def sparkline_svg(
     )
 
 
-# ── tab-level bar / combo charts ─────────────────────────────────────────────────────────
-
-@dataclass(frozen=True)
-class TabChart:
-    """A rendered tab chart: the inline ``<svg>`` plus legend entries ``(name, color)``."""
-
-    svg: str
-    legend: tuple[tuple[str, str], ...]
-
-
-def _bar_chart_svg(
-    labels: Sequence[str],
-    series: Sequence[tuple[str, Sequence[float | None], str]],
-    *,
-    line: tuple[str, Sequence[float | None], str] | None = None,
-    width: int = 1000,
-    height: int = 300,
-) -> str:
-    """Grouped vertical bars (one group per label) with an optional overlaid line, on a shared
-    value axis (gridlines + compact labels) with a zero baseline. Negative values draw below
-    the baseline. Numbers only → safe."""
-    numbers = [v for _, vals, _ in series for v in vals if v is not None]
-    if line:
-        numbers += [v for v in line[1] if v is not None]
-    if not numbers or not labels:
-        return ""
-    lo, hi = min(numbers + [0.0]), max(numbers + [0.0])
-    # Round the axis bounds out to "nice" numbers so gridline labels are round, not the raw
-    # data max — matches the axis this project's Streamlit app already draws for the same data.
-    axis_hi = _nice_ceil(hi) if hi > 0 else 0.0
-    axis_lo = -_nice_ceil(abs(lo)) if lo < 0 else 0.0
-    if axis_hi == 0 and axis_lo == 0:
-        axis_hi = 10.0
-    span = (axis_hi - axis_lo) or 1.0
-    pad_l, pad_r, pad_t, pad_b = 52, 8, 14, 26
-    plot_w, plot_h = width - pad_l - pad_r, height - pad_t - pad_b
-
-    def py(v: float) -> float:
-        return pad_t + plot_h * (axis_hi - v) / span
-
-    y0 = py(0.0)
-    n = len(labels)
-    slot = plot_w / n
-    nb = max(len(series), 1)
-    group_w = slot * 0.68
-    bar_w = group_w / nb
-    gx0 = (slot - group_w) / 2
-
-    parts: list[str] = []
-    for tick in _nice_ticks(axis_lo, axis_hi, n_ticks=5):
-        y = py(tick)
-        parts.append(f'<line x1="{pad_l}" y1="{y:.1f}" x2="{width - pad_r}" y2="{y:.1f}" stroke="{_RULE}" stroke-width="1"/>')
-        parts.append(
-            f'<text x="{pad_l - 8}" y="{y + 3:.1f}" text-anchor="end" font-size="11" '
-            f'fill="{_INK3}" font-family="{_MONO}">{_compact(tick)}</text>'
-        )
-    parts.append(f'<line x1="{pad_l}" y1="{y0:.1f}" x2="{width - pad_r}" y2="{y0:.1f}" stroke="{_INK3}" stroke-width="1"/>')
-    for si, (_name, vals, color) in enumerate(series):
-        for i, v in enumerate(vals):
-            if v is None:
-                continue
-            x = pad_l + i * slot + gx0 + si * bar_w
-            yv = py(v)
-            parts.append(
-                f'<rect x="{x:.1f}" y="{min(yv, y0):.1f}" width="{max(bar_w - 1.5, 1):.1f}" '
-                f'height="{abs(yv - y0):.1f}" fill="{color}" rx="1"/>'
-            )
-    if line:
-        pts = [
-            (pad_l + i * slot + slot / 2, py(v)) for i, v in enumerate(line[1]) if v is not None
-        ]
-        if len(pts) >= 2:
-            poly = " ".join(f"{x:.1f},{y:.1f}" for x, y in pts)
-            parts.append(f'<polyline points="{poly}" fill="none" stroke="{line[2]}" stroke-width="2.5" stroke-linejoin="round"/>')
-            parts += [f'<circle cx="{x:.1f}" cy="{y:.1f}" r="2.6" fill="{line[2]}"/>' for x, y in pts]
-    for i, lab in enumerate(labels):
-        parts.append(
-            f'<text x="{pad_l + i * slot + slot / 2:.1f}" y="{height - 8}" text-anchor="middle" '
-            f'font-size="11" fill="{_INK3}" font-family="JetBrains Mono, monospace">{lab}</text>'
-        )
-    return (
-        f'<svg class="tab-chart" viewBox="0 0 {width} {height}" width="100%" '
-        f'preserveAspectRatio="xMidYMid meet" role="img">' + "".join(parts) + "</svg>"
-    )
-
+# ── shared line/label derivation (unchanged by the chart-geometry migration) ────────────────
 
 def _line_of(rows: Sequence, name: str) -> tuple[float | None, ...] | None:
     """The chronological (oldest-first) values of the line named ``name`` in a statement/grid."""
@@ -194,95 +80,46 @@ def _year_labels(years: Sequence[int]) -> tuple[str, ...]:
     return tuple(f"'{str(y)[2:]}" for y in reversed(years))
 
 
-def income_statement_chart(statement: Statement) -> TabChart | None:
-    """Revenue bars with a Net-Income line overlaid, across fiscal years."""
+# ── tab-level bar / combo charts: DATA only, rendered client-side by statement_charts.js ────
+
+@dataclass(frozen=True)
+class ChartSeries:
+    """One named data series for a Chart.js bar/combo chart (e.g. Revenue, Net Income, Operating
+    CF). ``kind`` picks the Chart.js dataset type client-side (``"bar"`` or ``"line"``); the
+    series' color is assigned client-side too (see statement_charts.js's fixed name→token
+    mapping), never here."""
+
+    name: str
+    values: tuple[float | None, ...]
+    kind: str = "bar"
+
+
+@dataclass(frozen=True)
+class TabChartData:
+    """Chart-ready data for one tab's bar/combo chart: category labels (fiscal years or fiscal
+    quarters, oldest-to-newest) plus each series to plot against them."""
+
+    labels: tuple[str, ...]
+    series: tuple[ChartSeries, ...]
+
+
+def income_statement_chart(statement: Statement) -> TabChartData | None:
+    """Revenue (bar) + Net Income (line) data, across fiscal years, oldest-to-newest."""
     revenue = _line_of(statement.lines, "Revenue")
     if revenue is None:
         return None
     labels = _year_labels(statement.years)
     net_income = _line_of(statement.lines, "Net Income")
-    series = [("Revenue", revenue, _ACCENT)]
-    line = ("Net Income", net_income, _POSITIVE) if net_income else None
-    legend = (("Revenue", _ACCENT),) + ((("Net Income", _POSITIVE),) if net_income else ())
-    return TabChart(_bar_chart_svg(labels, series, line=line), legend)
+    series = [ChartSeries("Revenue", revenue, "bar")]
+    if net_income:
+        series.append(ChartSeries("Net Income", net_income, "line"))
+    return TabChartData(labels, tuple(series))
 
 
-def _ocf_fcf_chart_svg(
-    labels: Sequence[str],
-    ocf: Sequence[float | None],
-    fcf: Sequence[float | None],
-    *,
-    width: int = 1000,
-    height: int = 300,
-) -> str:
-    """Operating Cash Flow (wide, soft-filled bar) with Free Cash Flow = OCF − |CapEx| (a
-    narrower bar in front); the OCF→FCF gap reads visually as CapEx. A year missing CapEx
-    draws no front bar (never shows FCF == OCF, which would misstate a real gap as none)."""
-    numbers = [v for v in (*ocf, *fcf) if v is not None]
-    if not numbers or not labels:
-        return ""
-    lo, hi = min(numbers + [0.0]), max(numbers + [0.0])
-    axis_hi = _nice_ceil(hi) if hi > 0 else 0.0
-    axis_lo = -_nice_ceil(abs(lo)) if lo < 0 else 0.0
-    if axis_hi == 0 and axis_lo == 0:
-        axis_hi = 10.0
-    span = (axis_hi - axis_lo) or 1.0
-    pad_l, pad_r, pad_t, pad_b = 52, 8, 14, 26
-    plot_w, plot_h = width - pad_l - pad_r, height - pad_t - pad_b
-
-    def py(v: float) -> float:
-        return pad_t + plot_h * (axis_hi - v) / span
-
-    y0 = py(0.0)
-    n = len(labels)
-    slot = plot_w / n
-    ocf_w = slot * 0.68
-    fcf_w = ocf_w * 0.5
-    ox0 = (slot - ocf_w) / 2
-    fx0 = (slot - fcf_w) / 2
-
-    parts: list[str] = []
-    for tick in _nice_ticks(axis_lo, axis_hi, n_ticks=5):
-        y = py(tick)
-        parts.append(f'<line x1="{pad_l}" y1="{y:.1f}" x2="{width - pad_r}" y2="{y:.1f}" stroke="{_RULE}" stroke-width="1"/>')
-        parts.append(
-            f'<text x="{pad_l - 8}" y="{y + 3:.1f}" text-anchor="end" font-size="11" '
-            f'fill="{_INK3}" font-family="{_MONO}">{_compact(tick)}</text>'
-        )
-    parts.append(f'<line x1="{pad_l}" y1="{y0:.1f}" x2="{width - pad_r}" y2="{y0:.1f}" stroke="{_INK3}" stroke-width="1"/>')
-
-    for i, v in enumerate(ocf):
-        if v is None:
-            continue
-        x = pad_l + i * slot + ox0
-        yv = py(v)
-        parts.append(
-            f'<rect x="{x:.1f}" y="{min(yv, y0):.1f}" width="{ocf_w:.1f}" height="{abs(yv - y0):.1f}" '
-            f'fill="{_ACCENT_SOFT}" stroke="{_ACCENT}" stroke-width="1" rx="1"/>'
-        )
-    for i, v in enumerate(fcf):
-        if v is None:
-            continue
-        x = pad_l + i * slot + fx0
-        yv = py(v)
-        parts.append(
-            f'<rect x="{x:.1f}" y="{min(yv, y0):.1f}" width="{fcf_w:.1f}" height="{abs(yv - y0):.1f}" '
-            f'fill="{_POSITIVE}" rx="1"/>'
-        )
-    for i, lab in enumerate(labels):
-        parts.append(
-            f'<text x="{pad_l + i * slot + slot / 2:.1f}" y="{height - 8}" text-anchor="middle" '
-            f'font-size="11" fill="{_INK3}" font-family="{_MONO}">{lab}</text>'
-        )
-    return (
-        f'<svg class="tab-chart" viewBox="0 0 {width} {height}" width="100%" '
-        f'preserveAspectRatio="xMidYMid meet" role="img">' + "".join(parts) + "</svg>"
-    )
-
-
-def cash_flow_chart(statement: Statement) -> TabChart | None:
-    """Operating Cash Flow vs Free Cash Flow (= OCF − |CapEx|), across fiscal years — the
-    OCF→FCF gap reads as CapEx. ``None`` when the statement has no Operating CF line."""
+def cash_flow_chart(statement: Statement) -> TabChartData | None:
+    """Operating Cash Flow vs Free Cash Flow (= OCF − |CapEx|) data, across fiscal years,
+    oldest-to-newest — the OCF→FCF gap reads as CapEx. ``None`` when the statement has no
+    Operating CF line."""
     ocf = _line_of(statement.lines, "Operating CF")
     if ocf is None or all(v is None for v in ocf):
         return None
@@ -291,106 +128,52 @@ def cash_flow_chart(statement: Statement) -> TabChart | None:
         fcf: tuple[float | None, ...] = tuple(None for _ in ocf)
     else:
         fcf = tuple(None if (o is None or c is None) else o - abs(c) for o, c in zip(ocf, capex))
-    legend = (("Operating CF", _ACCENT), ("Free CF (= OCF − CapEx)", _POSITIVE))
-    return TabChart(_ocf_fcf_chart_svg(_year_labels(statement.years), ocf, fcf), legend)
+    series = (
+        ChartSeries("Operating CF", ocf, "bar"),
+        ChartSeries("Free CF (= OCF − CapEx)", fcf, "bar"),
+    )
+    return TabChartData(_year_labels(statement.years), series)
 
 
-def quarterly_chart(grid: QuarterGrid) -> TabChart | None:
-    """Quarterly Revenue bars across recent fiscal quarters."""
+def quarterly_chart(grid: QuarterGrid) -> TabChartData | None:
+    """Quarterly Revenue bar data across recent fiscal quarters, oldest-to-newest."""
     revenue = _line_of(grid.lines, "Revenue")
     if revenue is None:
         return None
     labels = tuple(reversed(grid.columns))
-    return TabChart(_bar_chart_svg(labels, [("Revenue", revenue, _ACCENT)]), (("Revenue", _ACCENT),))
+    return TabChartData(labels, (ChartSeries("Revenue", revenue, "bar"),))
 
 
-# ── price tab: adjusted close + SMA 20/50/200, value axis + date axis + legend ──────────────
+# ── price tab: adjusted close + SMA 20/50/200, rendered client-side by price_chart.js ───────
 
-# (label, value-getter, color, stroke-width, opacity) — Price is the primary series (heavier,
-# fully opaque); the SMAs are supporting context (thinner, dimmed). Plots adj_close
-# (split-safe), not raw close — a stock split would otherwise show as a fake cliff;
-# PriceChart's headline stats (pricechart.py) still use raw close separately.
-_PRICE_SERIES: tuple[tuple[str, Callable[[PricePoint], float | None], str, float, float], ...] = (
-    ("Price",   lambda p: p.adj_close, "#0B2545",  2.2, 1.0),
-    ("SMA 20",  lambda p: p.sma20,     "#E8702A",  1.3, 0.85),
-    ("SMA 50",  lambda p: p.sma50,     _POSITIVE,  1.3, 0.85),
-    ("SMA 200", lambda p: p.sma200,    _NEGATIVE,  1.3, 0.85),
-)
-_PRICE_W = 1000
-_PRICE_H = 320
-_PRICE_PAD = (46, 8, 10, 24)  # left, right, top, bottom — left is wider for the value-axis labels
+def price_chart_data(series: Sequence[PricePoint]) -> tuple[PricePoint, ...] | None:
+    """``series`` as-is, ready for the client-side Lightweight Charts render (adj_close + SMA
+    20/50/200 lines).
 
-
-def price_line_chart(series: Sequence[PricePoint]) -> TabChart | None:
-    """Adjusted close + SMA 20/50/200 as an inline multi-series ``<svg>``, with value-axis
-    gridlines/labels, a handful of date-axis ticks, and a legend.
-
-    ``None`` if no series has at least 2 plottable points (e.g. a ticker with only a couple of
-    days of price history, or with no adj_close at all).
+    ``None`` if no series (Price or any SMA) has at least 2 plottable points combined — e.g. a
+    ticker with only a couple of days of price history, or with no adj_close at all — matching
+    the "no chart" guard the previous SVG builder applied.
     """
-    n = len(series)
-    if n < 2:
+    if len(series) < 2:
         return None
-
-    all_vals = [v for _, get, *_ in _PRICE_SERIES for p in series if (v := get(p)) is not None]
+    getters = (
+        lambda p: p.adj_close,
+        lambda p: p.sma20,
+        lambda p: p.sma50,
+        lambda p: p.sma200,
+    )
+    all_vals = [v for get in getters for p in series if (v := get(p)) is not None]
     if len(all_vals) < 2:
         return None
-    lo, hi = min(all_vals), max(all_vals)
-    span = (hi - lo) or 1.0
-
-    pad_l, pad_r, pad_t, pad_b = _PRICE_PAD
-    plot_w, plot_h = _PRICE_W - pad_l - pad_r, _PRICE_H - pad_t - pad_b
-
-    def px(i: int) -> float:
-        return pad_l + i * plot_w / (n - 1)
-
-    def py(v: float) -> float:
-        return pad_t + plot_h * (hi - v) / span
-
-    parts: list[str] = []
-    for frac in (0.0, 1 / 3, 2 / 3, 1.0):
-        v = lo + frac * span
-        y = py(v)
-        parts.append(
-            f'<line x1="{pad_l}" y1="{y:.1f}" x2="{_PRICE_W - pad_r}" y2="{y:.1f}" '
-            f'stroke="{_RULE}" stroke-width="1"/>'
-        )
-        parts.append(
-            f'<text x="{pad_l - 6}" y="{y + 3:.1f}" text-anchor="end" font-size="10.5" '
-            f'fill="{_INK3}" font-family="JetBrains Mono, monospace">{v:,.0f}</text>'
-        )
-
-    tick_idxs = sorted({round(i * (n - 1) / 4) for i in range(5)})
-    for i in tick_idxs:
-        # The first/last tick would otherwise overflow past the plot edge under "middle"
-        # anchoring — anchor those two to the inside instead.
-        anchor = "start" if i == 0 else "end" if i == tick_idxs[-1] else "middle"
-        parts.append(
-            f'<text x="{px(i):.1f}" y="{_PRICE_H - 6}" text-anchor="{anchor}" font-size="10.5" '
-            f'fill="{_INK3}" font-family="JetBrains Mono, monospace">{series[i].date[:10]}</text>'
-        )
-
-    legend: list[tuple[str, str]] = []
-    for name, get, color, stroke_w, opacity in _PRICE_SERIES:
-        pts = [(px(i), py(v)) for i, p in enumerate(series) if (v := get(p)) is not None]
-        if len(pts) < 2:
-            continue
-        poly = " ".join(f"{x:.1f},{y:.1f}" for x, y in pts)
-        parts.append(
-            f'<polyline points="{poly}" fill="none" stroke="{color}" stroke-width="{stroke_w}" '
-            f'stroke-opacity="{opacity}" stroke-linejoin="round" stroke-linecap="round"/>'
-        )
-        legend.append((name, color))
-
-    svg = (
-        f'<svg class="tab-chart" viewBox="0 0 {_PRICE_W} {_PRICE_H}" width="100%" '
-        f'preserveAspectRatio="xMidYMid meet" role="img" '
-        f'aria-label="Price trend with moving averages">' + "".join(parts) + "</svg>"
-    )
-    return TabChart(svg, tuple(legend))
+    return tuple(series)
 
 
 # ── balance-sheet composition (single year, stacked twin bars) ───────────────────────────
+# Unchanged by the chart-geometry migration -- these already return plain dataclasses (never
+# built SVG), and the dark→light shade ramp is a genuine server-side computation (rank within a
+# stack → interpolated color), not something a static app.css custom property could express.
+# Only the template/view around this changes (Chart.js horizontal stacked bar replaces the CSS
+# div-height bars); see balance_sheet_chart.js.
 
 # Semantic color families: assets = navy/cyan, liabilities = orange/red, equity = green. Within
 # assets and liabilities the shade ramps DARK (most liquid / current, listed first) → LIGHT

@@ -47,25 +47,28 @@
   table.fs-web tr.headline td.label::before { content: "▸ "; color: var(--accent); }
   table.fs-web tr.headline td.num { color: var(--accent-ink); font-weight: 600; }
   /* Tab headline charts */
-  .tab-chart { display: block; width: 100%; height: auto; }
   .chart-legend { display: flex; flex-wrap: wrap; gap: 16px; font-family: var(--mono);
     font-size: .68rem; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2); }
   .chart-legend .dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
   .price-last { font-family: var(--display); font-size: 1.8rem; font-weight: 500; font-variation-settings: "opsz" 144; line-height: 1; }
+  /* CHART LIBRARY INTEGRATION — Lightweight Charts (Price) / Chart.js (bar/combo/stacked)
+     container sizing. Chart.js/Lightweight Charts both size to their container via
+     autoSize/responsive, so only the container needs an explicit height. */
+  .lwc-chart-wrap { position: relative; height: 340px; }
+  .cjs-chart-wrap { position: relative; height: 340px; }
+  .cjs-chart-wrap--bs { position: relative; height: 220px; }
   /* Valuation football field */
   .ff-track { position: relative; height: 1.6rem; background: var(--bg-subtle); border-radius: 3px; }
   .ff-range { position: absolute; top: 0; bottom: 0; background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 3px; }
   .ff-range.covers { background: var(--bg-hover); border-color: var(--ink-3); }
   .ff-mid { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--ink); }
   .ff-price { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--negative); }
-  /* Balance-sheet composition — twin stacked bars + legend */
+  /* Balance-sheet composition — legend below the Chart.js stacked bar (the bars/divider
+     themselves are drawn by balance_sheet_chart.js, not CSS — see CHART LIBRARY INTEGRATION) */
   .bs-comp { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
   .bs-col-head { display: flex; justify-content: space-between; align-items: baseline;
     font-family: var(--mono); font-size: .66rem; letter-spacing: .1em; text-transform: uppercase;
     color: var(--ink-3); padding-bottom: 8px; border-bottom: 1px solid var(--ink); margin-bottom: 10px; }
-  .bs-stack { height: 300px; display: flex; flex-direction: column; border: 1px solid var(--rule); border-radius: 4px; overflow: hidden; }
-  .bs-seg { min-height: 1px; }
-  .bs-seg.bs-boundary { border-top: 2px solid var(--ink); }  /* current / non-current divider */
   .bs-legend { margin-top: 12px; }
   .bs-leg-item { display: flex; justify-content: space-between; align-items: center; gap: 12px;
     padding: 5px 0; font-size: .82rem; border-bottom: 1px solid var(--rule-soft); }
@@ -97,10 +100,20 @@
 
 {% block extra_scripts %}
 {% if forecast_chart.metrics %}<script src="{% static 'fundamentals_screener/js/forecasting.js' %}"></script>{% endif %}
+{% if price_tab_data %}
+  <script src="{% static 'fundamentals_screener/js/vendor/lightweight-charts.standalone.production.js' %}"></script>
+  <script src="{% static 'fundamentals_screener/js/price_chart.js' %}"></script>
+{% endif %}
+{% if statement_chart_data or quarterly_chart_data or bs_compositions_data %}
+  <script src="{% static 'fundamentals_screener/js/vendor/chart.umd.js' %}"></script>
+{% endif %}
+{% if statement_chart_data or quarterly_chart_data %}
+  <script src="{% static 'fundamentals_screener/js/statement_charts.js' %}"></script>
+{% endif %}
+{% if bs_compositions_data %}
+  <script src="{% static 'fundamentals_screener/js/balance_sheet_chart.js' %}"></script>
+{% endif %}
 <script>
-  function bsShowYear(year) {
-    document.querySelectorAll('.bs-year').forEach(function (el) { el.hidden = el.dataset.year !== year; });
-  }
   document.addEventListener('DOMContentLoaded', function () {
     // Re-select the tab named by the URL hash (e.g. #pane-price) after a full page reload —
     // the Price tab's range-filter buttons are plain links (?window=...), and Bootstrap tabs
@@ -388,11 +401,10 @@
                  href="?window={{ w }}{% if usd_lens %}&amp;usd=1{% endif %}#pane-price">{{ w }}</a>
             {% endfor %}
           </div>
-          {% if price_tab_chart %}
-            <div class="chart-legend mb-2">
-              {% for name, color in price_tab_chart.legend %}<span><span class="dot" style="background:{{ color }}"></span>{{ name }}</span>{% endfor %}
-            </div>
-            {{ price_tab_chart.svg|safe }}
+          {% if price_tab_data %}
+            <div class="chart-legend mb-2" id="price-chart-legend"></div>
+            <div class="lwc-chart-wrap" id="price-chart-container"></div>
+            {{ price_tab_data|json_script:"price-chart-data" }}
           {% endif %}
           <div class="d-flex justify-content-between eyebrow mt-2">
             <span>Low {{ price_chart.min_close|metric_value:price_currency }}</span>
@@ -403,51 +415,34 @@
     {% endif %}
 
     <!-- Statement tabs -->
+    {% if statement_chart_data %}{{ statement_chart_data|json_script:"statement-chart-data" }}{% endif %}
     {% for st, chart in statement_panes %}
       <div class="tab-pane fade" id="pane-{{ st.name|slugify }}" role="tabpanel" aria-labelledby="tab-{{ st.name|slugify }}" tabindex="0">
-        {% if st.name == "Balance Sheet" and bs_compositions %}
+        {% if st.name == "Balance Sheet" and bs_compositions_data %}
           <div class="card p-4 mb-3">
             <div class="d-flex justify-content-between align-items-baseline mb-3 flex-wrap gap-2">
               <div class="eyebrow">Balance sheet composition</div>
-              <select class="form-select form-select-sm w-auto" aria-label="Fiscal year" onchange="bsShowYear(this.value)">
+              <select class="form-select form-select-sm w-auto" id="bs-year-select" aria-label="Fiscal year">
                 {% for c in bs_compositions %}<option value="{{ c.year }}">FY {{ c.year }}</option>{% endfor %}
               </select>
             </div>
-            {% for c in bs_compositions %}
-              <div class="bs-year" data-year="{{ c.year }}" {% if not forloop.first %}hidden{% endif %}>
-                <div class="bs-comp">
-                  <div class="bs-col">
-                    <div class="bs-col-head"><span>{{ c.assets.title }}</span><span class="mono">${{ c.assets.total|compact_money }}</span></div>
-                    <div class="bs-stack">
-                      {% for s in c.assets.segments %}<div class="bs-seg{% if s.boundary %} bs-boundary{% endif %}" style="height:{{ s.pct|floatformat:"3u" }}%; background:{{ s.color }}" title="{{ s.name }}"></div>{% endfor %}
-                    </div>
-                    <div class="bs-legend">
-                      {% for s in c.assets.segments %}
-                        <div class="bs-leg-item"><span><span class="bs-leg-dot" style="background:{{ s.color }}"></span>{{ s.name }}</span><span class="mono">${{ s.value|compact_money }}</span></div>
-                      {% endfor %}
-                    </div>
-                  </div>
-                  <div class="bs-col">
-                    <div class="bs-col-head"><span>{{ c.liabilities_equity.title }}</span><span class="mono">${{ c.liabilities_equity.total|compact_money }}</span></div>
-                    <div class="bs-stack">
-                      {% for s in c.liabilities_equity.segments %}<div class="bs-seg{% if s.boundary %} bs-boundary{% endif %}" style="height:{{ s.pct|floatformat:"3u" }}%; background:{{ s.color }}" title="{{ s.name }}"></div>{% endfor %}
-                    </div>
-                    <div class="bs-legend">
-                      {% for s in c.liabilities_equity.segments %}
-                        <div class="bs-leg-item"><span><span class="bs-leg-dot" style="background:{{ s.color }}"></span>{{ s.name }}</span><span class="mono">${{ s.value|compact_money }}</span></div>
-                      {% endfor %}
-                    </div>
-                  </div>
-                </div>
+            <div class="cjs-chart-wrap--bs"><canvas id="bs-chart"></canvas></div>
+            <div class="bs-comp mt-3">
+              <div class="bs-col">
+                <div class="bs-col-head"><span>Assets</span><span class="mono" id="bs-assets-total"></span></div>
+                <div class="bs-legend" id="bs-assets-legend"></div>
               </div>
-            {% endfor %}
+              <div class="bs-col">
+                <div class="bs-col-head"><span>Liabilities &amp; Equity</span><span class="mono" id="bs-le-total"></span></div>
+                <div class="bs-legend" id="bs-le-legend"></div>
+              </div>
+            </div>
           </div>
+          {{ bs_compositions_data|json_script:"bs-chart-data" }}
         {% elif chart %}
           <div class="card p-4 mb-3">
-            <div class="chart-legend mb-2">
-              {% for name, color in chart.legend %}<span><span class="dot" style="background:{{ color }}"></span>{{ name }}</span>{% endfor %}
-            </div>
-            {{ chart.svg|safe }}
+            <div class="chart-legend mb-2" data-legend-for="{{ st.name }}"></div>
+            <div class="cjs-chart-wrap"><canvas data-statement-chart="{{ st.name }}"></canvas></div>
           </div>
         {% endif %}
         <div class="card p-0 table-responsive">
@@ -482,13 +477,12 @@
     <!-- Quarterly (Income Statement by fiscal quarter) -->
     {% if quarterly.lines %}
       <div class="tab-pane fade" id="pane-quarterly" role="tabpanel" aria-labelledby="tab-quarterly" tabindex="0">
-        {% if quarterly_chart %}
+        {% if quarterly_chart_data %}
           <div class="card p-4 mb-3">
-            <div class="chart-legend mb-2">
-              {% for name, color in quarterly_chart.legend %}<span><span class="dot" style="background:{{ color }}"></span>{{ name }}</span>{% endfor %}
-            </div>
-            {{ quarterly_chart.svg|safe }}
+            <div class="chart-legend mb-2" data-legend-for="quarterly"></div>
+            <div class="cjs-chart-wrap"><canvas data-quarterly-chart></canvas></div>
           </div>
+          {{ quarterly_chart_data|json_script:"quarterly-chart-data" }}
         {% endif %}
         <div class="eyebrow mb-2">{{ quarterly.name }} · by fiscal quarter</div>
         <div class="card p-0 table-responsive">
