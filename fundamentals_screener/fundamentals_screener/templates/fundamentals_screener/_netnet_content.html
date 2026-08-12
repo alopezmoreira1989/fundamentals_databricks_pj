@@ -8,7 +8,7 @@ to a DIFFERENT mode swaps the whole #main region via _netnet_main.html instead (
 this same content) — see screener.js's initModeNav / views._render_mode's docstring.
 {% endcomment %}
 {% load fmt logos l10n %}
-{% localize off %}{# see valuation.html for raw-value interpolation; floatformat ignores this entirely (hardcodes use_l10n=True) so bar-fill widths use floatformat's own 'u' suffix instead #}
+{% localize off %}{# see company_detail.html for raw-value interpolation; floatformat ignores this entirely (hardcodes use_l10n=True) so bar-fill widths use floatformat's own 'u' suffix instead #}
   {% include "fundamentals_screener/_netnet_hero.html" %}
 
   <div class="nn-filters p-4 bg-white rounded-3 shadow-sm mb-4">

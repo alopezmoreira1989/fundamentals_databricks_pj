@@ -920,44 +920,11 @@ def company_data(request: HttpRequest, ticker: str) -> JsonResponse:
     })
 
 
-# ── valuation ────────────────────────────────────────────────────────────────────────────
-def valuation(request: HttpRequest, ticker: str) -> HttpResponse:
-    """Server-rendered standalone valuation page: intrinsic-value football field + MoS table."""
-    ticker = ticker.upper()
-    points = services.get_margin_of_safety(ticker)
-    scenarios = services.get_margin_of_safety_scenarios(ticker)
-    chart = football.build_chart(services.get_intrinsic_value_field(ticker))
-    summary = services.get_company_summary(ticker)
-    price_currency = quote_currency(summary.market if summary else None).lower()
-    context = {
-        "ticker": ticker,
-        "points": points,
-        "scenarios": scenarios,
-        "chart": chart,
-        "price_currency": price_currency,
-    }
-    net_net_ctx = _net_net_card_context(ticker)
-    if net_net_ctx:
-        context.update(net_net_ctx)
-    return render(request, "fundamentals_screener/valuation.html", context)
-
-
-def valuation_data(request: HttpRequest, ticker: str) -> JsonResponse:
-    points = services.get_margin_of_safety(ticker.upper())
-    return JsonResponse({
-        "ticker": ticker.upper(),
-        "count": len(points),
-        "margin_of_safety": [
-            {"metric": m.metric, "unit": m.unit, "fiscal_year": m.fiscal_year, "value": m.value}
-            for m in points
-        ],
-    })
-
-
 # ── forecasting ──────────────────────────────────────────────────────────────────────────
 def _forecast_chart_json(chart) -> dict:
-    """Plain-dict shape shared by the page's embedded ``json_script`` payload and the JSON
-    sibling endpoint, so the two never drift."""
+    """Plain-dict shape for the Forecasting tab's embedded ``json_script`` payload (see
+    ``company_detail``) -- was also shared by a standalone Forecasting page + JSON sibling
+    endpoint, removed as purely redundant with the embedded tab."""
     return {
         "ticker": chart.ticker,
         "metrics": [
@@ -983,25 +950,3 @@ def _forecast_chart_json(chart) -> dict:
     }
 
 
-def forecasting(request: HttpRequest, ticker: str) -> HttpResponse:
-    """Server-rendered Forecasting page: 10-year cross-sectional ML scenario fan chart +
-    PV-discounted forward-multiples table, per issue #336's mockup. The chart's data is
-    embedded via ``json_script`` (see the template) rather than fetched separately — one
-    request, no extra round trip."""
-    ticker = ticker.upper()
-    chart = services.get_forecast_chart(ticker)
-    if chart is None:
-        raise Http404(f"unknown ticker {ticker!r}")
-    return render(
-        request, "fundamentals_screener/forecasting.html",
-        {"ticker": ticker, "chart": chart, "chart_data": _forecast_chart_json(chart)},
-    )
-
-
-def forecasting_data(request: HttpRequest, ticker: str) -> JsonResponse:
-    """JSON sibling of :func:`forecasting` (API surface, mirrors ``valuation_data``)."""
-    ticker = ticker.upper()
-    chart = services.get_forecast_chart(ticker)
-    if chart is None:
-        return JsonResponse({"error": f"unknown ticker {ticker!r}"}, status=404)
-    return JsonResponse(_forecast_chart_json(chart))

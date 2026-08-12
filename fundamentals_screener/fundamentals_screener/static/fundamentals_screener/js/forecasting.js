@@ -1,112 +1,64 @@
 // Forecasting tab — 10-year history / 10-year explicit ML forecast / 10-year front-loaded
-// terminal-convergence fan chart, driven by the `chart_data` JSON embedded via
-// {{ chart_data|json_script:"fc-data" }} in forecasting.html (no extra request;
-// forecasting_data() is a separate JSON sibling for API consumers only).
+// terminal-convergence fan chart, rendered via Chart.js (self-hosted,
+// static/fundamentals_screener/js/vendor/chart.umd.js). Driven by the `forecast_chart_data`
+// JSON embedded via {{ forecast_chart_data|json_script:"fc-data" }} in company_detail.html.
+// Replaces the previous hand-rolled inline-<svg> fan chart with a real chart-library
+// component — native hover tooltips, real axis ticks — same migration already done for the
+// Price/Income Statement/Balance Sheet/Cash Flow/Quarterly tabs.
 //
-// Chart geometry ports docs/mockups/forecasting_tab.html's v2 layout: uniform px-per-year
-// across the whole 30-year span (10 hist + 10 explicit + 10 terminal), real y-axis gridlines,
-// x-axis year ticks, and a separate <path> per scenario per segment (explicit/terminal) so the
-// terminal segment can carry its own lighter/thinner .fc-line--terminal treatment. A single
-// shared min/max scale is still computed across the historical line AND every scenario line
-// for a metric, so every line originates from the same FY0 point (issue #336's original
-// required test, unchanged by this milestone).
+// x-axis is a linear NUMERIC scale (years relative to FY0: -historyLen..+20), not Chart.js
+// category labels — a ticker with fewer than 10 years of history just has a shorter
+// historical dataset (fewer points starting later), the same "shared px-per-year, variable
+// history length" idea the old SVG version used, expressed as a numeric scale instead of
+// hand-computed pixel positions. Every scenario's own values/horizons already carries a
+// prepended FY0 anchor point (services.get_forecast_chart, server-side) so every line -
+// historical + all 5 scenarios - shares one point of origin and one y-scale domain.
+//
+// Colors are read at runtime from app.css's :root custom properties via getComputedStyle() —
+// never hardcoded here, so the chart always matches whatever the current theme tokens are.
 (function () {
   "use strict";
 
+  if (typeof Chart === "undefined") return;
   var dataEl = document.getElementById("fc-data");
-  if (!dataEl) return;
+  var canvas = document.getElementById("fc-canvas");
+  if (!dataEl || !canvas) return;
   var DATA = JSON.parse(dataEl.textContent);
+  if (!DATA.metrics || !DATA.metrics.length) return;
 
   var METRICS = {};
   DATA.metrics.forEach(function (m) { METRICS[m.metric] = m; });
 
-  var SCENARIO_KEYS = { "0.1": "bear", "0.25": "lowbear", "0.5": "crab", "0.75": "lowbull", "0.9": "bull" };
+  var root = getComputedStyle(document.documentElement);
+  var tok = function (name) { return root.getPropertyValue(name).trim(); };
+  var COLOR_INK = tok("--ink");
+  var COLOR_NEGATIVE = tok("--negative");
+  var COLOR_ACCENT = tok("--accent");
+  var COLOR_POSITIVE = tok("--positive");
+  var COLOR_INK3 = tok("--ink-3");
+  var COLOR_RULE_SOFT = tok("--rule-soft");
+  var COLOR_BG_SUBTLE = tok("--bg-subtle");
+  var FONT_MONO = tok("--mono");
 
-  var svg = document.getElementById("fc-svg");
-  var titleEl = document.getElementById("fc-chart-title");
-  var SVG_NS = "http://www.w3.org/2000/svg";
+  // quantile_level -> display config, matching the legend chips already in the template
+  // (data-scenario values / .fc-chip--* colors in app.css).
+  var SCENARIOS = [
+    { level: "0.1", key: "bear", label: "Bear", color: COLOR_NEGATIVE, faded: false },
+    { level: "0.25", key: "lowbear", label: "Low Bear", color: COLOR_NEGATIVE, faded: true },
+    { level: "0.5", key: "crab", label: "Crab", color: COLOR_ACCENT, faded: false },
+    { level: "0.75", key: "lowbull", label: "Low Bull", color: COLOR_POSITIVE, faded: true },
+    { level: "0.9", key: "bull", label: "Bull", color: COLOR_POSITIVE, faded: false },
+  ];
+  var TERMINAL_START = 10; // horizon where the terminal (dashed/lighter) segment begins
+  var TERMINAL_END = 20;
 
-  // Layout constants — uniform px-per-year across the full 30-year span. X0 marks the leftmost
-  // possible historical point (FY-10); a ticker with less than 10 years of history simply
-  // starts its historical line further right (see histX below) rather than the axis itself
-  // changing shape — the axis frame is always the full nominal FY-10..FY+20 range.
-  var YEARS_HIST = 10, YEARS_EXPLICIT = 10, YEARS_TERMINAL = 10;
-  var PX_PER_YEAR = 34;
-  var X0 = 70;                                          // FY-10
-  var X_FY0 = X0 + YEARS_HIST * PX_PER_YEAR;             // FY0
-  var X_FY10 = X_FY0 + YEARS_EXPLICIT * PX_PER_YEAR;     // FY+10
-  var X_FY20 = X_FY10 + YEARS_TERMINAL * PX_PER_YEAR;    // FY+20
-  var Y_TOP = 44, Y_BASE = 320, PLOT_H = Y_BASE - Y_TOP;
-
-  // Historical years step back from FY0 by "years ago" (not by array index against a fixed
-  // 10-point assumption), so a ticker with fewer than 10 years of history renders a shorter
-  // line starting later, never overflowing past X0.
-  function histX(index, len) {
-    return X_FY0 - (len - 1 - index) * PX_PER_YEAR;
-  }
-  function forecastX(horizon) {
-    return X_FY0 + horizon * PX_PER_YEAR;
-  }
-  function toY(value, scale) {
-    return Y_BASE - ((value - scale.lo) / (scale.hi - scale.lo)) * PLOT_H;
-  }
-
-  function sharedScale(m) {
-    var all = m.historical.map(function (h) { return h.value; });
-    m.scenarios.forEach(function (s) { all = all.concat(s.values); });
-    all = all.filter(function (v) { return v !== null && v !== undefined; });
-    if (!all.length) return { lo: 0, hi: 1 };
-    var min = Math.min.apply(null, all);
-    var max = Math.max.apply(null, all);
-    var pad = (max - min) * 0.06 || 1;
-    return { lo: min - pad, hi: max + pad };
-  }
-
-  function histPath(m, scale) {
-    var d = "";
-    m.historical.forEach(function (h, idx) {
-      if (h.value === null || h.value === undefined) return;
-      var x = histX(idx, m.historical.length);
-      d += (d === "" ? "M" : " L") + x.toFixed(1) + "," + toY(h.value, scale).toFixed(1);
-    });
-    return d;
-  }
-
-  // Explicit segment: horizons 0 (the FY0 anchor, if a historical value exists to anchor from)
-  // through 10. Terminal segment: horizons 10 through 20. Both include horizon 10 so the two
-  // <path> elements visually connect with no gap.
-  function explicitPath(series, scale) {
-    var d = "";
-    series.horizons.forEach(function (h, i) {
-      if (h > YEARS_EXPLICIT) return;
-      var v = series.values[i];
-      if (v === null || v === undefined) return;
-      var x = forecastX(h);
-      d += (d === "" ? "M" : " L") + x.toFixed(1) + "," + toY(v, scale).toFixed(1);
-    });
-    return d;
-  }
-  function terminalPath(series, scale) {
-    var d = "";
-    series.horizons.forEach(function (h, i) {
-      if (h < YEARS_EXPLICIT) return;
-      var v = series.values[i];
-      if (v === null || v === undefined) return;
-      var x = forecastX(h);
-      d += (d === "" ? "M" : " L") + x.toFixed(1) + "," + toY(v, scale).toFixed(1);
-    });
-    return d;
-  }
-
-  function el(tag, attrs, text) {
-    var e = document.createElementNS(SVG_NS, tag);
-    Object.keys(attrs || {}).forEach(function (k) { e.setAttribute(k, attrs[k]); });
-    if (text !== undefined) e.textContent = text;
-    return e;
+  function withAlpha(hex, alpha) {
+    if (hex.charAt(0) !== "#" || hex.length !== 7) return hex; // not a plain #rrggbb -- leave as-is
+    return hex + Math.round(alpha * 255).toString(16).padStart(2, "0");
   }
 
   // Auto-scaled $ formatter (B/M/K) -- real figures span from small-cap millions to AAPL-scale
-  // hundreds of billions, unlike the mockup's fixed "$ billions" assumption.
+  // hundreds of billions.
   function fmtY(v) {
     var abs = Math.abs(v);
     if (abs >= 1e9) return "$" + (v / 1e9).toFixed(abs / 1e9 >= 100 ? 0 : 1) + "B";
@@ -114,74 +66,151 @@
     if (abs >= 1e3) return "$" + (v / 1e3).toFixed(abs / 1e3 >= 100 ? 0 : 1) + "K";
     return "$" + v.toFixed(1);
   }
-
-  function renderStaticAxes() {
-    var zoneTerminal = document.getElementById("zone-terminal");
-    zoneTerminal.setAttribute("x", X_FY10);
-    zoneTerminal.setAttribute("y", Y_TOP - 14);
-    zoneTerminal.setAttribute("width", X_FY20 - X_FY10);
-    zoneTerminal.setAttribute("height", Y_BASE - Y_TOP + 14);
-
-    document.getElementById("zone-label-hist").setAttribute("x", (X0 + X_FY0) / 2);
-    document.getElementById("zone-label-explicit").setAttribute("x", (X_FY0 + X_FY10) / 2);
-    document.getElementById("zone-label-terminal").setAttribute("x", (X_FY10 + X_FY20) / 2);
-
-    var baseline = document.getElementById("fc-baseline");
-    baseline.setAttribute("x1", X0); baseline.setAttribute("y1", Y_BASE);
-    baseline.setAttribute("x2", X_FY20); baseline.setAttribute("y2", Y_BASE);
-
-    var fy0 = document.getElementById("fc-line-fy0");
-    fy0.setAttribute("x1", X_FY0); fy0.setAttribute("y1", Y_TOP - 14);
-    fy0.setAttribute("x2", X_FY0); fy0.setAttribute("y2", Y_BASE);
-
-    var fy10 = document.getElementById("fc-line-fy10");
-    fy10.setAttribute("x1", X_FY10); fy10.setAttribute("y1", Y_TOP - 14);
-    fy10.setAttribute("x2", X_FY10); fy10.setAttribute("y2", Y_BASE);
-
-    // x-axis ticks: minor every year, major (labeled) every 5 years, spanning the full nominal
-    // FY-10..FY+20 range regardless of how much real historical data any one ticker has.
-    var ticksG = document.getElementById("fc-ticks-x");
-    ticksG.innerHTML = "";
-    for (var yr = -YEARS_HIST; yr <= YEARS_EXPLICIT + YEARS_TERMINAL; yr++) {
-      var x = X_FY0 + yr * PX_PER_YEAR;
-      var isMajor = yr % 5 === 0;
-      ticksG.appendChild(el("line", {
-        class: isMajor ? "fc-tick-major" : "fc-tick-minor",
-        x1: x, y1: Y_BASE, x2: x, y2: Y_BASE + (isMajor ? 8 : 4),
-      }));
-      if (isMajor) {
-        var label = yr === 0 ? "FY0" : (yr > 0 ? "FY+" + yr : "FY" + yr);
-        ticksG.appendChild(el("text", { class: "fc-axis-label", x: x, y: Y_BASE + 22, "text-anchor": "middle" }, label));
-      }
-    }
+  function fmtX(v) {
+    return v === 0 ? "FY0" : (v > 0 ? "FY+" + v : "FY" + v);
   }
 
-  function renderYGrid(scale) {
-    var g = document.getElementById("fc-gridlines-y");
-    g.innerHTML = "";
-    var levels = 4; // quartile gridlines
-    for (var i = 0; i <= levels; i++) {
-      var v = scale.lo + (scale.hi - scale.lo) * (i / levels);
-      var y = toY(v, scale);
-      g.appendChild(el("line", { class: "fc-grid-y", x1: X0, y1: y.toFixed(1), x2: X_FY20, y2: y.toFixed(1) }));
-      g.appendChild(el("text", { class: "fc-axis-label fc-axis-label--y", x: X0 - 10, y: (y + 3).toFixed(1) }, fmtY(v)));
+  // Shaded terminal-zone band + FY0 "today" reference line -- Chart.js has no built-in region-
+  // shading primitive, so this draws straight on the canvas via the chart's own x/y scale
+  // pixel mapping, correct across resize.
+  var zonePlugin = {
+    id: "fcTerminalZone",
+    beforeDatasetsDraw: function (chart) {
+      var xScale = chart.scales.x, yScale = chart.scales.y;
+      if (!xScale || !yScale) return;
+      var ctx = chart.ctx;
+      var xTerminal = xScale.getPixelForValue(TERMINAL_START);
+      var xEnd = xScale.getPixelForValue(xScale.max);
+      var xToday = xScale.getPixelForValue(0);
+      ctx.save();
+      ctx.fillStyle = COLOR_BG_SUBTLE || "rgba(0,0,0,.03)";
+      ctx.fillRect(xTerminal, yScale.top, xEnd - xTerminal, yScale.bottom - yScale.top);
+      ctx.strokeStyle = COLOR_INK3;
+      ctx.setLineDash([2, 2]);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(xToday, yScale.top);
+      ctx.lineTo(xToday, yScale.bottom);
+      ctx.stroke();
+      ctx.restore();
+    },
+  };
+
+  var titleEl = document.getElementById("fc-chart-title");
+  var chart = null;
+
+  function buildDatasets(m) {
+    var datasets = [];
+    if (m.historical.length) {
+      var fy0 = m.historical[m.historical.length - 1].fiscal_year;
+      var histPoints = m.historical
+        .filter(function (h) { return h.value !== null && h.value !== undefined; })
+        .map(function (h) { return { x: h.fiscal_year - fy0, y: h.value }; });
+      datasets.push({
+        fcKey: "hist", label: "Historical", data: histPoints,
+        borderColor: COLOR_INK, backgroundColor: COLOR_INK,
+        borderWidth: 2, pointRadius: 0, tension: 0, order: 10,
+      });
     }
+
+    m.scenarios.forEach(function (s) {
+      var cfg = null;
+      for (var i = 0; i < SCENARIOS.length; i++) {
+        if (SCENARIOS[i].level === String(s.quantile_level)) { cfg = SCENARIOS[i]; break; }
+      }
+      if (!cfg) return;
+      var points = [];
+      s.horizons.forEach(function (h, i) {
+        var v = s.values[i];
+        if (v !== null && v !== undefined) points.push({ x: h, y: v });
+      });
+      if (!points.length) return;
+      var explicitColor = cfg.faded ? withAlpha(cfg.color, 0.55) : cfg.color;
+      var terminalColor = withAlpha(cfg.color, 0.4);
+      datasets.push({
+        fcKey: cfg.key, label: cfg.label, data: points,
+        borderColor: explicitColor, backgroundColor: cfg.color,
+        borderWidth: 2, pointRadius: 0, tension: 0, order: 1,
+        segment: {
+          borderDash: function (ctx) {
+            if (ctx.p0.parsed.x >= TERMINAL_START) return [4, 3];
+            return cfg.faded ? [3, 2] : undefined;
+          },
+          borderColor: function (ctx) {
+            return ctx.p0.parsed.x >= TERMINAL_START ? terminalColor : explicitColor;
+          },
+          borderWidth: function (ctx) {
+            return ctx.p0.parsed.x >= TERMINAL_START ? 1.5 : 2;
+          },
+        },
+      });
+    });
+    return datasets;
+  }
+
+  // Re-apply every legend chip's current on/off state via the public setDatasetVisibility API
+  // (not a `hidden` flag baked into the dataset objects) -- used both after a metric-tab
+  // switch (e.g. a user hid "Bear" on Revenue, then switches to Net Income: that choice
+  // should carry over) and after the initial render, so both paths go through the same,
+  // version-stable API rather than depending on how Chart.js's internal per-dataset meta
+  // survives a wholesale chart.data.datasets replacement.
+  function applyChipVisibility() {
+    document.querySelectorAll(".fc-chip").forEach(function (chip) {
+      var idx = chart.data.datasets.findIndex(function (d) { return d.fcKey === chip.dataset.scenario; });
+      if (idx === -1) return;
+      chart.setDatasetVisibility(idx, chip.dataset.active === "true");
+    });
+    chart.update();
   }
 
   function renderChart(metricKey) {
     var m = METRICS[metricKey];
     if (!m) return;
-    titleEl.textContent = m.label + (m.unit ? " · " + m.unit : "");
-    var scale = sharedScale(m);
-    renderYGrid(scale);
-    document.getElementById("ln-hist").setAttribute("d", histPath(m, scale));
-    m.scenarios.forEach(function (s) {
-      var key = SCENARIO_KEYS[String(s.quantile_level)];
-      if (!key) return;
-      var explicitEl = document.getElementById("ln-" + key + "-explicit");
-      var terminalEl = document.getElementById("ln-" + key + "-terminal");
-      if (explicitEl) explicitEl.setAttribute("d", explicitPath(s, scale));
-      if (terminalEl) terminalEl.setAttribute("d", terminalPath(s, scale));
+    if (titleEl) titleEl.textContent = m.label + (m.unit ? " · " + m.unit : "");
+    var datasets = buildDatasets(m);
+    var histMinX = m.historical.length
+      ? m.historical[0].fiscal_year - m.historical[m.historical.length - 1].fiscal_year
+      : 0;
+
+    if (chart) {
+      chart.data.datasets = datasets;
+      chart.options.scales.x.min = histMinX;
+      applyChipVisibility();
+      return;
+    }
+
+    chart = new Chart(canvas.getContext("2d"), {
+      type: "line",
+      data: { datasets: datasets },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        parsing: false,
+        interaction: { mode: "index", intersect: false },
+        scales: {
+          x: {
+            type: "linear", min: histMinX, max: TERMINAL_END,
+            grid: { color: COLOR_RULE_SOFT },
+            ticks: {
+              color: COLOR_INK3, font: { family: FONT_MONO, size: 10 },
+              stepSize: 5, callback: fmtX,
+            },
+          },
+          y: {
+            grid: { color: COLOR_RULE_SOFT }, border: { display: false },
+            ticks: { color: COLOR_INK3, font: { family: FONT_MONO, size: 11 }, callback: fmtY },
+          },
+        },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              title: function (items) { return items.length ? fmtX(items[0].parsed.x) : ""; },
+              label: function (c) { return c.dataset.label + ": " + fmtY(c.parsed.y); },
+            },
+          },
+        },
+      },
+      plugins: [zonePlugin],
     });
   }
 
@@ -197,16 +226,16 @@
 
   document.querySelectorAll(".fc-chip").forEach(function (chip) {
     chip.addEventListener("click", function () {
-      var active = chip.dataset.active === "true";
-      chip.dataset.active = (!active).toString();
-      ["explicit", "terminal"].forEach(function (seg) {
-        var line = document.getElementById("ln-" + chip.dataset.scenario + "-" + seg);
-        if (line) line.setAttribute("data-hidden", active.toString());
-      });
+      if (!chart) return;
+      var willBeVisible = chip.dataset.active !== "true";
+      chip.dataset.active = willBeVisible.toString();
+      var idx = chart.data.datasets.findIndex(function (d) { return d.fcKey === chip.dataset.scenario; });
+      if (idx === -1) return;
+      chart.setDatasetVisibility(idx, willBeVisible);
+      chart.update();
     });
   });
 
-  renderStaticAxes();
   var firstTab = document.querySelector("#fc-metric-tabs .nav-link");
   if (firstTab) renderChart(firstTab.dataset.metric);
 
