@@ -58,4 +58,16 @@
   if (legendEl) legendEl.innerHTML = legendHtml;
 
   chart.timeScale().fitContent();
+
+  // The Price tab-pane is `display:none` (Bootstrap tab) at page load unless it's the
+  // active tab, so the container's width was ~0 when fitContent() ran above — that
+  // computed logical range then stays stuck once autoSize's ResizeObserver widens the
+  // canvas on tab-show, leaving only a few most-recent bars visible, right-anchored,
+  // with the rest of the chart empty. Re-fit once the pane actually becomes visible.
+  var tabTrigger = document.getElementById("tab-price");
+  if (tabTrigger) {
+    tabTrigger.addEventListener("shown.bs.tab", function () {
+      chart.timeScale().fitContent();
+    });
+  }
 })();

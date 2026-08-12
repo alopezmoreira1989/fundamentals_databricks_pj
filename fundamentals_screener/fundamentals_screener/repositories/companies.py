@@ -153,11 +153,26 @@ _STATEMENT_ORDER = ("Income Statement", "Balance Sheet", "Cash Flow")
 # the pipeline's own dashboard_filings artifact (15__fetch_sec_filings.py), not a live SEC
 # call of our own. Column aliases match FilingRow's field names exactly (see base.py's
 # _fetch docstring).
+#
+# fiscal_year/period_type: dashboard_filings itself carries no fiscal-year label (SEC's
+# submissions API gives only real-world dates), so rather than guessing one from report_date
+# (wrong for non-December fiscal-year-end filers, e.g. AAPL/Sep, MSFT/Jun), this LEFT JOINs
+# each filing's report_date against dashboard_data's own period_end for the same ticker —
+# reusing the fiscal_year/period_type the pipeline already computed, the same values shown on
+# the Income Statement/Quarterly tabs, rather than a second, possibly-inconsistent definition.
+# LEFT JOIN (not INNER): a filing with no matching period_end (e.g. a report_date the pipeline
+# hasn't ingested a period for yet) still shows up, just with fiscal_year/period_type as NULL.
 _FILINGS_SQL = """
-    SELECT form, filing_date, report_date, description, url
-    FROM dashboard_filings
-    WHERE ticker = ?
-    ORDER BY filing_date DESC
+    SELECT f.form, f.filing_date, f.report_date, f.description, f.url,
+           p.fiscal_year, p.period_type
+    FROM dashboard_filings f
+    LEFT JOIN (
+        SELECT DISTINCT ticker, period_end, fiscal_year, period_type
+        FROM dashboard_data
+        WHERE ticker = ?
+    ) p ON p.ticker = f.ticker AND p.period_end = f.report_date
+    WHERE f.ticker = ?
+    ORDER BY f.filing_date DESC
 """
 
 
@@ -312,7 +327,7 @@ class CompanyRepository(DuckDBRepository):
         `usd_fx_rate`/`price_series` above; confirmed necessary in production 2026-07-30 when
         this artifact was declared but not yet published by a pipeline run)."""
         try:
-            return self._fetch(_FILINGS_SQL, [ticker], FilingRow)
+            return self._fetch(_FILINGS_SQL, [ticker, ticker], FilingRow)
         except duckdb.Error:
             return ()
 
