@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this project is
 
-Databricks analytical pipeline that ingests SEC EDGAR XBRL filings (10-K/10-Q) for ~3,000 US tickers, joins Yahoo Finance prices, derives financial metrics + intrinsic values, runs an investment-archetype **backtester**, and serves it all via Delta tables to a Databricks dashboard **and a public Streamlit app** (fed by GitHub Release parquet artifacts). Entry point: `90__pipelines/91__full_pipeline.py` (Databricks notebook source format, run as a Databricks Job). A pure-Python public API inside the installable `fundamentals_pipeline` package (`schemas.py`, `valuation.py`, `periods.py`, `backtest.py`, `splits.py`, `fx.py`, `identity.py`, `tickers_universe.py`; no Spark/Databricks dependency) holds the reference formula/contract/backtest logic and is unit-tested by `tests/` (pytest). **All new work is produced in English** (docs, code, identifiers, comments, commit messages); some legacy content (prose, metric labels, JSON hierarchy values) is still in Spanish and is treated as data — see Conventions.
+Databricks analytical pipeline that ingests SEC EDGAR XBRL filings (10-K/10-Q) for ~3,000 US tickers, joins Yahoo Finance prices, derives financial metrics + intrinsic values, runs an investment-archetype **backtester**, and serves it all via Delta tables to a Databricks dashboard **and a public Streamlit app** (fed by GitHub Release parquet artifacts). **Entry point (production, since 2026-08): a 9-task Databricks Job DAG** — `90__pipelines/91a__pipeline_pre22.py` through `91j__delta_maintenance.py` (Databricks notebook source format; see the "Multi-task pipeline orchestration" convention below). `90__pipelines/91__full_pipeline.py` still exists as a single-notebook manual fallback / disaster-recovery path — not what the daily schedule runs. A pure-Python public API inside the installable `fundamentals_pipeline` package (`schemas.py`, `valuation.py`, `periods.py`, `backtest.py`, `splits.py`, `fx.py`, `identity.py`, `tickers_universe.py`; no Spark/Databricks dependency) holds the reference formula/contract/backtest logic and is unit-tested by `tests/` (pytest). **All new work is produced in English** (docs, code, identifiers, comments, commit messages); some legacy content (prose, metric labels, JSON hierarchy values) is still in Spanish and is treated as data — see Conventions.
 
 ## Conventions that must be preserved
 
@@ -359,7 +359,7 @@ Databricks analytical pipeline that ingests SEC EDGAR XBRL filings (10-K/10-Q) f
 
 - **SEC User-Agent must be set before running ingestion.** `00__config/01__tickers.py` ships with placeholder `"MyCompany myemail@example.com"`. SEC blocks requests without a real org/email. Flag this if you see it unchanged when working near ingestion.
 - **Unity Catalog schemas are pre-provisioned.** Code reads/writes `main.financials` and `main.config`; it does NOT create catalog or schema. Don't add `CREATE CATALOG` / `CREATE SCHEMA` statements — assume they exist.
-- **`%run` and `dbutils` only work inside Databricks.** Notebooks pull config via `%run "/Workspace/.../01__tickers"`. Flag any change that introduces these in a `.py` that's expected to run locally via Databricks Connect. The notebooks that import the `fundamentals_pipeline` package (`51`, `71`) rely on it being pip-installed in the session — done once in `91__full_pipeline`'s session-dependencies `%pip` cell — and do NOT manipulate `sys.path`.
+- **`%run` and `dbutils` only work inside Databricks.** Notebooks pull config via `%run "/Workspace/.../01__tickers"`. Flag any change that introduces these in a `.py` that's expected to run locally via Databricks Connect. The notebooks that import the `fundamentals_pipeline` package (`13`, `24`, `51`, `71`) each carry their own `try: import ... except ImportError: pip install -e ../..` fallback (mirroring `11__fetch_sec_xbrl.py`'s pattern) — necessary since, as separate Job Tasks under the multi-task DAG (see Workflow below), they no longer share `91__full_pipeline`'s one session-level `%pip` cell, and do NOT manipulate `sys.path`.
 - **Tests + lint exist (don't repeat the old "none" claim).** A pytest suite at repo root (`tests/`) covers the pure importable modules of the `fundamentals_pipeline` package and the Streamlit `lib/` helpers — no Spark/network needed: `pip install -r requirements-dev.txt && pytest -q` (dev deps only — `requirements-dev.txt` installs the `fundamentals_pipeline` package via `-e .`; `requirements.txt` also installs it via `-e .` so Streamlit Cloud can import it). Fixture-backed tests skip if `60__frontends/61__streamlit/fixtures/*` are absent (gitignored). Lint is `ruff.toml` (line-length 120, py310). There is **no Spark CI** — notebooks are still validated ad-hoc / via `30__analysis` checks.
 - **Still no catalog/schema CREATE.** Code reads/writes `main.financials` / `main.config` only.
 
@@ -367,8 +367,55 @@ Databricks analytical pipeline that ingests SEC EDGAR XBRL filings (10-K/10-Q) f
 
 - **Plan before editing notebooks or pipeline `.py` files.** They are stateful and side-effecting (writes to Delta tables, calls SEC/yfinance APIs). Outline the change first, then implement.
 - **Flag Databricks-only assumptions** explicitly when proposing changes (uses `dbutils`, `%run`, `spark`, Unity Catalog three-part names, etc.) so the user knows what will break locally.
-- **Run from `91__full_pipeline.py`** as a Databricks Job; it accepts `tickers_override`, `run_optimization` (gates `93__delta_maintenance`), `rebuild_config`, and `force_full_refresh`. Local smoke test for Databricks Connect credentials is `test_connection.py` (gitignored).
+- **Run via the "Financial Analysis Pipeline" Databricks Job** (job_id `736091313212283`, daily 08:00 Europe/Madrid) — a 9-task multi-task DAG, NOT `91__full_pipeline.py` directly (see "Multi-task pipeline orchestration" below). `tickers_override` is registered per-task by whichever notebooks need it (`91a__pipeline_pre22`, `91f__forecasting`); `run_optimization` (gates `93__delta_maintenance`) by `91j__delta_maintenance`; `rebuild_config`/`force_full_refresh` by `91a__pipeline_pre22`. `91__full_pipeline.py` remains as a single-notebook manual fallback taking the same 4 params. Local smoke test for Databricks Connect credentials is `test_connection.py` (gitignored).
 - **Branch discipline: `main` is the single source of truth.** GitHub `main` is the production source and feeds the read-only Databricks Repo mirror (see *Sync GitHub → Databricks Repo* below). Do feature work on `dev_alm`, validate, then merge to `main` via the normal PR flow. **Never force-push `main`** — it triggers the sync and is the production source.
+
+## Multi-task pipeline orchestration
+
+- **The production Job is a 9-task DAG, not one notebook.** A real incident (a Spark
+  checkpoint/executor-loss flake inside `22__derived_metrics.py` forcing a 2.5+ hour full-
+  pipeline retry, since the whole thing ran as one Databricks Job task) motivated splitting
+  `91__full_pipeline.py` into `90__pipelines/91a__pipeline_pre22.py` through
+  `91j__delta_maintenance.py` — each a genuine top-level Databricks Job Task with
+  `depends_on` edges, so a transient failure anywhere only costs a retry of that one task
+  (Databricks' native Repair Run, which skips already-succeeded tasks), not a full restart.
+  Chain: `91a` (bootstrap + SEC/yfinance ingestion + clean/dedup chain) → `91b` (`22__derived_metrics`,
+  the original incident's failure site) → parallel fan-out `91d`/`91e`/`91f` (`23__intrinsic_value`/
+  `71__run_backtest`/`24__forecasting` — confirmed to have zero cross-dependencies on each
+  other's output, only on `91b`'s) → fan-in `91g` (`31`/`32`/`34`/`37` analysis+checks) → `91h`
+  (`51__export_dashboard_data`) → `91i` (`52__publish_to_github`) → `91j`
+  (`93__delta_maintenance`, plus the run's final `pipeline_run_coverage` snapshot). Validated
+  end-to-end 2026-08-13 (~18.7 min for a scoped run, vs. 2.5-3+ hours for the same scope
+  pre-split).
+- **`dbutils.jobs.taskValues` carries `run_id` across tasks** (`91a` publishes it; every
+  downstream task reads it from its own **direct** `depends_on` entries via
+  `taskValues.get(taskKey=..., key="run_id", ...)` and relays it forward — `taskValues.get()`
+  is NOT reliable for arbitrary upstream tasks, only direct dependencies, so each link in the
+  chain must relay, not read-through). `main.config.pipeline_runs`/`pipeline_run_coverage`
+  (Delta `MERGE INTO`, keyed on this shared `run_id`) is what ties one run's per-task rows
+  together across separate task sessions/drivers.
+- **`51`→`52` handoff is a Unity Catalog Volume (`main.financials._publish`), not `/tmp`.**
+  Separate Job Tasks get separate compute, so `91h__export_dashboard_data` (which still
+  writes parquet to driver-local `/tmp` first — pandas/pyarrow need a real local path) copies
+  the results into the Volume via plain `shutil.copy`/`Path.mkdir` — **not** `dbutils.fs.cp`,
+  which raises `LocalFilesystemAccessDeniedException` on this workspace's shared/serverless
+  compute for any `file:` path outside `/Workspace` (a real failure hit and fixed during the
+  first live DAG validation run). A Volume is a real mounted POSIX path on the driver, so
+  plain Python file I/O reaches it with no `dbutils.fs` permission check involved at all;
+  `91i__publish_github` then reads straight from the Volume via plain `pathlib`.
+  `91h`/`91i` are the only two tasks touching this handoff — every other task exchanges state
+  purely through Delta tables + `taskValues`.
+- **`databricks.yml` (repo root) is reviewable IaC for the Job's task graph** — the topology
+  (task list, `depends_on` edges, schedule, notifications) as source-controlled config,
+  written to exactly mirror job_id `736091313212283` as validated. It deliberately does
+  **not** own notebook deployment (no `artifacts`/`sync` block) — every `notebook_task.notebook_path`
+  points at the existing read-only mirror produced by `sync-databricks.yml` (see *Sync
+  GitHub → Databricks Repo* below), so this file only ever manages the Job resource itself,
+  not a second competing deployment path for notebook content. **Not deployed automatically** —
+  `databricks bundle deploy` is a separate, explicit, real-infra action; the file's own header
+  comment documents the required one-time `databricks bundle deployment bind` step to adopt
+  the existing job_id rather than create a duplicate. Keep this file in sync by hand when the
+  live Job's topology changes (no CI currently diffs it against the live Job).
 
 ## Parallel worktree discipline
 
@@ -408,7 +455,7 @@ Databricks analytical pipeline that ingests SEC EDGAR XBRL filings (10-K/10-Q) f
     they don't automatically carry over.)
 - `fundamentals_screener/` — a standalone installable Django app (own `pyproject.toml` at `fundamentals_screener/`, package code at `fundamentals_screener/fundamentals_screener/`), originally extracted from the now-deleted `web/`'s `apps/companies` + `apps/screener` + `apps/valuation` for reuse by an external Django project (alopezm.xyz's `/apps/screener/`), and since `web/`'s retirement (ADR-0008) the repo's **only** Django presentation layer. Not a pipeline stage (exempt from `NN__`) and not part of any host project's own `INSTALLED_APPS` in this repo — a fully separate distribution with its own README. See **External consumers** below for the versioning contract and its own architecture (no auth, no PostgreSQL, CGI-safe synchronous data layer, Python 3.9 floor).
 - `70__backtest/71__run_backtest.py` — applies `backtest_archetypes.json` screens to history (no look-ahead) → `backtest_results` + `backtest_summary`
-- `90__pipelines/` — `91__full_pipeline.py` orchestration entry point; `93__delta_maintenance.py` (OPTIMIZE/VACUUM, gated on `run_optimization`)
+- `90__pipelines/` — `91a__pipeline_pre22.py` through `91j__delta_maintenance.py`: the 9 Databricks Job Task notebooks that make up the production multi-task DAG (see "Multi-task pipeline orchestration" under Workflow above). `91__full_pipeline.py` is the original single-notebook orchestrator, kept as a manual fallback / disaster-recovery path, not what the daily schedule runs. `93__delta_maintenance.py` (OPTIMIZE/VACUUM, gated on `run_optimization`) is `%run`'d by both `91j` and `91__full_pipeline.py`.
 - `tests/` — pytest suite (repo root) for the `fundamentals_pipeline` importable modules + Streamlit `lib/`; transversal tooling, intentionally unprefixed (not an `NN__` stage — see the naming-convention exception under Conventions)
 
 ### Delta tables (Unity Catalog)
@@ -437,6 +484,11 @@ GitHub `main` is the single source of truth. The Databricks Repo (synced by
 - The workflow is self-repairing: on `GIT_CONFLICT` it deletes and recreates the Repo from
   `main`, discarding the local state. If you had unsaved work in the synced
   Repo, it will be lost — that's why you must not work there.
+- **This workflow owns notebook content only, not Job topology.** `databricks.yml` (repo
+  root — see "Multi-task pipeline orchestration" under Workflow above) is a separate,
+  narrower Asset Bundle that owns the production Job's task graph/schedule as IaC; it
+  deliberately points at notebook paths this sync produces rather than deploying notebooks
+  itself, so the two mechanisms don't compete.
 
 ## External consumers
 

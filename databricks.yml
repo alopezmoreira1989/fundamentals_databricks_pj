@@ -1,0 +1,142 @@
+# Databricks Asset Bundle — reviewable IaC for the "Financial Analysis Pipeline" Job's
+# TASK GRAPH ONLY, not for notebook deployment.
+#
+# Scope, deliberately narrow: this bundle owns the Job's topology (task list, depends_on
+# edges, schedule, notifications) as source-controlled, PR-reviewable config. It does NOT
+# sync/deploy notebook source — every notebook_task.notebook_path below points at the
+# EXISTING read-only mirror produced by .github/workflows/sync-databricks.yml (see
+# CLAUDE.md's "Sync GitHub → Databricks Repo" section: GitHub `main` is the single source
+# of truth for notebook CONTENT; that workflow, not this bundle, is what puts it at
+# /Workspace/Shared/fundamentals_databricks_pj). Bundles normally also own notebook
+# deployment (an `artifacts`/`sync` block uploading files into a bundle-managed workspace
+# path) — that's intentionally omitted here so this doesn't become a second, competing
+# deployment mechanism alongside the sync workflow. `databricks bundle deploy` only ever
+# touches the Job resource itself.
+#
+# This file was written to MIRROR the existing production Job (job_id 736091313212283,
+# validated end-to-end 2026-08-13 — see the "expand to full fan-out/fan-in multi-task DAG"
+# work in git history) exactly as it stood after that validation — not a redesign. Diffing
+# `databricks jobs get 736091313212283` against this file's `resources.jobs.financial_analysis_pipeline`
+# should show no drift at the time this was written.
+#
+# NOT YET DEPLOYED. Writing this file is a pure, git-revertable, zero-side-effect change —
+# it does not touch the live Job. `databricks bundle deploy` is a separate, explicit action
+# with real infra consequences and needs its own go-ahead before being run for the first
+# time.
+#
+# Adopting the existing Job (required before the first `bundle deploy`, one-time): a bundle
+# resource with no prior binding CREATES A NEW JOB on first deploy rather than taking over
+# job_id 736091313212283 — that would leave the real one (with its run history, its
+# schedule, and the one Databricks Repair-Run history that already proved the DAG works)
+# orphaned, and duplicate the schedule. Bind first instead:
+#   databricks bundle deployment bind financial_analysis_pipeline 736091313212283 -t prod
+# This makes `bundle deploy` update the existing job in place. Confirm with
+# `databricks bundle validate -t prod` (read-only) before ever running `bundle deploy`.
+
+bundle:
+  name: fundamentals_databricks_pj
+
+variables:
+  notebook_root:
+    description: >-
+      Workspace path to the read-only GitHub-synced mirror (see sync-databricks.yml).
+      Never point this at a bundle-managed path — notebook content is owned by that sync,
+      not by this bundle.
+    default: /Workspace/Shared/fundamentals_databricks_pj/fundamentals_pipeline/90__pipelines
+
+targets:
+  prod:
+    default: true
+    mode: production
+    workspace:
+      host: https://dbc-b52a3a2b-c131.cloud.databricks.com
+      # Where the bundle's own state/manifest lives — NOT where pipeline notebooks live
+      # (those stay at ${var.notebook_root}, owned by the sync workflow; see the header).
+      root_path: /Workspace/Users/al.lopez.moreira@gmail.com/.bundle/${bundle.name}/${bundle.target}
+    run_as:
+      user_name: al.lopez.moreira@gmail.com
+
+resources:
+  jobs:
+    financial_analysis_pipeline:
+      name: "Financial Analysis Pipeline"
+      max_concurrent_runs: 1
+      queue:
+        enabled: true
+      performance_target: PERFORMANCE_OPTIMIZED
+      schedule:
+        quartz_cron_expression: "22 0 8 * * ?"
+        timezone_id: Europe/Madrid
+        pause_status: UNPAUSED
+      email_notifications:
+        on_success:
+          - al.lopez.moreira@gmail.com
+        on_failure:
+          - al.lopez.moreira@gmail.com
+        no_alert_for_skipped_runs: false
+      tasks:
+        - task_key: pipeline_pre22
+          notebook_task:
+            notebook_path: ${var.notebook_root}/91a__pipeline_pre22
+            source: WORKSPACE
+
+        - task_key: pipeline_metrics
+          depends_on:
+            - task_key: pipeline_pre22
+          notebook_task:
+            notebook_path: ${var.notebook_root}/91b__pipeline_metrics
+            source: WORKSPACE
+
+        # Parallel fan-out — none of the three read each other's output, only
+        # pipeline_metrics's (see the Phase-2 commit for the cross-dependency audit).
+        - task_key: intrinsic_value
+          depends_on:
+            - task_key: pipeline_metrics
+          notebook_task:
+            notebook_path: ${var.notebook_root}/91d__intrinsic_value
+            source: WORKSPACE
+
+        - task_key: backtest
+          depends_on:
+            - task_key: pipeline_metrics
+          notebook_task:
+            notebook_path: ${var.notebook_root}/91e__backtest
+            source: WORKSPACE
+
+        - task_key: forecasting
+          depends_on:
+            - task_key: pipeline_metrics
+          notebook_task:
+            notebook_path: ${var.notebook_root}/91f__forecasting
+            source: WORKSPACE
+
+        # Fan-in
+        - task_key: analysis_and_checks
+          depends_on:
+            - task_key: intrinsic_value
+            - task_key: backtest
+            - task_key: forecasting
+          notebook_task:
+            notebook_path: ${var.notebook_root}/91g__analysis_and_checks
+            source: WORKSPACE
+
+        - task_key: export_dashboard_data
+          depends_on:
+            - task_key: analysis_and_checks
+          notebook_task:
+            notebook_path: ${var.notebook_root}/91h__export_dashboard_data
+            source: WORKSPACE
+
+        - task_key: publish_github
+          depends_on:
+            - task_key: export_dashboard_data
+          notebook_task:
+            notebook_path: ${var.notebook_root}/91i__publish_github
+            source: WORKSPACE
+
+        - task_key: delta_maintenance
+          depends_on:
+            - task_key: publish_github
+          notebook_task:
+            notebook_path: ${var.notebook_root}/91j__delta_maintenance
+            source: WORKSPACE
