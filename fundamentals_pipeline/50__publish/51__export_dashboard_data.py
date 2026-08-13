@@ -21,7 +21,8 @@
 # MAGIC
 # MAGIC **Retention window:** last 10 fiscal years (FY) and last 12 quarters per ticker.
 # MAGIC
-# MAGIC Databricks-only: uses `spark`, `%run`, `dbutils.fs`, and writes to driver-local `/tmp/`.
+# MAGIC Databricks-only: uses `spark`, `%run`, and writes to driver-local `/tmp/` before copying
+# MAGIC (plain `shutil`, not `dbutils.fs` — see §5 below) to the `main.financials._publish` Volume.
 
 # COMMAND ----------
 
@@ -613,14 +614,24 @@ print(f"  {META_JSON}      (schema_version={SCHEMA_VERSION})")
 # MAGIC (`set True for local dev`); now unconditional (`main.financials._publish` — a managed
 # MAGIC Volume, created 2026-08 specifically for this) since `52` depends on it every run, not
 # MAGIC just when a developer happens to want it.
+# MAGIC
+# MAGIC **Plain `shutil.copy`, not `dbutils.fs.cp`.** A real run against this workspace's
+# MAGIC serverless/shared compute confirmed `dbutils.fs.cp("file:/tmp/...", ...)` raises
+# MAGIC `LocalFilesystemAccessDeniedException: Cannot access non /Workspace local filesystem
+# MAGIC path` — this workspace's shared-UC enforcement blocks `dbutils.fs` specifically from
+# MAGIC touching driver-local paths outside `/Workspace`. A Volume is a real mounted POSIX path
+# MAGIC on the driver (unlike DBFS, which does need `dbutils.fs`), so plain `pathlib`/`shutil`
+# MAGIC read it and write it with no `dbutils.fs` permission check involved at all.
 
 # COMMAND ----------
 
-VOLUME_PATH = "/Volumes/main/financials/_publish"
+import shutil
 
-dbutils.fs.mkdirs(VOLUME_PATH)
+VOLUME_PATH = Path("/Volumes/main/financials/_publish")
+
+VOLUME_PATH.mkdir(parents=True, exist_ok=True)
 for f in [DATA_PARQUET, METRIC_PARQUET, PRICE_PARQUET, BACKTEST_PARQUET, FX_PARQUET,
           FILINGS_PARQUET, FORECAST_PARQUET, META_JSON]:
-    dest = f"{VOLUME_PATH}/{f.name}"
-    dbutils.fs.cp(f"file:{f}", dest, recurse=False)
+    dest = VOLUME_PATH / f.name
+    shutil.copy(f, dest)
     print(f"  ✓ {f.name} → {dest}")
