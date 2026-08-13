@@ -1,26 +1,12 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # 90__pipelines / 91b__pipeline_metrics
+# MAGIC # 90__pipelines / 91h__export_dashboard_data
 # MAGIC
-# MAGIC **Second of three Databricks Job Tasks** in the "Financial Analysis Pipeline" multi-task
-# MAGIC split (Phase 1 — see `91a__pipeline_pre22`'s header for the full rationale). Isolates
-# MAGIC `22__derived_metrics` as its own task: this is where a real production incident happened
-# MAGIC (2026-08, a Spark checkpoint/executor-loss error), and it's the step whose retry cost was
-# MAGIC most worth isolating — before this split, a failure here forced re-running all of
-# MAGIC ingestion and the clean/dedup chain (`91a`'s steps) again on retry.
-# MAGIC
-# MAGIC `22__derived_metrics` (unlike `24__forecasting`) does NOT read `ACTIVE_TICKERS` anywhere —
-# MAGIC confirmed by grep against the real file — so this task needs no `tickers_override` widget
-# MAGIC at all, only `CATALOG`/`SCHEMA` from `01__tickers`.
-# MAGIC
-# MAGIC **Relays `run_id`**: reads it from `91a` (a direct `depends_on` dependency, so
-# MAGIC `dbutils.jobs.taskValues.get(taskKey="pipeline_pre22", ...)` is reliable) and re-publishes
-# MAGIC it as its own taskValue, so every task downstream of `91b` (the `91d`/`91e`/`91f`
-# MAGIC parallel branch, and everything chained after it) can read the SAME run_id from its own
-# MAGIC direct dependency — `dbutils.jobs.taskValues.get()` reads values set by a task's own
-# MAGIC `depends_on` entries, not arbitrary upstream tasks, so each link in the chain needs to
-# MAGIC relay the value forward rather than every task reaching back to the original source
-# MAGIC directly.
+# MAGIC **Part of the "Financial Analysis Pipeline" multi-task split, Phase 2** — runs
+# MAGIC `51__export_dashboard_data` as its own Databricks Job Task. Writes to `/tmp/` on this
+# MAGIC task's own driver, then copies to the `main.financials._publish` Unity Catalog Volume — a
+# MAGIC real cross-task-readable location, since `91i__publish_github` (the next task) runs on a
+# MAGIC different driver and can't see this one's `/tmp`.
 
 # COMMAND ----------
 
@@ -40,45 +26,44 @@ def _record_step(name, t0, status="ok"):
 
 # COMMAND ----------
 
-# `debugValue` lets this task run standalone (outside the Job's task-dependency graph) without
-# erroring — falls back to "now" so a lone manual run still gets a usable run_id.
 run_id = dbutils.jobs.taskValues.get(
-    taskKey="pipeline_pre22", key="run_id",
+    taskKey="analysis_and_checks", key="run_id",
     debugValue=datetime.utcnow().strftime("%Y%m%dT%H%M%SZ"),
 )
 pipeline_start = datetime.strptime(run_id, "%Y%m%dT%H%M%SZ")
 try:
-    dbutils.jobs.taskValues.set(key="run_id", value=run_id)  # relay forward for 91d/91e/91f
+    dbutils.jobs.taskValues.set(key="run_id", value=run_id)  # relay for 91i/91j
 except Exception:
     pass
-print(f"✓ run_id={run_id} (relayed from pipeline_pre22)")
+print(f"✓ run_id={run_id} (relayed from analysis_and_checks)")
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 8. Derived metrics
-# MAGIC `financials_metrics` — margins, FCF, YoY growth, leverage, valuation ratios
+# MAGIC ## Export dashboard data
+# MAGIC A failure here aborts this task before reaching the telemetry cell below (→ task marked
+# MAGIC FAILED, Job alerting fires) — the Delta tables are already committed by this point, so a
+# MAGIC red task flags a stale Release instead of hiding it behind a green one.
 
 # COMMAND ----------
 
 print("=" * 55)
-print("STEP 7 / 9 — Derived Metrics")
+print("Export dashboard data")
 print("=" * 55)
 _t0 = time.monotonic()
 
 # COMMAND ----------
 
-# MAGIC %run "../20__transformation/22__derived_metrics"
+# MAGIC %run "../50__publish/51__export_dashboard_data"
 
 # COMMAND ----------
 
-_record_step("Derived Metrics", _t0)
+_record_step("Export dashboard data", _t0)
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 9. This task's run-log telemetry
-# MAGIC Same MERGE-into-`pipeline_runs` idiom as `91a`'s own tail cell — see its header doc.
+# MAGIC ## This task's run-log telemetry
 
 # COMMAND ----------
 
@@ -117,10 +102,10 @@ try:
             for s in STEP_TIMINGS
         ]
         spark.createDataFrame(_runs_records, schema=_runs_schema) \
-            .createOrReplaceTempView("incoming_pipeline_runs_metrics")
+            .createOrReplaceTempView("incoming_pipeline_runs_export")
         spark.sql(f"""
             MERGE INTO {_runs_tbl} AS t
-            USING incoming_pipeline_runs_metrics AS s
+            USING incoming_pipeline_runs_export AS s
             ON t.run_id = s.run_id AND t.step = s.step
             WHEN MATCHED THEN UPDATE SET
                 t.run_started_at = s.run_started_at, t.minutes = s.minutes, t.status = s.status
@@ -133,4 +118,4 @@ except Exception as _e:
 
 # COMMAND ----------
 
-print("✓ 91b (metrics) complete — financials_metrics refreshed.")
+print("✓ 91h (export_dashboard_data) complete.")

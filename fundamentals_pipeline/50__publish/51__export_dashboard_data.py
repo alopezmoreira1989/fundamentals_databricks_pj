@@ -2,23 +2,26 @@
 # MAGIC %md
 # MAGIC # 50__publish / 51__export_dashboard_data
 # MAGIC
-# MAGIC Exports the dashboard-ready slice of `main.financials.*` to three local files on
-# MAGIC the driver (`/tmp/`). `52__publish_to_github` uploads them as GitHub Release
-# MAGIC assets — together they let the public Streamlit app render without touching
-# MAGIC Databricks at runtime.
+# MAGIC Exports the dashboard-ready slice of `main.financials.*` to local files on the driver
+# MAGIC (`/tmp/` — required by pandas/pyarrow's parquet writers), then copies them to the
+# MAGIC `main.financials._publish` Unity Catalog Volume, which is what `52__publish_to_github`
+# MAGIC actually reads from (a real cross-task-readable location — `51`/`52` run as separate
+# MAGIC Databricks Job Tasks, which don't share driver-local `/tmp`) to upload as GitHub Release
+# MAGIC assets — together they let the public Streamlit app render without touching Databricks at
+# MAGIC runtime.
 # MAGIC
-# MAGIC **Outputs**
-# MAGIC - `/tmp/dashboard_data.parquet`    — long-format financials joined with concept_hierarchy
-# MAGIC - `/tmp/dashboard_metrics.parquet` — long-format derived metrics joined with metrics_hierarchy
-# MAGIC - `/tmp/dashboard_filings.parquet` — SEC 10-K/10-Q filing list (see 15__fetch_sec_filings.py)
-# MAGIC - `/tmp/dashboard_forecast.parquet` — 10-year ML scenario forecasts (see 24__forecasting.py)
-# MAGIC - `/tmp/dashboard_meta.json`       — build timestamp, ticker list, row counts, schema version
+# MAGIC **Outputs** (written to `/tmp/`, then copied to `/Volumes/main/financials/_publish/`)
+# MAGIC - `dashboard_data.parquet`    — long-format financials joined with concept_hierarchy
+# MAGIC - `dashboard_metrics.parquet` — long-format derived metrics joined with metrics_hierarchy
+# MAGIC - `dashboard_filings.parquet` — SEC 10-K/10-Q filing list (see 15__fetch_sec_filings.py)
+# MAGIC - `dashboard_forecast.parquet` — 10-year ML scenario forecasts (see 24__forecasting.py)
+# MAGIC - `dashboard_meta.json`       — build timestamp, ticker list, row counts, schema version
 # MAGIC
 # MAGIC **Universe:** all tickers that have data in `financials`.
 # MAGIC
 # MAGIC **Retention window:** last 10 fiscal years (FY) and last 12 quarters per ticker.
 # MAGIC
-# MAGIC Databricks-only: uses `spark`, `%run`, and writes to driver-local `/tmp/`.
+# MAGIC Databricks-only: uses `spark`, `%run`, `dbutils.fs`, and writes to driver-local `/tmp/`.
 
 # COMMAND ----------
 
@@ -597,24 +600,27 @@ print(f"  {META_JSON}      (schema_version={SCHEMA_VERSION})")
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 5. Optional — copy to a Volume for local fixture extraction
+# MAGIC ## 5. Copy to the publish Volume — the real 51→52 handoff
 # MAGIC
-# MAGIC When iterating on the Streamlit app locally, the easiest way to grab the
-# MAGIC artifacts is via a Unity Catalog Volume mounted in your workspace. Set
-# MAGIC `COPY_TO_VOLUME = True` and adjust the path to a volume you can read with
-# MAGIC `databricks fs cp`.
+# MAGIC `52__publish_to_github` reads from `VOLUME_PATH` below, not from the driver-local `/tmp`
+# MAGIC paths written above — the two steps run as SEPARATE Databricks Job Tasks (Phase 2 of the
+# MAGIC "split 91 into a multi-task job" effort), which don't share a driver/`/tmp`. Writing to
+# MAGIC `/tmp` first is still necessary (pandas'/pyarrow's parquet writers need a real local
+# MAGIC filesystem path), this just also copies the result to a Unity Catalog Volume — a real
+# MAGIC cross-task-readable location — right after.
+# MAGIC
+# MAGIC This copy was originally an opt-in `COPY_TO_VOLUME` flag for local fixture extraction
+# MAGIC (`set True for local dev`); now unconditional (`main.financials._publish` — a managed
+# MAGIC Volume, created 2026-08 specifically for this) since `52` depends on it every run, not
+# MAGIC just when a developer happens to want it.
 
 # COMMAND ----------
 
-COPY_TO_VOLUME = False
-VOLUME_PATH    = "/Volumes/main/financials/_publish"   # must already exist
+VOLUME_PATH = "/Volumes/main/financials/_publish"
 
-if COPY_TO_VOLUME:
-    dbutils.fs.mkdirs(VOLUME_PATH)
-    for f in [DATA_PARQUET, METRIC_PARQUET, PRICE_PARQUET, BACKTEST_PARQUET, FX_PARQUET,
-              FILINGS_PARQUET, FORECAST_PARQUET, META_JSON]:
-        dest = f"{VOLUME_PATH}/{f.name}"
-        dbutils.fs.cp(f"file:{f}", dest, recurse=False)
-        print(f"  ✓ {f.name} → {dest}")
-else:
-    print("⊘ COPY_TO_VOLUME=False — skipping Volume copy (set True for local dev)")
+dbutils.fs.mkdirs(VOLUME_PATH)
+for f in [DATA_PARQUET, METRIC_PARQUET, PRICE_PARQUET, BACKTEST_PARQUET, FX_PARQUET,
+          FILINGS_PARQUET, FORECAST_PARQUET, META_JSON]:
+    dest = f"{VOLUME_PATH}/{f.name}"
+    dbutils.fs.cp(f"file:{f}", dest, recurse=False)
+    print(f"  ✓ {f.name} → {dest}")
