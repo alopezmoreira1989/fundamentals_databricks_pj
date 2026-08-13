@@ -12,6 +12,9 @@ __pycache__/
 # Databricks Connect — artefactos locales
 .databricks-connect
 
+# Databricks Asset Bundle — local state/cache from `databricks bundle validate/deploy`
+.databricks/
+
 # Local smoke tests (no son parte del pipeline)
 test_connection.py
 
