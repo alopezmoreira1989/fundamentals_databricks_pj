@@ -7,6 +7,10 @@
 # MAGIC tag/release to point at the new artifacts so the public Streamlit app can
 # MAGIC always pull from `.../releases/download/latest/<file>`.
 # MAGIC
+# MAGIC Reads from the `main.financials._publish` Unity Catalog Volume, not driver-local `/tmp`
+# MAGIC — `51`/`52` run as separate Databricks Job Tasks (Phase 2 of the "split 91 into a
+# MAGIC multi-task job" effort), which don't share a driver.
+# MAGIC
 # MAGIC **Idempotent.** If a release with today's date tag already exists, its
 # MAGIC assets are deleted and re-uploaded. The `latest` release is always
 # MAGIC delete-and-recreated.
@@ -34,15 +38,19 @@ import requests
 OWNER = "alopezmoreira1989"
 REPO  = "fundamentals_databricks_pj"
 
+# Unity Catalog Volumes are mounted as a real POSIX filesystem path on Databricks -- plain
+# pathlib.Path/open() work directly, no dbutils.fs needed to read them.
+VOLUME_PATH = Path("/Volumes/main/financials/_publish")
+
 ARTIFACTS = [
-    Path("/tmp/dashboard_data.parquet"),
-    Path("/tmp/dashboard_metrics.parquet"),
-    Path("/tmp/dashboard_prices.parquet"),
-    Path("/tmp/dashboard_backtest.parquet"),
-    Path("/tmp/dashboard_fx.parquet"),
-    Path("/tmp/dashboard_filings.parquet"),
-    Path("/tmp/dashboard_forecast.parquet"),
-    Path("/tmp/dashboard_meta.json"),
+    VOLUME_PATH / "dashboard_data.parquet",
+    VOLUME_PATH / "dashboard_metrics.parquet",
+    VOLUME_PATH / "dashboard_prices.parquet",
+    VOLUME_PATH / "dashboard_backtest.parquet",
+    VOLUME_PATH / "dashboard_fx.parquet",
+    VOLUME_PATH / "dashboard_filings.parquet",
+    VOLUME_PATH / "dashboard_forecast.parquet",
+    VOLUME_PATH / "dashboard_meta.json",
 ]
 
 LATEST_TAG = "latest"
@@ -210,7 +218,7 @@ def verify_public_download(tag: str, asset_name: str, attempts: int = 8, delay: 
 
 # COMMAND ----------
 
-meta = json.loads(Path("/tmp/dashboard_meta.json").read_text())
+meta = json.loads((VOLUME_PATH / "dashboard_meta.json").read_text())
 release_body = (
     f"Automated dashboard data export.\n\n"
     f"- **Build timestamp:** {meta['build_timestamp']}\n"

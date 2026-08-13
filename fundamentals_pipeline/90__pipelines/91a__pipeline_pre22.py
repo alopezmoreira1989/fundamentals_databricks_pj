@@ -40,10 +40,11 @@
 # MAGIC ```
 # MAGIC
 # MAGIC **Publishes `run_id` via `dbutils.jobs.taskValues`** (this task's own start timestamp,
-# MAGIC stamped `YYYYMMDDThhmmssZ`) so the downstream `91b`/`91c` tasks tie their own
-# MAGIC `pipeline_runs` rows to the SAME run — the Databricks-native cross-task value-passing
-# MAGIC mechanism, since separate Job Tasks don't share a Python session/`globals()` the way `%run`
-# MAGIC cells within one notebook do.
+# MAGIC stamped `YYYYMMDDThhmmssZ`) so every downstream task ties its own `pipeline_runs` rows to
+# MAGIC the SAME run — the Databricks-native cross-task value-passing mechanism, since separate
+# MAGIC Job Tasks don't share a Python session/`globals()` the way `%run` cells within one
+# MAGIC notebook do. Each downstream task relays the value forward to the next (see `91b`'s own
+# MAGIC header doc for why `taskValues.get()` only reads a task's own direct dependencies).
 # MAGIC
 # MAGIC Registers its own `tickers_override`/`rebuild_config`/`force_full_refresh` widgets
 # MAGIC directly (not inherited via globals() from a parent notebook) — this task IS the top-level
@@ -51,7 +52,8 @@
 # MAGIC (the "does NOT reliably read the PARENT's widget under `%run`" gotcha documented in
 # MAGIC `11__fetch_sec_xbrl.py` only applies to a NESTED `%run`'d notebook trying to read a value a
 # MAGIC parent already registered — not to the top-level notebook registering its own).
-# MAGIC `run_optimization` is NOT registered here — only `93__delta_maintenance` (in `91c`) needs it.
+# MAGIC `run_optimization` is NOT registered here — only `93__delta_maintenance` (run from
+# MAGIC `91j__delta_maintenance`, the last task in the chain) needs it.
 
 # COMMAND ----------
 
@@ -63,8 +65,8 @@
 # MAGIC - `lxml` — required by `13__fetch_dimensional_10k` (XBRL instance parsing); not preinstalled on serverless.
 # MAGIC - `fundamentals_pipeline` (editable, `-e ../..`) — the project package. Installing it here
 # MAGIC   once lets `%run` notebooks import it as a normal package — no `sys.path` manipulation.
-# MAGIC   (`91b`/`91c` are separate Job Tasks with their own fresh Python env, so each needs this
-# MAGIC   too, or the per-notebook reinstall-on-ImportError fallback added in Phase 0.)
+# MAGIC   (every downstream task is its own separate Job Task with a fresh Python env, so each
+# MAGIC   needs this too, or the per-notebook reinstall-on-ImportError fallback added in Phase 0.)
 # MAGIC
 # MAGIC > **Databricks path note:** the notebook's CWD in a Repo is its own folder
 # MAGIC > (`90__pipelines/`), not the repo root — `-e ../..` resolves to the repo root, where
@@ -76,9 +78,10 @@
 
 # COMMAND ----------
 
-# Per-step wall-clock timing, scoped to THIS task's own steps only (91b/91c keep their own
-# separate STEP_TIMINGS — no cross-task Python state, same reasoning as the run_id taskValues
-# handoff below). Defined right AFTER the %pip cell because %pip restarts the interpreter.
+# Per-step wall-clock timing, scoped to THIS task's own steps only (every downstream task keeps
+# its own separate STEP_TIMINGS — no cross-task Python state, same reasoning as the run_id
+# taskValues handoff below). Defined right AFTER the %pip cell because %pip restarts the
+# interpreter.
 import time
 
 STEP_TIMINGS = []
@@ -148,8 +151,8 @@ if not ACTIVE_TICKERS:
 pipeline_start = datetime.utcnow()
 print(f"Pipeline started at {pipeline_start.isoformat()} UTC")
 
-# run_id ties this task's pipeline_runs rows to 91b's and 91c's — published via taskValues so
-# both downstream tasks (fresh Python sessions, no shared globals()) can read the SAME value.
+# run_id ties this task's pipeline_runs rows to every downstream task's — published via
+# taskValues so each one (fresh Python session, no shared globals()) can read the SAME value.
 # Wrapped defensively: outside any Job Task context (e.g. an interactive/standalone run)
 # taskValues has nothing to attach to and raises.
 run_id = pipeline_start.strftime("%Y%m%dT%H%M%SZ")
@@ -473,8 +476,8 @@ _record_step("Shares Diluted Plausibility", _t0)
 # MAGIC ## 8. This task's run-log telemetry
 # MAGIC
 # MAGIC Persists THIS task's own per-step rows to `main.config.pipeline_runs`, keyed by the shared
-# MAGIC `run_id` — `91b`/`91c` each append their own rows the same way, so the full run's step
-# MAGIC history is queryable as one logical run once all three tasks have completed. Pure
+# MAGIC `run_id` — every downstream task appends its own rows the same way, so the full run's step
+# MAGIC history is queryable as one logical run once every task has completed. Pure
 # MAGIC observability: wrapped in try/except so a telemetry failure never aborts an otherwise-
 # MAGIC successful task.
 

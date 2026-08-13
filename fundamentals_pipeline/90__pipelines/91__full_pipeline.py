@@ -43,14 +43,15 @@ def _record_step(name, t0, status="ok"):
 # MAGIC # 90__pipelines / 91__full_pipeline
 # MAGIC
 # MAGIC **No longer the production Job's entry point (2026-08-13).** The "Financial Analysis
-# MAGIC Pipeline" Job now runs `91a__pipeline_pre22` → `91b__pipeline_metrics` →
-# MAGIC `91c__pipeline_post22` as three separate Databricks Job Tasks, so a failure in one stage
-# MAGIC only costs a retry of that task (Databricks' native Repair Run), not the whole ~2.5h+
-# MAGIC pipeline. This file is kept, unchanged in behavior, as a **manual single-notebook
-# MAGIC fallback / local Databricks Connect smoke test / disaster-recovery path** — it still runs
-# MAGIC the complete pipeline end to end in one session if the multi-task Job is ever unavailable
-# MAGIC or you need to reproduce a run in one place. See `91a`'s own header doc for the full
-# MAGIC rationale and the task-split design.
+# MAGIC Pipeline" Job now runs a multi-task DAG: `91a__pipeline_pre22` → `91b__pipeline_metrics` →
+# MAGIC (`91d__intrinsic_value` / `91e__backtest` / `91f__forecasting`, in parallel) →
+# MAGIC `91g__analysis_and_checks` → `91h__export_dashboard_data` → `91i__publish_github` →
+# MAGIC `91j__delta_maintenance`, so a failure in one stage only costs a retry of that task
+# MAGIC (Databricks' native Repair Run), not the whole ~2.5h+ pipeline. This file is kept,
+# MAGIC unchanged in behavior, as a **manual single-notebook fallback / local Databricks Connect
+# MAGIC smoke test / disaster-recovery path** — it still runs the complete pipeline end to end in
+# MAGIC one session if the multi-task Job is ever unavailable or you need to reproduce a run in one
+# MAGIC place. See `91a`'s own header doc for the full rationale and the task-split design.
 # MAGIC
 # MAGIC Runs the full ingestion → transformation → analysis pipeline in sequence.
 # MAGIC
