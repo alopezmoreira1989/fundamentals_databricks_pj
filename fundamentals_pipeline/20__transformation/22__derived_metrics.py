@@ -1482,7 +1482,13 @@ final_long.createOrReplaceTempView("incoming_metrics")
 # Exits via `dbutils.notebook.exit()` (JSON), never writes anywhere — no throwaway Databricks
 # table, per explicit instruction; the caller reads the result from the Jobs API's
 # `notebook_output.result` field.
-DRY_RUN = str(globals().get("DRY_RUN", "false")).strip().lower() == "true"
+if "DRY_RUN" in globals():
+    DRY_RUN = str(DRY_RUN).strip().lower() == "true"  # noqa: F821 -- %run/importlib inheritance
+else:
+    try:
+        DRY_RUN = dbutils.widgets.get("DRY_RUN").strip().lower() == "true"
+    except Exception:
+        DRY_RUN = False
 if DRY_RUN:
     print("=" * 55)
     print("DRY RUN — classifying incoming_metrics vs financials_metrics; NO WRITE")
