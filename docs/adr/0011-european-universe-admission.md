@@ -95,19 +95,75 @@ Composite precedent) was tested directly and found blocked: the legacy `.ajax?fi
 `json` scraping pattern documented in public tooling no longer works against the current
 (Astro-based SPA) `ishares.com` UK site.
 
-This yields a clean split, worth stating explicitly:
+This yielded a clean split, worth stating explicitly:
 ```
 identity resolution (this ADR's decision)     READY
 ESEF ingestion (Phase 5.1)                     READY
 canonical mapping (Phase 5.1)                  READY
-universe discovery                              NOT SOLVED
+universe discovery                              NOT SOLVED  (at the time)
 ```
-Neither gap is resolved by this ADR — the identity-resolution decision above stands on its own
-and is not contingent on which universe source (if any) eventually supplies candidates. The
-remaining real choices for universe discovery (manual curation, a commercial license, further
-engineering investment in the iShares route, or revisiting this later) are left as an explicit,
-separate, future decision — deliberately not selected here, and deliberately not forced by
-adopting a source already shown not to meet this project's own evidentiary bar.
+
+**Updated by a third follow-up pass**
+([docs/phase5-2c-esma-firds-research.md](../phase5-2c-esma-firds-research.md)): **ESMA FIRDS**
+(the EU regulator's own MiFID II/MiFIR reference-data system) was investigated as a replacement
+candidate and found `READY WITH CONDITIONS` — a materially better result than STOXX/iShares,
+verified live against real ESMA data: a documented, free, unauthenticated machine-to-machine
+API; a real equity reference file published the day before this research (confirmed current —
+passing precisely the freshness test STOXX's PDF failed); native `ISIN`/issuer-`LEI`/venue-`MIC`
+fields (no ticker field, which is a feature for this project's ticker-is-not-identity principle,
+not a gap); and all four Phase 5.1 pilots independently re-found by ISIN alone, with LEI and MIC
+(including Fincantieri's `MTAA` specifically — now a fourth independent confirmation) matching
+exactly. **This ADR's own universe-discovery status updates to**:
+```
+identity resolution (this ADR's decision)     READY
+ESEF ingestion (Phase 5.1)                     READY
+canonical mapping (Phase 5.1)                  READY
+universe discovery                              READY WITH CONDITIONS  (ESMA FIRDS —
+                                                 see phase5-2c for the exact conditions:
+                                                 a primary-venue selection filter is
+                                                 still undesigned, and the listing_id
+                                                 ISIN-vs-ticker keying question this
+                                                 finding raises is unresolved)
+```
+None of this is implemented by this ADR or by the phase5-2c research itself — the
+identity-resolution decision above stands on its own regardless, and the universe-source
+decision remains a separate, future implementation phase, not decided here.
+
+**Updated by a fourth follow-up pass**
+([docs/phase5-2d-firds-primary-listing-and-identity-model.md](../phase5-2d-firds-primary-listing-and-identity-model.md)),
+a small, narrowly-scoped pass resolving two of phase5-2c's four open conditions and performing
+two lightweight due-diligence checks the repo owner asked for alongside them:
+
+- **Primary-venue selection — now SOLVED, not just designed.** `TradgVnRltdAttrbts/IssrReq =
+  true`, tie-broken by earliest `TradgVnRltdAttrbts/FrstTradDt`, resolves all four pilots with no
+  remaining ambiguity — including two real ties found in the live data (FCC: `XMAD` vs. the
+  Madrid group's own dark-midpoint segment `DMAD`; Fincantieri: `MTAA` vs. a newly-admitted
+  Italian MTF `HMTF`), both correctly broken in favor of the already-established Phase 5.1 MIC.
+  This rule is documented, not yet implemented in code, and was validated against only two real
+  tie cases — flagged in phase5-2d as needing a broader sample before production use.
+- **CFI classification — now confirmed from ESMA's own reference, not only ISO 10962 public
+  documentation.** ESMA70-145-1090 ("FIRDS CFI validations," a real, versioned workbook
+  downloaded and independently parsed) lists the `ES` prefix under its "Equities" classification
+  group — the same conclusion Phase 5.2c already reached from public ISO 10962 docs and the four
+  pilots' own observed values, now independently corroborated by ESMA's own published validation
+  grid. That grid's own Notes sheet states it is derived from ISO 10962:2015 — ESMA is not an
+  independent CFI authority, a real and now explicitly documented distinction.
+- **`listing_id` keying (`MIC:TICKER` vs. `MIC:ISIN`) — investigated, deliberately not decided.**
+  FIRDS' own `RefData` schema has no ticker field at all; its natural composite key, as observed
+  directly in the data, is `(ISIN, MIC)`. This is real evidence that `MIC:ISIN` would be the
+  better fit for an ISIN-native universe source, consistent with this project's own existing
+  `(ticker, market)` — not bare-ticker — identity precedent (`identity.py`). Per explicit
+  instruction, this ADR and ADR-0010 are **not** amended by this finding — phase5-2d recommends
+  resolving the question before a future phase implements FIRDS-based universe discovery, not
+  before this ADR is accepted, since ADR-0011 was already explicitly silent on universe-source
+  mechanics by design.
+- **FIRDS terms of use — lightweight check only, not a legal review.** ESMA's general
+  reproduction/reuse policy (source-attributed reproduction authorised, no commercial-use
+  prohibition found) applies; no FIRDS-specific stricter terms were found.
+
+This pass leaves phase5-2c's remaining two conditions (only the Equity CFI class investigated;
+primary-venue rule validated on 4 pilots / 2 tie cases only, not a broad sample) as still-open,
+explicitly acknowledged limitations — not silently resolved.
 
 ## Consequences
 
