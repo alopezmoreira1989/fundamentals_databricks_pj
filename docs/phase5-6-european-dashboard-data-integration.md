@@ -802,13 +802,144 @@ changed file: clean. No Databricks notebook executed this round — the `market_
 recovery (§12.1) used the same read-only-SQL-plus-`RESTORE TABLE` pattern as §10.3, not a
 notebook run.
 
-### 12.6 What remains
+### 12.6 What remains (superseded — see §13/§14 for what happened next)
 
-- **The live bounded run is still not re-attempted** — now doubly true: it would exercise
-  both §11's fixes and §12's semantic guard/MERGE split for the first time against real
-  Databricks writes. Needs its own explicit go-ahead.
-- **`Shares Diluted` remains unmapped** (§11.5) — unchanged, out of scope this round too.
-- **The MERGE-level split (§12.3) has no automated regression test** (§12.4) — the live
-  bounded run is what would actually prove it, once authorized.
+- ~~The live bounded run is still not re-attempted~~ — **it was, see §13.** It validated
+  §11/§12's fixes for real and found a new, unrelated issue (§13), since resolved (§14).
+- **`Shares Diluted` remains unmapped** (§11.5) — still true after §13/§14 too, out of scope.
+- **PR #380 remains a draft, not merged.** Still true throughout §13/§14.
+
+## 13. The authorized live run, and a new, third-round finding (2026-08-17)
+
+With §11/§12's hardening complete and reviewed, the live bounded run (`18` → `22` → `23` →
+`51`) was explicitly authorized, with a mandatory read-only preflight first.
+
+### 13.1 Preflight
+
+Two semantic checks measure different things and correctly gave different answers:
+`12`'s guard (does the 8-EU-ticker scope cover the full universe?) — **False**, exactly as
+required to prevent a destructive overwrite. `22`'s guard (does `market_prices_daily` as a
+whole represent the fundamentals universe?) — **True**, both before and after `18`, because
+`18`'s root-cause fix means it only *adds* rows via safe MERGE, never narrows the table. That
+second "True" is the correct, safe outcome (the underlying data genuinely is representative),
+not a red flag — confirmed explicitly before proceeding.
+
+### 13.2 `18` — full success, the `classify_company_match()` fix validated live
+
+All **8 of 8** EU tickers passed the market-data safety gate this time (previously 6 of 8) —
+`FCC` and `SGO` now resolve correctly, live confirmation of the §11.6 fix.
+`market_prices_daily` grew from 15,268,796 → 15,315,168 rows (+46,372, exactly consistent with
+8 new tickers' full history) and 2,644 → 2,652 distinct tickers — a clean, additive MERGE, not
+an overwrite. `stock_splits` unchanged (4,330 rows). `AAPL`/`MSFT`/`TSLA`/`AEM`/`AQN`/`BN` all
+byte-identical to baseline. Zero entries in `ingestion_failures` for this run.
+
+### 13.3 `22` blocked — a real, but unrelated, third finding
+
+`22`'s primary guard correctly passed (representative price data) and `market_cap_asof`/
+`market_cap_live` both completed a full, successful recompute. The **secondary** 10% guard
+then correctly fired on the `financials_metrics` MERGE: would delete 474,698 of 2,039,873
+rows (23%).
+
+**Root cause, established via read-only investigation (Delta history + time-travel row
+comparison, zero writes)**: NOT the incident recurring, NOT EU-related, NOT a US/CA mutation.
+`financials` itself changed by exactly **+108 rows since the incident-recovery restore
+point**, 100% belonging to the 8 EU tickers (real EU-ingestion work from a parallel session on
+the same shared workspace — job names `phase5.1-run-21-after-eu-ingest` and an unnamed
+interactive session, both dated 2026-08-16, well before this session's own incident), **0
+rows removed, 0 rows modified** — confirmed twice (whole-table diff and a targeted
+`AAPL`/`MSFT`/`TSLA`/`AEM`/`AQN`/`BN` check). `financials_metrics`'s restore point (v799,
+07:25 UTC) turned out to predate not just the incident but *all* EU data ever landing in
+`financials` — the daily production job that wrote v799 never touches EU data at all (Option
+B; EU ingestion isn't on the scheduled DAG), so `financials_metrics` had literally never once
+reflected any EU-related state.
+
+A dedicated, purpose-built **read-only `DRY_RUN` diagnostic mode** was added to `22` itself
+(not a reimplementation in SQL — it classifies the exact real `incoming_metrics` DataFrame the
+MERGE would consume, then exits via `dbutils.notebook.exit()` before any write) to find the
+real mechanism. **Result: 100% of the 474,698 "orphans" were "unclassified"** — not present in
+`22`'s own `base_metric_cols` or `val_metric_cols` at all — and every top orphaned metric
+label (`Owner Earnings (FY)`, `Graham Revised Value (FY)`, `DCF Value per Share (FY)`, `MoS %
+(...)`) belongs exclusively to `23__intrinsic_value.py`. `orphan_by_market`: `US` 466,168,
+`CA` 3,158, `OTHER` 5,372, **`EU` 0**. `modified_count: 0` — every metric `22` *does* own was
+byte-identical to v799.
+
+**The real mechanism**: `financials_metrics` is jointly populated by `22` and `23`, each via
+an independent MERGE into the same table. `22`'s orphan-cleanup DELETE has no awareness that
+`23` also owns rows there — from `22`'s own vantage point, every one of `23`'s rows looks like
+an orphan, because `22` never produces them in the first place. In normal production this is
+invisible (`22`→`23` always run back-to-back in the same DAG pass), but running `22` in
+isolation — exactly what this validation's own step-by-step methodology did — exposed a
+pre-existing architectural coupling that predates Phase 5.6 entirely.
+
+## 14. Ownership hardening — `financials_metrics`'s joint-ownership fix (2026-08-17)
+
+Per explicit instruction: not "disable the guard, we now know it's normal" — give `22`
+positive knowledge of its own ownership boundary instead.
+
+### 14.1 The fix
+
+`22__derived_metrics.py`'s `WHEN NOT MATCHED BY SOURCE` DELETE is now scoped:
+`AND target.metric IN (_22_owned_metrics)`, where `_22_owned_metrics` = `base_metric_cols ∪
+val_metric_cols` — `22`'s own, already-existing, positively-declared metric vocabulary (the
+same lists already used to build its own `long_base`/`long_val` source data). A deliberate
+**allow-list**, not a deny-list naming `23` specifically: `22` only needs to know what it
+itself owns, not enumerate every other current or future owner of rows in the same table. This
+mirrors the exact pattern `23__intrinsic_value.py`'s own `_iv_labels`-scoped cleanup already
+uses for the reverse case (never touching `22`'s rows) — the fix makes `22` follow the
+convention `23` already established, not a new pattern. The 10% guard's before/would-delete
+counts are scoped identically, so the percentage is now meaningful (evaluated against rows
+`22` actually owns, not the whole jointly-owned table).
+
+### 14.2 Regression tests
+
+`fundamentals_pipeline.write_safety.scoped_orphan_keys()` — pure, unit-tested specification of
+the filter (8 new tests, `tests/test_write_safety.py`): reproduces the real dry-run finding
+exactly (an all-`23`-owned orphan set scopes to zero); confirms a genuinely stale `22`-owned
+metric is still correctly flagged (the fix doesn't disable legitimate cleanup); confirms a
+mixed orphan set keeps only the owned subset; and — critically — confirms the fix does **not**
+weaken protection against the *original* 2026-08-16 incident pattern: a simulated large,
+genuine loss of `22`-owned rows still scopes to the full loss and still trips
+`assert_orphan_delete_safe()`.
+
+### 14.3 Verified against real data — no live write
+
+The `DRY_RUN` diagnostic (§13.3) was extended with the same ownership-scoped calculation
+(`scoped_orphaned_count`) and re-run, read-only, against the exact same live discrepancy:
+
+```
+orphaned_count (raw, unscoped):    474,698  (23.27% — unchanged, kept for visibility)
+scoped_orphaned_count (owned-only):      0  (0.00%)
+```
+
+**Confirmed**: with the fix applied, `22`'s real MERGE would delete zero rows belonging to
+`23`, and the 10% guard would not fire at all — `22` can now safely run standalone, with no
+dependency on `23` running immediately afterward to "repair" the damage. This is proof by
+direct measurement against production data, not inference.
+
+### 14.4 The 131 "new" rows, characterized
+
+100% belong to the 8 EU tickers (`new_by_market`: `EU` 131, everything else 0) — `22`'s own
+base metrics (`ROA %`, `Net Margin %`, `Piotroski F-Score`, `Net Income YoY %`, `Revenue YoY
+%`, `Total Payout Ratio`) computed fresh from the 108 new EU `financials` rows (§13.3).
+Exactly the metric set already established as the only kind EU tickers can produce (§7 —
+blocked from anything share-count-dependent by the `Shares Diluted` gap). No anomaly, fully
+explained, not investigated further.
+
+### 14.5 Local verification
+
+`pytest tests/ -q`: **334 passed, 2 skipped** (pre-existing, unrelated). `ruff check` clean.
+No production write this round — both dry-run confirmations used the same read-only
+`DRY_RUN` mechanism (exits before the MERGE), and the ownership/ticker/ticker-market
+comparisons used only `SELECT`/`DESCRIBE HISTORY`/`VERSION AS OF` queries.
+
+### 14.6 What remains
+
+- **The live bounded run has not been re-attempted with this fix applied** — `18` succeeded
+  live (§13.2); `22` was blocked, diagnosed, and fixed, but the fix itself has only been
+  verified via `DRY_RUN`, never via a real MERGE. `23`/`51` have never run in this validation
+  attempt at all. Needs its own explicit go-ahead.
+- **`Shares Diluted` remains unmapped** (§11.5) — unchanged, still out of scope.
+- **The `23` blind-`UPDATE`-with-`NULL` guard** (§12.3, fixed) is still unverified against a
+  real live write for the same reason as above.
 - **PR #380 remains a draft, not merged.** No new PR opened. No European universe expansion.
   No DAG scheduling change. No `fundamentals_screener`/Django file touched.
