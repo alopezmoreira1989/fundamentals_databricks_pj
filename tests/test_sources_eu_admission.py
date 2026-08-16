@@ -231,6 +231,28 @@ def test_build_admission_candidate_fcc_pilot_regression():
     assert candidate.rejection_reason is None
     assert candidate.n_venue_records == 3
     assert candidate.primary_frst_trad_dt == date(1999, 9, 30)
+    assert candidate.currency == "EUR"
+
+
+def test_build_admission_candidate_currency_from_primary_listing_not_any_venue():
+    """currency must come from the WINNING venue's own NtnlCcy, not an arbitrary record --
+    constructed with a deliberately different (wrong) currency on a losing candidate to prove
+    the winner's value is the one that survives."""
+    winner = _rec("XMAD", issr_req=True, frst=date(1999, 9, 30))
+    loser = _rec("DMAD", issr_req=True, frst=date(2024, 12, 9))
+    # mutate the loser's currency to prove it is NOT what gets picked
+    from dataclasses import replace
+    loser = replace(loser, ntnl_ccy="XXX")
+    candidate = build_admission_candidate("ES0122060314", [winner, loser], as_of=AS_OF)
+    assert candidate.currency == "EUR"
+
+
+def test_build_admission_candidate_currency_none_when_unresolved():
+    """No primary listing resolved -> no currency claimed either (never guessed from a
+    non-winning record)."""
+    mtf_only = [_rec(m, issr_req=False, frst=date(2015, 1, 1)) for m in ["FRAB", "FRAV", "HAMN"]]
+    candidate = build_admission_candidate("ZAE000028296", mtf_only, as_of=AS_OF)
+    assert candidate.currency is None
 
 
 def test_build_admission_candidate_all_four_pilots():

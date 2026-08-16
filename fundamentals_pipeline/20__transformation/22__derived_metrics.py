@@ -50,7 +50,13 @@ mcl_tbl     = f"{CATALOG}.{SCHEMA}.market_cap_live"       # genuinely live price
 # reporting_currency (main.config.tickers) — e.g. a USD-reporting, CAD-quoted Canadian gold
 # miner — which is a same-ticker unit-mismatch bug independent of any cross-market
 # comparability question (see fundamentals_pipeline/fx.py).
-QUOTE_CURRENCY_BY_MARKET = {"US": "USD", "CA": "CAD"}
+QUOTE_CURRENCY_BY_MARKET = {"US": "USD", "CA": "CAD", "EU": "EUR"}
+# "EU" (Phase 5.6): the single Generation-1 `market` value for FIRDS-admitted European
+# listings (see fundamentals_pipeline/sources/eu_admission.py) -- not per-country, matching
+# FIRDS' own EU-wide scope. Only used defensively here (the actual EU quote/reporting
+# currency for the ticker-alignment join below comes from `eu_admission_candidates.currency`
+# directly, not derived from this dict) -- kept in sync for any other market-keyed logic that
+# might read this dict.
 
 # COMMAND ----------
 
@@ -757,6 +763,31 @@ else:
         print(f"⚠ Could not read config.tickers for currency alignment ({_e}) — assuming "
               f"quote_currency=reporting_currency='USD' for every ticker.")
         ticker_currency = None
+
+    # Phase 5.6: extend with FIRDS-admitted European issuers -- real currency (FIRDS' own
+    # NtnlCcy, captured on main.config.eu_admission_candidates.currency), never defaulted or
+    # guessed. Quote currency and reporting currency are the SAME value here because every
+    # currently-admitted MIC (XMAD/XPAR/XAMS/MTAA) is Eurozone -- a future non-Eurozone EU
+    # admission (e.g. a Swedish/Danish listing) would need a genuine market->quote-currency
+    # split the way QUOTE_CURRENCY_BY_MARKET already provides for US/CA; not built here, since
+    # no such candidate is admitted yet. Without this union, a EU ticker reaching this join
+    # would silently fall through to the "USD" default below -- exactly the wrong-but-silent
+    # failure mode this alignment logic exists to prevent for US/CA in the first place.
+    try:
+        _eu_ccy = (
+            spark.table(f"{CATALOG}.config.eu_admission_candidates")
+            .filter((F.col("admission_status") == "admitted") & F.col("currency").isNotNull())
+            .select(
+                "ticker",
+                F.col("currency").alias("quote_currency"),
+                F.col("currency").alias("reporting_currency"),
+            )
+        )
+        ticker_currency = _eu_ccy if ticker_currency is None else ticker_currency.unionByName(_eu_ccy)
+    except Exception as _eu_e:
+        print(f"⚠ Could not read config.eu_admission_candidates for currency alignment "
+              f"({_eu_e}) — European tickers, if any reach this point, fall through to the "
+              f"USD default below.")
 
     def _log_missing_fx(missing_df, step_label: str) -> None:
         """Log rows needing currency conversion with no resolvable FX rate to

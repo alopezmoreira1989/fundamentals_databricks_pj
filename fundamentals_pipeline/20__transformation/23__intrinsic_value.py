@@ -67,7 +67,8 @@ ASSUMPTIONS_JSON_PATH = "../00__config/valuation_assumptions.json"
 # below. See fundamentals_pipeline/fx.py for why this matters: a ticker's TTM live price is
 # quoted in whatever currency its listing market trades in, but its fundamentals are reported
 # in `reporting_currency` — these can differ for the SAME ticker.
-QUOTE_CURRENCY_BY_MARKET = {"US": "USD", "CA": "CAD"}
+QUOTE_CURRENCY_BY_MARKET = {"US": "USD", "CA": "CAD", "EU": "EUR"}
+# "EU" (Phase 5.6) -- see 22__derived_metrics.py's own copy of this dict for the full note.
 
 full_table  = f"{CATALOG}.{SCHEMA}.{TABLE}"
 # Period_end-aligned price + market cap written by 22 (replaces legacy calendar-aligned
@@ -550,6 +551,25 @@ if has_live_price:
         print(f"⚠ Could not read config.tickers for TTM currency alignment ({_e}) — assuming "
               f"quote_currency=reporting_currency='USD' for every ticker.")
         ticker_currency = None
+
+    # Phase 5.6: same extension as 22__derived_metrics.py's FY-basis version (see there for the
+    # full rationale) -- real FIRDS NtnlCcy from eu_admission_candidates.currency, never
+    # defaulted to USD.
+    try:
+        _eu_ccy = (
+            spark.table(f"{CATALOG}.config.eu_admission_candidates")
+            .filter((F.col("admission_status") == "admitted") & F.col("currency").isNotNull())
+            .select(
+                "ticker",
+                F.col("currency").alias("quote_currency"),
+                F.col("currency").alias("reporting_currency"),
+            )
+        )
+        ticker_currency = _eu_ccy if ticker_currency is None else ticker_currency.unionByName(_eu_ccy)
+    except Exception as _eu_e:
+        print(f"⚠ Could not read config.eu_admission_candidates for TTM currency alignment "
+              f"({_eu_e}) — European tickers, if any reach this point, fall through to the "
+              f"USD default below.")
 
     def _log_missing_fx_ttm(missing_df) -> None:
         """Log TTM rows needing currency conversion with no resolvable FX rate to

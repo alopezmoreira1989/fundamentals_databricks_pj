@@ -92,10 +92,18 @@ BENCHMARK_TICKERS = ["SPY"]
 # fetch_batch/fetch_splits_batch, which translate back to the bare ticker for every written row.
 # Benchmark tickers (SPY) are never in config.tickers, so MARKET_MAP.get(t, "US") defaults them
 # to "US" (no suffix) — never fails looking a benchmark up.
-YAHOO_SYMBOL = {
-    t: (f"{t}.TO" if MARKET_MAP.get(t, "US") == "CA" else t)
-    for t in [*ACTIVE_TICKERS, *BENCHMARK_TICKERS]
-}
+# Phase 5.6: same override-mode pattern as ACTIVE_TICKERS/force_full_refresh above -- a caller
+# (e.g. 18__fetch_eu_market_data.py) may pre-seed YAHOO_SYMBOL with an explicit per-ticker
+# Yahoo symbol (needed for Europe: unlike Canada's single uniform ".TO" suffix, each EU MIC has
+# its own real Yahoo suffix -- XMAD->.MC, XPAR->.PA, XAMS->.AS, MTAA->.MI -- so a single
+# MARKET_MAP-keyed suffix cannot express it). Untouched for a normal (non-override) run.
+if "YAHOO_SYMBOL" not in globals() or not YAHOO_SYMBOL:
+    YAHOO_SYMBOL = {
+        t: (f"{t}.TO" if MARKET_MAP.get(t, "US") == "CA" else t)
+        for t in [*ACTIVE_TICKERS, *BENCHMARK_TICKERS]
+    }
+else:
+    print(f"✓ Inherited {len(YAHOO_SYMBOL)} Yahoo symbol override(s) from parent")
 
 # ── Refresh policy ────────────────────────────────────────────────────────────
 # Inherit force_full_refresh from the parent 91 via globals() — SAME handoff as
