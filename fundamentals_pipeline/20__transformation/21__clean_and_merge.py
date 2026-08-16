@@ -8,9 +8,12 @@
 # MAGIC Quarterly rows are handled by `21b__derive_quarterly` afterwards.
 # MAGIC
 # MAGIC **Logic for FY:**
-# MAGIC - Filter raw to `form IN ('10-K','10-K/A','20-F','20-F/A','40-F','40-F/A')` AND `fp = 'FY'`
-# MAGIC   (20-F/40-F = foreign private issuer / Canadian MJDS annual reports — always annual-only,
-# MAGIC   no 10-Q equivalent, so `21b__derive_quarterly` naturally never sees them), EXCLUDING the sub-annual
+# MAGIC - Filter raw to `form IN ('10-K','10-K/A','20-F','20-F/A','40-F','40-F/A','ESEF')` AND
+# MAGIC   `fp = 'FY'` (20-F/40-F = foreign private issuer / Canadian MJDS annual reports; `ESEF`
+# MAGIC   = the European filings.xbrl.org adapter, Phase 5.1/ADR-0010 — both are always
+# MAGIC   annual-only, no 10-Q equivalent, so `21b__derive_quarterly` naturally never sees them
+# MAGIC   either, since its own `form` filters don't include any of these three literals),
+# MAGIC   EXCLUDING the sub-annual
 # MAGIC   shapes a 10-K re-reports under `fp='FY'` (`Q_standalone`, `YTD_6M`, `YTD_9M`) — so only
 # MAGIC   annual shapes (`FY_or_TTM` + `other_Nd` transition stubs) compete (for flows); OR
 # MAGIC   `kind = 'stock'` AND snapshot at fiscal year-end
@@ -130,7 +133,7 @@ raw = raw.localCheckpoint(eager=True)
 flow_fy = (
     raw
     .filter(F.col("kind").isin("flow_additive", "flow_nonadditive"))
-    .filter(F.col("form").isin("10-K", "10-K/A", "20-F", "20-F/A", "40-F", "40-F/A"))
+    .filter(F.col("form").isin("10-K", "10-K/A", "20-F", "20-F/A", "40-F", "40-F/A", "ESEF"))
     .filter(F.col("fp") == "FY")
     .filter(~F.col("period_shape").isin("snapshot", "Q_standalone", "YTD_6M", "YTD_9M"))
     .filter(F.col("value").isNotNull())
@@ -144,7 +147,7 @@ flow_fy = (
 stock_fy = (
     raw
     .filter(F.col("kind") == "stock")
-    .filter(F.col("form").isin("10-K", "10-K/A", "20-F", "20-F/A", "40-F", "40-F/A"))
+    .filter(F.col("form").isin("10-K", "10-K/A", "20-F", "20-F/A", "40-F", "40-F/A", "ESEF"))
     .filter(F.col("fp") == "FY")
     .filter(F.col("period_shape") == "snapshot")
     .filter(F.col("value").isNotNull())
@@ -332,7 +335,7 @@ print(f"✓ MERGE complete → {full_tbl} (FY rows)")
 _flow_fy_all = (
     spark.table(raw_full).filter(F.col("scraped_at") == latest_scrape)
     .filter(F.col("kind").isin("flow_additive", "flow_nonadditive"))
-    .filter(F.col("form").isin("10-K", "10-K/A", "20-F", "20-F/A", "40-F", "40-F/A"))
+    .filter(F.col("form").isin("10-K", "10-K/A", "20-F", "20-F/A", "40-F", "40-F/A", "ESEF"))
     .filter(F.col("fp") == "FY")
     .filter(F.col("period_shape") != "snapshot")
     .filter(F.col("value").isNotNull())
