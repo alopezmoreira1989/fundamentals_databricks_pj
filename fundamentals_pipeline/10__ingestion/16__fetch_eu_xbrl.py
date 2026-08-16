@@ -2,9 +2,8 @@
 # MAGIC %md
 # MAGIC # 10__ingestion / 16__fetch_eu_xbrl
 # MAGIC
-# MAGIC **Phase 5.1 (ADR-0009/ADR-0010) — the European `filings.xbrl.org` fundamentals adapter,
-# MAGIC pilot ingestion.** Fetches real annual IFRS/ESEF filings for four verified pilot issuers
-# MAGIC (Spain/France/Netherlands/Italy) and writes mapped facts into the SAME
+# MAGIC **Phase 5.1 (ADR-0009/ADR-0010) — the European `filings.xbrl.org` fundamentals adapter.**
+# MAGIC Fetches real annual IFRS/ESEF filings and writes mapped facts into the SAME
 # MAGIC `financials_raw`/`financials` tables SEC ingestion uses — `source_id="EU_CURRENT"` is the
 # MAGIC only thing that distinguishes a row's origin, per ADR-0009's "no
 # MAGIC `financials_raw_europe`" decision.
@@ -18,11 +17,14 @@
 # MAGIC live as pure, fixture-tested functions in `fundamentals_pipeline/sources/eu_current.py`;
 # MAGIC this notebook only adds the network calls and the Delta write.
 # MAGIC
-# MAGIC **Pilot scope only** — four hardcoded, already-identity-verified issuers (ADR-0010's
-# MAGIC `issuer_id`/`listing_id` model), not a European universe. Does NOT modify
-# MAGIC `main.config.tickers`, does NOT run on the scheduled DAG yet (standalone smoke-test
-# MAGIC invocation only — see `docs/phase5-1-eu-adapter.md` for the one-line `91a` change a
-# MAGIC future phase would need to schedule this).
+# MAGIC **Phase 5.4 update — production input is now `main.config.eu_admission_candidates`,
+# MAGIC not the hardcoded pilot list.** `PILOT_EU_ENTITIES` remains, unchanged, as the
+# MAGIC test/dev fixture `EUCurrentSource()`'s no-arg default uses; the real ingestion run (§5)
+# MAGIC reads `admission_status = 'admitted'` rows fresh from the Phase 5.3 admission layer via
+# MAGIC `load_admitted_eu_entities()`, never a hardcoded ticker list. Still does NOT modify
+# MAGIC `main.config.tickers`, still does NOT run on the scheduled DAG (standalone invocation
+# MAGIC only — see `docs/phase5-1-eu-adapter.md`/`docs/phase5-4-european-vertical-slice.md` for
+# MAGIC the one-line `91a` change a future phase would need to schedule this).
 # MAGIC
 # MAGIC **Writes to:** `{catalog}.{schema}.financials_raw` (append), `{catalog}.{schema}.ingestion_failures`.
 
@@ -125,21 +127,76 @@ PILOT_EU_ENTITIES = [
 
 # COMMAND ----------
 
+# MAGIC %md ## 1b. Admitted EU entities (Phase 5.4 — real production input)
+# MAGIC
+# MAGIC `PILOT_EU_ENTITIES` above stays exactly as it was (Phase 5.1) — it remains the fixture
+# MAGIC used by tests and by `EUCurrentSource()`'s own no-arg default, deliberately kept separate
+# MAGIC from the real production path per Phase 5.4's own instruction not to conflate "test
+# MAGIC fixture" with "real admitted-universe input". The real, production-capable entity source
+# MAGIC is `main.config.eu_admission_candidates` (Phase 5.3) — this function reads it fresh at
+# MAGIC run time, filtered to `admission_status = 'admitted'` ONLY (never `pending_esef_check` or
+# MAGIC `rejected` — Phase 5.3's own admission decision is authoritative, not re-derived here).
+# MAGIC No ticker list is ever hardcoded in this path.
+
+# COMMAND ----------
+
+
+def load_admitted_eu_entities(spark_session, catalog: str) -> list[tuple[str, str, str, str]]:
+    """Real Spark query against `{catalog}.config.eu_admission_candidates` -- returns
+    `(ticker, lei, mic, name)` tuples, the same shape `PILOT_EU_ENTITIES` uses, so
+    `EUCurrentSource` can consume either interchangeably. Only `admission_status = 'admitted'`
+    rows qualify. A real, possible edge case (not observed in the current 8-row admitted set,
+    all of which have a resolved ticker): an admitted row with `ticker IS NULL` (ticker
+    resolution is explicitly non-blocking for admission, per Phase 5.3's own
+    `apply_ticker_enrichment` design) -- such a row is EXCLUDED here (this ingestion path,
+    like the pre-existing pilot one, is ticker-keyed downstream in `financials_raw`/
+    `financials`) and must be reported, not silently dropped -- see the caller's own
+    `missing_ticker` failure logging below.
+    """
+    rows = spark_session.sql(f"""
+        SELECT isin, ticker, lei, mic, issuer_name
+        FROM {catalog}.config.eu_admission_candidates
+        WHERE admission_status = 'admitted'
+        ORDER BY isin
+    """).collect()
+    missing_ticker = [r["isin"] for r in rows if not r["ticker"]]
+    if missing_ticker:
+        print(f"  WARNING: {len(missing_ticker)} admitted candidate(s) have no resolved "
+              f"ticker, excluded from this ingestion run: {missing_ticker}")
+    return [
+        (r["ticker"], r["lei"], r["mic"], r["issuer_name"])
+        for r in rows if r["ticker"]
+    ]
+
+
+# COMMAND ----------
+
 # MAGIC %md ## 2. EUCurrentSource — FundamentalsSource adapter (real network calls)
 
 # COMMAND ----------
 
 class EUCurrentSource:
     """`filings.xbrl.org` (ESEF/IFRS) as a `FundamentalsSource` -- the real, called European
-    ingestion path (unlike SECXBRLSource in 11__fetch_sec_xbrl.py, which remains a proof)."""
+    ingestion path (unlike SECXBRLSource in 11__fetch_sec_xbrl.py, which remains a proof).
+
+    `entities` (Phase 5.4): the `(ticker, lei, mic, name)` list this source resolves tickers
+    against. Defaults to `PILOT_EU_ENTITIES` (preserves every existing test's no-arg
+    `EUCurrentSource()` behavior unchanged) -- the real production ingestion run below
+    constructs this with `entities=load_admitted_eu_entities(...)` instead. This is the "small
+    additive change" Phase 5.4 makes to the source contract -- no new interface, no second
+    European source class.
+    """
 
     source_id = EU_SOURCE_ID
 
+    def __init__(self, entities=None):
+        self._entities = entities if entities is not None else PILOT_EU_ENTITIES
+
     def discover_entities(self, tickers):
-        """Identity is already known/verified for the pilot (ADR-0010) -- no fuzzy matching, no
+        """Identity is already known/verified (ADR-0010) -- no fuzzy matching, no
         ticker->LEI lookup at runtime (filings.xbrl.org's own /api/entities has no ticker field,
         per Phase 4 research)."""
-        by_ticker = {t: (lei, name) for t, lei, _mic, name in PILOT_EU_ENTITIES}
+        by_ticker = {t: (lei, name) for t, lei, _mic, name in self._entities}
         out = []
         for t in tickers:
             if t not in by_ticker:
@@ -391,17 +448,29 @@ if RUN_EU_PILOT:
 
 # COMMAND ----------
 
-# MAGIC %md ## 5. Run the pilot
+# MAGIC %md ## 5. Run the ingestion — Phase 5.4: driven by `eu_admission_candidates`, not the
+# MAGIC hardcoded pilot list
+# MAGIC
+# MAGIC `EU_ENTITIES_TO_INGEST` is loaded fresh from `main.config.eu_admission_candidates`
+# MAGIC (`admission_status = 'admitted'` only, per Phase 5.3's own decision — never re-derived
+# MAGIC here) — never hardcoded in this section. `_source` is reassigned to an
+# MAGIC `EUCurrentSource` built against that real list; `PILOT_EU_ENTITIES`/the module-level
+# MAGIC no-arg `_source` above remain the test/dev default, untouched.
 
 # COMMAND ----------
 
 if RUN_EU_PILOT:
+    EU_ENTITIES_TO_INGEST = load_admitted_eu_entities(spark, CATALOG)
+    print(f"Loaded {len(EU_ENTITIES_TO_INGEST)} admitted EU entities from "
+          f"{CATALOG}.config.eu_admission_candidates")
+    _source = EUCurrentSource(entities=EU_ENTITIES_TO_INGEST)
+
     scraped_at = datetime.utcnow()
     all_records: list[dict] = []
     all_failures: list[dict] = []
 
-    for ticker, lei, mic, name in PILOT_EU_ENTITIES:
-        print(f"── {ticker} ({name}) ──")
+    for ticker, lei, mic, name in EU_ENTITIES_TO_INGEST:
+        print(f"-- {ticker} ({name}) --")
         try:
             records, failures = process_eu_entity(ticker, lei, mic, name, scraped_at)
         except Exception as e:
