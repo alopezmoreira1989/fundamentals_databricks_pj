@@ -8,6 +8,11 @@ admission decision for every real FIRDS equity ISIN — not fundamentals, not a 
 a DAG wiring. Per the driving brief's explicit stop condition: implementation + tests + a bounded
 validation run + this document + a PR left **unmerged** for review.
 
+**Update**: §19 was originally written before a working Databricks Connect profile became
+available in this session; it has since been re-run against the real production workspace (see
+§19's own "UPDATED" marker) — every part of this implementation, including the Spark/Delta
+write, is now validated against real, live infrastructure, not just locally.
+
 Source-discipline labels: **VERIFIED FACT** / **REAL DATA TEST** / **INFERENCE** /
 **RECOMMENDATION** / **OPEN QUESTION**.
 
@@ -330,26 +335,79 @@ verified property, not an assumed one.
 
 ## 19. Databricks validation
 
-**Honest limitation, stated plainly, not glossed over.** No Databricks Connect credentials are
-configured in this session's environment (confirmed: `~/.databrickscfg` has an empty `[DEFAULT]`
-profile, no `DATABRICKS_HOST`/`DATABRICKS_TOKEN` env vars) — matching this repo's own memory note
-that Databricks Connect setup is still pending a workspace URL. **The notebook's own actual code**
-(not a reimplementation) was validated as thoroughly as possible without a live cluster:
+**UPDATED — now genuinely executed against the real, live production Databricks workspace, not
+just reviewed.** A working Databricks Connect profile (`fundamentals`, `dbc-b52a3a2b-c131.cloud.
+databricks.com`) became available in this environment after this document's first draft — the
+notebook's own code (not a reimplementation) was run for real via `DatabricksSession.builder.
+profile("fundamentals").serverless(True).getOrCreate()`, the same mechanism `test_connection.py`
+already establishes as this project's local Databricks Connect smoke-test convention.
 
-- `find_latest_firds_equity_files()` — called live against the real ESMA M2M API; found the real,
-  current `FULINS_E_20260815_01of02.zip`/`...02of02.zip` files with real checksums.
-- `parse_firds_equity_zip()` — run against the full real 682,398-record file set; confirmed exact
-  record counts, field extraction, and (after the fix in §18) full idempotency under reversed and
-  randomly-shuffled input order.
-- `run_admission_pipeline()`/`apply_bounded_validation()` — run end-to-end for the full universe
-  and for all 9 bounded-validation candidates, with live `filings.xbrl.org`/OpenFIGI calls.
-- **Not executed**: the `CREATE TABLE`/`spark.createDataFrame`/Delta-write section (§6 of the
-  notebook) — this requires an actual Spark session this environment does not have. The Delta
-  schema/write logic was reviewed and simplified (an initial string→cast workaround for
-  `n_venue_records` was replaced with a direct `IntegerType` column once noticed) but is
-  **unexecuted against a real cluster**. This is the natural next verification step, and should
-  happen on a real Databricks Repo clone (mirroring how Phase 3/5.0/5.1 validated their own Spark
-  sections) before this PR is merged.
+**Previously validated locally (no change)**: `find_latest_firds_equity_files()`/
+`parse_firds_equity_zip()`/`run_admission_pipeline()`/`apply_bounded_validation()` — see §9-18
+above, unchanged.
+
+**Newly validated against the real Databricks workspace (this update)**:
+
+- **Real end-to-end execution, twice**, against `main` catalog, real serverless compute
+  (Spark 4.1.0). Both runs reproduced the *exact* funnel from the local/live-ESMA validation:
+  `raw=682,398 → unique_isin=183,055 → equity=17,251 → primary_listing=4,983 →
+  unique_issuers=4,926`, and the exact same admission breakdown: `{admitted: 8, pending_esef_
+  check: 4,974, rejected: 178,073}` — the 8 `admitted` are the 6 required pilots/generalization
+  candidates + Randstad + Intesa Sanpaolo; the 1 real ESEF rejection is SAP, exactly as predicted.
+- **A real bug found and fixed on the first live run**: the final `print(f"✓ {len(rows)}...")`
+  statement crashed with `UnicodeEncodeError: 'charmap' codec can't encode character '✓'`
+  under this Windows console's `cp1252` encoding — a genuine Python-runtime difference the
+  driving brief's own §12 anticipated. Confirmed the **Delta write itself had already succeeded
+  before the crash** (the table existed with the correct 183,055 rows immediately after) — this
+  was a cosmetic reporting bug, not a data-correctness bug, but a real one nonetheless. Fixed by
+  replacing the Unicode checkmark with a plain `"OK: ..."` string (the smallest necessary fix,
+  per §12); re-ran clean twice after the fix with 0 further errors.
+- **Schema**: `DESCRIBE TABLE main.config.eu_admission_candidates` matches the notebook's declared
+  schema exactly (17 columns, correct types — `n_venue_records INT`, dates as `DATE`,
+  `retrieved_at TIMESTAMP`).
+- **Duplicates**: `SELECT isin, COUNT(*) ... HAVING COUNT(*) > 1` → **0**. Same check on
+  `(issuer_id, listing_id)` among non-null rows → **0**.
+- **Idempotency (real Delta semantics, not simulated)**: ran the notebook **twice** against the
+  same live FIRDS source. Row count after run 1: 183,055. Row count after run 2: 183,055 —
+  identical. This table uses `overwrite` mode (a point-in-time snapshot, not an append log, per
+  the notebook's own documented design) — confirmed to behave exactly as documented: a full,
+  clean replacement, not accumulation.
+- **Pilot/generalization/sample query against the real table** — all 9 candidates, read directly
+  from `main.config.eu_admission_candidates`, not re-derived:
+
+  | ISIN | MIC | listing_id | ticker | status | rejection |
+  |---|---|---|---|---|---|
+  | ES0122060314 (FCC) | XMAD | `XMAD:ES0122060314` | FCC | admitted | — |
+  | FR0010220475 (Alstom) | XPAR | `XPAR:FR0010220475` | ALO | admitted | — |
+  | NL0015000CG2 (NAI) | XAMS | `XAMS:NL0015000CG2` | NAI | admitted | — |
+  | IT0005599938 (Fincantieri) | MTAA | `MTAA:IT0005599938` | FCT | admitted | — |
+  | ES0144580Y14 (Iberdrola) | XMAD | `XMAD:ES0144580Y14` | IBE | admitted | — |
+  | FR0000125007 (Saint-Gobain) | XPAR | `XPAR:FR0000125007` | SGO | admitted | — |
+  | DE0007164600 (SAP) | FRAA | `FRAA:DE0007164600` | NULL | rejected | no_esef_filing |
+  | NL0000379121 (Randstad) | XAMS | `XAMS:NL0000379121` | RAND | admitted | — |
+  | IT0000072618 (Intesa Sanpaolo) | MTAA | `MTAA:IT0000072618` | ISP | admitted | — |
+
+  Exact match to §10-15's earlier results — the Databricks run reproduces the identical
+  identities, MICs, and tickers.
+- **US/CA regression — before/after row counts on every table the brief named as protected**,
+  captured immediately before the first live run and re-checked after both runs:
+
+  | Table | Before | After | |
+  |---|---|---|---|
+  | `main.config.tickers` | 2,662 | 2,662 | MATCH |
+  | `main.financials.financials_raw` | 425,799,947 | 425,799,947 | MATCH |
+  | `main.financials.financials` | 4,750,430 | 4,750,430 | MATCH |
+  | `main.financials.market_prices_daily` | 15,268,796 | 15,268,796 | MATCH |
+  | `main.financials.stock_splits` | 4,330 | 4,330 | MATCH |
+  | `main.financials.market_cap_asof` | 27,240 | 27,240 | MATCH |
+  | `main.financials.ingestion_failures` | 61,277 | 61,277 | MATCH |
+
+  Zero rows changed anywhere outside the new `main.config.eu_admission_candidates` table.
+
+This closes the one gap this document previously flagged as open. Every part of PR #377's own
+implementation — FIRDS retrieval, XML parsing, the admission pipeline, bounded ESEF/ticker
+enrichment, and now the Spark/Delta write — has been run for real, against real data, on the
+real target infrastructure.
 
 ## 20. SEC regression
 
@@ -368,14 +426,16 @@ function) and `fundamentals_pipeline/sources/__init__.py` (export list only).
 - **GLEIF cross-check is designed but unexercised** (§6) — `RejectionReason.IDENTITY_UNRESOLVED`
   exists in the data model with no real code path reaching it yet.
 - **ESEF eligibility and ticker enrichment are bounded to 9 real candidates**, not the full 4,926
-  resolved issuers (§7/§8) — deliberately, per the brief's own scope, but this means the real
-  `main.config.eu_admission_candidates` table this phase would produce on a live cluster carries
-  `PENDING_ESEF_CHECK` for the overwhelming majority of resolved rows, not a final admission
-  verdict.
+  resolved issuers (§7/§8) — deliberately, per the brief's own scope. The real, live
+  `main.config.eu_admission_candidates` table (confirmed by direct query, §19) carries
+  `PENDING_ESEF_CHECK` for 4,974 of its 4,982 resolved rows — a real, honest intermediate state,
+  not a final admission verdict, exactly as designed.
 - **Only the Equity ("ES") CFI class was investigated** — preference shares (§17), depositary
   receipts, and other equity-adjacent instrument types are out of scope.
-- **The Spark/Delta-write section of the notebook is unexecuted against a live cluster** (§19) —
-  this session has no configured Databricks Connect credentials.
+- ~~The Spark/Delta-write section of the notebook is unexecuted against a live cluster~~ —
+  **resolved this update (§19)**: run twice against the real production workspace, including a
+  real bug found (a Windows-console Unicode print crash, occurring after a successful Delta
+  write) and fixed.
 - **No legal/terms-of-use re-review performed this phase** — Phase 5.2d's lightweight FIRDS
   terms-of-use check stands unchanged; this phase didn't re-examine it.
 - **`issuer_name` for the bulk (non-bounded) candidate population is FIRDS' own `FullNm` field
@@ -385,13 +445,15 @@ function) and `fundamentals_pipeline/sources/__init__.py` (export list only).
 
 ## 22. Recommended next phase
 
-Per the driving brief's own framing and the repo owner's stated intent (Phase 5.3 → Phase 5.4
-production EU pipeline → Phase 5.5 `fundamentals_screener`): the natural next step is **not**
-Phase 5.4 immediately, but validating this phase's own Spark/Delta-write section on a real
-Databricks cluster (§19) — the one part of this implementation genuinely unverified end-to-end.
-Once that's confirmed, wiring this layer's `ADMITTED` output into `EUCurrentSource`'s
-`PILOT_EU_ENTITIES`-equivalent input (still not decided how — a separate design question, not
-answered by this phase) is the natural bridge to a real Phase 5.4.
+With §19's Databricks validation now closed, **PR #377 is READY TO MERGE** (repo owner's own
+review/decision, not exercised by this document). Per the repo owner's own stated sequencing
+(Phase 5.3 → a small real EU fundamentals sample → `fundamentals_screener`): the natural next
+step after merge is wiring a small, explicit subset of this layer's `ADMITTED` output (e.g. the
+9 already-validated candidates) into `EUCurrentSource`'s `PILOT_EU_ENTITIES`-equivalent input —
+still not decided how (a separate design question, not answered by this phase) — to get the
+first real, non-hardcoded European rows into `financials`, and only after that into
+`fundamentals_screener`. Full-universe fundamentals ingestion for all 4,926 resolved issuers
+remains explicitly out of scope until that small-sample checkpoint is itself verified.
 
 ## 23. Explicit non-goals (this pass, restated)
 

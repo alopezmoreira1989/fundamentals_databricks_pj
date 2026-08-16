@@ -425,4 +425,4 @@ if RUN_FIRDS_ADMISSION:
     # same rows, not accumulate duplicates -- idempotency, verified in tests/test_sources_
     # eu_admission.py and re-confirmed against the real file in Phase 5.3's own validation).
     sdf.write.mode("overwrite").option("overwriteSchema", "true").saveAsTable(admission_tbl)
-    print(f"✓ {len(rows)} admission candidate(s) written to {admission_tbl}")
+    print(f"OK: {len(rows)} admission candidate(s) written to {admission_tbl}")
