@@ -102,8 +102,11 @@ future admission could reintroduce the exact ambiguity that happens not to exist
 - `fundamentals_pipeline/identity.py`: `make_issuer_id()`, `make_listing_id()` (pure functions).
 - `fundamentals_pipeline/sources/base.py`: `SourceEntity` corrected to
   `source_id`/`source_entity_id`/`issuer_id`/`name`/`ticker: str | None`.
-- `main.config.tickers`: additive `issuer_id`/`mic`/`listing_id` columns. `issuer_id` backfilled
-  for the whole existing US/CA universe via `11__fetch_sec_xbrl.py` (CIK-derived,
-  `SEC_XBRL:<cik>`). `mic`/`listing_id` deliberately left NULL for existing rows.
+- `main.config.tickers`: additive `issuer_id`/`mic`/`listing_id` columns. `issuer_id` populated
+  via `11__fetch_sec_xbrl.py` (CIK-derived, `SEC_XBRL:<cik>`) for every ticker where CIK
+  resolution succeeds — verified live at 2,624/2,662 (98.6%); the remaining 38 fail CIK
+  resolution today as pre-existing SEC-ingestion technical debt, unrelated to this pass (see
+  §3b below for the cross-market-safety check on this same backfill). `mic`/`listing_id`
+  deliberately left NULL for existing rows.
 - Pilot identity validated via literal test fixtures only (`tests/test_issuer_listing_identity.py`)
   — `XMAD:FCC`, `XPAR:ALO`, `XAMS:NAI`, `MTAA:FCT` — no `config.tickers` write, no adapter.

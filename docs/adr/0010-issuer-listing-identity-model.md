@@ -18,10 +18,20 @@ Only `main.config.tickers` has a real composite `(ticker, market)` identity key,
 `fundamentals_pipeline/identity.py`'s `check_no_cross_market_collision()` — and that guard's own
 docstring already states the downstream tables stay bare-ticker-keyed. A bare ticker is not a
 global identifier: the same symbol can legitimately belong to two unrelated companies on
-different markets (Magna International `MG` on the TSX vs. Mistras Group `MG` on the NYSE,
-already a real collision in production `config.tickers`), or to one company listed twice
-(Brookfield `BAM` on both NYSE and TSX). Introducing a European source without a real identity
-model would reproduce this exact risk at every layer that guard does not reach.
+different markets. `identity.py`'s own docstring gives the concrete illustration — Magna
+International trades as `MG` on the TSX, and SEC's own global `company_tickers.json` index
+still (as of 2026-07) maps bare `MG` to Mistras Group's CIK, a stale entry from before Mistras
+went private in 2023. **Live-verified this session (2026-08-16): `MG` does not currently
+exist under either market in `main.config.tickers`** — Mistras is no longer part of the active
+US universe and Magna was never admitted as a Canadian candidate, so this is not, today, an
+existing collision inside `config.tickers` itself. It remains the right illustration of the
+*risk class* the guard defends against (a stale/global-index-level collision that a future
+ticker admission could reintroduce), not evidence of a live collision in the table today — the
+same live check (§ below / `docs/phase5-identity-listing-model.md` §3b) confirms 0 tickers
+currently span more than one `market` in production. Dual-listing is the other real shape this
+guard handles (Brookfield `BAM` on both NYSE and TSX, deliberately collapsed to one row, not a
+collision). Introducing a European source without a real identity model would reproduce the
+`MG`-shaped risk at every layer this guard does not reach, the first time it actually occurs.
 
 MIC (ISO 10383) verification, done live this session via ESMA/FIRDS and vendor MIC registries,
 found a real ambiguity worth recording as a project-wide rule: several exchange groups have both
@@ -62,8 +72,11 @@ regardless of how many markets it lists on); market prices/market cap are modele
 **This pass is additive and transitional, not a re-key.** `issuer_id`/`mic`/`listing_id` are
 added as new, nullable columns on `main.config.tickers` only — the four core financial/price
 Delta tables named above keep their existing bare-`ticker` physical keys unchanged. `issuer_id`
-is backfilled for the whole existing US/CA universe (a pure function of the CIK
-`11__fetch_sec_xbrl.py` already resolves for every ticker). `mic`/`listing_id` are **not**
+is populated for every ticker for which CIK resolution succeeds (a pure function of the CIK
+`11__fetch_sec_xbrl.py` already resolves) — **verified live: 2,624 of 2,662 existing rows
+(98.6%)**; the remaining 38 fail CIK resolution today independent of this ADR (a pre-existing
+SEC-ingestion gap, documented as separate technical debt, not silently absorbed into this
+pass's completion claim). `mic`/`listing_id` are **not**
 backfilled for the existing ~2,662 US/CA rows in this pass — that needs a Yahoo-exchange-mnemonic
 → real ISO 10383 MIC mapping that does not exist yet, and inventing/approximating one would
 violate the same "never guess a MIC" principle this ADR itself establishes. The designed (not yet
