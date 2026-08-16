@@ -1472,6 +1472,137 @@ spark.sql(f"""
 
 final_long.createOrReplaceTempView("incoming_metrics")
 
+# ── DRY_RUN diagnostic mode (2026-08-17, docs/phase5-6-european-dashboard-data-integration.md
+# §13) ────────────────────────────────────────────────────────────────────────────────────
+# Read-only classification of `incoming_metrics` (the exact real DataFrame the MERGE below
+# would consume — NOT a reimplementation of the pivot/derive logic in SQL) against the current
+# `financials_metrics`, for diagnosing a large orphan-delete count WITHOUT running the write
+# that would answer the question destructively. Same override-mode pattern as ACTIVE_TICKERS/
+# force_full_refresh above; defaults to False, so a normal run is byte-for-byte unaffected.
+# Exits via `dbutils.notebook.exit()` (JSON), never writes anywhere — no throwaway Databricks
+# table, per explicit instruction; the caller reads the result from the Jobs API's
+# `notebook_output.result` field.
+DRY_RUN = str(globals().get("DRY_RUN", "false")).strip().lower() == "true"
+if DRY_RUN:
+    print("=" * 55)
+    print("DRY RUN — classifying incoming_metrics vs financials_metrics; NO WRITE")
+    print("=" * 55)
+
+    _key = ["ticker", "fiscal_year", "metric"]
+    _target = spark.table(metrics_tbl)
+    _source = final_long
+
+    _target_count = _target.count()
+    _source_count = _source.count()
+
+    _matched = _target.alias("t").join(_source.alias("s"), on=_key, how="inner")
+    _matched_count = _matched.count()
+    _new_rows = _source.join(_target, on=_key, how="left_anti")
+    _new_count = _new_rows.count()
+    _orphaned_rows = _target.join(_source, on=_key, how="left_anti")
+    _orphaned_count = _orphaned_rows.count()
+    _modified_rows = _matched.filter(F.col("t.value") != F.col("s.value"))
+    _modified_count = _modified_rows.count()
+
+    # Orphan breakdown by metric (compact — a few dozen distinct metric labels at most).
+    _orphan_by_metric = [
+        {"metric": r["metric"], "n": r["n"]}
+        for r in _orphaned_rows.groupBy("metric").count().withColumnRenamed("count", "n")
+                                .orderBy(F.desc("n")).collect()
+    ]
+
+    # Orphan breakdown by fiscal_year.
+    _orphan_by_fy = [
+        {"fiscal_year": r["fiscal_year"], "n": r["n"]}
+        for r in _orphaned_rows.groupBy("fiscal_year").count().withColumnRenamed("count", "n")
+                                .orderBy("fiscal_year").collect()
+    ]
+
+    # Orphan breakdown by market (EU admitted vs US/CA vs other) -- read-only lookups against
+    # config.tickers / eu_admission_candidates, same tables the real pipeline already reads.
+    _eu_tickers_df = (
+        spark.table(f"{CATALOG}.config.eu_admission_candidates")
+        .filter(F.col("admission_status") == "admitted")
+        .select("ticker").withColumn("market_bucket", F.lit("EU"))
+    )
+    _us_ca_tickers_df = (
+        spark.table(f"{CATALOG}.config.tickers")
+        .select("ticker", F.coalesce(F.col("market"), F.lit("US")).alias("market_bucket"))
+    )
+    _market_lookup = _us_ca_tickers_df.unionByName(_eu_tickers_df)
+    _orphan_by_market = [
+        {"market": r["market_bucket"] if r["market_bucket"] is not None else "OTHER (not in config.tickers or eu_admission_candidates)", "n": r["n"]}
+        for r in (
+            _orphaned_rows.join(_market_lookup, on="ticker", how="left")
+            .groupBy("market_bucket").count().withColumnRenamed("count", "n")
+            .orderBy(F.desc("n")).collect()
+        )
+    ]
+
+    # Orphan top-50 tickers (not all ~2,662+ -- keeps notebook.exit()'s payload compact).
+    _orphan_by_ticker_top50 = [
+        {"ticker": r["ticker"], "n": r["n"]}
+        for r in _orphaned_rows.groupBy("ticker").count().withColumnRenamed("count", "n")
+                                .orderBy(F.desc("n")).limit(50).collect()
+    ]
+
+    # Base vs valuation classification -- reuses the SAME base_metric_cols/val_metric_cols
+    # lists the real pivot logic above already defines; not a second, independently-invented
+    # taxonomy. val_metric_cols only exists when pe_mcap is not None (this run's own coverage
+    # gate passed, so it does) -- defensively handled for a DRY_RUN under the opposite branch.
+    _val_cols_set = set(globals().get("val_metric_cols", []))
+    _base_cols_set = set(base_metric_cols)
+    _orphan_by_category = [
+        {"category": r["category"], "n": r["n"]}
+        for r in (
+            _orphaned_rows
+            .withColumn(
+                "category",
+                F.when(F.col("metric").isin(list(_val_cols_set)), F.lit("valuation"))
+                 .when(F.col("metric").isin(list(_base_cols_set)), F.lit("base"))
+                 .otherwise(F.lit("unclassified")),
+            )
+            .groupBy("category").count().withColumnRenamed("count", "n")
+            .orderBy(F.desc("n")).collect()
+        )
+    ]
+
+    _sample_modified = [
+        {"ticker": r["ticker"], "fiscal_year": r["fiscal_year"], "metric": r["metric"],
+         "old_value": r["old_value"], "new_value": r["new_value"]}
+        for r in (
+            _modified_rows
+            .select(
+                F.col("t.ticker").alias("ticker"),
+                F.col("t.fiscal_year").alias("fiscal_year"),
+                F.col("t.metric").alias("metric"),
+                F.col("t.value").alias("old_value"),
+                F.col("s.value").alias("new_value"),
+            )
+            .limit(20).collect()
+        )
+    ] if _modified_count else []
+
+    _result = {
+        "dry_run": True,
+        "generated_with_branch_code": "phase5-6-european-dashboard-data-integration",
+        "target_financials_metrics_count": _target_count,
+        "source_incoming_metrics_count": _source_count,
+        "matched_count": _matched_count,
+        "new_count": _new_count,
+        "orphaned_count": _orphaned_count,
+        "orphaned_pct_of_target": (_orphaned_count / _target_count) if _target_count else None,
+        "modified_count": _modified_count,
+        "orphan_by_metric": _orphan_by_metric,
+        "orphan_by_fiscal_year": _orphan_by_fy,
+        "orphan_by_market": _orphan_by_market,
+        "orphan_by_category_base_vs_valuation": _orphan_by_category,
+        "orphan_top50_tickers": _orphan_by_ticker_top50,
+        "sample_modified_rows": _sample_modified,
+    }
+    print(json.dumps(_result, indent=2, default=str))
+    dbutils.notebook.exit(json.dumps(_result, default=str))
+
 # `unpivot()` drops NULL-valued metrics before they ever reach `incoming_metrics` (NULL = "absent",
 # no row stored). Combined with `raw`/`_raw_full` above always reading the FULL financials table
 # (no tickers_override in this notebook — every run recomputes the entire universe), that means a
