@@ -11,3 +11,10 @@ pytest>=8,<9
 pandas>=2.2,<3
 pyarrow>=14
 lightgbm>=4,<5
+
+# Phase 5.1: tests/test_eu_adapter_protocol_conformance.py loads
+# 10__ingestion/16__fetch_eu_xbrl.py via importlib (RUN_EU_PILOT=False, so no network call
+# actually fires) to prove EUCurrentSource satisfies FundamentalsSource at runtime -- but the
+# module still has `import requests` at the top, same as 11__fetch_sec_xbrl.py already does.
+# Pinned to match requirements.txt's own existing version.
+requests>=2.31,<3

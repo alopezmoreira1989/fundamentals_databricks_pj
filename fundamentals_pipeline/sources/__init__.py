@@ -14,6 +14,18 @@ from .base import (
     SourceFact,
     SourceFiling,
 )
+from .eu_current import (
+    EU_CANONICAL_MAPPING,
+    EU_SOURCE_ID,
+    FilingRejection,
+    entity_from_pilot,
+    extract_source_facts,
+    is_consolidated_fact,
+    is_current_period_fact,
+    map_source_fact_to_canonical,
+    parse_unit_currency,
+    select_filing_for_period,
+)
 from .mapping import MappingDecision, MappingStatus, MappingType, is_usable
 from .registry import SOURCE_REGISTRY, SourceAccessStatus, SourceDefinition
 
@@ -30,4 +42,14 @@ __all__ = [
     "SOURCE_REGISTRY",
     "SourceAccessStatus",
     "SourceDefinition",
+    "EU_CANONICAL_MAPPING",
+    "EU_SOURCE_ID",
+    "FilingRejection",
+    "entity_from_pilot",
+    "extract_source_facts",
+    "is_consolidated_fact",
+    "is_current_period_fact",
+    "map_source_fact_to_canonical",
+    "parse_unit_currency",
+    "select_filing_for_period",
 ]

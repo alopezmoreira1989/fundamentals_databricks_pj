@@ -22,9 +22,12 @@ def test_sedar_plus_is_automation_restricted_not_active():
     assert entry.machine_readable is False
 
 
-def test_eu_current_is_research_only_until_an_adapter_ships():
+def test_eu_current_is_active_after_the_phase51_adapter_shipped():
+    # Phase 5.1: EUCurrentSource shipped and was validated via a real Databricks smoke test
+    # (docs/phase5-1-eu-adapter.md) -- flipped from RESEARCH_ONLY to ACTIVE, per the registry's
+    # own prior comment stating that was the trigger condition.
     entry = SOURCE_REGISTRY["EU_CURRENT"]
-    assert entry.access_status == SourceAccessStatus.RESEARCH_ONLY
+    assert entry.access_status == SourceAccessStatus.ACTIVE
     assert entry.machine_readable is True
     assert "ES" in entry.jurisdiction and "FR" in entry.jurisdiction
 

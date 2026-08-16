@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 
 @dataclass(frozen=True)
@@ -77,13 +77,21 @@ class SourceEntityMetadata:
     reporting_currency: str | None
 
 
+@runtime_checkable
 class FundamentalsSource(Protocol):
     """The common contract every fundamentals source adapter implements.
 
     Structural typing (PEP 544) — an adapter satisfies this by having the right methods, not
     by inheriting from anything. See ``SECXBRLSource`` in
     ``10__ingestion/11__fetch_sec_xbrl.py`` for the first (additive, currently uncalled)
-    implementation proof.
+    implementation proof, and ``EUCurrentSource`` in
+    ``10__ingestion/16__fetch_eu_xbrl.py`` for the first real, called one (Phase 5.1).
+
+    ``@runtime_checkable`` makes ``isinstance(adapter, FundamentalsSource)`` a real, executable
+    check (method/attribute presence only — it does not check method signatures) rather than a
+    purely static one — see ``tests/test_eu_adapter_protocol_conformance.py``, which uses this
+    to prove ``EUCurrentSource`` genuinely satisfies the contract, not just that it was written
+    with the same method names by convention.
     """
 
     source_id: str

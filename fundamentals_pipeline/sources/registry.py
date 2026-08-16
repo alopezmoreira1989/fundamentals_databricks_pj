@@ -57,7 +57,11 @@ SOURCE_REGISTRY: dict[str, SourceDefinition] = {
         jurisdiction=("ES", "FR", "NL", "IT"),
         accounting_frameworks=("ifrs-full",),
         source_type="aggregator",
-        access_status=SourceAccessStatus.RESEARCH_ONLY,  # until ADR-0009 §7 Phase 5 ships an adapter
+        access_status=SourceAccessStatus.ACTIVE,  # Phase 5.1: EUCurrentSource shipped and
+        # validated via a real Databricks smoke test (4 pilot issuers, 50 canonical facts
+        # reached `financials`, SEC regression clean) — see docs/phase5-1-eu-adapter.md.
+        # Still PILOT-SCOPE: only the 4 verified issuers are actually ingestible today (no
+        # universe admission), and only 5 of ~500 concepts per filing are mapped.
         machine_readable=True,
         historical_depth="ESEF mandate start = FY2020 annual reports (filed 2021+) — annual "
                           "consolidated IFRS statements only, EU-regulated-market issuers only, "
@@ -66,7 +70,7 @@ SOURCE_REGISTRY: dict[str, SourceDefinition] = {
               "filings, not ESEF itself — JSON-API, 'no restrictions on data use' stated in "
               "their own docs. Does not cover all EU countries (Germany, Ireland notably "
               "absent from this aggregator's index — a retrieval gap, not an ESEF scope gap). "
-              "See ADR-0009 §4.",
+              "See ADR-0009 §4 and docs/phase5-1-eu-adapter.md (Phase 5.1 adapter + pilot).",
     ),
     "ESAP": SourceDefinition(
         source_id="ESAP",
