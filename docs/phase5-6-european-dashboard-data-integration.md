@@ -9,13 +9,19 @@ actually read. Also closes a real currency-alignment gap this connection exposed
 price/market-cap history for the first time.
 
 Source-discipline labels: **VERIFIED LOCALLY** / **VERIFIED IN DATABRICKS** / **NOT YET RUN** /
-**INFERENCE** / **OPEN QUESTION**. Unlike Phase 5.4's doc, most of this phase's own live
-production behavior is still **NOT YET RUN** as of this writing — this phase was paused
-mid-work for a machine handoff (see the git history around branch
-`phase5-6-european-dashboard-data-integration`, draft PR #380) before the real bounded
-Databricks run could happen. This document captures the architecture and code as they stand,
-not results that don't exist yet; sections describing unrun behavior say so explicitly rather
-than presenting inference as verification.
+**INFERENCE** / **OPEN QUESTION**.
+
+**Update (2026-08-16): the bounded live Databricks run happened.** §7 and §10 below are the
+real record. Headline: the architecture (Option B, §2), the currency field (§3), and the
+export-boundary union + collision guard (§5) are all confirmed working against real production
+data. The run also hit a real, severe bug — a table-write-mode contract mismatch between
+`18__fetch_eu_market_data.py` and `12__fetch_market_data.py` (**not** the currency-alignment
+fix, which was never reached) — that briefly reduced `market_prices_daily` to 7 tickers and
+cascaded into `market_cap_asof`/`financials_metrics`/`financials_intrinsic_value` for the
+**entire US/CA/EU universe**. Fully diagnosed and fully recovered via Delta `RESTORE TABLE`
+(all four tables confirmed back to their exact pre-incident row counts); a fix is designed
+but **not implemented** — see §10. Phase 5.6 is paused here pending that fix, per explicit
+instruction; do not resume without reading §10 first.
 
 ## 1. Files changed
 
@@ -189,34 +195,76 @@ collisions. Writes to `market_prices_daily`/`stock_splits` are **NOT YET RUN** i
 lifetime — this would be the tickers' first-ever price history (`force_full_refresh = "true"`
 is hardcoded for exactly this reason).
 
-## 7. What is verified vs. not yet run
+## 7. What is verified — real results from the 2026-08-16 bounded live run
 
 **VERIFIED LOCALLY** (pure Python, no Spark/network):
 - `AdmissionCandidate.currency` resolution (§3) — 3 tests
 - `check_no_export_ticker_collision()` (§5) — 5 tests
 - Full suite: 303 passed, 2 skipped (pre-existing, unrelated), `ruff check` clean
 
-**NOT YET RUN** (the real bounded Databricks run, deliberately deferred — see the branch's own
-machine-handoff note):
-- `17__firds_admission.py` re-run with the new `currency` column populated in
-  `eu_admission_candidates` (currently live in production without it)
-- `18__fetch_eu_market_data.py` — first-ever `market_prices_daily`/`stock_splits` rows for the
-  8 admitted EU tickers, including the live Yahoo company-name safety check actually gating
-  real writes (only individually spot-checked live so far, not run through the full notebook)
-- `22__derived_metrics.py`/`23__intrinsic_value.py` — the currency-alignment fix (§4) actually
-  producing `EUR`-denominated `market_cap_asof`/TTM rows for the 8 tickers, not a silent `USD`
-  default
-- `51__export_dashboard_data.py` — the `UNION ALL` (§2) and collision guard (§5) against real
-  data, confirming the 8 EU tickers appear correctly in the exported artifacts and no collision
-  fires
-- **Idempotency**: re-running the chain twice and confirming no duplicate/drifted rows (the
-  same check Phase 5.4's own §12 performed for the ingestion layer — not yet repeated at the
-  export/derived-metrics layer this phase touches)
-- **US/CA/Canada regression**: before/after row counts on `financials_metrics`,
-  `financials_intrinsic_value`, and the exported artifacts for the existing US/CA universe,
-  confirming the `UNION ALL` and the new `ticker_currency` branch changed nothing for
-  non-European tickers (the same style of proof Phase 5.4's own §13 gave for the ingestion
-  layer)
+**VERIFIED IN DATABRICKS**, real production workspace, executed from a personal Databricks
+Repo checkout of this branch (`/Repos/al.lopez.moreira@gmail.com/phase5-6-validation`, since
+the GitHub→Databricks sync only mirrors `main`) — each notebook submitted as its own one-time
+`jobs/runs/submit` run, not the scheduled 9-task DAG (none of whose tasks were touched):
+
+- **`17__firds_admission.py`**: SUCCESS. `currency` column now live in
+  `eu_admission_candidates` (18 columns, was 17). All 8 admitted tickers correctly show
+  `currency = 'EUR'`. Admission set unchanged (183,055 total candidates, 8 admitted — identical
+  to pre-run), confirming the re-run didn't drift the admission logic itself.
+- **`18__fetch_eu_market_data.py`**: SUCCESS, but only **6 of 8** tickers passed the live
+  Yahoo company-name safety gate — a real, legitimate finding, not a bug in the gate's design:
+  - **`FCC`**: Yahoo's `longName` comes back truncated mid-word (`"ACCIONES FOMENTO DE
+    CONSTRUCCIO"`, cut at 32 characters) vs. FIRDS' full `"ACCIONES FOMENTO DE CONSTRUCCIONES
+    Y CONTRATAS, S.A."` — `classify_company_match()` returns `"ambiguous"` because the final
+    token differs entirely (`CONSTRUCCIO` vs `CONSTRUCCIONES`), not a subset match.
+  - **`SGO`**: Yahoo returns `"Compagnie de Saint-Gobain S.A."` vs. FIRDS' `"SAINT GOBAIN"` —
+    `identity.py`'s `_PUNCTUATION` regex (`r"[.,'&]"`) does not strip hyphens, so
+    `"Saint-Gobain"` normalizes to one token that matches neither `"SAINT"` nor `"GOBAIN"`
+    individually, producing zero token overlap and a `"different"` verdict.
+  - Both are genuine same-company matches that the safety gate conservatively (and correctly,
+    per its own design) rejected rather than guess. **Not fixed in this pass** — the run's
+    scope was validation, not `identity.py` changes; flagged here for a future, separate,
+    reviewed fix (a real normalization gap, not specific to Phase 5.6).
+  - The 6 that passed (`ALO`/`FCT`/`IBE`/`ISP`/`NAI`/`RAND`) got real first-ever daily
+    price history written correctly (confirmed real `close`/`adj_close` values, real date
+    ranges back to each ticker's actual listing history).
+  - **This run also caused a severe, since-fully-recovered incident — see §10.**
+- **`22__derived_metrics.py`**: SUCCESS (~3.5 min). `financials_metrics` populated for all 8
+  EU tickers (6–27 rows each) — correctly limited to non-share-dependent metrics (Net Income
+  YoY %, Net Margin %, Piotroski F-Score, ROA %, Revenue YoY %, Total Payout Ratio). **No
+  `market_cap_asof` rows for any EU ticker** — root-caused to a separate, pre-existing,
+  deliberately out-of-scope gap: `financials` has **zero** `Shares Diluted` rows for any EU
+  ticker (IFRS concept mapping in `01__tickers.py` was never extended to a share-count concept
+  — confirmed directly; `IBE`'s only 4 mapped concepts are Cash & Equivalents/Net
+  Income/Revenue/Total Assets, matching Phase 5.4's own §8 coverage table exactly). Since
+  `market_cap = price × shares`, this blocks market-cap computation for EU tickers regardless
+  of currency handling — the currency-alignment fix (§4) is therefore **correct by code
+  inspection and unreachable by observation**: the union into `ticker_currency` executes
+  without error, but there is no `market_cap_asof` row for any EU ticker to show the resulting
+  currency on. Confirmed clean (no wrong/leaked values): `financials_metrics` for EU tickers
+  contains no `Market Cap`/`P/E`/`EPS`-family metric at all — real absence, matching this
+  project's "real gap reads NULL" convention exactly, not silently wrong data.
+- **`23__intrinsic_value.py`**: SUCCESS. `financials_intrinsic_value` — **zero rows for any EU
+  ticker**, same root cause: `EPS Diluted`/`Shares Diluted` are both hard-required pivot inputs
+  (`23`'s own `("Income Statement", "EPS Diluted", "eps")` / `("Income Statement", "Shares
+  Diluted", "shares")`), absent for every EU ticker for the identical reason as above.
+- **`51__export_dashboard_data.py`**: SUCCESS. **The critical test passes**: `dashboard_data.
+  parquet` (2,640 distinct tickers) contains all 8 admitted EU tickers, including `FCC`/`SGO`
+  despite their missing market data — confirming the Option B `UNION ALL` (§2) works correctly
+  end-to-end against real production data, with zero dependency on `config.tickers`
+  (re-confirmed empty for all 8 EU tickers throughout). The `check_no_export_ticker_collision()`
+  guard (§5) ran with no collision (none exists live today) — its actual raise path remains
+  verified only by the 5 unit tests (§5), not by a live collision, since none exists to trigger
+  one.
+- **US/CA regression**: after full incident recovery (§10), verified byte-for-byte identical
+  to the pre-run snapshot — `market_prices_daily` (15,268,796 rows), `market_cap_asof` (27,240
+  rows, AAPL/MSFT $USD values unchanged, `AEM` still correctly `USD`-aligned, `AQN` still
+  correctly native `CAD`), `financials_metrics` (2,039,873 rows), `financials_intrinsic_value`
+  (221,273 rows, AAPL's TTM `price_close`/`margin_of_safety_pct` restored to real values).
+  `config.tickers` never gained the 8 EU tickers at any point (0 rows, checked before, during,
+  and after).
+- **Idempotency**: not attempted — the run stopped after the incident (§10) rather than
+  proceeding to a second pass, per explicit instruction.
 
 ## 8. Known limitations / open questions
 
@@ -228,18 +276,179 @@ machine-handoff note):
   (currently defaulting every European row's currency straight from `eu_admission_candidates`)
   and the `QUOTE_CURRENCY_BY_MARKET` extension (§4), neither of which is built yet.
   **OPEN QUESTION**, not blocking today since every currently-admitted MIC is Eurozone.
-- **No unit test exists (or can reasonably exist, in this repo's testing philosophy) for the
-  Spark-native currency-alignment join fix itself** (§4) — the real bounded Databricks run is
-  the verification for that piece, not a substitute test.
+- **No `Shares Diluted` (or any share-count) IFRS concept mapping exists** — blocks
+  `market_cap_asof`, valuation-dependent `financials_metrics` rows, and
+  `financials_intrinsic_value` entirely for every EU ticker (§7). Pre-existing, deliberately
+  out-of-scope per CLAUDE.md's multi-market roadmap ("IFRS XBRL concept mapping in
+  `01__tickers.py`... still out of scope, deliberately") — not a Phase 5.6 regression, but the
+  real, current reason the currency-alignment fix (§4) can't be observed end-to-end.
+- **Two real company-name-matching false positives in `identity.py`'s `classify_company_match()`**
+  (§7): a mid-word Yahoo `longName` truncation (`FCC`) and a hyphen the `_PUNCTUATION` regex
+  doesn't strip (`SGO`, `"Saint-Gobain"` vs `"Saint Gobain"`). Both cause a genuine same-company
+  match to read as `"ambiguous"`/`"different"` and be conservatively rejected. Real, reproducible,
+  **not fixed** — flagged for a future, separately-reviewed change (touches the same matcher the
+  US/CA cross-market collision guard uses, so any fix needs its own regression check against
+  that usage too).
 - **This phase does not schedule anything on the DAG** — `18__fetch_eu_market_data.py` is
   explicitly non-scheduled, and none of the 9-task production DAG's tasks were modified.
+- **See §10 for the write-mode contract bug** — the most significant finding of this pass,
+  with its own fix design (not yet implemented).
 
 ## 9. Next steps (in order)
 
-1. The real bounded Databricks run (§7's "NOT YET RUN" list): `17` → `18` → `22`/`23` → `51`.
-2. Idempotency check (re-run twice, diff row counts).
-3. US/CA/Canada regression (before/after row counts on the existing universe).
-4. Once all three are green: consider whether `fundamentals_screener`/Streamlit actually
+0. **Fix the `18`/`12` write-mode contract bug (§10) first** — do not re-attempt the bounded
+   live run before this lands; it would reproduce the same incident. Design is ready in §10;
+   implementation is a separate, explicitly-deferred step.
+1. ~~The real bounded Databricks run: `17` → `18` → `22`/`23` → `51`~~ — **done, 2026-08-16**
+   (§7). Architecture, currency field, and export union all confirmed working; a real bug was
+   found and fully recovered (§10), not yet fixed at the code level.
+2. Re-run the bounded live pass once the §10 fix lands, to confirm `18` no longer touches rows
+   outside its own ticker scope.
+3. Idempotency check (re-run twice, diff row counts) — not yet attempted (§7).
+4. Optionally: a real fix for the two `classify_company_match()` false positives (§8) so `FCC`/
+   `SGO` also get market data — separate, reviewed change, not blocking.
+5. Optionally: IFRS `Shares Diluted` concept mapping (§8) so `market_cap_asof`/
+   `financials_intrinsic_value` can actually populate for EU tickers — a substantial, separate
+   piece of work (multi-market roadmap), not started.
+6. Once the above are green: consider whether `fundamentals_screener`/Streamlit actually
    render the new European rows correctly (out of scope for this phase — the dashboard-export
    boundary is the explicit stopping point, matching Phase 5.4's own "does not make European
    data visible in `fundamentals_screener`" boundary one layer up the chain).
+
+## 10. Live validation incident (2026-08-16) — `market_prices_daily` write-mode contract bug
+
+**Severity: high (real, if brief, production data reduction across the entire US/CA/EU
+universe). Fully diagnosed, fully recovered. Fix designed, not implemented.**
+
+### 10.1 What happened
+
+`18__fetch_eu_market_data.py` delegates its actual fetch/write to `12__fetch_market_data.py`
+by loading it via `importlib` and pre-seeding module globals (§6):
+
+```python
+_module.ACTIVE_TICKERS = EU_ACTIVE_TICKERS   # the 6 tickers that passed the safety check
+_module.YAHOO_SYMBOL = EU_YAHOO_SYMBOL
+_module.BENCHMARK_TICKERS = []
+_module.force_full_refresh = "true"          # first run for these tickers -- always full history
+```
+
+`12__fetch_market_data.py` reads `force_full_refresh` into a single `FORCE_FULL_REFRESH`
+flag, which drives a single `MODE` variable (`fundamentals_pipeline/10__ingestion/
+12__fetch_market_data.py:191`):
+
+```python
+MODE = "full" if (FORCE_FULL_REFRESH or not _has_prices) else "incremental"
+```
+
+This one flag controls **two independent decisions** that were never meant to be coupled:
+
+1. **Per-ticker fetch depth** — `period="max"` (full history) vs. an incremental gap-fill from
+   each ticker's last known date (lines 195–213).
+2. **Table write mode** (lines 378–396) — `MODE == "full"` writes
+   `prices_sdf.write.format("delta").mode("overwrite")...saveAsTable(prices_tbl)`, a **full
+   table replace**; `MODE == "incremental"` writes a `MERGE INTO ... ON (ticker, date)` with
+   only `WHEN MATCHED UPDATE` / `WHEN NOT MATCHED INSERT` — no delete clause, so it can never
+   remove rows for tickers outside its own source.
+
+In the normal production caller (`91a__pipeline_pre22.py`), `force_full_refresh` is only ever
+set when `ACTIVE_TICKERS` already **is** the full production universe (a deliberate, rare,
+whole-pipeline rebuild flag) — so a full-table overwrite is correct there, since the batch
+genuinely represents everything. `18` is the first caller to combine `force_full_refresh=true`
+with a **narrow** `ACTIVE_TICKERS` override (6 tickers), a combination `12` was never designed
+to handle: the write path had no way to know the batch was intentionally partial, so it
+replaced the entire table with just those 6 tickers' rows.
+
+**Confirmed via `DESCRIBE HISTORY main.financials.market_prices_daily`**: version 118,
+`CREATE OR REPLACE TABLE AS SELECT`, triggered by job `phase5-6-validation-18-eu-market-data`,
+`numOutputRows: 41142` (down from 15,268,796), removing the 3 files holding the full prior
+universe.
+
+### 10.2 Cascading impact
+
+`22__derived_metrics.py` and `23__intrinsic_value.py` both ran (as instructed, in sequence)
+**after** the corrupted table existed and **before** the corruption was caught, so both
+consumed it as their real input:
+
+- **`market_cap_asof`** (`22`): full-overwrite table (`mode("overwrite")`, no MERGE at all —
+  every run is a from-scratch rebuild). With only 7 tickers' worth of price data as input,
+  and those 7 having no `Shares Diluted` either (§7/§8), the rebuild produced **zero rows**,
+  wiping the entire pre-existing 27,240-row table for the whole US/CA/EU universe.
+- **`financials_metrics`** (`22`): a `MERGE INTO ... WHEN NOT MATCHED BY SOURCE THEN DELETE`
+  (the file's own comment: *"Safe here specifically because source is a full-universe rebuild
+  each run"*). That assumption held for the ticker dimension but not for the **metric**
+  dimension: with `market_cap_asof` empty, every valuation-dependent metric (P/E, market-cap
+  ratios, PEG, etc.) was legitimately absent from this run's source for the **entire**
+  universe, and the delete-orphans clause — behaving exactly as designed — removed all of
+  them. Row count dropped from 2,039,873 to 1,380,672.
+- **`financials_intrinsic_value`** (`23`): its own MERGE + orphan-cleanup is scoped to
+  `iv_processed_tickers` (only tickers actually processed that run), so it did **not** suffer
+  the same blanket deletion — but its `WHEN MATCHED THEN UPDATE SET ... price_close = source.
+  price_close, margin_of_safety_pct = source.margin_of_safety_pct` overwrote the TTM row's
+  live-price fields with `NULL` for every ticker whose TTM valuation ran this pass (confirmed
+  directly on `AAPL`: `price_close`/`margin_of_safety_pct` both `NULL`, `computed_at` matching
+  this run's timestamp) — real production rows silently degraded to a real-but-wrong "no
+  data" state, not caught by row-count alone (net count actually rose slightly, from 221,273
+  to 224,843, since new FY-basis rows were still legitimately added even as TTM fields were
+  nulled).
+
+`51__export_dashboard_data.py` was also run (before the corruption was caught) and its
+`dashboard_prices.parquet` output reflected the corrupted state (6 tickers only) — but since
+that artifact was superseded by the recovery, no separate action was needed for it beyond the
+underlying table fixes.
+
+### 10.3 Recovery
+
+All four tables restored via Delta time-travel (`RESTORE TABLE ... TO VERSION AS OF <n>`),
+each version chosen as the last write before this validation session touched anything and
+confirmed by exact row-count match against the pre-run snapshot before restoring:
+
+| Table | Restored to version | Rows confirmed |
+|---|---|---|
+| `market_prices_daily` | 117 | 15,268,796 |
+| `market_cap_asof` | 83 | 27,240 |
+| `financials_metrics` | 799 | 2,039,873 |
+| `financials_intrinsic_value` | 293 | 221,273 |
+
+Post-restore spot checks: `AAPL`/`MSFT`/`TSLA` price and `market_cap_asof` rows identical to
+pre-run; `AEM` still correctly `USD`-aligned (the pre-existing Canadian currency-mismatch fix,
+unaffected); `AQN` still correctly native `CAD`; `AAPL`'s TTM `price_close`/
+`margin_of_safety_pct` back to real values (e.g. `304.91`, not `NULL`); `config.tickers`
+confirmed to have gained zero EU rows at any point during the incident (Option B, §2, held
+throughout). The 6 EU tickers' price data written by `18` was necessarily lost along with the
+restore (it lived in the same version-118 write as the corruption) — recoverable by re-running
+`18` once the write-mode bug (§10.4) is fixed.
+
+### 10.4 Proposed fix (design only — not implemented)
+
+The incremental/MERGE write branch (`12__fetch_market_data.py:383-396`) is **already safe**
+for a narrow ticker scope — no delete clause, touches only rows matching its own source. The
+`if MODE == "full": full_tickers = list(PRICE_UNIVERSE)` branch's **per-ticker fetch-depth**
+logic isn't even necessary for `18`'s use case: the incremental branch's own line 204
+(`full_tickers = [t for t in PRICE_UNIVERSE if t not in maxd]  # never seen → full hist`)
+**already** detects a ticker with zero existing rows and fetches its complete history via
+`period="max"`, regardless of `FORCE_FULL_REFRESH`. Since `market_prices_daily` already holds
+millions of other tickers' rows, `_has_prices` (line 182) is globally `True`, so `MODE` would
+resolve to `"incremental"` on its own — routing new EU tickers through the exact same
+first-time-full-history-fetch behavior, but via the safe `MERGE` write path — **without any
+code change to `12` at all**.
+
+**The minimal fix**: `18__fetch_eu_market_data.py` should simply **not set
+`_module.force_full_refresh = "true"`** — remove that one line. `12`'s existing logic already
+does the right thing for a brand-new ticker in incremental mode. Verified by direct code
+reading (`12__fetch_market_data.py:114-120`): with no `force_full_refresh` global pre-seeded
+and no `dbutils.widgets` registered in this standalone/`importlib` context, `12`'s own
+fallback (`except Exception: FORCE_FULL_REFRESH = False`) applies cleanly — no other change
+needed anywhere.
+
+**A more defensive, second-layer fix worth considering alongside it** (not required by the
+above, but cheap insurance against the next caller making the same mistake): make `12`'s
+write-mode decision itself resistant to a narrow `ACTIVE_TICKERS` override, independent of
+`FORCE_FULL_REFRESH` — e.g. only allow the full-table-overwrite branch when `ACTIVE_TICKERS`
+was **not** externally pre-seeded (the same `"ACTIVE_TICKERS" in globals()`-style check the
+file already uses for `YAHOO_SYMBOL`'s own override detection), falling through to the safe
+MERGE path whenever a caller has narrowed the ticker scope, regardless of what
+`force_full_refresh` says. This would make the dangerous combination structurally unreachable,
+not just avoided by this one caller's correct usage.
+
+Neither change has been implemented — this section is a design record for the next pass (§9,
+step 0), per explicit instruction to diagnose and design without touching code this session.
