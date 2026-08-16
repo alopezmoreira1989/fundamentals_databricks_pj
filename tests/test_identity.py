@@ -7,7 +7,9 @@ import pytest
 
 from fundamentals_pipeline.identity import (
     CrossMarketCollisionError,
+    ExportTickerCollisionError,
     check_no_cross_market_collision,
+    check_no_export_ticker_collision,
     classify_company_match,
 )
 
@@ -113,3 +115,37 @@ def test_partial_name_overlap_is_ambiguous_and_raises():
 )
 def test_classify_company_match(name_a, name_b, expected):
     assert classify_company_match(name_a, name_b) == expected
+
+
+# ── check_no_export_ticker_collision (Phase 5.6: US/CA vs. EU export-branch guard) ─────────
+
+def test_export_collision_no_dupes_passes():
+    # No exception, no return value — a pure guard.
+    check_no_export_ticker_collision(pd.Series(["AAPL", "MSFT", "FCC"]))
+
+
+def test_export_collision_accepts_plain_list():
+    # 51__export_dashboard_data.py passes a DataFrame column (a Series); confirm a plain list
+    # works too, since that's the more natural type for a hand-written test/caller.
+    check_no_export_ticker_collision(["AAPL", "MSFT", "FCC"])
+
+
+def test_export_collision_raises_on_duplicate():
+    # e.g. a ticker admitted both as a US/CA config.tickers row AND a FIRDS-admitted European
+    # candidate — the exact scenario this guard exists to catch (not observed live yet).
+    with pytest.raises(ExportTickerCollisionError, match="FCC"):
+        check_no_export_ticker_collision(pd.Series(["AAPL", "FCC", "MSFT", "FCC"]))
+
+
+def test_export_collision_reports_all_dupes_not_just_first():
+    with pytest.raises(ExportTickerCollisionError, match="FCC.*MSFT|MSFT.*FCC"):
+        check_no_export_ticker_collision(pd.Series(["AAPL", "FCC", "FCC", "MSFT", "MSFT"]))
+
+
+def test_export_collision_same_market_repeats_still_raise():
+    # Unlike check_no_cross_market_collision(), this guard has no concept of "market" at all —
+    # it never attempts to distinguish a same-market duplicate from a real cross-branch
+    # collision (the caller is expected to pass an already ticker-deduplicated-per-branch
+    # frame; any repeat here is treated as a real collision).
+    with pytest.raises(ExportTickerCollisionError, match="AAPL"):
+        check_no_export_ticker_collision(pd.Series(["AAPL", "AAPL"]))

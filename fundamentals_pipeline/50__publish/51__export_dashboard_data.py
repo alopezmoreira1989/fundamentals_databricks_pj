@@ -45,12 +45,14 @@ import pandas as pd
 # 11__fetch_sec_xbrl.py.
 try:
     from fundamentals_pipeline import schemas as _schemas
+    from fundamentals_pipeline.identity import check_no_export_ticker_collision
 except ImportError:
     import subprocess
     import sys
 
     subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "-e", "../.."])
     from fundamentals_pipeline import schemas as _schemas
+    from fundamentals_pipeline.identity import check_no_export_ticker_collision
 
 SCHEMA_VERSION = 15  # +dashboard_forecast artifact (10-year cross-sectional ML scenario
                      # forecasts — see 24__forecasting.py; issue #333)
@@ -143,13 +145,9 @@ if tickers_df.empty:
 # own repositories, per the Phase 5.5 audit) builds. Not observed today (FCC/FCT are absent
 # from config.tickers, confirmed live) -- but per this project's own "reject, never silently
 # guess" principle, a real collision here must stop the run, not corrupt the export.
-_dupe_tickers = tickers_df["ticker"][tickers_df["ticker"].duplicated()].unique().tolist()
-if _dupe_tickers:
-    raise ValueError(
-        f"Ticker collision between the US/CA (config.tickers) and European "
-        f"(eu_admission_candidates) export branches: {_dupe_tickers} -- resolve manually "
-        f"before export can proceed. Never silently pick one."
-    )
+# Extracted into fundamentals_pipeline/identity.py's check_no_export_ticker_collision() so
+# this exact logic is unit-tested (tests/test_identity.py) without needing a Spark session.
+check_no_export_ticker_collision(tickers_df["ticker"])
 
 tickers = tickers_df["ticker"].tolist()
 # Build records with native Python bools — pandas/numpy bool_ would be stringified

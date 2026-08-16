@@ -237,6 +237,32 @@ def make_listing_id(mic: str, ticker: str) -> str:
     return f"{mic.upper()}:{ticker.upper()}"
 
 
+class ExportTickerCollisionError(Exception):
+    """Raised when the same ticker string appears in more than one export-source branch that
+    has no shared identity gate between them (e.g. `51__export_dashboard_data.py`'s US/CA
+    `config.tickers` branch and its European `eu_admission_candidates` branch, Phase 5.6)."""
+
+
+def check_no_export_ticker_collision(tickers) -> None:
+    """Raise `ExportTickerCollisionError` if any ticker string appears more than once.
+
+    Unlike `check_no_cross_market_collision()`, this never attempts to auto-resolve via
+    company-name matching. The branches it guards are independent admission processes with no
+    shared identity model to reconcile them by yet (ADR-0012's MIC:ISIN vs. MIC:TICKER
+    decision is still open) — a genuine collision here must stop the export outright, never
+    silently pick one side.
+
+    `tickers` is any sequence coercible to a `pandas.Series` (e.g. a DataFrame column).
+    """
+    s = tickers if isinstance(tickers, pd.Series) else pd.Series(list(tickers))
+    dupes = s[s.duplicated()].unique().tolist()
+    if dupes:
+        raise ExportTickerCollisionError(
+            f"Ticker collision across export-source branches: {dupes} — resolve manually "
+            "before export can proceed. Never silently pick one."
+        )
+
+
 def make_listing_id_from_isin(mic: str, isin: str) -> str:
     """Canonical listing identity for a NEW (FIRDS-sourced) listing, per ADR-0012:
     ``f"{MIC}:{ISIN}"`` (e.g. ``"XPAR:FR0010220475"``), both upper-cased.
