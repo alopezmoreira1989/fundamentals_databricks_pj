@@ -20,18 +20,35 @@ was manually verified and hardcoded. This phase researches — without implement
 triple first.
 
 The central finding: **a working, deterministic identity bridge exists and was verified live
-this session** — `GLEIF` (the LEI-issuing authority's own free public API) resolves both
-`ISIN → LEI` and `LEI → ISIN` with zero authentication, confirmed against all four real pilot
-LEIs. Combined with `OpenFIGI` (free, ticker+MIC → security-type-classified instrument) for
-collision-safe ticker resolution and the already-established `filings.xbrl.org` for the ESEF
-confirmation gate, a **Universe → Listing → ISIN → LEI → Issuer → ESEF Entity → Admission**
-pipeline is architecturally sound and testable against real data. What is **not** yet solved:
-a free, reliably-parseable **universe source** for European index membership — `STOXX`'s own
-official constituent lists require a paid Third-Party Data License (verified live), so the
-Generation-1 candidate mirrors this project's own existing Russell 3000/TSX precedent (an
-ETF's publicly disclosed holdings as a free proxy for index membership) rather than the index
-provider directly — but the exact download URL for a European UCITS ETF was not verified live
-in this pass (see §20, §21).
+this session, end to end, for all four real pilots** — `GLEIF` (the LEI-issuing authority's own
+free public API) resolves both `ISIN → LEI` and `LEI → ISIN` with zero authentication;
+`OpenFIGI` (a free, widely-used industry security-reference source — not a legal/regulatory
+identity authority the way GLEIF is, see §5) independently resolves `(ticker, MIC)` to exactly
+one, correctly-typed equity instrument for every pilot including Fincantieri's `MTAA:FCT`
+(cross-checked against the operating MICs `XMIL`/`BMEX`, which OpenFIGI correctly does *not*
+recognize — independent, third-source reinforcement of ADR-0010). The full chain
+`ticker+MIC → OpenFIGI → equity ISIN → GLEIF → LEI` was independently re-derived — not assumed
+or reused from Phase 5.1 — for all four pilots, and reproduced the exact, already-known LEI
+every time; a real pagination bug in GLEIF's `LEI → ISIN` endpoint (defaults to 15 results/page,
+Alstom has 36 real ISINs) was found and fixed along the way (§19). Combined with the already-
+established `filings.xbrl.org` ESEF confirmation gate, a **Universe → Listing → ISIN → LEI →
+Issuer → ESEF Entity → Admission** pipeline is confirmed architecturally sound against real data.
+
+What is **not** yet solved: a free, reliably-parseable **universe source** for European index
+membership. `STOXX`'s own interactive "selection-lists" portal requires a paid Third-Party Data
+License (verified live) — but a **separate, free, no-login STOXX PDF** was found this session
+(`stoxx.com/document/Bookmarks/CurrentComponents/{SYMBOL}.pdf`) containing the real, complete
+STOXX Europe 600 list (exactly 600 rows, verified by direct parsing) — company name, country,
+sector, weight, but no ticker/ISIN/MIC, and its own embedded PDF metadata shows a `ModDate` of
+July 2023 despite "Current" in the URL, a real freshness concern not yet resolved. The ETF-
+holdings route (mirroring this project's own Russell 3000/TSX precedent) was tested directly
+against the real iShares site and found blocked by a modern JS-rendered (Astro) frontend with no
+working static CSV/JSON endpoint — a real, reported negative result, not just an unresolved
+question. The recommended Generation-1 universe source is therefore the free STOXX PDF itself,
+bridged to `(ticker, MIC)` via OpenFIGI's name+`micCode` search (proven live for two new
+candidates, §21 of the follow-up doc). Full detail:
+[docs/phase5-2b-european-universe-source-validation.md](phase5-2b-european-universe-source-validation.md)
+(see §20, §21 there).
 
 Two genuine, live-verified ticker collisions were found (§18) — not fabricated, not
 hypothetical — directly confirming the "ticker alone is insufficient identity" principle this
@@ -96,21 +113,30 @@ re-key). This phase's proposal (ADR-0011) builds directly on both without revisi
 
 ## 4. Universe-source options (researched, not assumed)
 
+**Updated after a dedicated follow-up pass** — see
+[phase5-2b-european-universe-source-validation.md](phase5-2b-european-universe-source-validation.md)
+for the full detail behind every "RESOLVED" verdict below.
+
 | Candidate | Coverage | Access | Identifiers provided | Verdict |
 |---|---|---|---|---|
 | **STOXX official selection lists** (EURO STOXX 50, STOXX Europe 600) | Eurozone / pan-Europe, exactly the index definitions this project already names as targets | **Paid Third-Party Data License required** — verified live: stoxx.com/selection-lists explicitly states "Access to remaining files are reserved to STOXX Index licensees"; only files prefixed `slpublic` are unrestricted, and it's unconfirmed whether EURO STOXX 50/STOXX 600 selection lists are among them | ISIN, SEDOL, RIC, company name (per a sample factsheet PDF found) | **AUTOMATION_RESTRICTED** for the full, current list — same shape as SEDAR+'s ToS-restricted status in ADR-0009 |
-| **iShares Core EURO STOXX 50 UCITS ETF** (ISIN `IE00B53L3W79`) holdings | Tracks EURO STOXX 50 by construction | iShares product pages advertise "Download Holdings"/"Detailed Holdings and Analytics" — **the exact download URL was not successfully verified live in this pass** (a direct fetch attempt returned HTTP 403, likely bot-blocking rather than a real access restriction — unresolved, not asserted either way) | Presumably ISIN/ticker/weight, matching the pattern IWV/XIC already expose | **RESEARCH_ONLY** — real, promising, precedented candidate; URL discovery is concrete follow-up work, same kind of work already done twice for Russell 3000 and TSX in this exact codebase |
-| **iShares STOXX Europe 600 UCITS ETF (DE)** (ISIN `DE0002635307`, ticker `EXSA`) holdings | Tracks STOXX Europe 600 | Same as above | Same as above | **RESEARCH_ONLY**, same caveat |
-| **Wikipedia "STOXX Europe 600" article** | Partial, unclear if complete | Free, `pd.read_html`-compatible in principle (same mechanism as `fetch_sp500()`) | Ticker, company name, ICB sector, country (per what was visible) | **RESEARCH_ONLY** — a live fetch this session returned what appeared to be a partial/truncated table; genuinely unclear whether the underlying Wikipedia article has the full ~600-row table or whether the fetch tool's own summarization cut it off. **Not confirmed either way — flagged honestly, not asserted as incomplete.** A follow-up pass should fetch and count rows directly (e.g. via `pd.read_html`) rather than a summarized web fetch. |
+| **STOXX `CurrentComponents` PDF** (`stoxx.com/document/Bookmarks/CurrentComponents/{SYMBOL}.pdf`) — a **separate, free** resource from the row above, discovered in the follow-up pass | Same index definitions | **RESOLVED: free, no login** — verified live, HTTP 200, real PDF, no auth wall | Company name, supersector, country, weight — **no ticker/ISIN/MIC** | **RESEARCH_ONLY** — free and automatable, but the PDF's own metadata shows `ModDate: 2023-07-12`, a real, unresolved freshness concern despite the "Current" naming |
+| **iShares Core EURO STOXX 50 UCITS ETF** (ISIN `IE00B53L3W79`) holdings | Tracks EURO STOXX 50 by construction | **RESOLVED: blocked** — the follow-up pass tested the documented legacy `.ajax?fileType=csv\|json` pattern directly with multiple parameter variants; the current `ishares.com/uk/...` site is an Astro-built SPA that does not expose a working static endpoint this way | Presumably ISIN/ticker/weight, matching the pattern IWV/XIC already expose, but not reachable | **UNAVAILABLE** (this pass) — not merely unresolved; a real negative result |
+| **iShares STOXX Europe 600 UCITS ETF (DE)** (ISIN `DE0002635307`, ticker `EXSA`) holdings | Tracks STOXX Europe 600 | Same as above — confirmed blocked | Same as above | **UNAVAILABLE** (this pass) |
+| **Wikipedia "STOXX Europe 600" article** | Partial | **RESOLVED via direct `pd.read_html`**: exactly **467 rows** (not ~600), columns `Ticker, Company, ICB Sector, Country, Headquarters` | Ticker, company name, sector, country (no ISIN/MIC) | **Confirmed incomplete** relative to the real 600-constituent index — not a viable sole universe source |
 | **Euronext's own market-data portal** | Euronext-listed instruments (Paris/Amsterdam/Milan/Brussels/Lisbon/Dublin) | No public CSV/API endpoint found in this pass; portal points to a commercial "Data Shop" | Unknown | **RESEARCH_ONLY** — not ruled out, but no free automated path found live |
 | **National exchange/regulator security-master files** (BME, Borsa Italiana, AMF, AFM) | Per-country | Not investigated in this pass — real candidate, out of time budget this session | Unknown | **RESEARCH_ONLY**, unexplored |
 
-**Conclusion**: no single free, complete, current, machine-readable "the European universe"
-source was found and verified live. The most promising path, by direct analogy to this
-project's own two already-solved cases (Russell 3000, TSX Composite), is an ETF's own
-disclosed holdings — but the exact mechanism needs the same kind of hands-on discovery work
-`fetch_tsx_composite()`'s own comment documents having done for XIC. This is real,
-unfinished, and honestly reported as such — not something to paper over with an assumption.
+**Conclusion**: the STOXX `CurrentComponents` PDF is a real, free, verified 600-row source —
+company-name/country/sector/weight only, no ticker/ISIN/MIC — bridgeable to a `(ticker, MIC)`
+candidate via `Country → curated MIC table → OpenFIGI name+micCode search`, proven live for two
+new candidates (Iberdrola, Saint Gobain — see the follow-up doc). Its one serious unresolved
+issue is data freshness. The iShares ETF route, by contrast, is a confirmed dead end for this
+pass, not merely unexplored — the hands-on discovery work that succeeded for Russell 3000 (a
+BlackRock varnish-api endpoint) and TSX Composite (a plain CSV path) does not have a working
+analog on the current, Astro-rebuilt `ishares.com` UK site, at least not one found via a direct
+HTTP approach. This is real, reported honestly — not papered over with an assumption that "it
+must work the same way" just because it worked twice before for other BlackRock products.
 
 ## 5. Identity-source options — LEI resolution (the strongest finding this pass)
 
@@ -256,6 +282,14 @@ candidate listing (ticker, MIC, ISIN)
 ADMITTED   REJECTED (or MANUAL_REVIEW)
 ```
 
+**Terminology note (kept explicit, per review)**: everything above the `filings.xbrl.org` step
+is *identity resolution* ("we know exactly which issuer/listing this is"); the ESEF check itself
+is a separate *fundamentals-eligibility* gate ("this issuer currently has usable ESEF data"). A
+`NO` outcome here does not mean the candidate's identity was invalid — it means a successfully
+identified issuer isn't currently ingestible through `EU_CURRENT`. Generation-1 still resolves
+that to a practical `REJECTED` (see §19's fuller treatment of this distinction), but the two
+concepts are not the same thing and the model doesn't conflate them.
+
 This is a direct generalization of exactly what Phase 5.1's `select_filing_for_period` already
 does per-filing — applied once, at admission time, per candidate. **Not every European listed
 company will have an ESEF filing** — ESEF only applies to EU-regulated-market issuers filing
@@ -360,80 +394,133 @@ worth noting the existing US/CA precedent (full recompute every scheduled run, n
 is a reasonable Generation-1 default for Europe too, since the universe-source problem (§4)
 isn't solved yet regardless.
 
-## 19. Pilot validation — the proposed mechanism, run conceptually against all 4 real pilots
+## 19. Pilot validation — the full chain, independently re-derived end to end for all 4 pilots
+
+**Updated after review**: the first pass of this research isolated the exact equity ISIN only
+for FCC and reused Phase 5.1's already-known LEI for the other three. A follow-up pass closed
+that gap — the full chain (`ticker+MIC → OpenFIGI → equity ISIN → GLEIF → LEI`) was independently
+re-run for all four, and a real bug was found and fixed along the way (see the note below the
+table).
 
 | | FCC | Alstom | New Amsterdam Invest | Fincantieri |
 |---|---|---|---|---|
-| Candidate (ticker, MIC) | `FCC`, `XMAD` | `ALO`, `XPAR` | `NAI`, `XAMS` | `FCT`, `MTAA`* |
-| OpenFIGI resolves to | 1 match, Common Stock (confirmed live, `EO`-family codes) | 1 match, Common Stock (confirmed live, `FP`) | 1 match, Common Stock (confirmed live, `NA`) | not queried with MIC=`MTAA` specifically (OpenFIGI uses Bloomberg exchange codes, not raw ISO MICs — see note below); `IM`-coded match confirmed live |
-| ISIN (from GLEIF's LEI→ISIN set) | `ES0122060314` (equity, ES-prefixed — high confidence) | one of 15 candidates (equity ISIN not independently isolated this pass — §6 gap) | one of 2 NL-prefixed candidates (not independently isolated) | one of 2 IT-prefixed candidates (not independently isolated) |
-| LEI (GLEIF ISIN→LEI, reverse-confirmed for FCC) | `95980020140005178328` ✓ | `96950032TUYMW11FB530` (already known, reverse direction not re-tested per-pilot) | `724500JXEXUGEATP5L52` (same) | `8156005BDF49128B6239` (same) |
+| Candidate (ticker, MIC) | `FCC`, `XMAD` | `ALO`, `XPAR` | `NAI`, `XAMS` | `FCT`, `MTAA` |
+| OpenFIGI `micCode` query result | 1 match, Common Stock — **verified live** | 1 match, Common Stock — **verified live** | 1 match, Common Stock — **verified live** | 1 match, Common Stock — **verified live** |
+| Equity ISIN (isolated via OpenFIGI `ID_ISIN` reverse lookup against GLEIF's LEI→ISIN candidate set) | `ES0122060314` | `FR0010220475` | `NL0015000CG2` | `IT0005599938` |
+| LEI (GLEIF `ISIN → LEI` reverse lookup, independently re-derived) | `95980020140005178328` ✓ matches Phase 5.1 | `96950032TUYMW11FB530` ✓ matches Phase 5.1 | `724500JXEXUGEATP5L52` ✓ matches Phase 5.1 | `8156005BDF49128B6239` ✓ matches Phase 5.1 |
 | ESEF entity exists | Yes — real, 5 filings | Yes — real, 4 filings | Yes — real, 4 filings (incl. amendment) | Yes — real, 5 filings (incl. amendment + 1 unusable) |
 | Admission result | **ADMITTED** | **ADMITTED** | **ADMITTED** | **ADMITTED** |
 
-**The design recovers the identity already manually verified for all four pilots on the parts
-independently re-tested live this session** (OpenFIGI ticker+MIC resolution, GLEIF LEI record
-lookup, and — for FCC specifically — the full ISIN↔LEI round trip). **Honest gap**: the
-*exact* equity ISIN was only independently isolated end-to-end for FCC; for the other three,
-this pass relied on the already-known LEI (from Phase 5.1) rather than re-deriving it from a
-bare ticker+MIC through the full OpenFIGI→ISIN→GLEIF chain — re-running that full chain for
-all four, and confirming it lands on the SAME LEI Phase 5.1 already used, is flagged as the
-natural first implementation-validation step for Phase 5.3, not claimed as already done here.
+**LIVE TEST RESULT — the design independently reproduces Phase 5.1's own manually-verified
+identity for all four pilots**, not assumed, not reused. Every LEI in the table above was
+derived *from the candidate's ticker+MIC alone* (via OpenFIGI → ISIN → GLEIF), then compared
+against — never seeded from — the LEI Phase 5.1 already used.
 
-*Note on MIC vs. Bloomberg exchange codes*: OpenFIGI's `micCode` parameter accepts real ISO
-10383 MICs and worked directly for `XPAR`/`XAMS` (confirmed live) — Milan's `MTAA` specifically
-was not re-tested with the `micCode` parameter in this pass (only the bare-ticker global query,
-which surfaced the real collision in §8); the `MTAA` vs `XMIL` distinction from ADR-0010 should
-be re-verified against OpenFIGI's own `micCode` filter in a follow-up, not assumed to behave
-identically to Madrid/Paris/Amsterdam without checking.
+**A real bug found and fixed in the process, worth recording precisely**: the first attempt at
+this table found Alstom's GLEIF `LEI → ISIN` response contained exactly 15 ISINs, none of them
+the real equity — because **GLEIF's API paginates at 15 results per page by default**, and
+Alstom (a frequent bond issuer) actually has 36 ISINs under its LEI. Re-fetching with
+`page[size]=50` surfaced the 36th entry, `FR0010220475`, which OpenFIGI confirmed is exactly
+Alstom's real `XPAR:ALO` Common Stock (same FIGI, `BBG000DQ7884`, as the direct ticker+MIC
+query), and GLEIF's reverse `ISIN → LEI` lookup on it returned exactly the expected LEI. This is
+a real, general implementation risk for any future admission code: **any GLEIF `isins`
+relationship call must handle pagination explicitly** — a naive single-page fetch silently
+produces incomplete (and, for a bond-heavy issuer, potentially equity-free) results, exactly the
+kind of "ambiguity → guess" failure mode this whole architecture exists to prevent, now caught
+concretely rather than theoretically.
+
+**MIC verification — now fully confirmed, all four, via a third independent source**: OpenFIGI's
+`micCode` parameter was tested directly against every project MIC. `XMAD` (FCC), `XPAR` (Alstom),
+`XAMS` (New Amsterdam Invest), and **`MTAA` (Fincantieri)** all resolve correctly to the expected
+Common Stock instrument. The corresponding *operating* MICs were also tested as a negative
+control: `BMEX` and `XMIL` both returned `"warning": "No identifier found."` — OpenFIGI does not
+recognize either operating MIC for these tickers, an independent, third-source reinforcement of
+ADR-0010's segment-MIC decision (not merely "not contradicted" — actively confirmed).
+
+### Identity resolution vs. fundamentals eligibility (kept explicit, per review)
+
+The table above conflates two concepts for brevity that the underlying model keeps separate:
+**identity resolution** ("we know exactly which issuer/listing this is" — the `ticker+MIC →
+OpenFIGI → ISIN → GLEIF → LEI` chain) is complete and successful for all four pilots regardless
+of ESEF availability. **Fundamentals eligibility** ("this issuer currently has usable ESEF data
+for `EU_CURRENT`" — the `filings.xbrl.org` check) is a separate, later question. A candidate
+that clears identity resolution but fails the ESEF check (e.g. a real German or Irish company,
+per §17's confirmed `filings.xbrl.org` coverage gap) has a fully valid, confirmed identity — it
+is `NOT_INGESTIBLE`, not an invalid or rejected identity. Generation-1's practical admission gate
+(§15) still treats that as a terminal `REJECTED` state for this pipeline's purposes (there is no
+use, today, in carrying forward an issuer with no ingestible data), but the state machine's
+naming (`NO_ESEF_ENTITY`/`NO_USABLE_FILING`, distinct from `IDENTITY_AMBIGUOUS`/`NO_LEI`) already
+reflects this distinction, and a future source covering more countries could re-admit the same,
+already-identified issuer without repeating identity resolution.
 
 ## 20. Source accessibility matrix
 
 | Source | Purpose | Authority | API? | Auth needed | Rate limit | Verified live this session |
 |---|---|---|---|---|---|---|
 | GLEIF | LEI record + ISIN↔LEI mapping | The official LEI-issuing federation (authoritative by definition) | Yes, REST, JSON:API-shaped | No | Not hit in this session's light usage | **Yes** — both directions, real pilot data |
-| OpenFIGI | Ticker+MIC → security-typed instrument | Bloomberg (industry-standard open symbology, not a government body but widely relied upon) | Yes, REST | No (key optional, raises rate limit) | 5,000/day unauthenticated, 50,000/day with free key (per OpenFIGI's own docs, not independently load-tested) | **Yes** — real pilot + real collision data |
+| OpenFIGI | Ticker+MIC → security-typed instrument reference | Bloomberg (industry security-reference/symbology source — **not** a legal or regulatory authority over identity, unlike GLEIF; see the terminology note in ADR-0011) | Yes, REST | No (key optional, raises rate limit) | **Directly observed live**: `ratelimit-policy: 25;w=60` header (25 requests/60s) on the unauthenticated `/v3/mapping` endpoint; batch jobs additionally capped at 10 per request (`HTTP 413` on an 11+ job batch, confirmed live). OpenFIGI's own docs separately claim 5,000/day unauthenticated / 50,000/day with a free key — that daily figure was not independently load-tested, only the per-minute header was directly confirmed. | **Yes** — real pilot + real collision data |
 | ISO 20022 / ESMA FIRDS (MIC registry) | Authoritative MIC codes | ISO / ESMA (official standards bodies) | CSV download | No | N/A | Reused from Phase 5.0's own prior verification, not re-fetched this pass |
 | `filings.xbrl.org` | ESEF entity/filing confirmation | XBRL International (aggregator, not the regulator) | Yes, JSON:API | No | Not documented publicly; not hit hard enough in Phase 5.1/5.2 to surface one | **Yes** — extensively, Phase 5.1 |
-| STOXX official selection lists | Index constituent source | STOXX (the index provider itself — authoritative) | PDF/Excel per their site, license-gated | **Yes — paid Third-Party Data License** | N/A | **Yes** (confirmed the paywall, not the data) |
-| iShares ETF holdings (EURO STOXX 50 / STOXX 600 trackers) | Free proxy for index membership | Indirect (the ETF issuer, not STOXX itself) | Unclear — page references a download feature, exact URL not resolved | Unknown | Unknown | **Partially** — product pages found real; exact holdings-download URL not confirmed (403 on direct fetch) |
-| Wikipedia (STOXX Europe 600 article) | Free proxy for index membership | Community-maintained, not authoritative | HTML table, `pd.read_html`-compatible in principle | No | N/A | **Partially** — page exists, full-table completeness unconfirmed |
+| STOXX official selection lists (portal) | Index constituent source | STOXX (the index provider itself — authoritative) | PDF/Excel per their site, license-gated | **Yes — paid Third-Party Data License** | N/A | **Yes** (confirmed the paywall, not the data) |
+| STOXX `CurrentComponents` PDF (separate free resource) | Index constituent source | STOXX (same provider, different resource) | Direct PDF GET, no login | No | N/A | **Yes** — full detail in the follow-up doc: real 600-row STOXX Europe 600 list parsed, `ModDate` freshness concern found |
+| iShares ETF holdings (EURO STOXX 50 / STOXX 600 trackers) | Free proxy for index membership | Indirect (the ETF issuer, not STOXX itself) | N/A — confirmed unreachable | N/A | N/A | **Yes, confirmed blocked** — see the follow-up doc §2/§3 for the specific negative test results (multiple magic-number/parameter variants tried, all failed) |
+| Wikipedia (STOXX Europe 600 article) | Free proxy for index membership | Community-maintained, not authoritative | HTML table, `pd.read_html`-compatible | No | N/A | **Yes** — confirmed via direct `pd.read_html`: 467 rows, not ~600, no ISIN/MIC |
 | Euronext data portal | Instrument reference data | Euronext (the exchange itself) | Points to a commercial Data Shop | Likely yes for anything beyond marketing pages | N/A | **No** — no free path found |
 
 ## 21. Recommended Generation-1 architecture
 
 ```
- Universe Source                         Identity Resolution                    Admission Gate
-┌──────────────────┐                    ┌──────────────────────┐              ┌─────────────────┐
-│  ETF holdings     │  ticker, MIC       │ OpenFIGI              │   LEI        │ filings.xbrl.org │
-│  (EURO STOXX 50 / │ ─────────────────► │ (ticker,MIC)→ISIN,    │ ───────────► │ /api/entities/   │
-│  STOXX 600        │  candidate         │ security type check   │              │ {LEI}/filings    │
-│  tracker, TBD      │  listing           │       │               │              │       │           │
-│  which exact ETF/  │                    │       ▼               │              │       ▼           │
-│  URL — see §4/§20) │                    │ GLEIF ISIN→LEI        │              │  ADMITTED /      │
-└──────────────────┘                    │ (cross-check LEI→ISIN │              │  REJECTED         │
-                                          │  set contains it)     │              └─────────────────┘
-                                          └──────────────────────┘
+ Universe Source                    MIC Derivation      Identity Resolution              Admission Gate
+┌────────────────────┐            ┌───────────────┐   ┌──────────────────────┐        ┌─────────────────┐
+│ STOXX               │  company   │ Country (from │   │ OpenFIGI              │  LEI   │ filings.xbrl.org │
+│ CurrentComponents    │  name +    │ STOXX PDF) -> │──►│ name+micCode search   │───────►│ /api/entities/   │
+│ PDF (free, no login, │  country   │ curated MIC   │   │ -> exactly one Common │        │ {LEI}/filings    │
+│ 600 rows verified —  │───────────►│ table         │   │ Stock instrument      │        │       │           │
+│ freshness UNRESOLVED,│            └───────────────┘   │       │               │        │       ▼           │
+│ ModDate 2023-07)      │                                │       ▼               │        │  ADMITTED /      │
+└────────────────────┘                                │ GLEIF ISIN->LEI        │        │  NOT_INGESTIBLE   │
+                                                          │ (via OpenFIGI ID_ISIN  │        └─────────────────┘
+                                                          │  reverse + GLEIF       │
+                                                          │  ISIN->LEI)            │
+                                                          └──────────────────────┘
 ```
 
-This is the target diagram from the brief (§23), confirmed **architecturally sound** by this
-session's live testing of every link except the leftmost box (universe source — the one piece
-genuinely unresolved). Recommend: (1) treat universe-source discovery (the exact free ETF
-holdings URL, or an equivalent) as its own, narrowly-scoped follow-up research task before any
-implementation phase, mirroring the hands-on discovery work already done for IWV/XIC; (2)
-everything right of "Candidate Listing" in the diagram is ready to prototype against real data
-whenever that's authorized, since GLEIF/OpenFIGI/filings.xbrl.org are all confirmed live,
-free, and unauthenticated.
+This **updates** the brief's original target diagram (§23) — the original assumed ETF holdings
+as the universe box; that box is confirmed non-working this pass (see the follow-up doc), and
+the corrected diagram above was **live-tested end to end for two genuinely new candidates**
+(Iberdrola, Saint Gobain — not the four already-known pilots), with Saint Gobain's chain fully
+completed through to 4 real, clean `filings.xbrl.org` filings. The one still-open piece is the
+leftmost box's data freshness, not a missing or unverified link in the chain itself. Recommend:
+(1) resolve the STOXX PDF freshness question before relying on it in any implementation; (2)
+everything right of the Universe Source box is ready to prototype against real data whenever
+that's authorized, since GLEIF/OpenFIGI/filings.xbrl.org are all confirmed live, free, and
+unauthenticated, and the name+MIC bridge is now proven, not merely proposed.
 
 ## 22. Open questions
 
-- Exact, verified free download mechanism for a European index-tracking ETF's holdings (§4, §20).
-- Whether Wikipedia's STOXX Europe 600 article actually has a complete constituent table (§4) —
-  needs a direct `pd.read_html` row-count check, not another summarized web fetch.
-- The precise ISIN-to-equity-instrument isolation step for issuers with many ISINs (§6) — likely
-  an OpenFIGI reverse `ID_ISIN` lookup per GLEIF-supplied candidate, not yet implemented/tested.
-- Whether `MTAA` (vs `XMIL`) behaves correctly as an OpenFIGI `micCode` filter value (§19 note) —
-  not re-tested this pass.
+**Resolved by the follow-up pass** (kept here, struck through, so the review trail is visible
+rather than silently deleted):
+- ~~Exact, verified free download mechanism for a European index-tracking ETF's holdings~~ —
+  investigated in depth; found **blocked** (a real negative result, not a positive one) — see
+  [phase5-2b-european-universe-source-validation.md](phase5-2b-european-universe-source-validation.md).
+- ~~Whether Wikipedia's STOXX Europe 600 article actually has a complete constituent table~~ —
+  **resolved: no**, confirmed via direct `pd.read_html` — exactly 467 rows, not ~600, and no
+  ISIN/exchange columns. See the same doc.
+- ~~The precise ISIN-to-equity-instrument isolation step for issuers with many ISINs~~ —
+  **resolved**: OpenFIGI reverse `ID_ISIN` lookup against GLEIF's candidate set, tested and
+  working for all 4 pilots (§19).
+- ~~Whether `MTAA` (vs `XMIL`) behaves correctly as an OpenFIGI `micCode` filter value~~ —
+  **resolved: yes**, `MTAA` works, `XMIL`/`BMEX` (operating MICs) correctly return no result (§19).
+
+**Still open**:
+- The real, free STOXX "CurrentComponents" PDF's own freshness (`ModDate` July 2023 despite the
+  "Current" naming) — not resolved; a production admission layer cannot trust this source's
+  currency without further verification (a periodic re-check, or comparing against a second
+  source) — see the new doc §5/§15 for detail.
+- Bridging the STOXX PDF's company name (no ticker/ISIN) to a `(ticker, MIC)` candidate — OpenFIGI
+  name search was tested and found genuinely ambiguous on its own (many results per company name
+  across markets/currencies); combining it with the PDF's own `Country` column via a small,
+  curated country→primary-MIC table is the leading idea, not implemented or tested end-to-end.
 - GLEIF's real-world ISIN-to-LEI coverage limits for markets/instruments beyond the 4 already-
   verified pilots — the "early mover national numbering agencies" caveat in GLEIF's own
   documentation was not stress-tested against a genuinely obscure or newly-issued security.
@@ -442,6 +529,10 @@ free, and unauthenticated.
 - How `MANUAL_REVIEW` should actually be operationalized (a queue? a config file? a Delta
   table?) if the state machine (§15) ever needs it for real — no case requiring it was found
   this session, so its concrete mechanism wasn't designed.
+- Whether GLEIF's pagination default (15/page, discovered via the Alstom bug, §19) affects any
+  other GLEIF endpoint used elsewhere in this research — only the `isins` relationship endpoint
+  was stress-tested for this; the base `lei-records` lookups were not similarly checked because
+  they return a single record, not a list.
 
 ## 23. Explicit non-goals (this pass)
 

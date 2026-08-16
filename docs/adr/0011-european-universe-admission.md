@@ -44,27 +44,55 @@ Candidate Listing (ticker, MIC)
   ADMITTED  ->  listing_id = MIC:TICKER, issuer_id = EU_CURRENT:LEI
 ```
 
-Both `GLEIF` (`api.gleif.org`) and `OpenFIGI` (`api.openfigi.com`) are adopted as the
-authoritative, automatable identity sources — verified live this session, free, unauthenticated,
-and directly tested against all four real pilot issuers (GLEIF resolved FCC's ISIN to its real
-LEI and back; OpenFIGI resolved all four pilots' `(ticker, MIC)` pairs to correctly-typed,
-single-match equity instruments, and independently surfaced two genuine ticker collisions —
-`FCC` also matches an unrelated Vietnamese company, `FCT` matches at least five other unrelated
-companies globally). This closes the identity-resolution gap the Phase 5.0 identity model
-(`issuer_id`/`listing_id`) needed but did not itself specify a source for.
+`GLEIF` (`api.gleif.org`) is adopted as the **authoritative identifier source** — it is the LEI
+system's own official issuing federation, the legal authority for LEI↔ISIN relationships, not
+an industry convention. `OpenFIGI` (`api.openfigi.com`) is adopted as the **industry security-
+reference / instrument-resolution source** — a widely-relied-upon, free, Bloomberg-run open
+symbology service, useful and independently verified, but not a legal or regulatory authority
+over instrument identity the way GLEIF is over LEI. This distinction is deliberate: the
+architecture leans on GLEIF for the identity claim itself and on OpenFIGI only to resolve which
+specific instrument/ISIN a `(ticker, MIC)` pair refers to.
 
-The `filings.xbrl.org` ESEF-entity-and-filing-existence check becomes the final admission gate,
-not merely a downstream ingestion step — a candidate that resolves to a real LEI but has no
-usable ESEF filing is correctly `REJECTED`, not admitted with an expectation that ingestion will
-silently fail later.
+Both were verified live this session, free, unauthenticated, and directly tested against all
+four real pilot issuers — **the full chain, `(ticker, MIC) → OpenFIGI → equity ISIN → GLEIF →
+LEI`, is now confirmed end-to-end for all four**, not just FCC as an initial pass first found:
+Alstom required discovering and fixing a real bug in that first pass (GLEIF paginates
+`LEI → ISIN` results at 15/page by default, and Alstom's 36 real ISINs were silently truncated
+to 15, none of which was the actual equity — refetching with a larger page size surfaced
+`FR0010220475`, confirmed via OpenFIGI as Alstom's real `XPAR:ALO` Common Stock, and confirmed
+via GLEIF's reverse `ISIN → LEI` lookup to resolve to the exact same LEI already known from
+Phase 5.1). New Amsterdam Invest and Fincantieri's real equity ISINs (`NL0015000CG2`,
+`IT0005599938`) were isolated the same way and both independently reproduced their already-known
+Phase 5.1 LEIs exactly. OpenFIGI's `micCode` parameter was also directly tested against `MTAA`
+(works, resolves Fincantieri correctly) and `XMIL` (returns no result) — independent, third-
+source confirmation of ADR-0010's segment-MIC decision, alongside the same result for
+`XMAD`/`BMEX` and `XPAR`/`XAMS`.
+
+The `filings.xbrl.org` ESEF-entity-and-filing-existence check becomes the final Generation-1
+**fundamentals-eligibility** gate — deliberately kept distinct from **identity resolution**. A
+candidate that resolves to a real, confirmed LEI but has no usable ESEF filing has had its
+*identity* successfully established (`IDENTITY_RESOLVED`) — it is simply not currently
+*ingestible* through `EU_CURRENT` (`NOT_INGESTIBLE` / `NO_ESEF_ENTITY` / `NO_USABLE_FILING`).
+For this project's purposes (a fundamentals pipeline with no use for an issuer it can never
+source data for), Generation-1 still treats that outcome as a practical `REJECTED` rather than
+carrying an identified-but-dataless entity forward — but the two concepts are not conflated in
+the model itself, and a future source (e.g. covering Germany/Ireland) could re-admit the same,
+already-identified issuer without redoing identity resolution from scratch.
 
 **Explicitly not decided by this ADR**: which universe source supplies the initial candidate
-`(ticker, MIC)` list. STOXX's own official constituent lists require a paid license (verified
-live); an ETF-holdings-as-free-proxy approach (mirroring this project's own existing Russell
-3000/TSX Composite precedent) is the leading candidate but its exact, working download
-mechanism was not verified live in this pass. This remains open (see the research doc §4/§21/§22)
-and is not blocking acceptance of the identity-resolution decision above, which stands on its
-own regardless of which universe source eventually feeds it candidates.
+`(ticker, MIC)` list. A follow-up research pass
+([docs/phase5-2b-european-universe-source-validation.md](../phase5-2b-european-universe-source-validation.md))
+found STOXX's own official constituent lists require a paid license for the interactive
+"selection-lists" portal, but a **separate, free, no-login "CurrentComponents" PDF** exists at
+`stoxx.com/document/Bookmarks/CurrentComponents/{SYMBOL}.pdf` with real, complete data (STOXX
+Europe 600's PDF has exactly 600 rows) — company name, country, sector, weight, but **no
+ticker/ISIN/MIC**, and its own PDF metadata shows a `ModDate` of July 2023 despite the
+"Current" in its name, a real, unresolved freshness concern. The iShares ETF-holdings route
+(mirroring this project's Russell 3000/TSX Composite precedent) was tested directly and found
+blocked: the legacy `.ajax?fileType=csv`/`json` scraping pattern documented in public tooling no
+longer works against the current (Astro-based SPA) `ishares.com` UK site. Neither gap is
+resolved by this ADR — the identity-resolution decision above stands on its own regardless of
+which universe source eventually supplies candidates.
 
 ## Consequences
 
