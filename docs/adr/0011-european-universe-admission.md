@@ -129,6 +129,42 @@ None of this is implemented by this ADR or by the phase5-2c research itself — 
 identity-resolution decision above stands on its own regardless, and the universe-source
 decision remains a separate, future implementation phase, not decided here.
 
+**Updated by a fourth follow-up pass**
+([docs/phase5-2d-firds-primary-listing-and-identity-model.md](../phase5-2d-firds-primary-listing-and-identity-model.md)),
+a small, narrowly-scoped pass resolving two of phase5-2c's four open conditions and performing
+two lightweight due-diligence checks the repo owner asked for alongside them:
+
+- **Primary-venue selection — now SOLVED, not just designed.** `TradgVnRltdAttrbts/IssrReq =
+  true`, tie-broken by earliest `TradgVnRltdAttrbts/FrstTradDt`, resolves all four pilots with no
+  remaining ambiguity — including two real ties found in the live data (FCC: `XMAD` vs. the
+  Madrid group's own dark-midpoint segment `DMAD`; Fincantieri: `MTAA` vs. a newly-admitted
+  Italian MTF `HMTF`), both correctly broken in favor of the already-established Phase 5.1 MIC.
+  This rule is documented, not yet implemented in code, and was validated against only two real
+  tie cases — flagged in phase5-2d as needing a broader sample before production use.
+- **CFI classification — now confirmed from ESMA's own reference, not only ISO 10962 public
+  documentation.** ESMA70-145-1090 ("FIRDS CFI validations," a real, versioned workbook
+  downloaded and independently parsed) lists the `ES` prefix under its "Equities" classification
+  group — the same conclusion Phase 5.2c already reached from public ISO 10962 docs and the four
+  pilots' own observed values, now independently corroborated by ESMA's own published validation
+  grid. That grid's own Notes sheet states it is derived from ISO 10962:2015 — ESMA is not an
+  independent CFI authority, a real and now explicitly documented distinction.
+- **`listing_id` keying (`MIC:TICKER` vs. `MIC:ISIN`) — investigated, deliberately not decided.**
+  FIRDS' own `RefData` schema has no ticker field at all; its natural composite key, as observed
+  directly in the data, is `(ISIN, MIC)`. This is real evidence that `MIC:ISIN` would be the
+  better fit for an ISIN-native universe source, consistent with this project's own existing
+  `(ticker, market)` — not bare-ticker — identity precedent (`identity.py`). Per explicit
+  instruction, this ADR and ADR-0010 are **not** amended by this finding — phase5-2d recommends
+  resolving the question before a future phase implements FIRDS-based universe discovery, not
+  before this ADR is accepted, since ADR-0011 was already explicitly silent on universe-source
+  mechanics by design.
+- **FIRDS terms of use — lightweight check only, not a legal review.** ESMA's general
+  reproduction/reuse policy (source-attributed reproduction authorised, no commercial-use
+  prohibition found) applies; no FIRDS-specific stricter terms were found.
+
+This pass leaves phase5-2c's remaining two conditions (only the Equity CFI class investigated;
+primary-venue rule validated on 4 pilots / 2 tie cases only, not a broad sample) as still-open,
+explicitly acknowledged limitations — not silently resolved.
+
 ## Consequences
 
 **Easier**: a future admission-layer implementation phase has a concrete, live-tested chain to
