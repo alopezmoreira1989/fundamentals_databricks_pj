@@ -51,6 +51,17 @@ import pyspark.sql.functions as F
 import pyspark.sql.types as T
 from pyspark.sql.window import Window
 
+# Same reinstall-on-ImportError pattern as 11__fetch_sec_xbrl.py — this notebook has no
+# guarantee of a shared session install when run standalone or as its own Databricks Job task.
+try:
+    from fundamentals_pipeline.write_safety import UnsafeOrphanDeleteError, assert_orphan_delete_safe
+except ImportError:
+    import subprocess
+    import sys
+
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "-e", "../.."])
+    from fundamentals_pipeline.write_safety import UnsafeOrphanDeleteError, assert_orphan_delete_safe
+
 # CONTRACT: the currency-conversion arithmetic below (native Spark F.when/multiply) mirrors
 # fundamentals_pipeline/fx.py's convert_price() scalar semantics — no-op when currencies
 # match, multiply by rate otherwise, never guess a missing rate. fx.py is the pure reference
@@ -1141,6 +1152,24 @@ if len(iv_pdf):
               AND COALESCE(s.fiscal_year, -1) = COALESCE(t.fiscal_year, -1)
               AND s.method = t.method AND s.scenario = t.scenario)
     """).count()
+
+    # Structural guard (2026-08-16 incident, docs/phase5-6-european-dashboard-data-integration.md
+    # §10): scoping to iv_processed_tickers already prevents this cleanup from touching tickers
+    # not recomputed this run, but it doesn't protect against an upstream dependency (e.g.
+    # market_prices_daily) coming back anomalously empty for tickers that WERE recomputed —
+    # every method/scenario for every such ticker would look like a legitimate orphan and be
+    # deleted in one pass. Sanity check the blast radius before committing.
+    _iv_before = spark.table(iv_tbl).count()
+    try:
+        assert_orphan_delete_safe(n_orphan_iv, _iv_before)
+    except UnsafeOrphanDeleteError as _e:
+        raise RuntimeError(
+            f"Refusing the orphan cleanup on {iv_tbl}: it {_e}. This usually means an "
+            f"upstream dependency came back anomalously empty/narrow this run. See "
+            f"docs/phase5-6-european-dashboard-data-integration.md §10. Investigate before "
+            f"re-running — do not bypass this check without understanding why the count is high."
+        ) from _e
+
     spark.sql(f"""
         MERGE INTO {iv_tbl} AS t
         USING (
@@ -1302,6 +1331,33 @@ if exposed_frames:
         ] + ["Owner Earnings (FY)", "Owner Earnings (TTM)",
              "P/E (TTM, live)", "P/B (TTM, live)", "EV/EBITDA (TTM, live)"]
         _iv_labels_sql = ", ".join("'" + lbl.replace("'", "''") + "'" for lbl in _iv_labels)
+
+        # Structural guard (2026-08-16 incident, docs/phase5-6-european-dashboard-data-integration.md
+        # §10) — same rationale as 8b's guard above, scoped to just the IV-owned labels this
+        # cleanup touches (comparing against the WHOLE financials_metrics table, which also holds
+        # 22's own base/val metrics, would never trip a meaningful percentage here).
+        _iv_metrics_before = spark.sql(f"""
+            SELECT COUNT(*) AS n FROM {metrics_tbl} WHERE metric IN ({_iv_labels_sql})
+        """).collect()[0]["n"]
+        _iv_metrics_would_delete = spark.sql(f"""
+            SELECT COUNT(*) AS n
+            FROM {metrics_tbl} t
+            JOIN iv_processed_tickers p ON t.ticker = p.ticker
+            WHERE t.metric IN ({_iv_labels_sql})
+              AND NOT EXISTS (
+                SELECT 1 FROM incoming_iv_metrics s
+                WHERE s.ticker = t.ticker AND s.{year_col} = t.{year_col}
+                  AND s.metric = t.metric)
+        """).collect()[0]["n"]
+        try:
+            assert_orphan_delete_safe(_iv_metrics_would_delete, _iv_metrics_before)
+        except UnsafeOrphanDeleteError as _e:
+            raise RuntimeError(
+                f"Refusing the IV-label orphan cleanup on {metrics_tbl}: it {_e}. See "
+                f"docs/phase5-6-european-dashboard-data-integration.md §10. Investigate before "
+                f"re-running — do not bypass this check without understanding why the count is high."
+            ) from _e
+
         spark.sql(f"""
             MERGE INTO {metrics_tbl} AS t
             USING (

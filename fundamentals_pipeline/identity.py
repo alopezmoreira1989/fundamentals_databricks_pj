@@ -63,6 +63,13 @@ class CrossMarketCollisionError(Exception):
 # gate in 00__config/02__tickers_master.py.
 _SEC_DISAMBIGUATION_TAG = re.compile(r"/[A-Z0-9]+/")  # SEC EDGAR tags: /CAN/, /ON/, /NEW/
 _PUNCTUATION = re.compile(r"[.,'&]")
+_HYPHEN = re.compile(r"-")  # 2026-08-16: real Yahoo/FIRDS mismatch on Saint-Gobain —
+# "Compagnie de Saint-Gobain S.A." vs FIRDS' "SAINT GOBAIN" tokenized to zero overlap because
+# the hyphen kept "SAINT-GOBAIN" as one token matching neither "SAINT" nor "GOBAIN" — see
+# docs/phase5-6-european-dashboard-data-integration.md §10/§7. Replaced with a SPACE, not
+# deleted like `_PUNCTUATION` above — deleting it would merge "SAINT-GOBAIN" into
+# "SAINTGOBAIN" (one word), the opposite of the intended fix; a hyphen in a company name
+# separates two words, it doesn't just decorate one.
 _CLASS_QUALIFIER = re.compile(r"\bCLASS\s*[A-Z]\b")
 _SUBORDINATE_VOTING = re.compile(r"\bSUBORDINATE\s+VOT\w*\b")
 _NONVOTING = re.compile(r"\bNON[\s-]?VOT\w*\b")
@@ -78,6 +85,7 @@ def _normalize_company_name(name: str) -> str:
     s = (name or "").upper()
     s = _SEC_DISAMBIGUATION_TAG.sub("", s)
     s = _PUNCTUATION.sub("", s)
+    s = _HYPHEN.sub(" ", s)
     s = _CLASS_QUALIFIER.sub("", s)
     s = _SUBORDINATE_VOTING.sub("", s)
     s = _NONVOTING.sub("", s)
@@ -86,13 +94,53 @@ def _normalize_company_name(name: str) -> str:
     return re.sub(r"\s+", " ", s).strip()
 
 
+# Minimum length of a truncated final token's matched prefix before treating it as truncation
+# rather than coincidence — deliberately conservative. "MICRO" (5 chars) plausibly prefixes both
+# "MICROSOFT" and "MICRODYNE", two unrelated real companies, so a short common-word prefix must
+# NOT be enough to call two names the same; a lower bound this high all but rules out that kind
+# of accidental collision while still catching real truncation (FCC's own real case below cuts
+# "CONSTRUCCIONES" to "CONSTRUCCIO" — an 11-character match).
+_MIN_TRUNCATED_TOKEN_LEN = 8
+
+
+def _is_truncated_prefix_match(shorter: str, longer: str) -> bool:
+    """True if `shorter` (already `_normalize_company_name`d) looks like `longer` cut off
+    mid-word at a fixed character budget — Yahoo Finance's own `longName` field truncation,
+    confirmed live 2026-08 (docs/phase5-6-european-dashboard-data-integration.md §7/§10): FCC's
+    real Yahoo `longName` is `"ACCIONES FOMENTO DE CONSTRUCCIO"` against FIRDS' full
+    `"ACCIONES FOMENTO DE CONSTRUCCIONES Y CONTRATAS, S.A."` — cut mid-word inside
+    "CONSTRUCCIONES", not at a token boundary, so the existing set-based token comparison
+    (which requires whole-token equality) sees zero overlap on that final token and can't
+    recognize it.
+
+    Deliberately narrow and positional, unlike the rest of this module's set-based comparison:
+    every token of `shorter` up to the second-to-last must match `longer`'s corresponding token
+    EXACTLY, in the SAME order — real truncation only ever cuts the tail, never rearranges or
+    drops an earlier word. Only the LAST token of `shorter` may be a genuine prefix (at least
+    `_MIN_TRUNCATED_TOKEN_LEN` characters) of the corresponding token in `longer`. This is
+    strictly additive to the existing token-subset "same" rule, not a replacement — it only
+    ever turns a would-be "ambiguous"/"different" verdict into "same" for this one specific,
+    narrow shape of mismatch.
+    """
+    s_tokens, l_tokens = shorter.split(), longer.split()
+    if not s_tokens or len(s_tokens) > len(l_tokens):
+        return False
+    if s_tokens[:-1] != l_tokens[: len(s_tokens) - 1]:
+        return False
+    last = s_tokens[-1]
+    return len(last) >= _MIN_TRUNCATED_TOKEN_LEN and l_tokens[len(s_tokens) - 1].startswith(last)
+
+
 def classify_company_match(name_a: str, name_b: str) -> MatchVerdict:
     """Classify whether two company names plausibly refer to the SAME legal entity.
 
     Three-way and deliberately conservative — never silently guesses:
-      - ``"same"``: normalized names are equal, or the shorter one's significant tokens are
-        a full subset of the longer's (handles BlackRock's truncated names, e.g. "GFL
-        ENVIRONMENTAL SUBORDINATE VOTI" vs SEC's "GFL Environmental Inc.").
+      - ``"same"``: normalized names are equal, the shorter one's significant tokens are a
+        full subset of the longer's (handles BlackRock's truncated names, e.g. "GFL
+        ENVIRONMENTAL SUBORDINATE VOTI" vs SEC's "GFL Environmental Inc."), or one name is the
+        other cut off mid-word at a fixed character budget (`_is_truncated_prefix_match` —
+        Yahoo Finance's own `longName` truncation, e.g. FCC's real
+        "ACCIONES FOMENTO DE CONSTRUCCIO" vs FIRDS' full legal name).
       - ``"different"``: the two names share NO significant (length > 1) normalized token —
         e.g. "Aecon Group Inc" vs "Alexandria Real Estate Equities, Inc.".
       - ``"ambiguous"``: partial token overlap — two distinct companies that happen to share
@@ -104,11 +152,18 @@ def classify_company_match(name_a: str, name_b: str) -> MatchVerdict:
 
     Validated 2026-07 against every real S&P/TSX Composite (XIC) ticker cross-referenced with
     SEC's `company_tickers.json` — see `00__config/02__tickers_master.py`'s TSX admission step.
+    Truncation-prefix matching (`_is_truncated_prefix_match`) validated 2026-08-16 against real
+    FCC/SGO Yahoo Finance lookups — see
+    docs/phase5-6-european-dashboard-data-integration.md §7/§10.
     """
     na, nb = _normalize_company_name(name_a), _normalize_company_name(name_b)
     if not na or not nb:
         return "ambiguous"
     if na == nb:
+        return "same"
+
+    shorter_str, longer_str = (na, nb) if len(na) <= len(nb) else (nb, na)
+    if _is_truncated_prefix_match(shorter_str, longer_str):
         return "same"
 
     tokens_a = {t for t in na.split() if len(t) > 1}

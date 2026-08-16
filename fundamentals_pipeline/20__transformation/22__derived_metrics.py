@@ -30,6 +30,17 @@ from pyspark.sql import functions as F
 from pyspark.sql.types import StringType, StructField, StructType, TimestampType
 from pyspark.sql.window import Window
 
+# Same reinstall-on-ImportError pattern as 11__fetch_sec_xbrl.py — this notebook has no
+# guarantee of a shared session install when run standalone or as its own Databricks Job task.
+try:
+    from fundamentals_pipeline.write_safety import UnsafeOrphanDeleteError, assert_orphan_delete_safe
+except ImportError:
+    import subprocess
+    import sys
+
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "-e", "../.."])
+    from fundamentals_pipeline.write_safety import UnsafeOrphanDeleteError, assert_orphan_delete_safe
+
 # CONTRACT: the currency-conversion arithmetic below (native Spark F.when/multiply, for
 # performance over ~30k rows) mirrors fundamentals_pipeline/fx.py's convert_price() scalar
 # semantics — no-op when currencies match, multiply by rate otherwise, never guess a missing
@@ -1441,6 +1452,36 @@ final_long.createOrReplaceTempView("incoming_metrics")
 # persist forever even though the current code no longer produces it. `WHEN NOT MATCHED BY SOURCE`
 # deletes exactly those orphans. Safe here specifically because source is a full-universe rebuild
 # each run — a partial/incremental source would incorrectly delete untouched tickers.
+#
+# Structural guard (2026-08-16 incident, docs/phase5-6-european-dashboard-data-integration.md
+# §10): "source is a full-universe rebuild each run" held true for TICKER coverage even during
+# the incident (this notebook has no ticker-scoping mechanism at all) but failed at the METRIC
+# level — an upstream dependency (market_prices_daily) came back anomalously empty, so `long_val`
+# (valuation-dependent metrics) collapsed to near-zero, and this exact DELETE then correctly, per
+# its own literal logic, removed every valuation metric for the ENTIRE universe. A healthy run's
+# orphan cleanup is a small drift (occasional stale-value retirement), not a bulk wipe — sanity
+# check the blast radius before committing to it, rather than trusting "empty source" to always
+# mean "legitimately nothing left to keep."
+_metrics_before = spark.table(metrics_tbl).count()
+_metrics_would_delete = spark.sql(f"""
+    SELECT COUNT(*) AS n FROM {metrics_tbl} t
+    WHERE NOT EXISTS (
+        SELECT 1 FROM incoming_metrics s
+        WHERE s.ticker = t.ticker AND s.fiscal_year = t.fiscal_year AND s.metric = t.metric
+    )
+""").collect()[0]["n"]
+try:
+    assert_orphan_delete_safe(_metrics_would_delete, _metrics_before)
+except UnsafeOrphanDeleteError as _e:
+    raise RuntimeError(
+        f"Refusing to MERGE into {metrics_tbl}: the orphan-cleanup (WHEN NOT MATCHED BY SOURCE "
+        f"DELETE) {_e}. This usually means an upstream dependency (e.g. market_prices_daily) "
+        f"came back anomalously empty/narrow this run, not that this many metrics genuinely "
+        f"became inapplicable at once. See docs/phase5-6-european-dashboard-data-integration.md "
+        f"§10. Investigate before re-running — do not bypass this check without understanding "
+        f"why the count is high."
+    ) from _e
+
 spark.sql(f"""
     MERGE INTO {metrics_tbl} AS target
     USING incoming_metrics AS source

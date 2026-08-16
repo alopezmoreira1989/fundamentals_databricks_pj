@@ -230,7 +230,16 @@ if RUN_EU_MARKET_DATA and EU_ACTIVE_TICKERS:
     _module.ACTIVE_TICKERS = EU_ACTIVE_TICKERS
     _module.YAHOO_SYMBOL = EU_YAHOO_SYMBOL
     _module.BENCHMARK_TICKERS = []
-    _module.force_full_refresh = "true"  # first run for these tickers -- always full history
+    # Deliberately NOT setting force_full_refresh here (2026-08-16 incident, see
+    # docs/phase5-6-european-dashboard-data-integration.md §10). `12` treats
+    # force_full_refresh as BOTH "fetch full per-ticker history" AND "overwrite the whole
+    # table" -- combined with this notebook's narrow EU_ACTIVE_TICKERS, that emptied
+    # market_prices_daily to just these tickers. It's also unnecessary: `12`'s own
+    # incremental branch already detects a ticker with zero existing rows (`t not in maxd`)
+    # and fetches its full history via the SAFE, ticker-scoped MERGE write path -- exactly
+    # what a brand-new EU ticker needs, with no risk to the rest of the table. `12` also
+    # now hard-aborts (rather than silently overwriting) if a narrower-than-full-universe
+    # ACTIVE_TICKERS ever reaches its MODE=="full" write path, as defense in depth.
     _spec.loader.exec_module(_module)
 elif RUN_EU_MARKET_DATA:
     print("No EU tickers passed the market-data safety check this run — nothing to fetch.")

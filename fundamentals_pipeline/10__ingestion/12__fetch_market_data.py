@@ -67,8 +67,68 @@ import yfinance as yf
 from pyspark.sql import functions as F
 from pyspark.sql.types import DateType, DoubleType, LongType, StringType, StructField, StructType, TimestampType
 
+# Same reinstall-on-ImportError pattern as 11__fetch_sec_xbrl.py — this notebook has no
+# guarantee of a shared session install when run standalone or as its own Databricks Job task.
+try:
+    from fundamentals_pipeline.write_safety import UnsafeFullOverwriteError, assert_full_overwrite_safe
+except ImportError:
+    import subprocess
+    import sys
+
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "-e", "../.."])
+    from fundamentals_pipeline.write_safety import UnsafeFullOverwriteError, assert_full_overwrite_safe
+
 prices_tbl = f"{CATALOG}.{SCHEMA}.market_prices_daily"
 splits_tbl = f"{CATALOG}.{SCHEMA}.stock_splits"
+
+# ── Structural safety guard against a bounded-scope full-table overwrite ───────────────────
+# 2026-08-16 incident (docs/phase5-6-european-dashboard-data-integration.md §10):
+# 18__fetch_eu_market_data.py pre-seeded a narrow ACTIVE_TICKERS (6 tickers) together with
+# force_full_refresh=true; MODE=="full" below drives a WHOLE-TABLE .mode("overwrite") that has
+# no awareness of ticker scope, so it silently replaced market_prices_daily (and stock_splits)
+# with just those 6 tickers' rows, destroying the rest of the production universe. The
+# immediate fix is that 18 no longer sets force_full_refresh at all (its own comment explains
+# why: `12`'s incremental branch already fetches full history for a never-seen ticker via the
+# safe MERGE path). This function is the second, structural layer: it makes the dangerous
+# combination impossible regardless of what any future caller does, by hard-aborting rather
+# than silently overwriting whenever ACTIVE_TICKERS does not cover the full config.tickers
+# universe. "Full history for selected tickers" and "full-table replacement" are different
+# operations — only the second requires this guard.
+def _assert_safe_full_overwrite(table_name: str) -> None:
+    """Raise `UnsafeFullOverwriteError` if a MODE=="full" write is about to overwrite
+    `table_name` wholesale while ACTIVE_TICKERS (minus benchmarks) is a narrower scope than the
+    full production universe.
+
+    Thin Spark I/O wrapper — the actual safety judgment is
+    `fundamentals_pipeline.write_safety.assert_full_overwrite_safe()`, a pure function unit
+    tested in `tests/test_write_safety.py` (this notebook itself has no Spark-free test path).
+    A full-table overwrite is only correct when the batch being written genuinely represents
+    everything the table should contain — i.e. ACTIVE_TICKERS was computed from the WHOLE
+    `config.tickers` (the normal `91a__pipeline_pre22.py` caller when `tickers_override` is
+    empty). Any narrower scope — an explicit `tickers_override`, or a caller like
+    `18__fetch_eu_market_data.py` pre-seeding its own subset — must never reach this write
+    mode; see the incremental/MERGE branch instead, which is safe for any scope.
+    """
+    try:
+        _full_universe = {
+            r.ticker for r in spark.table(f"{CATALOG}.config.tickers").select("ticker").collect()
+        }
+    except Exception as _e:
+        print(f"⚠ Could not read config.tickers to verify full-overwrite safety for "
+              f"{table_name} ({_e}) — proceeding, since there is no universe to compare "
+              f"against (e.g. a fresh/test environment).")
+        return
+    try:
+        assert_full_overwrite_safe(ACTIVE_TICKERS, _full_universe, BENCHMARK_TICKERS)
+    except UnsafeFullOverwriteError as _e:
+        raise RuntimeError(
+            f"Refusing a full-table overwrite of {table_name}: {_e} — it would silently "
+            f"destroy every other ticker's data (this is the exact failure mode of the "
+            f"2026-08-16 incident; see docs/phase5-6-european-dashboard-data-integration.md "
+            f"§10). If you need complete history for a SUBSET of tickers, do not set "
+            f"force_full_refresh — the incremental branch already fetches full history for "
+            f"any ticker with no prior rows, via the safe MERGE write path."
+        ) from _e
 
 # ── Batched download config ──────────────────────────────────────────────────────
 # yf.download already parallelizes WITHIN a batch (threads=True), so batch-level
@@ -193,6 +253,7 @@ MODE = "full" if (FORCE_FULL_REFRESH or not _has_prices) else "incremental"
 full_tickers, incr_tickers, incr_start = [], [], None
 
 if MODE == "full":
+    _assert_safe_full_overwrite(prices_tbl)
     full_tickers = list(PRICE_UNIVERSE)
     print(f"FULL refresh — {len(full_tickers):,} tickers, period=max (overwrite)")
 else:
@@ -482,6 +543,7 @@ except Exception:
 # (catches a split announced since the last run). Whole universe each time — splits are tiny.
 _splits_full = FORCE_FULL_REFRESH or not _splits_seen
 if _splits_full:
+    _assert_safe_full_overwrite(splits_tbl)
     _split_frames = _run_splits_fetch(PRICE_UNIVERSE, period="max", label="full-history")
 else:
     _split_cutoff = date.today() - timedelta(days=STALENESS_DAYS + INCR_BUFFER_DAYS)

@@ -149,3 +149,54 @@ def test_export_collision_same_market_repeats_still_raise():
     # frame; any repeat here is treated as a real collision).
     with pytest.raises(ExportTickerCollisionError, match="AAPL"):
         check_no_export_ticker_collision(pd.Series(["AAPL", "AAPL"]))
+
+
+# ── classify_company_match() truncation/hyphen fixes (2026-08-16 incident aftermath) ───────
+# Real false positives found during the Phase 5.6 live validation's market-data safety check
+# (docs/phase5-6-european-dashboard-data-integration.md §7/§10) — both genuine same-company
+# matches the safety gate conservatively (and, before this fix, incorrectly) rejected.
+
+
+def test_fcc_yahoo_truncated_name_now_matches():
+    # Real strings from a live Yahoo Finance lookup, 2026-08-16: FCC.MC's longName comes back
+    # hard-truncated mid-word at 32 characters.
+    assert classify_company_match(
+        "ACCIONES FOMENTO DE CONSTRUCCIONES Y CONTRATAS, S.A.",
+        "ACCIONES FOMENTO DE CONSTRUCCIO",
+    ) == "same"
+
+
+def test_sgo_yahoo_hyphenated_name_now_matches():
+    # Real strings from a live Yahoo Finance lookup, 2026-08-16: SGO.PA's longName spells
+    # Saint-Gobain with a hyphen; FIRDS' own issuer_name doesn't.
+    assert classify_company_match(
+        "SAINT GOBAIN",
+        "Compagnie de Saint-Gobain S.A.",
+    ) == "same"
+
+
+def test_short_truncated_prefix_does_not_false_positive():
+    # The false-positive guard the truncation fix must not weaken: a short common-word prefix
+    # ("MICRO", 5 chars) plausibly belongs to multiple unrelated real companies and must NOT
+    # be treated as truncation — below _MIN_TRUNCATED_TOKEN_LEN (8).
+    assert classify_company_match("MICRO", "MICROSOFT CORP") == "different"
+    assert classify_company_match("MICRO", "MICRODYNE INC") == "different"
+
+
+def test_truncated_prefix_requires_exact_leading_tokens():
+    # A long enough final-token prefix match is not enough on its own — every earlier token
+    # must match exactly, in order. "DIFFERENT LEADING WORD CONSTRUCCIO" sharing only the
+    # truncated tail with FCC's real name must not match.
+    assert classify_company_match(
+        "ACCIONES FOMENTO DE CONSTRUCCIONES Y CONTRATAS, S.A.",
+        "DIFFERENT LEADING WORD CONSTRUCCIO",
+    ) != "same"
+
+
+def test_hyphen_fix_does_not_break_existing_nonvoting_handling():
+    # Regression: _NONVOTING's own hyphen-tolerant pattern (\bNON[\s-]?VOT\w*\b) must still
+    # work now that hyphens are globally replaced with spaces before it runs.
+    assert classify_company_match(
+        "Example Corp",
+        "Example Non-Voting Shares Corp",
+    ) == "same"

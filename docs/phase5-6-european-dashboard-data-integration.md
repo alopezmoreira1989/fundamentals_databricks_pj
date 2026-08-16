@@ -11,17 +11,24 @@ price/market-cap history for the first time.
 Source-discipline labels: **VERIFIED LOCALLY** / **VERIFIED IN DATABRICKS** / **NOT YET RUN** /
 **INFERENCE** / **OPEN QUESTION**.
 
-**Update (2026-08-16): the bounded live Databricks run happened.** §7 and §10 below are the
-real record. Headline: the architecture (Option B, §2), the currency field (§3), and the
-export-boundary union + collision guard (§5) are all confirmed working against real production
-data. The run also hit a real, severe bug — a table-write-mode contract mismatch between
-`18__fetch_eu_market_data.py` and `12__fetch_market_data.py` (**not** the currency-alignment
-fix, which was never reached) — that briefly reduced `market_prices_daily` to 7 tickers and
-cascaded into `market_cap_asof`/`financials_metrics`/`financials_intrinsic_value` for the
+**Update (2026-08-16): the bounded live Databricks run happened, hit a real incident, and has
+since been fully hardened.** §7 is the live-run record; §10 is the incident (fully recovered);
+§11 is the post-incident hardening pass (fixed, tested, all local). Headline: the architecture
+(Option B, §2), the currency field (§3), and the export-boundary union + collision guard (§5)
+are all confirmed working against real production data. The run also hit a real, severe bug —
+a table-write-mode contract mismatch between `18__fetch_eu_market_data.py` and
+`12__fetch_market_data.py` (**not** the currency-alignment fix, which was never reached) —
+that briefly reduced `market_prices_daily` to 7 tickers and cascaded into
+`market_cap_asof`/`financials_metrics`/`financials_intrinsic_value`/`stock_splits` for the
 **entire US/CA/EU universe**. Fully diagnosed and fully recovered via Delta `RESTORE TABLE`
-(all four tables confirmed back to their exact pre-incident row counts); a fix is designed
-but **not implemented** — see §10. Phase 5.6 is paused here pending that fix, per explicit
-instruction; do not resume without reading §10 first.
+(all five tables confirmed back to their exact pre-incident row counts). §11 then implemented
+and unit-tested the fix and a structural safety guard, reviewed and guarded the same
+destructive-delete pattern in `22`/`23`, investigated (and, with real evidence, declined to
+guess at) the `Shares Diluted` gap, and found and fixed a real, separate bug in
+`classify_company_match()` that was rejecting two genuine same-company matches. **Still
+explicitly paused**: no live Databricks write has happened since the recovery — every §11
+change is verified locally (pytest/ruff) only, per instruction. PR #380 remains a draft, not
+merged; the next live bounded run needs its own explicit go-ahead.
 
 ## 1. Files changed
 
@@ -391,16 +398,28 @@ consumed it as their real input:
   to 224,843, since new FY-basis rows were still legitimately added even as TTM fields were
   nulled).
 
+- **`stock_splits`** (`18` directly, same delegation into `12`): the identical vulnerability
+  pattern one level down — `_splits_full = FORCE_FULL_REFRESH or not _splits_seen` gates the
+  exact same `.mode("overwrite")` shape (`12__fetch_market_data.py`'s own splits section).
+  **Missed in the original incident response** — only caught during the §11 hardening pass,
+  when checking whether the same vulnerability existed elsewhere in the file surfaced that it
+  had already fired: reduced from 4,330 rows / 1,255 tickers to 7 rows / 4 tickers.
+
 `51__export_dashboard_data.py` was also run (before the corruption was caught) and its
 `dashboard_prices.parquet` output reflected the corrupted state (6 tickers only) — but since
 that artifact was superseded by the recovery, no separate action was needed for it beyond the
 underlying table fixes.
 
+`fx_rates_daily` was checked and confirmed **unaffected** — its currency-pair set is derived
+from the full `config.tickers` table directly (`_needed_currencies()`), independent of
+`ACTIVE_TICKERS`, so the `MODE=="full"` overwrite that also fired here wrote the same correct
+pairs it always does (11,919 rows vs. the pre-incident 11,892 — a normal refresh).
+
 ### 10.3 Recovery
 
-All four tables restored via Delta time-travel (`RESTORE TABLE ... TO VERSION AS OF <n>`),
-each version chosen as the last write before this validation session touched anything and
-confirmed by exact row-count match against the pre-run snapshot before restoring:
+All five affected tables restored via Delta time-travel (`RESTORE TABLE ... TO VERSION AS OF
+<n>`), each version chosen as the last write before this validation session touched anything
+and confirmed by exact row-count match against the pre-run snapshot before restoring:
 
 | Table | Restored to version | Rows confirmed |
 |---|---|---|
@@ -408,15 +427,17 @@ confirmed by exact row-count match against the pre-run snapshot before restoring
 | `market_cap_asof` | 83 | 27,240 |
 | `financials_metrics` | 799 | 2,039,873 |
 | `financials_intrinsic_value` | 293 | 221,273 |
+| `stock_splits` | 82 | 4,330 |
 
-Post-restore spot checks: `AAPL`/`MSFT`/`TSLA` price and `market_cap_asof` rows identical to
-pre-run; `AEM` still correctly `USD`-aligned (the pre-existing Canadian currency-mismatch fix,
-unaffected); `AQN` still correctly native `CAD`; `AAPL`'s TTM `price_close`/
-`margin_of_safety_pct` back to real values (e.g. `304.91`, not `NULL`); `config.tickers`
-confirmed to have gained zero EU rows at any point during the incident (Option B, §2, held
-throughout). The 6 EU tickers' price data written by `18` was necessarily lost along with the
-restore (it lived in the same version-118 write as the corruption) — recoverable by re-running
-`18` once the write-mode bug (§10.4) is fixed.
+Post-restore spot checks: `AAPL`/`MSFT`/`TSLA` price, splits, and `market_cap_asof` rows
+identical to pre-run; `AEM` still correctly `USD`-aligned (the pre-existing Canadian
+currency-mismatch fix, unaffected); `AQN` still correctly native `CAD`; `AAPL`'s TTM
+`price_close`/`margin_of_safety_pct` back to real values (e.g. `304.91`, not `NULL`);
+`config.tickers` confirmed to have gained zero EU rows at any point during the incident
+(Option B, §2, held throughout). The 6 EU tickers' price/split data written by `18` was
+necessarily lost along with the restore (it lived in the same corrupted write as the rest) —
+recoverable by re-running `18` once the write-mode bug (§10.4, fixed in §11) lands in a real
+run.
 
 ### 10.4 Proposed fix (design only — not implemented)
 
@@ -450,5 +471,193 @@ MERGE path whenever a caller has narrowed the ticker scope, regardless of what
 `force_full_refresh` says. This would make the dangerous combination structurally unreachable,
 not just avoided by this one caller's correct usage.
 
-Neither change has been implemented — this section is a design record for the next pass (§9,
-step 0), per explicit instruction to diagnose and design without touching code this session.
+**Both changes are now implemented — see §11.1/§11.2.** This section is kept as-written (the
+original design record) for the historical trail; §11 is the actual implementation, with real
+test coverage, not a restatement of this section.
+
+## 11. Post-incident hardening (2026-08-16, same day)
+
+**Verification discipline for this section**: every change below is **VERIFIED LOCALLY**
+(pytest/ruff, no Spark) only. No notebook was executed against Databricks after the §10
+recovery — per explicit instruction, only read-only SQL (via the workspace's serverless SQL
+warehouse) was used to confirm the recovery and research the `Shares Diluted` gap (§11.5).
+The next live bounded run is a separate, future, explicitly-authorized step.
+
+### 11.1 Root-cause fix
+
+`18__fetch_eu_market_data.py` no longer sets `_module.force_full_refresh = "true"` when
+delegating into `12`. The removed line's own inline comment is replaced with an explanation of
+why it's unnecessary (§10.4's finding: `12`'s incremental branch already fetches full history
+for any never-seen ticker via the safe `MERGE` path) and a pointer to the structural guard
+below, which would now catch the exact mistake even if a future edit reintroduced it.
+
+### 11.2 Structural safety guard in `12__fetch_market_data.py`
+
+A caller pre-seeding a narrower-than-full-universe `ACTIVE_TICKERS` can no longer reach either
+of `12`'s two whole-table `.mode("overwrite")` write paths (`market_prices_daily` **and**
+`stock_splits` — both share the vulnerability, see §10.2) without an explicit, loud abort.
+`_assert_safe_full_overwrite(table_name)` — called right at the top of both `if MODE ==
+"full":` / `if _splits_full:` branches, before any fetch work happens — queries the real
+`config.tickers` universe and delegates the actual judgment to
+`fundamentals_pipeline.write_safety.assert_full_overwrite_safe()` (§11.4): raises
+`UnsafeFullOverwriteError`, wrapped in a `RuntimeError` with a message pointing back at this
+document, unless every ticker in `config.tickers` is covered by `ACTIVE_TICKERS`. A no-op
+(never blocks) when `config.tickers` is unreadable/empty — nothing to protect in that case.
+
+The normal, unscoped production caller (`91a__pipeline_pre22.py`, `tickers_override` empty) is
+unaffected — its `ACTIVE_TICKERS` genuinely is the full universe. Any narrower scope, present
+or future, now gets an explicit, actionable error instead of silent data loss.
+
+### 11.3 `22`/`23` destructive-delete review and guards
+
+Investigated every `WHEN NOT MATCHED BY SOURCE` / bulk-`DELETE` / unconditional-`UPDATE`
+pattern in both notebooks, per instruction — not a redesign, the smallest defensible guard for
+each real risk found:
+
+- **`22__derived_metrics.py`'s `financials_metrics` MERGE** (the one that actually fired in
+  the incident, §10.2): now computes the orphan-delete count before running the MERGE and
+  calls `assert_orphan_delete_safe()` (§11.4) — aborts if the delete would remove more than
+  10% of the table's current rows, with a message explaining that this usually means an
+  upstream dependency came back anomalously empty, not that this many metrics genuinely
+  became stale at once.
+- **`23__intrinsic_value.py`'s two orphan-cleanup MERGEs** (`financials_intrinsic_value`'s own
+  8b, and its `financials_metrics` IV-label copy's 9b) — both already scoped to
+  `iv_processed_tickers` (ticker-narrow scoping was never the risk here), but neither
+  protected against an upstream dependency coming back empty for tickers that WERE
+  recomputed. Same 10%-of-existing-rows guard added to both, the second one scoped to just
+  the IV-owned metric labels (comparing against the whole `financials_metrics` table would
+  never trip a meaningful percentage, since it also holds `22`'s own base/val metrics).
+- **A separate, real finding — not guarded, documented instead**: `23`'s plain `iv_tbl` MERGE
+  (`WHEN MATCHED THEN UPDATE SET ... price_close = source.price_close, margin_of_safety_pct =
+  source.margin_of_safety_pct`, unconditional — no `AND target.value != source.value` guard
+  the way `22`'s own base-metrics MERGE has) is what actually degraded `AAPL`'s TTM row to
+  `NULL` in the incident, not either orphan-cleanup DELETE (that row was never orphaned — its
+  method/scenario combination still existed in `incoming_iv` this run, just with a `NULL`
+  price). This is a genuinely different failure shape (silent overwrite-with-worse-value, not
+  bulk deletion) that the 10%-of-rows guard does **not** catch, since the row count is
+  unaffected. Deliberately **not fixed** this pass — building a correct guard means
+  distinguishing "this ticker's price legitimately has no live quote today" from "an upstream
+  dependency broke," which is a real design decision (not a magnitude threshold) that
+  shouldn't be invented unilaterally. Flagged here for the repo owner to decide on.
+
+### 11.4 Regression tests reproducing the exact failure mode
+
+Neither `12`'s write-mode decision nor `22`/`23`'s MERGE logic is unit-testable directly (all
+three are Spark-only notebooks; this repo's `tests/` suite is deliberately Spark-free — see
+CLAUDE.md). Following the same pattern already used for the export-collision guard (§5), the
+pure decision core of each guard was extracted into a new module,
+`fundamentals_pipeline/write_safety.py`:
+
+- `assert_full_overwrite_safe(active_tickers, full_universe, benchmark_tickers)` — raises
+  `UnsafeFullOverwriteError` unless `full_universe` is fully covered by `active_tickers`.
+  `12__fetch_market_data.py`'s `_assert_safe_full_overwrite()` fetches the real Spark data and
+  delegates the judgment here.
+- `assert_orphan_delete_safe(would_delete, existing, max_fraction=0.10)` — raises
+  `UnsafeOrphanDeleteError` if the ratio exceeds the threshold. Used by all three `22`/`23`
+  guard sites (§11.3).
+
+`tests/test_write_safety.py` (12 new cases): reproduces the exact 2026-08-16 incident at the
+pure-logic level (a 6-ticker EU-shaped scope against a 3-ticker stand-in universe raises;
+the exact real percentage from the `financials_metrics` cascade, 32%, raises with that number
+in the message), confirms the normal full-universe case still passes, confirms benchmark
+tickers and a superset scope never falsely trip the guard, and confirms the orphan-delete
+threshold's exact boundary (10.0% passes, 10.01% raises). Full suite: **320 passed, 2 skipped
+(pre-existing, unrelated)**, `ruff check` clean.
+
+### 11.5 `Shares Diluted` investigation — real research, no safe mapping found
+
+Traced the actual IFRS facts in two real, live filings (not fixtures) via `filings.xbrl.org`'s
+public API — the same one `16__fetch_eu_xbrl.py` uses, called directly and read-only, no
+Databricks or write path touched:
+
+- **FCC** (LEI `95980020140005178328`, real FY2024 filing, 512 facts, fetched live): the
+  22 share-related facts include `ifrs-full:BasicEarningsLossPerShare` and
+  `ifrs-full:DilutedEarningsLossPerShare` (both tagged, value `0.96`) and `ifrs-full:
+  TreasuryShares`, but **no tagged weighted-average-shares or shares-outstanding count
+  concept** — only per-share *ratios*. The only place a raw share count appears is inside a
+  free-text narrative disclosure (`ifrs-full:DisclosureOfShareCapitalReservesAndOther
+  EquityInterestExplanatory`, Spanish prose containing "454.878.132 acciones ordinarias") —
+  not a structured, safely-parseable fact.
+- **Iberdrola** (LEI `5QK37QC7NWOJ8D7WVQ45`, real FY2024 filing, 833 facts, fetched live):
+  identical pattern — `ifrs-full:BasicEarningsLossPerShareFromContinuingOperations`/
+  `DilutedEarningsLossPerShareFromContinuingOperations` are tagged, no share-count concept is.
+
+**Conclusion, per the "universalization > availability" principle**: confirmed across two
+different issuers and auditors, not an FCC idiosyncrasy — there is no directly-tagged,
+universal IFRS share-count concept available for these filers. A share count *could* be
+derived (Net Income ÷ EPS Diluted), but that is a fundamentally different kind of mapping from
+every existing `EU_CANONICAL_MAPPING` entry (all `MappingType.DIRECT`, one real fact → one
+canonical concept, no arithmetic) — and a real semantic risk exists even if attempted:
+Iberdrola's own EPS is explicitly scoped "FromContinuingOperations," while the already-mapped
+"Net Income" concept (`ifrs-full:ProfitLossAttributableToOwnersOfParent`) is not scoped to
+continuing operations only, so dividing the two would silently produce a wrong denominator for
+at least this issuer. **Not implemented — correctly left `NULL`, per "if a mapping is not
+semantically defensible, do not guess."** This is why `market_cap_asof`/
+`financials_intrinsic_value` are empty for every EU ticker (§7), and remains true after this
+hardening pass; it is not something this pass could fix. A `MappingType.DERIVED` category
+(if the repo owner wants to pursue the Net Income ÷ EPS route despite the risk above) would be
+new architecture, not a small extension, and is a decision for a future pass, not this one.
+
+### 11.6 `classify_company_match()` fix — the real FCC/SGO false-positive root cause
+
+Investigated why the two real §7 rejections happened, using the strongest identity evidence
+already in the pipeline (the FIRDS-verified `issuer_name`, resolved via ISIN/LEI/MIC through
+the whole admission chain) rather than weakening the check to ticker-only matching:
+
+- **`SGO`**: a real, narrow bug, not a design gap — `identity.py`'s `_PUNCTUATION` regex
+  (`[.,'&]`) does not include a hyphen, so Yahoo's `"Compagnie de Saint-Gobain S.A."` kept
+  `"SAINT-GOBAIN"` as one token that matched neither FIRDS' `"SAINT"` nor `"GOBAIN"` — zero
+  token overlap. **Fix**: hyphens are now replaced with a space (a new `_HYPHEN` regex,
+  applied before tokenization) — not deleted like the rest of `_PUNCTUATION`, since deleting a
+  hyphen would merge `"SAINT-GOBAIN"` into `"SAINTGOBAIN"` (the opposite of the intended fix).
+  With that one change, the existing token-subset "same" rule already handles it correctly —
+  no other logic needed.
+- **`FCC`**: a real gap in the matcher's design, not a simple regex miss — Yahoo's `longName`
+  field is hard-truncated at a fixed character budget (confirmed: FCC's real value is cut to
+  exactly 32 characters, mid-word, inside "CONSTRUCCIONES"), which the existing **set-based**
+  token comparison can never recognize (a partial word is a different string from the whole
+  word, so it can't be a member of the token set no matter how similar). **Fix**: a new,
+  deliberately narrow, **positional** (not set-based) helper,
+  `_is_truncated_prefix_match()` — every token of the shorter name up to the second-to-last
+  must match the longer name's corresponding token EXACTLY, in order; only the shorter name's
+  LAST token may be a genuine prefix (≥ 8 characters, `_MIN_TRUNCATED_TOKEN_LEN`) of the
+  longer name's corresponding token. Strictly additive to the existing "same" rule — it can
+  only ever upgrade a would-be `"ambiguous"`/`"different"` verdict for this one narrow shape
+  of mismatch, never the reverse.
+- **False-positive guard, explicitly tested**: the 8-character minimum exists specifically so
+  a short common-word truncation (e.g. `"MICRO"`, which plausibly prefixes both `"MICROSOFT"`
+  and `"MICRODYNE"` — two real, unrelated companies) is never treated as truncation. Verified:
+  both `classify_company_match("MICRO", "MICROSOFT CORP")` and `("MICRO", "MICRODYNE INC")`
+  still correctly return `"different"`.
+
+**5 new tests in `tests/test_identity.py`** (real FCC/SGO strings from the live 2026-08-16
+lookup, the MICRO false-positive guard, a leading-token-mismatch negative case, and a
+regression check that `_NONVOTING`'s own hyphen-tolerant pattern still works now that hyphens
+are globally replaced with spaces before it runs). All pre-existing identity tests (the
+US/CA cross-market collision suite) pass unchanged — confirmed zero regression in the one
+other consumer of `classify_company_match()`.
+
+**§8 compliance**: `issuer_id`, `listing_id` (`MIC:ISIN`), and ADR-0012 were not touched. The
+investigation found a normalization bug in name *comparison*, not a contradiction in the
+identity *model* — ticker remains a market-data lookup attribute, never treated as universal
+issuer identity, exactly as before.
+
+### 11.7 Local verification
+
+`pytest tests/ -q`: **320 passed, 2 skipped** (pre-existing, unrelated to this work).
+`ruff check` on every changed file: clean. No Databricks notebook executed since the §10
+recovery — every check in this section is against local code and (for §11.5) live, read-only,
+non-Databricks external API calls.
+
+### 11.8 What remains
+
+- **Not re-attempted**: the live bounded run (`17`→`18`→`22`/`23`→`51`) that would actually
+  exercise §11.1/§11.2's fix and §11.3's guards against real Databricks writes. Needs its own
+  explicit go-ahead, per instruction — this pass is diagnosis, fix, and local test only.
+- **Not fixed**: the `23__intrinsic_value.py` blind-`UPDATE`-with-`NULL` finding (§11.3) — a
+  real, distinct vulnerability, deliberately left for the repo owner to decide how to guard.
+- **Not fixed**: `Shares Diluted` remains unmapped for EU tickers (§11.5) — investigated with
+  real data, no safe direct mapping exists; a derived mapping is a real future design
+  decision, not built here.
+- **PR #380 remains a draft, not merged.** No new PR opened. No European universe expansion.
+  No DAG scheduling change. No `fundamentals_screener`/Django file touched.
