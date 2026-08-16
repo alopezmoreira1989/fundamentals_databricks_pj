@@ -205,3 +205,12 @@ Primary-vs-secondary-listing resolution, corporate-action/identity-change re-ver
   identity-resolution chain (GLEIF/OpenFIGI/filings.xbrl.org) is independently valuable,
   independently verified, and independently decidable — coupling it to the unresolved universe
   question would block a real, evidence-backed decision on an unrelated open item.
+
+## Implementation note
+
+[docs/phase5-3-european-universe-admission.md](../phase5-3-european-universe-admission.md)
+implements a first, real European universe/admission layer against ESMA FIRDS — the equity
+classifier, active-instrument filter, and primary-listing selector this ADR's own research
+established, plus a real full-scale run against the live FIRDS equity file (682,398 raw
+records → 4,983 resolved primary listings across 4,926 unique issuers). This ADR's status is
+**not** changed by that implementation — still awaiting the repo owner's review before Accepted.

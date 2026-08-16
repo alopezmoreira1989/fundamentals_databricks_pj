@@ -235,3 +235,18 @@ def make_listing_id(mic: str, ticker: str) -> str:
     Milan `MTAA`).
     """
     return f"{mic.upper()}:{ticker.upper()}"
+
+
+def make_listing_id_from_isin(mic: str, isin: str) -> str:
+    """Canonical listing identity for a NEW (FIRDS-sourced) listing, per ADR-0012:
+    ``f"{MIC}:{ISIN}"`` (e.g. ``"XPAR:FR0010220475"``), both upper-cased.
+
+    A deliberately separate function from `make_listing_id()`, not an overload of it — ADR-0012
+    (status Proposed) scopes `listing_id = MIC:ISIN` to new listings only; the pre-existing
+    US/CA universe keeps `make_listing_id(mic, ticker)`'s `MIC:TICKER` shape unchanged. `mic`
+    must be the same kind of real, verified segment-not-operating ISO 10383 code
+    `make_listing_id()` requires (see its own docstring). `isin` is the security's own ISO 6166
+    identifier, e.g. as reported by ESMA FIRDS (`FinInstrmGnlAttrbts/Id`) — never derived or
+    guessed.
+    """
+    return f"{mic.upper()}:{isin.upper()}"

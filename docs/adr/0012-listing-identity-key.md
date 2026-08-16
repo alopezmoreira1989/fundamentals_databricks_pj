@@ -166,3 +166,13 @@ existing US/CA universe, which is explicitly out of scope here (see Open questio
 - **Keep ticker as part of the identity but add ISIN as a secondary lookup column.** Rejected:
   this doesn't solve the actual stability problem (the identity string itself would still break
   on a ticker change like Orange's) — it only adds a convenience index, not a fix.
+
+## Implementation note
+
+[docs/phase5-3-european-universe-admission.md](../phase5-3-european-universe-admission.md)
+implements `make_listing_id_from_isin()` (the `MIC:ISIN` function this ADR decided) as part of
+the new European admission layer — real code, real tests, a real full-scale run against ESMA
+FIRDS. This ADR's status is **not** changed by that implementation; a Proposed ADR being
+implemented ahead of acceptance mirrors ADR-0010's own `make_issuer_id`/`make_listing_id`
+precedent (also implemented while Proposed). Still awaiting the repo owner's review before
+Accepted.
