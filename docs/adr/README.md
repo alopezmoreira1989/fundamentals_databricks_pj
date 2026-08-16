@@ -42,5 +42,6 @@ code must be written. Routine choices don't need an ADR; this is not a change lo
 | [0009](0009-multi-market-fundamentals-ingestion-framework.md) | Multi-market, multi-source fundamentals ingestion — Europe as the first non-US pilot, ESAP-ready, Canada registered but not forced | Accepted |
 | [0010](0010-issuer-listing-identity-model.md) | Issuer/listing identity model — `issuer_id`, `listing_id`, transitional bare-ticker keys | Proposed |
 | [0011](0011-european-universe-admission.md) | European universe & admission layer — GLEIF/OpenFIGI-based identity resolution | Proposed |
+| [0012](0012-listing-identity-key.md) | Listing identity key — `MIC:ISIN` for new listings, ticker kept as attribute | Proposed |
 
 _Template: [`0000-template.md`](0000-template.md)._
