@@ -41,15 +41,12 @@ from datetime import date, datetime, timedelta
 
 import pandas as pd
 import requests
-from pyspark.sql.types import (
-    DateType,
-    DoubleType,
-    IntegerType,
-    StringType,
-    StructField,
-    StructType,
-    TimestampType,
-)
+
+# `pyspark` is deliberately NOT imported at module level -- this repo has no Spark CI (see
+# CLAUDE.md) and pyspark is not a test dependency. The only place it's actually needed is
+# EU_SCHEMA_DEF/the CREATE TABLE section below, already gated behind `if RUN_EU_PILOT:`; the
+# import is deferred to right before that use so tests/test_eu_adapter_protocol_conformance.py
+# can load EUCurrentSource/process_eu_entity (RUN_EU_PILOT=False) without pyspark installed.
 
 try:
     from fundamentals_pipeline.identity import make_issuer_id
@@ -334,6 +331,16 @@ def process_eu_entity(ticker: str, lei: str, mic: str, name: str, scraped_at_ts:
 # COMMAND ----------
 
 if RUN_EU_PILOT:
+    from pyspark.sql.types import (
+        DateType,
+        DoubleType,
+        IntegerType,
+        StringType,
+        StructField,
+        StructType,
+        TimestampType,
+    )
+
     raw_full = f"{CATALOG}.{SCHEMA}.{RAW_TABLE}"
 
     spark.sql(f"""
