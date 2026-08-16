@@ -4,12 +4,26 @@ Extracted after the 2026-08-16 incident (see
 docs/phase5-6-european-dashboard-data-integration.md §10): `10__ingestion/
 12__fetch_market_data.py` silently overwrote the whole `market_prices_daily` table with a
 caller's narrow ticker scope, and `20__transformation/22__derived_metrics.py` /
-`23__intrinsic_value.py` each had a MERGE's orphan-cleanup ``DELETE`` fire against nearly the
-entire table when an upstream dependency came back anomalously empty. Both notebooks are
-Spark-only and not directly unit-testable (this repo's `tests/` suite is deliberately
+`23__intrinsic_value.py` each had a MERGE's orphan-cleanup ``DELETE`` (and, in `23`'s case, a
+plain ``UPDATE``) fire against nearly the entire table when an upstream dependency
+(`market_prices_daily`) came back anomalously empty — cascading into `market_cap_asof` and
+`market_cap_live` (both zeroed by an unconditional full overwrite) too. All three notebooks
+are Spark-only and not directly unit-testable (this repo's `tests/` suite is deliberately
 Spark-free — see CLAUDE.md), so this module holds the pure comparison/decision core of each
 guard: the notebooks fetch the real counts/sets from Spark and delegate the actual safety
 judgment here.
+
+**Primary vs. secondary defense** (per the 2026-08-17 hardening pass): `is_full_universe_run`
+is the PRIMARY guard — a semantic check answering "does this run's upstream input actually
+represent the full universe," evaluated BEFORE any destructive write is attempted, so a
+degraded input never reaches a `DELETE`/`UPDATE`/overwrite in the first place.
+`assert_orphan_delete_safe`'s percentage threshold is a SECONDARY, defense-in-depth check on
+the delete-based MERGEs only — useful for a failure mode `is_full_universe_run` doesn't cover
+(a genuine full-universe run whose OWN logic produces an implausibly large orphan set for some
+unrelated reason), but deliberately not the primary mechanism: a percentage threshold set too
+loose still permits a real catastrophe (90,000-of-100,000 rows destroyed is still a
+catastrophe at just under a 10% threshold), where a semantic "was this run even looking at the
+full universe" check does not have that failure mode.
 """
 
 from __future__ import annotations
@@ -17,6 +31,29 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 DEFAULT_MAX_ORPHAN_DELETE_FRACTION = 0.10
+DEFAULT_MIN_UNIVERSE_COVERAGE = 0.90
+
+
+def is_full_universe_run(source_ticker_count: int, reference_ticker_count: int,
+                          min_coverage: float = DEFAULT_MIN_UNIVERSE_COVERAGE) -> bool:
+    """True if `source_ticker_count` covers at least `min_coverage` of `reference_ticker_count`
+    — the semantic "is this a full-universe run" signal, computed from real ticker coverage
+    rather than assumed from a flag a caller could forget to set correctly.
+
+    This is deliberately NOT a caller-supplied boolean (a `FULL_UNIVERSE_RUN = True/False`
+    flag a notebook sets by hand would have exactly the same "silently wrong" failure mode the
+    2026-08-16 incident already demonstrated with `force_full_refresh` — a flag whose meaning
+    the caller misunderstood). Instead the caller measures its own actual input (e.g. how many
+    distinct tickers `market_prices_daily` covers) and the reference universe it should cover
+    (e.g. how many distinct tickers `financials` has), and this function turns that comparison
+    into the yes/no signal every guard in this module keys off of.
+
+    A no-op — always `True` — when `reference_ticker_count` is 0 (nothing to compare against,
+    e.g. a fresh/test environment).
+    """
+    if reference_ticker_count <= 0:
+        return True
+    return source_ticker_count / reference_ticker_count >= min_coverage
 
 
 class UnsafeFullOverwriteError(Exception):

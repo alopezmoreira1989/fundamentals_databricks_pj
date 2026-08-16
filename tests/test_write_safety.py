@@ -13,6 +13,7 @@ from fundamentals_pipeline.write_safety import (
     UnsafeOrphanDeleteError,
     assert_full_overwrite_safe,
     assert_orphan_delete_safe,
+    is_full_universe_run,
 )
 
 # ── assert_full_overwrite_safe ──────────────────────────────────────────────────────────────
@@ -105,3 +106,37 @@ def test_custom_max_fraction_respected():
     assert_orphan_delete_safe(would_delete=400, existing=1_000, max_fraction=0.5)
     with pytest.raises(UnsafeOrphanDeleteError):
         assert_orphan_delete_safe(would_delete=600, existing=1_000, max_fraction=0.5)
+
+
+# ── is_full_universe_run (2026-08-17: semantic primary guard) ──────────────────────────────
+
+
+def test_full_coverage_is_full_universe_run():
+    assert is_full_universe_run(source_ticker_count=2_662, reference_ticker_count=2_662) is True
+
+
+def test_the_exact_incident_is_not_a_full_universe_run():
+    # market_prices_daily covered 7 tickers against a ~2,662-ticker fundamentals universe
+    # during the 2026-08-16 incident — nowhere near the coverage threshold.
+    assert is_full_universe_run(source_ticker_count=7, reference_ticker_count=2_662) is False
+
+
+def test_coverage_exactly_at_threshold_passes():
+    assert is_full_universe_run(source_ticker_count=900, reference_ticker_count=1_000,
+                                 min_coverage=0.90) is True
+
+
+def test_coverage_just_under_threshold_fails():
+    assert is_full_universe_run(source_ticker_count=899, reference_ticker_count=1_000,
+                                 min_coverage=0.90) is False
+
+
+def test_zero_reference_universe_is_a_noop():
+    # Nothing to compare against (e.g. a fresh/test environment) — never block on this alone.
+    assert is_full_universe_run(source_ticker_count=0, reference_ticker_count=0) is True
+
+
+def test_source_can_exceed_reference():
+    # The source legitimately covering MORE tickers than the reference (e.g. price data for
+    # some tickers not yet in the fundamentals universe) is still a full-universe run.
+    assert is_full_universe_run(source_ticker_count=3_000, reference_ticker_count=2_662) is True

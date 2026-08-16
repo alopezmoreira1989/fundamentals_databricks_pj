@@ -33,13 +33,21 @@ from pyspark.sql.window import Window
 # Same reinstall-on-ImportError pattern as 11__fetch_sec_xbrl.py — this notebook has no
 # guarantee of a shared session install when run standalone or as its own Databricks Job task.
 try:
-    from fundamentals_pipeline.write_safety import UnsafeOrphanDeleteError, assert_orphan_delete_safe
+    from fundamentals_pipeline.write_safety import (
+        UnsafeOrphanDeleteError,
+        assert_orphan_delete_safe,
+        is_full_universe_run,
+    )
 except ImportError:
     import subprocess
     import sys
 
     subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "-e", "../.."])
-    from fundamentals_pipeline.write_safety import UnsafeOrphanDeleteError, assert_orphan_delete_safe
+    from fundamentals_pipeline.write_safety import (
+        UnsafeOrphanDeleteError,
+        assert_orphan_delete_safe,
+        is_full_universe_run,
+    )
 
 # CONTRACT: the currency-conversion arithmetic below (native Spark F.when/multiply, for
 # performance over ~30k rows) mirrors fundamentals_pipeline/fx.py's convert_price() scalar
@@ -708,6 +716,17 @@ print(f"Base metrics long: {long_base.count():,} rows")
 
 # COMMAND ----------
 
+# Structural guard (2026-08-17 hardening, docs/phase5-6-european-dashboard-data-integration.md
+# §12): `_has_prices` used to be a bare "does market_prices_daily have ANY rows" check — true
+# even for the 2026-08-16 incident's 7-ticker corrupted table, which is exactly how a narrow
+# upstream input reached market_cap_asof/market_cap_live's unconditional full-table overwrites
+# (both wiped to 0 rows) and financials_metrics' orphan-cleanup DELETE (which then removed
+# every valuation metric for the whole universe, §10.2). `_has_prices` is now gated on real
+# ticker COVERAGE, not bare presence — this is the PRIMARY defense (semantic: "does this run's
+# price input actually represent the full universe"), evaluated before ANY of the downstream
+# writes/deletes are even attempted, not a percentage-of-what-would-be-destroyed check after
+# the fact. `assert_orphan_delete_safe()`'s threshold (§11.3) remains as a secondary,
+# independent check on the financials_metrics MERGE specifically.
 try:
     _prices = (
         spark.table(prices_tbl)
@@ -715,11 +734,21 @@ try:
         .filter(F.col("close").isNotNull())
     )
     _has_prices = _prices.limit(1).count() > 0
+    if _has_prices:
+        _price_ticker_count = _prices.select("ticker").distinct().count()
+        _fundamentals_ticker_count = spark.table(full_tbl).select("ticker").distinct().count()
+        _has_prices = is_full_universe_run(_price_ticker_count, _fundamentals_ticker_count)
+        if not _has_prices:
+            print(f"⚠ market_prices_daily covers only {_price_ticker_count:,} of "
+                  f"{_fundamentals_ticker_count:,} tickers with fundamentals data — below the "
+                  f"full-universe coverage threshold. Treating this as NOT a full-universe run: "
+                  f"skipping valuation metrics, market_cap_asof, and market_cap_live this run "
+                  f"rather than risk a destructive write against a partial upstream input.")
 except Exception:
     _has_prices = False
 
 if not _has_prices:
-    print("⚠ market_prices_daily not found/empty — skipping valuation metrics.")
+    print("⚠ market_prices_daily not found/empty/partial — skipping valuation metrics.")
     pe_mcap = None
 else:
     # FY period_end per (ticker, fiscal_year). One fiscal close per FY; MAX is defensive.

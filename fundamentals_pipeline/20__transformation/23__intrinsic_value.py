@@ -54,13 +54,21 @@ from pyspark.sql.window import Window
 # Same reinstall-on-ImportError pattern as 11__fetch_sec_xbrl.py — this notebook has no
 # guarantee of a shared session install when run standalone or as its own Databricks Job task.
 try:
-    from fundamentals_pipeline.write_safety import UnsafeOrphanDeleteError, assert_orphan_delete_safe
+    from fundamentals_pipeline.write_safety import (
+        UnsafeOrphanDeleteError,
+        assert_orphan_delete_safe,
+        is_full_universe_run,
+    )
 except ImportError:
     import subprocess
     import sys
 
     subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "-e", "../.."])
-    from fundamentals_pipeline.write_safety import UnsafeOrphanDeleteError, assert_orphan_delete_safe
+    from fundamentals_pipeline.write_safety import (
+        UnsafeOrphanDeleteError,
+        assert_orphan_delete_safe,
+        is_full_universe_run,
+    )
 
 # CONTRACT: the currency-conversion arithmetic below (native Spark F.when/multiply) mirrors
 # fundamentals_pipeline/fx.py's convert_price() scalar semantics — no-op when currencies
@@ -517,6 +525,17 @@ else:
 
 # TTM: live price — the latest close in market_prices_daily per ticker, independent of any
 # fiscal_year row (unlike the FY join above, which is deliberately period_end-aligned).
+#
+# Structural guard (2026-08-17 hardening, docs/phase5-6-european-dashboard-data-integration.md
+# §12): unlike 22's own coverage gate, tightening `has_live_price` alone does NOT fix the real
+# risk here — even when False, the `else` branch below still produces a NULL-filled
+# `ttm_with_price` row for EVERY ticker (by design, so `ttm_pdf`/`incoming_iv` always has a
+# complete shape), and those NULLs still reach the MERGE below. The actual harm in the
+# 2026-08-16 incident was that MERGE's plain, unconditional `UPDATE SET price_close =
+# source.price_close` overwriting AAPL's real price with that NULL. `_ttm_full_universe_run`
+# is computed here and consumed by the MERGE further down (§8a below) to gate ONLY the
+# price/margin-of-safety columns specifically — never blindly trust a NULL enough to destroy a
+# real existing value unless this run's price coverage was actually representative.
 try:
     _daily_prices = (
         spark.table(prices_daily_tbl)
@@ -524,9 +543,21 @@ try:
         .filter(F.col("close").isNotNull())
     )
     has_live_price = _daily_prices.limit(1).count() > 0
+    _live_price_ticker_count = _daily_prices.select("ticker").distinct().count() if has_live_price else 0
 except Exception:
     print("⚠ market_prices_daily not available — TTM price/market_cap will be NULL.")
     has_live_price = False
+    _live_price_ticker_count = 0
+
+_ttm_ticker_count = ttm_wide.select("ticker").distinct().count()
+_ttm_full_universe_run = is_full_universe_run(_live_price_ticker_count, _ttm_ticker_count)
+if has_live_price and not _ttm_full_universe_run:
+    print(f"⚠ market_prices_daily covers only {_live_price_ticker_count:,} of "
+          f"{_ttm_ticker_count:,} TTM-eligible tickers — below the full-universe coverage "
+          f"threshold. TTM price_close/margin_of_safety_pct will compute as NULL for "
+          f"under-covered tickers this run, but the MERGE below will not let that NULL "
+          f"overwrite an existing real value (see "
+          f"docs/phase5-6-european-dashboard-data-integration.md §12).")
 
 if has_live_price:
     w_live_price = Window.partitionBy("ticker").orderBy(F.col("date").desc())
@@ -1113,6 +1144,22 @@ if len(iv_pdf):
     # For TTM, fiscal_year is that of the most recent quarter, so each TTM run
     # upserts the same row (if the quarter hasn't changed) or inserts a new one
     # (if there is a more recent quarter). `scenario` makes bull/mid/bear coexist.
+    #
+    # Structural guard (2026-08-17 hardening, docs/phase5-6-european-dashboard-data-
+    # integration.md §12): TWO `WHEN MATCHED` clauses, not one — this is what actually
+    # degraded AAPL's TTM `price_close`/`margin_of_safety_pct` to `NULL` in the 2026-08-16
+    # incident (a plain, unconditional `UPDATE SET price_close = source.price_close` blindly
+    # trusted whatever this run computed, even a NULL from a partial upstream input). FY rows
+    # are unaffected by this split — their price comes from `market_cap_asof` via a plain LEFT
+    # JOIN (§4b above), which already degrades to NULL safely with no destructive write
+    # involved. Only TTM rows needed this: the first clause covers the SAFE cases (an FY row,
+    # or a TTM row with a genuine non-NULL price, or a TTM row when this run's price coverage
+    # was confirmed representative) and updates every column as before; the second clause
+    # covers the one unsafe case (a TTM row whose price computed NULL AND this run's price
+    # coverage was NOT representative) and updates everything EXCEPT price_close/
+    # margin_of_safety_pct — preserving whatever real value already exists rather than
+    # destroying it with an untrustworthy NULL.
+    _ttm_price_trustworthy_sql = "TRUE" if _ttm_full_universe_run else "FALSE"
     spark.sql(f"""
         MERGE INTO {iv_tbl} AS target
         USING incoming_iv AS source
@@ -1122,7 +1169,11 @@ if len(iv_pdf):
         AND target.method      = source.method
         AND target.scenario    = source.scenario
 
-        WHEN MATCHED THEN UPDATE SET
+        WHEN MATCHED AND (
+            source.period_type != 'TTM'
+            OR source.price_close IS NOT NULL
+            OR {_ttm_price_trustworthy_sql}
+        ) THEN UPDATE SET
             target.intrinsic_value_per_share = source.intrinsic_value_per_share,
             target.intrinsic_value_total     = source.intrinsic_value_total,
             target.price_close               = source.price_close,
@@ -1131,6 +1182,17 @@ if len(iv_pdf):
             target.computed_at               = source.computed_at,
             target.period_end                = source.period_end,
             target.company                   = source.company
+
+        WHEN MATCHED THEN UPDATE SET
+            target.intrinsic_value_per_share = source.intrinsic_value_per_share,
+            target.intrinsic_value_total     = source.intrinsic_value_total,
+            target.assumptions               = source.assumptions,
+            target.computed_at               = source.computed_at,
+            target.period_end                = source.period_end,
+            target.company                   = source.company
+            -- price_close/margin_of_safety_pct deliberately NOT touched here --
+            -- preserves the existing real value instead of overwriting it with an
+            -- untrustworthy NULL (see the guard note above).
 
         WHEN NOT MATCHED THEN INSERT *
     """)

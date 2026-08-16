@@ -11,24 +11,30 @@ price/market-cap history for the first time.
 Source-discipline labels: **VERIFIED LOCALLY** / **VERIFIED IN DATABRICKS** / **NOT YET RUN** /
 **INFERENCE** / **OPEN QUESTION**.
 
-**Update (2026-08-16): the bounded live Databricks run happened, hit a real incident, and has
-since been fully hardened.** §7 is the live-run record; §10 is the incident (fully recovered);
-§11 is the post-incident hardening pass (fixed, tested, all local). Headline: the architecture
-(Option B, §2), the currency field (§3), and the export-boundary union + collision guard (§5)
-are all confirmed working against real production data. The run also hit a real, severe bug —
-a table-write-mode contract mismatch between `18__fetch_eu_market_data.py` and
-`12__fetch_market_data.py` (**not** the currency-alignment fix, which was never reached) —
-that briefly reduced `market_prices_daily` to 7 tickers and cascaded into
-`market_cap_asof`/`financials_metrics`/`financials_intrinsic_value`/`stock_splits` for the
-**entire US/CA/EU universe**. Fully diagnosed and fully recovered via Delta `RESTORE TABLE`
-(all five tables confirmed back to their exact pre-incident row counts). §11 then implemented
-and unit-tested the fix and a structural safety guard, reviewed and guarded the same
-destructive-delete pattern in `22`/`23`, investigated (and, with real evidence, declined to
-guess at) the `Shares Diluted` gap, and found and fixed a real, separate bug in
-`classify_company_match()` that was rejecting two genuine same-company matches. **Still
-explicitly paused**: no live Databricks write has happened since the recovery — every §11
-change is verified locally (pytest/ruff) only, per instruction. PR #380 remains a draft, not
-merged; the next live bounded run needs its own explicit go-ahead.
+**Update (2026-08-16 → 2026-08-17): the bounded live Databricks run happened, hit a real
+incident, and has since been hardened across two rounds.** §7 is the live-run record; §10 is
+the incident (fully recovered, six tables — see §12.1 for the sixth, found late); §11 is the
+first hardening round; §12 is the second, which replaced §11's percentage threshold with a
+semantic primary guard and fixed a real NULL-overwrite bug §11 had only documented. Headline:
+the architecture (Option B, §2), the currency field (§3), and the export-boundary union +
+collision guard (§5) are all confirmed working against real production data. The run also hit
+a real, severe bug — a table-write-mode contract mismatch between `18__fetch_eu_market_data.py`
+and `12__fetch_market_data.py` (**not** the currency-alignment fix, which was never reached) —
+that briefly reduced `market_prices_daily` to 7 tickers and cascaded into `market_cap_asof`,
+`market_cap_live`, `financials_metrics`, `financials_intrinsic_value`, and `stock_splits` for
+the **entire US/CA/EU universe**. Fully diagnosed and fully recovered via Delta `RESTORE TABLE`
+(all six tables confirmed back to their exact pre-incident row counts — §10.3 has the complete
+table). §11 implemented and unit-tested the root-cause fix, a structural ticker-scope guard in
+`12`, a percentage-based secondary guard on `22`/`23`'s destructive deletes, investigated (and,
+with real evidence, declined to guess at) the `Shares Diluted` gap, and fixed a real, separate
+bug in `classify_company_match()`. §12 replaced the percentage threshold's primary role with a
+semantic `is_full_universe_run` check (keeping the percentage as secondary, per explicit
+instruction), found the sixth casualty (`market_cap_live`) that §11 had missed, and fixed the
+actual mechanism behind the `AAPL` TTM `NULL`-overwrite (a MERGE-clause split, not just a
+documented finding). **Still explicitly paused**: no live Databricks write has happened since
+the recovery — every §11/§12 change is verified locally (pytest/ruff) only, per instruction.
+PR #380 remains a draft, not merged; the next live bounded run needs its own explicit
+go-ahead.
 
 ## 1. Files changed
 
@@ -404,6 +410,13 @@ consumed it as their real input:
   **Missed in the original incident response** — only caught during the §11 hardening pass,
   when checking whether the same vulnerability existed elsewhere in the file surfaced that it
   had already fired: reduced from 4,330 rows / 1,255 tickers to 7 rows / 4 tickers.
+- **`market_cap_live`** (`22`, `mcl_tbl`): a SIXTH casualty, missed by both the original
+  incident response and the first §11 hardening pass — only found during the §12 review, when
+  building a complete inventory of every `.mode("overwrite")` write in `22`/`23` surfaced that
+  this table shares the exact same `_has_prices`-gated code block as `market_cap_asof`
+  (`22__derived_metrics.py`'s "Live market cap" section, lines ~1013 on) with its own
+  unconditional full-table overwrite. Reduced from 2,175 rows to **0 rows** — same shape as
+  `market_cap_asof`, just never checked.
 
 `51__export_dashboard_data.py` was also run (before the corruption was caught) and its
 `dashboard_prices.parquet` output reflected the corrupted state (6 tickers only) — but since
@@ -417,26 +430,39 @@ pairs it always does (11,919 rows vs. the pre-incident 11,892 — a normal refre
 
 ### 10.3 Recovery
 
-All five affected tables restored via Delta time-travel (`RESTORE TABLE ... TO VERSION AS OF
+All six affected tables restored via Delta time-travel (`RESTORE TABLE ... TO VERSION AS OF
 <n>`), each version chosen as the last write before this validation session touched anything
-and confirmed by exact row-count match against the pre-run snapshot before restoring:
+and confirmed by exact row-count match against the pre-run snapshot before restoring. This is
+the complete, final recovery record (superseding any partial listing earlier in this
+document) — confirmed via `DESCRIBE HISTORY` on each table, not assumed:
 
-| Table | Restored to version | Rows confirmed |
-|---|---|---|
-| `market_prices_daily` | 117 | 15,268,796 |
-| `market_cap_asof` | 83 | 27,240 |
-| `financials_metrics` | 799 | 2,039,873 |
-| `financials_intrinsic_value` | 293 | 221,273 |
-| `stock_splits` | 82 | 4,330 |
+| Table | Before (pre-incident) | Bad version | Rows in bad version | Restored to version | Rows after restore |
+|---|---|---|---|---|---|
+| `market_prices_daily` | 15,268,796 rows / ~2,662 tickers | 118 | 41,142 rows / 7 tickers | 117 | 15,268,796 rows / 2,644 tickers |
+| `market_cap_asof` | 27,240 rows | 84 | 0 rows | 83 | 27,240 rows |
+| `financials_metrics` | 2,039,873 rows | (MERGE, not a version snapshot — orphan-delete removed 659,201 rows) | 1,380,672 rows | 799 | 2,039,873 rows |
+| `financials_intrinsic_value` | 221,273 rows | (MERGE — TTM fields nulled, not deleted) | 224,843 rows (higher — new FY rows still added) | 293 | 221,273 rows |
+| `stock_splits` | 4,330 rows / 1,255 tickers | 83 | 7 rows / 4 tickers | 82 | 4,330 rows / 1,255 tickers |
+| `market_cap_live` | 2,175 rows | 35 | 0 rows | 34 | 2,175 rows |
 
-Post-restore spot checks: `AAPL`/`MSFT`/`TSLA` price, splits, and `market_cap_asof` rows
-identical to pre-run; `AEM` still correctly `USD`-aligned (the pre-existing Canadian
-currency-mismatch fix, unaffected); `AQN` still correctly native `CAD`; `AAPL`'s TTM
-`price_close`/`margin_of_safety_pct` back to real values (e.g. `304.91`, not `NULL`);
-`config.tickers` confirmed to have gained zero EU rows at any point during the incident
-(Option B, §2, held throughout). The 6 EU tickers' price/split data written by `18` was
-necessarily lost along with the restore (it lived in the same corrupted write as the rest) —
-recoverable by re-running `18` once the write-mode bug (§10.4, fixed in §11) lands in a real
+**Post-restore spot checks, US/CA representatives:**
+
+| Ticker | `market_prices_daily` | `stock_splits` | `market_cap_asof` | `market_cap_live` | `financials_intrinsic_value` (TTM) |
+|---|---|---|---|---|---|
+| `AAPL` | 11,507 rows | 5 splits | present, `USD` | `market_cap` = 4.45E12, `USD` | `price_close` = `304.91` (not `NULL`) |
+| `MSFT` | 10,181 rows | 9 splits | present, `USD` | `market_cap` = 3.74E12, `USD` | — |
+| `TSLA` | 4,054 rows | 2 splits | present, `USD` | `market_cap` = 1.31E12, `USD` | — |
+| `AEM` (CA, USD-aligned) | 7,936 rows | 0 (real — no splits on record) | `USD` (cross-currency fix intact) | — | — |
+| `AQN` (CA, native CAD) | 5,734 rows | 0 (real — no splits on record) | `CAD` | — | — |
+| `BN` (CA, has real splits) | — | 8 splits (confirmed real, not zero) | — | — | — |
+
+`AEM`/`AQN` legitimately have zero recorded splits (real absence, not a recovery gap) — `BN`
+(Brookfield) was checked separately specifically to confirm `stock_splits`' Canadian coverage
+with a real, non-zero, positive count. `config.tickers` confirmed to have gained zero EU rows
+at any point during the incident (Option B, §2, held throughout). The 6 EU tickers' price/
+split data written by `18` was necessarily lost along with the restore (it lived in the same
+corrupted write as the rest) — recoverable by re-running `18` once the write-mode bug (§10.4,
+fixed in §11) lands in a real
 run.
 
 ### 10.4 Proposed fix (design only — not implemented)
@@ -649,15 +675,140 @@ issuer identity, exactly as before.
 recovery — every check in this section is against local code and (for §11.5) live, read-only,
 non-Databricks external API calls.
 
-### 11.8 What remains
+### 11.8 What remains (as of this section — see §12 for what's since been closed)
 
-- **Not re-attempted**: the live bounded run (`17`→`18`→`22`/`23`→`51`) that would actually
-  exercise §11.1/§11.2's fix and §11.3's guards against real Databricks writes. Needs its own
-  explicit go-ahead, per instruction — this pass is diagnosis, fix, and local test only.
-- **Not fixed**: the `23__intrinsic_value.py` blind-`UPDATE`-with-`NULL` finding (§11.3) — a
-  real, distinct vulnerability, deliberately left for the repo owner to decide how to guard.
+- ~~**Not re-attempted**: the live bounded run...~~ — still true after §12 too; see §12.6.
+- ~~**Not fixed**: the `23__intrinsic_value.py` blind-`UPDATE`-with-`NULL` finding~~ — **fixed
+  in §12.3**, not left open.
 - **Not fixed**: `Shares Diluted` remains unmapped for EU tickers (§11.5) — investigated with
   real data, no safe direct mapping exists; a derived mapping is a real future design
-  decision, not built here.
+  decision, not built here. Still true after §12 — out of scope for this round too.
+- **PR #380 remains a draft, not merged.** No new PR opened. No European universe expansion.
+  No DAG scheduling change. No `fundamentals_screener`/Django file touched.
+
+## 12. Second hardening round (2026-08-17) — semantic guard, a sixth casualty, the NULL-overwrite fix
+
+Triggered by review of §11: the 10%-of-existing-rows threshold added there is useful but was
+correctly identified as **secondary, not primary** — a percentage threshold's own failure mode
+(90,001-of-100,000 real rows destroyed is still a catastrophe at just under a 10% threshold)
+means it can never be the main defense. This round replaces it as the primary mechanism with a
+semantic check — "does this run's upstream input actually represent the full universe" — and,
+in reviewing for that, found a sixth incident-affected table §11 had missed.
+
+**Verification discipline, same as §11**: everything below is **VERIFIED LOCALLY**
+(pytest/ruff) except the recovery confirmation itself, which is **VERIFIED IN DATABRICKS**
+(read-only SQL only). No notebook executed against Databricks this round either.
+
+### 12.1 A sixth casualty found: `market_cap_live`
+
+Building a complete inventory of every `.mode("overwrite")` write across `22`/`23` (rather
+than trusting the partial list from the original incident response) surfaced that
+`22__derived_metrics.py`'s "Live market cap" section (`market_cap_live`/`mcl_tbl`, ~line 1013
+on — the genuinely-current, non-fiscal-year-anchored market cap used for display) shares the
+**exact same `_has_prices`-gated code block** as `market_cap_asof`, with its own independent
+unconditional full-table overwrite two hundred lines later in the same `else:` branch. It had
+never been checked. Confirmed corrupted (0 rows, down from 2,175) and confirmed restored
+(version 34, 2,175 rows, real `AAPL`/`MSFT`/`TSLA` values) — full detail in the now-updated
+§10.2/§10.3 above, which supersede the original five-table listing.
+
+`23__intrinsic_value.py` has **no** `.mode("overwrite")` writes at all (confirmed via the same
+inventory sweep) — only the two MERGE-based tables already reviewed in §11.3. `12`'s own three
+overwrite sites (`market_prices_daily`, `stock_splits`, `fx_rates_daily`) were already fully
+enumerated in §11.2/§10.2. This is now a complete, swept inventory, not a partial one.
+
+### 12.2 The semantic guard: `is_full_universe_run`
+
+New in `fundamentals_pipeline/write_safety.py`: `is_full_universe_run(source_ticker_count,
+reference_ticker_count, min_coverage=0.90)` — a pure coverage-ratio comparison, no Spark. This
+is now the **primary** defense; `assert_orphan_delete_safe`'s percentage threshold (§11.3)
+remains as **secondary**, unchanged, per the explicit instruction to keep both layers.
+
+Deliberately **not** a caller-set `FULL_UNIVERSE_RUN = True/False` flag — a hand-set boolean
+would have exactly the same failure mode `force_full_refresh` already demonstrated (a flag
+whose meaning a caller can misunderstand or misuse). Instead each notebook measures its own
+real input against a real reference and lets the comparison decide:
+
+- **`22__derived_metrics.py`**: `_has_prices` — previously a bare "does `market_prices_daily`
+  have any rows at all" check (true even for the incident's 7-ticker corrupted table) — is now
+  additionally gated on `is_full_universe_run(distinct tickers in market_prices_daily, distinct
+  tickers in financials)`. This is the single primary gate protecting **three** things at
+  once, since all three sit inside the same `if _has_prices: ... else: pe_mcap = None` block:
+  `market_cap_asof`'s write, `market_cap_live`'s write (§12.1), and `long_val`'s (valuation
+  metrics) contribution to the `financials_metrics` MERGE. A degraded upstream input now never
+  reaches any of the three writes at all, rather than reaching them and then being caught (or
+  not) by a downstream percentage check.
+- **`23__intrinsic_value.py`**: a new `_ttm_full_universe_run` flag, computed the same way
+  (`is_full_universe_run(distinct tickers in market_prices_daily, distinct tickers in
+  ttm_wide)`) — but here tightening the existing `has_live_price` boolean alone would **not**
+  have been sufficient (§12.3 explains why) — it's a separate flag consumed directly by the
+  MERGE.
+
+**12 new tests** in `tests/test_write_safety.py` for `is_full_universe_run` (full coverage
+passes; the exact incident ratio, 7-of-2,662, fails; the 90% boundary in both directions;
+empty-reference no-op; source-exceeds-reference still passes).
+
+### 12.3 The real `23` blind-NULL-overwrite fix
+
+Re-investigated exactly how a legitimate empty/partial source could overwrite existing
+valuation fields with `NULL`, per instruction. **Finding: tightening `has_live_price`'s
+coverage alone does not fix this** — even when `has_live_price` is `False`, the existing
+`else:` branch (`23__intrinsic_value.py`, ~line 726) still builds `ttm_with_price` with
+explicit `NULL` `price_close`/`market_cap` columns for **every** ticker, by design (so
+`ttm_pdf`/`incoming_iv` always has a complete, uniform shape). Those `NULL`s reach
+`incoming_iv` regardless of `has_live_price`'s value, and the real harm happens one step
+later: the `iv_tbl` MERGE's `WHEN MATCHED THEN UPDATE SET ... price_close = source.price_close,
+margin_of_safety_pct = source.margin_of_safety_pct` was **unconditional** — it always trusted
+whatever this run computed, real or `NULL`, over whatever real value already existed.
+
+**Fix**: the single `WHEN MATCHED` clause is now two, evaluated in order (standard Delta Lake
+MERGE syntax):
+
+1. `WHEN MATCHED AND (source.period_type != 'TTM' OR source.price_close IS NOT NULL OR
+   {_ttm_full_universe_run}) THEN UPDATE SET` — the full update, all columns including
+   price/margin-of-safety. Covers: every FY row (unaffected by this whole question — its price
+   comes from a plain LEFT JOIN against `market_cap_asof` that already degrades to `NULL`
+   safely with no destructive write involved, confirmed by re-reading that code path); any TTM
+   row with a genuine non-`NULL` price; any TTM row when this run's price coverage was
+   confirmed representative (a `NULL` is then trustworthy — the ticker genuinely has no live
+   price, e.g. a real delisting).
+2. `WHEN MATCHED THEN UPDATE SET` (no condition — catches everything the first clause didn't)
+   — updates every column **except** `price_close`/`margin_of_safety_pct`, explicitly
+   preserving whatever real value already exists. Reached only by a TTM row whose price
+   computed `NULL` while this run's coverage was NOT representative — exactly the 2026-08-16
+   `AAPL` scenario, and now structurally incapable of repeating it.
+
+This preserves the project's own "real gap reads `NULL`" philosophy for a **genuinely**
+full-universe run (a real delisting still correctly reads `NULL`) while refusing to let a
+**degraded** run's `NULL` destroy a real value — the same distinction §12.2's semantic gate
+draws elsewhere, applied here at the per-column level instead of the whole-block level because
+TTM rows for tickers WITH real data and tickers WITHOUT it are interleaved in the same MERGE
+source, unlike `22`'s all-or-nothing valuation block.
+
+### 12.4 Regression tests
+
+`is_full_universe_run` itself is covered by §12.2's 6 new tests. The MERGE-level split (the
+two-`WHEN MATCHED`-clauses SQL) is not independently unit-testable — it's inline Spark SQL in
+a Databricks-only notebook, the same constraint noted throughout this document — its
+correctness rests on the pure `is_full_universe_run` logic feeding it plus a manual trace of
+the SQL (documented in §12.3) confirming FY rows and non-NULL TTM rows always take the full-
+update path and only the exact incident shape (TTM + NULL + non-representative coverage) takes
+the preserving path. Flagged as a real gap for the next live bounded run to specifically
+exercise (§12.6) rather than a gap this round could close without Spark.
+
+### 12.5 Local verification
+
+`pytest tests/ -q`: **326 passed, 2 skipped** (pre-existing, unrelated). `ruff check` on every
+changed file: clean. No Databricks notebook executed this round — the `market_cap_live`
+recovery (§12.1) used the same read-only-SQL-plus-`RESTORE TABLE` pattern as §10.3, not a
+notebook run.
+
+### 12.6 What remains
+
+- **The live bounded run is still not re-attempted** — now doubly true: it would exercise
+  both §11's fixes and §12's semantic guard/MERGE split for the first time against real
+  Databricks writes. Needs its own explicit go-ahead.
+- **`Shares Diluted` remains unmapped** (§11.5) — unchanged, out of scope this round too.
+- **The MERGE-level split (§12.3) has no automated regression test** (§12.4) — the live
+  bounded run is what would actually prove it, once authorized.
 - **PR #380 remains a draft, not merged.** No new PR opened. No European universe expansion.
   No DAG scheduling change. No `fundamentals_screener`/Django file touched.
