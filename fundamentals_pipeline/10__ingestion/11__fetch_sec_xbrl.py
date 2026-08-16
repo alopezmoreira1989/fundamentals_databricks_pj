@@ -562,7 +562,9 @@ def process_ticker(ticker: str, scraped_at_ts: datetime) -> tuple:
 
     error_dict has: error_type, error_message, step. meta_dict has: accounting_standard,
     reporting_currency — detected from this ticker's companyfacts response (see
-    detect_accounting_standard_and_currency), None whenever facts couldn't be fetched at all.
+    detect_accounting_standard_and_currency), None whenever facts couldn't be fetched at all —
+    plus cik (Phase 5.0/ADR-0010), populated as soon as CIK resolution succeeds regardless of
+    what happens downstream. meta_dict itself is None only when CIK resolution fails.
     """
     records = []
     try:
@@ -570,10 +572,16 @@ def process_ticker(ticker: str, scraped_at_ts: datetime) -> tuple:
     except Exception as e:
         return [], _classify_error(e, "fetch_cik"), None
 
+    # cik is known as soon as it resolves — carried in meta from here on regardless of what
+    # happens downstream, so the Phase 5.0 issuer_id backfill (section 7c) can use it even for
+    # a ticker whose facts fetch later fails (the accounting_standard/reporting_currency
+    # backfill's own None/None filter is unaffected — see section 7c's comment).
+    meta = {"accounting_standard": None, "reporting_currency": None, "cik": cik}
+
     try:
         facts = get_facts(cik)
     except Exception as e:
-        return [], _classify_error(e, "fetch_facts"), None
+        return [], _classify_error(e, "fetch_facts"), meta
 
     # Merge predecessor CIKs (mergers, MLP→C-corp, spinoffs). A broken alias
     # must not abort ingestion for the ticker — log and continue with what we have.
@@ -591,7 +599,8 @@ def process_ticker(ticker: str, scraped_at_ts: datetime) -> tuple:
             facts = merge_facts(facts, *_alias_facts)
 
     accounting_standard, reporting_currency = detect_accounting_standard_and_currency(facts)
-    meta = {"accounting_standard": accounting_standard, "reporting_currency": reporting_currency}
+    meta["accounting_standard"] = accounting_standard
+    meta["reporting_currency"] = reporting_currency
 
     try:
         # VECTORIZED row construction. Previously: series.iterrows() per concept — ~42% of
@@ -684,6 +693,7 @@ def process_ticker(ticker: str, scraped_at_ts: datetime) -> tuple:
 # COMMAND ----------
 
 try:
+    from fundamentals_pipeline.identity import make_issuer_id
     from fundamentals_pipeline.sources.base import (
         SourceEntity,
         SourceEntityMetadata,
@@ -695,6 +705,7 @@ except ImportError:
     import sys
 
     subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "-e", "../.."])
+    from fundamentals_pipeline.identity import make_issuer_id
     from fundamentals_pipeline.sources.base import (
         SourceEntity,
         SourceEntityMetadata,
@@ -717,7 +728,13 @@ class SECXBRLSource:
                 cik, company_name = get_cik(t)
             except ValueError:
                 continue
-            out.append(SourceEntity(ticker=t.upper(), source_entity_id=cik, name=company_name))
+            out.append(SourceEntity(
+                source_id=self.source_id,
+                source_entity_id=cik,
+                issuer_id=make_issuer_id(self.source_id, cik),
+                name=company_name,
+                ticker=t.upper(),
+            ))
         return out
 
     def discover_filings(self, entity):
@@ -1012,6 +1029,51 @@ if RUN_TICKERS and ticker_meta:
               f"Canadian ticker(s)")
     else:
         print("✓ No Canadian ticker accounting_standard/reporting_currency to backfill this run")
+else:
+    print("✓ No ticker metadata collected this run (nothing to backfill)")
+
+# COMMAND ----------
+
+# MAGIC %md ## 7c. Backfill issuer_id (Phase 5.0, ADR-0010 — additive, all markets)
+# MAGIC
+# MAGIC `issuer_id = make_issuer_id("SEC_XBRL", cik)` for every ticker this run resolved a CIK
+# MAGIC for — US and CA both (unlike 7b above, this is NOT filtered to Canadian rows, since CIK
+# MAGIC resolution already happens for every ticker regardless of market). This is the ONE
+# MAGIC column this Phase 5.0 pass actually backfills onto `config.tickers`; `mic`/`listing_id`
+# MAGIC are added to the schema (section 9 below) but left NULL for the existing universe —
+# MAGIC backfilling those needs a Yahoo-exchange-mnemonic → real ISO 10383 MIC mapping that
+# MAGIC does not exist yet (see `docs/phase5-identity-listing-model.md`). Mirrors 7b's own
+# MAGIC MERGE shape exactly, including its bare-`ticker` MERGE key — that pre-existing
+# MAGIC limitation is inherited here, not introduced fresh or fixed (fixing it means resolving
+# MAGIC the same `(ticker, market)` ambiguity this whole Phase 5.0 pass is deliberately scoping
+# MAGIC around, per ADR-0010).
+
+# COMMAND ----------
+
+if RUN_TICKERS and ticker_meta:
+    _issuer_records = [
+        {"ticker": t, "issuer_id": make_issuer_id("SEC_XBRL", m["cik"])}
+        for t, m in ticker_meta.items()
+        if m.get("cik")
+    ]
+
+    if _issuer_records:
+        _issuer_schema = StructType([
+            StructField("ticker",    StringType(), False),
+            StructField("issuer_id", StringType(), False),
+        ])
+        spark.createDataFrame(_issuer_records, schema=_issuer_schema) \
+             .createOrReplaceTempView("incoming_ticker_issuer_id")
+        spark.sql(f"""
+            MERGE INTO {CATALOG}.config.tickers AS t
+            USING incoming_ticker_issuer_id AS s
+            ON t.ticker = s.ticker
+            WHEN MATCHED THEN UPDATE SET
+                t.issuer_id = s.issuer_id
+        """)
+        print(f"✓ issuer_id backfilled for {len(_issuer_records)} ticker(s)")
+    else:
+        print("✓ No ticker issuer_id to backfill this run (no CIKs resolved)")
 else:
     print("✓ No ticker metadata collected this run (nothing to backfill)")
 
