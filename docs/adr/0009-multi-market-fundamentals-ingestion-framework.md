@@ -1,14 +1,36 @@
 # ADR-0009: Multi-market, multi-source fundamentals ingestion — Europe as the first non-US pilot, ESAP-ready, Canada registered but not forced
 
-- **Status:** Proposed — approved to proceed to Phase 3 (§7) while still Proposed. Deliberately
-  **not** flipped to Accepted yet: Phase 3 is where this design has to prove it actually fits
-  the existing codebase (identity → ticker universe → source routing → SEC ingestion → source-
-  normalized facts → canonical financials) without requiring the current architecture to be
-  substantially rebuilt to accommodate it. If Phase 3 finds that it does, this ADR gets
-  revised before Acceptance. Accept only once Phase 3 is implemented and the existing US
-  pipeline's tests still pass unchanged.
-- **Date:** 2026-08-16 (revised same day — see revision note)
+- **Status:** Accepted
+- **Date:** 2026-08-16 (Proposed and revised earlier the same day — see the revision notes below;
+  Accepted after Phase 3 landed)
 - **Deciders:** repo owner
+
+## Acceptance note (2026-08-16)
+
+Accepted after Phase 3 (§7) met the bar this ADR itself set for Acceptance — proving the
+`FundamentalsSource` design actually fits the existing codebase (identity → ticker universe →
+source routing → SEC ingestion → source-normalized facts → canonical financials) without
+requiring it to be rebuilt, not merely designed on paper:
+
+- Phase 3 implemented (`fundamentals_pipeline/sources/`: the `FundamentalsSource` contract,
+  the source registry with its access-status model, the `MappingStatus`/`MappingType` decision
+  model) and merged into `main` ([PR #369](https://github.com/alopezmoreira1989/fundamentals_databricks_pj/pull/369)).
+- `source_id` provenance added to `financials_raw`/`financials`, additive, following the
+  existing `tag_namespace` precedent exactly.
+- `SECXBRLSource` proved the contract fits SEC's real shape — not asserted, exercised: a real
+  Databricks smoke test (local Databricks Connect, fixed same session) ran `11__fetch_sec_xbrl`
+  → `21__clean_and_merge` end-to-end against a real SEC API call and real Unity Catalog writes
+  (AAPL, forced refresh), confirmed `source_id`/`tag_namespace` populate correctly, confirmed
+  AAPL's canonical values were unchanged, confirmed zero new `ingestion_failures`.
+- Two real review findings from PR #369 were fixed and re-verified live before merge:
+  `SECXBRLSource.retrieve_facts()` now matches on the real SEC accession number (`accn`), not
+  an approximate `(form, period_end)` key; the ADR's own wording about `source_id` no longer
+  overclaims a retroactive backfill that was never actually implemented.
+- The existing US pipeline's local test suite (211 tests) passed unchanged throughout — no
+  regression from this work.
+
+Phase 4 (European source research) starts from here, on its own branch, following the same
+research-before-implementation discipline this ADR was itself built with.
 
 This ADR is the Phase 1–2 deliverable for the multi-market ingestion project (repository
 analysis + architecture proposal). It documents a **proposal**; Phase 3 (§7) is scoped as a

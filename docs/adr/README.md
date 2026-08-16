@@ -39,6 +39,6 @@ code must be written. Routine choices don't need an ADR; this is not a change lo
 | [0006](0006-repositories-mandatory-for-analytical-storage.md) | Repositories mandatory for analytical storage; trivial ORM CRUD may skip them | Superseded by [0008](0008-retire-web-consolidate-on-fundamentals-screener.md) |
 | [0007](0007-custom-user-model-from-first-migration.md) | Custom user model, set before the first migration | Superseded by [0008](0008-retire-web-consolidate-on-fundamentals-screener.md) |
 | [0008](0008-retire-web-consolidate-on-fundamentals-screener.md) | Retire `web/`, consolidate the presentation layer on `fundamentals_screener` | Accepted |
-| [0009](0009-multi-market-fundamentals-ingestion-framework.md) | Multi-market, multi-source fundamentals ingestion — Europe as the first non-US pilot, ESAP-ready, Canada registered but not forced | Proposed |
+| [0009](0009-multi-market-fundamentals-ingestion-framework.md) | Multi-market, multi-source fundamentals ingestion — Europe as the first non-US pilot, ESAP-ready, Canada registered but not forced | Accepted |
 
 _Template: [`0000-template.md`](0000-template.md)._
