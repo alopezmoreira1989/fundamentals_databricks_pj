@@ -9,6 +9,13 @@ and [docs/phase5-1-eu-adapter.md](phase5-1-eu-adapter.md). See also
 [docs/adr/0011-european-universe-admission.md](adr/0011-european-universe-admission.md) (status: Proposed) for the
 decision this research supports.
 
+**Note on this document's own universe-source verdict**: this pass and its direct follow-up
+([phase5-2b](phase5-2b-european-universe-source-validation.md)) classified European universe
+discovery `NOT SOLVED` after STOXX and iShares were tested and disqualified. A later pass,
+[phase5-2c](phase5-2c-esma-firds-research.md), found ESMA FIRDS to be a materially better
+candidate (`READY WITH CONDITIONS`) — kept here for the review trail, but phase5-2c is the
+current state of that question.
+
 ---
 
 ## 1. Executive summary

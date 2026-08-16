@@ -4,6 +4,13 @@
 [docs/phase5-2-european-universe-admission-research.md](phase5-2-european-universe-admission-research.md)
 and [ADR-0011](adr/0011-european-universe-admission.md) (status stays **Proposed**).
 
+**Superseded, not retracted**: this document's own verdict (`C — NOT SOLVED`, §27) was the
+correct conclusion for the two sources actually tested here (STOXX, iShares) and is kept as
+written for the review trail. A later pass,
+[docs/phase5-2c-esma-firds-research.md](phase5-2c-esma-firds-research.md), found a materially
+better candidate (ESMA FIRDS, `READY WITH CONDITIONS`) that this document did not investigate —
+read that document for the current state of the universe-source question.
+
 **Labeling convention used throughout, per explicit instruction**: every claim below is tagged
 **VERIFIED FACT** (directly observed, reproducible), **LIVE TEST RESULT** (a specific query run
 this session with its real output), **RESEARCH FINDING** (established from documentation/public

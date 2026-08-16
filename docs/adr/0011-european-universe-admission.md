@@ -95,19 +95,39 @@ Composite precedent) was tested directly and found blocked: the legacy `.ajax?fi
 `json` scraping pattern documented in public tooling no longer works against the current
 (Astro-based SPA) `ishares.com` UK site.
 
-This yields a clean split, worth stating explicitly:
+This yielded a clean split, worth stating explicitly:
 ```
 identity resolution (this ADR's decision)     READY
 ESEF ingestion (Phase 5.1)                     READY
 canonical mapping (Phase 5.1)                  READY
-universe discovery                              NOT SOLVED
+universe discovery                              NOT SOLVED  (at the time)
 ```
-Neither gap is resolved by this ADR — the identity-resolution decision above stands on its own
-and is not contingent on which universe source (if any) eventually supplies candidates. The
-remaining real choices for universe discovery (manual curation, a commercial license, further
-engineering investment in the iShares route, or revisiting this later) are left as an explicit,
-separate, future decision — deliberately not selected here, and deliberately not forced by
-adopting a source already shown not to meet this project's own evidentiary bar.
+
+**Updated by a third follow-up pass**
+([docs/phase5-2c-esma-firds-research.md](../phase5-2c-esma-firds-research.md)): **ESMA FIRDS**
+(the EU regulator's own MiFID II/MiFIR reference-data system) was investigated as a replacement
+candidate and found `READY WITH CONDITIONS` — a materially better result than STOXX/iShares,
+verified live against real ESMA data: a documented, free, unauthenticated machine-to-machine
+API; a real equity reference file published the day before this research (confirmed current —
+passing precisely the freshness test STOXX's PDF failed); native `ISIN`/issuer-`LEI`/venue-`MIC`
+fields (no ticker field, which is a feature for this project's ticker-is-not-identity principle,
+not a gap); and all four Phase 5.1 pilots independently re-found by ISIN alone, with LEI and MIC
+(including Fincantieri's `MTAA` specifically — now a fourth independent confirmation) matching
+exactly. **This ADR's own universe-discovery status updates to**:
+```
+identity resolution (this ADR's decision)     READY
+ESEF ingestion (Phase 5.1)                     READY
+canonical mapping (Phase 5.1)                  READY
+universe discovery                              READY WITH CONDITIONS  (ESMA FIRDS —
+                                                 see phase5-2c for the exact conditions:
+                                                 a primary-venue selection filter is
+                                                 still undesigned, and the listing_id
+                                                 ISIN-vs-ticker keying question this
+                                                 finding raises is unresolved)
+```
+None of this is implemented by this ADR or by the phase5-2c research itself — the
+identity-resolution decision above stands on its own regardless, and the universe-source
+decision remains a separate, future implementation phase, not decided here.
 
 ## Consequences
 
