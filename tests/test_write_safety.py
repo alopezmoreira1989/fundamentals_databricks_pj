@@ -14,6 +14,7 @@ from fundamentals_pipeline.write_safety import (
     assert_full_overwrite_safe,
     assert_orphan_delete_safe,
     is_full_universe_run,
+    scoped_orphan_keys,
 )
 
 # ── assert_full_overwrite_safe ──────────────────────────────────────────────────────────────
@@ -140,3 +141,70 @@ def test_source_can_exceed_reference():
     # The source legitimately covering MORE tickers than the reference (e.g. price data for
     # some tickers not yet in the fundamentals universe) is still a full-universe run.
     assert is_full_universe_run(source_ticker_count=3_000, reference_ticker_count=2_662) is True
+
+
+# ── scoped_orphan_keys (2026-08-17: financials_metrics joint-ownership fix) ─────────────────
+# Reproduces the real 2026-08-17 dry-run finding: 474,698 raw orphans, 100% belonging to
+# 23__intrinsic_value.py's own metric vocabulary, 0% to 22__derived_metrics.py's own -- and
+# proves the fix doesn't weaken protection against the ORIGINAL 2026-08-16 incident pattern
+# (a genuine, large loss of 22-owned metrics).
+
+_22_OWNED = {"Net Margin %", "ROA %", "Piotroski F-Score", "P/E", "Altman Z-Score"}
+_23_OWNED = {"Owner Earnings (FY)", "Graham Number (FY)", "MoS % (DCF, FY)"}
+
+
+def test_the_real_dry_run_scenario_scopes_to_zero():
+    # All "orphans" are 23-owned metrics missing from 22's own source -- because 22 never
+    # produces them in the first place, not because anything is actually stale.
+    orphans = {("AAPL", 2024, m) for m in _23_OWNED} | {("MSFT", 2024, m) for m in _23_OWNED}
+    assert scoped_orphan_keys(orphans, _22_OWNED) == set()
+
+
+def test_genuinely_stale_22_owned_metric_is_still_flagged():
+    # A real, legitimate cleanup case: 22 itself no longer produces a metric it used to (e.g.
+    # a retired formula) -- this must still be caught, not silently protected by the fix.
+    orphans = {("AAPL", 2020, "Altman Z-Score")}
+    assert scoped_orphan_keys(orphans, _22_OWNED) == {("AAPL", 2020, "Altman Z-Score")}
+
+
+def test_mixed_orphan_set_keeps_only_the_owned_subset():
+    orphans = (
+        {("AAPL", 2024, m) for m in _23_OWNED}          # not 22's business
+        | {("AAPL", 2020, "Altman Z-Score")}             # genuinely 22's stale metric
+    )
+    assert scoped_orphan_keys(orphans, _22_OWNED) == {("AAPL", 2020, "Altman Z-Score")}
+
+
+def test_original_incident_pattern_still_fully_protected():
+    # The 2026-08-16 incident: a corrupted price input collapsed long_val (22's OWN valuation
+    # metrics) for the entire universe. Simulate a large, genuine loss of 22-owned rows and
+    # confirm scoped_orphan_keys still surfaces all of it -- the fix must not mask this.
+    large_genuine_loss = {(f"TICK{i}", 2024, "P/E") for i in range(1000)}
+    scoped = scoped_orphan_keys(large_genuine_loss, _22_OWNED)
+    assert len(scoped) == 1000
+    assert scoped == large_genuine_loss
+
+
+def test_combined_with_assert_orphan_delete_safe_real_scenario_passes():
+    # End-to-end: the real dry-run's raw count (474,698) would have tripped the OLD, unscoped
+    # guard; the ownership-scoped count (0, since all are 23-owned) correctly passes.
+    orphans = {(f"TICK{i}", 2024, m) for i in range(50_000) for m in _23_OWNED}
+    scoped = scoped_orphan_keys(orphans, _22_OWNED)
+    assert_orphan_delete_safe(len(scoped), existing=2_039_873)  # does not raise
+
+
+def test_combined_with_assert_orphan_delete_safe_original_incident_still_raises():
+    # End-to-end: a genuine large loss of 22-owned rows must still trip the guard after scoping.
+    large_genuine_loss = {(f"TICK{i}", 2024, "P/E") for i in range(300_000)}
+    scoped = scoped_orphan_keys(large_genuine_loss, _22_OWNED)
+    with pytest.raises(UnsafeOrphanDeleteError):
+        assert_orphan_delete_safe(len(scoped), existing=2_039_873)
+
+
+def test_empty_owned_metrics_scopes_to_nothing():
+    orphans = {("AAPL", 2024, "P/E")}
+    assert scoped_orphan_keys(orphans, set()) == set()
+
+
+def test_empty_orphan_set_is_a_noop():
+    assert scoped_orphan_keys(set(), _22_OWNED) == set()

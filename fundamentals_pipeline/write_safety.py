@@ -90,6 +90,29 @@ def assert_full_overwrite_safe(
         )
 
 
+def scoped_orphan_keys(orphan_keys: Iterable[tuple], owned_metrics: Iterable[str]) -> set[tuple]:
+    """Filter `orphan_keys` — `(ticker, fiscal_year, metric)` tuples present in a target table
+    but absent from a fresh run's own source — down to the subset this caller actually OWNS
+    (metric, the 3rd tuple element, is in `owned_metrics`).
+
+    2026-08-17 (docs/phase5-6-european-dashboard-data-integration.md §14): `financials_metrics`
+    is jointly populated by `22__derived_metrics.py` (its own base/valuation metrics) and
+    `23__intrinsic_value.py` (its own intrinsic-value labels), each via an independent MERGE
+    into the SAME table. A metric absent from `22`'s own freshly-computed source is only a
+    genuine orphan if `22` is the one who owns it — a `23`-owned label being absent from `22`'s
+    source is not evidence of anything; `22` never produces those rows in the first place. This
+    is what a real dry-run (2026-08-17) found: of 474,698 raw "orphans," 100% belonged to `23`'s
+    own metric vocabulary, none to `22`'s.
+
+    Deliberately an ALLOW-list (only delete what I positively know I own), not a deny-list
+    (delete everything except what I know belongs to some other specific owner) — this caller
+    only needs to know its OWN vocabulary, not enumerate every other current or future owner of
+    rows in the same table.
+    """
+    owned = set(owned_metrics)
+    return {k for k in orphan_keys if k[2] in owned}
+
+
 class UnsafeOrphanDeleteError(Exception):
     """Raised when a MERGE's orphan-cleanup DELETE would remove an implausibly large fraction
     of existing rows — a signal that an upstream dependency came back anomalously empty or

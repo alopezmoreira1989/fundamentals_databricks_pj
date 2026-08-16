@@ -1510,6 +1510,41 @@ if DRY_RUN:
     _modified_rows = _matched.filter(F.col("t.value") != F.col("s.value"))
     _modified_count = _modified_rows.count()
 
+    # Ownership-scoped orphan count (2026-08-17, §14) -- the Spark-scale equivalent of
+    # fundamentals_pipeline.write_safety.scoped_orphan_keys(), computed directly here (not by
+    # collecting millions of keys into the driver to call the pure Python function) since the
+    # pure function's job is to be the unit-tested SPECIFICATION of this exact filter, not the
+    # thing literally executed at this scale. This is what the real (non-dry-run) guard/MERGE
+    # now actually deletes -- shown here so a dry-run can directly verify the fix without a
+    # live run.
+    _22_owned_metrics_dryrun = list(dict.fromkeys([*base_metric_cols, *globals().get("val_metric_cols", [])]))
+    _scoped_orphaned_count = _orphaned_rows.filter(F.col("metric").isin(_22_owned_metrics_dryrun)).count()
+
+    # New-row breakdown (2026-08-17, §14 item 6) -- characterize what "new" actually contains,
+    # not just its count. Compact: new rows are typically few relative to orphans.
+    _new_rows_detail = [
+        {"ticker": r["ticker"], "fiscal_year": r["fiscal_year"], "metric": r["metric"]}
+        for r in _new_rows.select("ticker", "fiscal_year", "metric").orderBy("ticker", "fiscal_year").limit(200).collect()
+    ]
+    _new_by_market = [
+        {"market": r["market_bucket"] if r["market_bucket"] is not None else "OTHER (not in config.tickers or eu_admission_candidates)", "n": r["n"]}
+        for r in (
+            _new_rows
+            .join(
+                spark.table(f"{CATALOG}.config.tickers")
+                .select("ticker", F.coalesce(F.col("market"), F.lit("US")).alias("market_bucket"))
+                .unionByName(
+                    spark.table(f"{CATALOG}.config.eu_admission_candidates")
+                    .filter(F.col("admission_status") == "admitted")
+                    .select("ticker").withColumn("market_bucket", F.lit("EU"))
+                ),
+                on="ticker", how="left",
+            )
+            .groupBy("market_bucket").count().withColumnRenamed("count", "n")
+            .orderBy(F.desc("n")).collect()
+        )
+    ]
+
     # Orphan breakdown by metric (compact — a few dozen distinct metric labels at most).
     _orphan_by_metric = [
         {"metric": r["metric"], "n": r["n"]}
@@ -1598,12 +1633,16 @@ if DRY_RUN:
         "new_count": _new_count,
         "orphaned_count": _orphaned_count,
         "orphaned_pct_of_target": (_orphaned_count / _target_count) if _target_count else None,
+        "scoped_orphaned_count": _scoped_orphaned_count,
+        "scoped_orphaned_pct_of_target": (_scoped_orphaned_count / _target_count) if _target_count else None,
         "modified_count": _modified_count,
         "orphan_by_metric": _orphan_by_metric,
         "orphan_by_fiscal_year": _orphan_by_fy,
         "orphan_by_market": _orphan_by_market,
         "orphan_by_category_base_vs_valuation": _orphan_by_category,
         "orphan_top50_tickers": _orphan_by_ticker_top50,
+        "new_rows_detail": _new_rows_detail,
+        "new_by_market": _new_by_market,
         "sample_modified_rows": _sample_modified,
     }
     print(json.dumps(_result, indent=2, default=str))
@@ -1619,6 +1658,22 @@ if DRY_RUN:
 # deletes exactly those orphans. Safe here specifically because source is a full-universe rebuild
 # each run — a partial/incremental source would incorrectly delete untouched tickers.
 #
+# Ownership scoping (2026-08-17, docs/phase5-6-european-dashboard-data-integration.md §14):
+# `financials_metrics` is jointly populated by THIS notebook and `23__intrinsic_value.py`, each
+# via its own independent MERGE into the same table. A real 2026-08-17 dry-run found that "source
+# is a full-universe rebuild each run" is true for THIS notebook's own metric vocabulary but was
+# never true for `23`'s — `incoming_metrics` (built purely from `base_metric_cols`/
+# `val_metric_cols`) never contains a single one of `23`'s intrinsic-value labels, so running this
+# notebook alone made every one of `23`'s rows look orphaned (474,698 of them, in that real run —
+# 100% unrelated to any actual data problem). `_22_owned_metrics` is this notebook's own,
+# positively-declared vocabulary — mirrors the exact allow-list pattern `23__intrinsic_value.py`'s
+# own `_iv_labels`-scoped cleanup already uses for the reverse case (never touching `22`'s rows).
+# `WHEN NOT MATCHED BY SOURCE` below is now scoped to it: a `23`-owned row absent from THIS run's
+# source is simply not this notebook's business, regardless of source shape — it is never treated
+# as an orphan, so it can never be deleted here.
+_22_owned_metrics = list(dict.fromkeys([*base_metric_cols, *globals().get("val_metric_cols", [])]))
+_22_owned_metrics_sql = ", ".join("'" + m.replace("'", "''") + "'" for m in _22_owned_metrics)
+
 # Structural guard (2026-08-16 incident, docs/phase5-6-european-dashboard-data-integration.md
 # §10): "source is a full-universe rebuild each run" held true for TICKER coverage even during
 # the incident (this notebook has no ticker-scoping mechanism at all) but failed at the METRIC
@@ -1627,11 +1682,17 @@ if DRY_RUN:
 # its own literal logic, removed every valuation metric for the ENTIRE universe. A healthy run's
 # orphan cleanup is a small drift (occasional stale-value retirement), not a bulk wipe — sanity
 # check the blast radius before committing to it, rather than trusting "empty source" to always
-# mean "legitimately nothing left to keep."
-_metrics_before = spark.table(metrics_tbl).count()
+# mean "legitimately nothing left to keep." Both counts below are scoped to `_22_owned_metrics`
+# (§14) — comparing against rows this notebook doesn't own would both mis-state the percentage
+# and (before the ownership-scoped DELETE below existed) have nothing to do with what would
+# actually be deleted.
+_metrics_before = spark.sql(f"""
+    SELECT COUNT(*) AS n FROM {metrics_tbl} WHERE metric IN ({_22_owned_metrics_sql})
+""").collect()[0]["n"]
 _metrics_would_delete = spark.sql(f"""
     SELECT COUNT(*) AS n FROM {metrics_tbl} t
-    WHERE NOT EXISTS (
+    WHERE t.metric IN ({_22_owned_metrics_sql})
+      AND NOT EXISTS (
         SELECT 1 FROM incoming_metrics s
         WHERE s.ticker = t.ticker AND s.fiscal_year = t.fiscal_year AND s.metric = t.metric
     )
@@ -1641,10 +1702,11 @@ try:
 except UnsafeOrphanDeleteError as _e:
     raise RuntimeError(
         f"Refusing to MERGE into {metrics_tbl}: the orphan-cleanup (WHEN NOT MATCHED BY SOURCE "
-        f"DELETE) {_e}. This usually means an upstream dependency (e.g. market_prices_daily) "
-        f"came back anomalously empty/narrow this run, not that this many metrics genuinely "
-        f"became inapplicable at once. See docs/phase5-6-european-dashboard-data-integration.md "
-        f"§10. Investigate before re-running — do not bypass this check without understanding "
+        f"DELETE, scoped to this notebook's own {len(_22_owned_metrics)} known metrics) {_e}. "
+        f"This usually means an upstream dependency (e.g. market_prices_daily) came back "
+        f"anomalously empty/narrow this run, not that this many metrics genuinely became "
+        f"inapplicable at once. See docs/phase5-6-european-dashboard-data-integration.md §10/"
+        f"§14. Investigate before re-running — do not bypass this check without understanding "
         f"why the count is high."
     ) from _e
 
@@ -1664,11 +1726,12 @@ spark.sql(f"""
         INSERT (ticker, company, fiscal_year, metric, value)
         VALUES (source.ticker, source.company, source.fiscal_year, source.metric, source.value)
 
-    WHEN NOT MATCHED BY SOURCE THEN
+    WHEN NOT MATCHED BY SOURCE AND target.metric IN ({_22_owned_metrics_sql}) THEN
         DELETE
 """)
 
-print(f"✓ MERGE complete → {metrics_tbl}")
+print(f"✓ MERGE complete → {metrics_tbl} (orphan-cleanup scoped to this notebook's own "
+      f"{len(_22_owned_metrics)} metrics — 23__intrinsic_value.py's rows are never touched here)")
 
 # COMMAND ----------
 
