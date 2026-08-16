@@ -27,6 +27,13 @@ Scope note: this guards identity at the `config.tickers` / ingestion layer only.
 `financials_raw` / `financials` / `market_prices_daily` / `market_cap_asof` and both
 frontends remain bare-`ticker`-keyed — re-keying them is real migration work that belongs to
 the actual Canadian-onboarding effort, not to this preventive guard.
+
+Phase 5.0 addition (ADR-0010): `make_issuer_id()`/`make_listing_id()` below introduce the
+issuer/listing identity primitives (`issuer_id = source_id:source_entity_id`,
+`listing_id = MIC:TICKER`) as ADDITIVE metadata on `config.tickers` only. This is explicitly a
+TRANSITIONAL state, not a fix to the scope note above: the four core tables named there still
+use bare `ticker` as their physical key after this change. The designed (not yet executed)
+future re-key migration lives in `docs/phase5-identity-listing-model.md`.
 """
 
 from __future__ import annotations
@@ -192,3 +199,39 @@ def check_no_cross_market_collision(
         drop_indices.extend(i for i in rows.index if i != best_idx)
 
     return working.drop(index=drop_indices).reset_index(drop=True)
+
+
+# ── Issuer / listing identity primitives (Phase 5.0, ADR-0010) ─────────────────────────────
+# Deliberately two plain functions, not a registry/manager class — see ADR-0010's explicit
+# "no UniversalIdentityManager" decision. Both are pure string formatting; all the actual
+# judgment (which CIK/LEI resolves to which ticker, which MIC a listing trades on) happens at
+# the call site, using data this module intentionally does not try to derive on its own.
+
+
+def make_issuer_id(source_id: str, source_entity_id: str) -> str:
+    """Source-qualified issuer identity: ``f"{source_id}:{source_entity_id}"`` (e.g.
+    ``"SEC_XBRL:0000320193"``).
+
+    This is NOT a universal cross-source issuer identity. Two different sources' `issuer_id`
+    for the same real-world company do NOT compare equal (e.g. a US-listed and a European
+    listing of the same group would get `SEC_XBRL:<CIK>` and `EU_CURRENT:<LEI>` — distinct
+    strings). Reconciling those into one cross-source identity is unimplemented future
+    entity-resolution work, not something this function attempts.
+    """
+    return f"{source_id}:{source_entity_id}"
+
+
+def make_listing_id(mic: str, ticker: str) -> str:
+    """Canonical listing identity: ``f"{MIC}:{TICKER}"``, both upper-cased (e.g.
+    ``"XNAS:AAPL"``, ``"XMAD:FCC"``).
+
+    `mic` must be a real, verified ISO 10383 Market Identifier Code for the specific market the
+    listing trades on — never invented or approximated. Where an exchange group has both an
+    operating MIC and one or more market-segment MICs (e.g. Borsa Italiana's operating `XMIL`
+    vs. its cash-equities segment `MTAA`), use the segment MIC that identifies the actual
+    market the listing trades on, not the parent operating MIC — see
+    `docs/adr/0010-issuer-listing-identity-model.md` for the evidence behind this rule and the
+    per-market MIC decisions already verified (Madrid `XMAD`, Paris `XPAR`, Amsterdam `XAMS`,
+    Milan `MTAA`).
+    """
+    return f"{mic.upper()}:{ticker.upper()}"

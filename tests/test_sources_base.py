@@ -22,7 +22,16 @@ class _FakeSource:
     source_id = "FAKE_SOURCE"
 
     def discover_entities(self, tickers):
-        return [SourceEntity(ticker=t, source_entity_id=f"FAKE-{t}", name=t) for t in tickers]
+        return [
+            SourceEntity(
+                source_id=self.source_id,
+                source_entity_id=f"FAKE-{t}",
+                issuer_id=f"{self.source_id}:FAKE-{t}",
+                name=t,
+                ticker=t,
+            )
+            for t in tickers
+        ]
 
     def discover_filings(self, entity):
         return [
@@ -57,6 +66,9 @@ def test_fake_source_satisfies_the_protocol_structurally():
     source: FundamentalsSource = _FakeSource()
     entities = source.discover_entities(["ACME"])
     assert entities[0].ticker == "ACME"
+    assert entities[0].source_id == "FAKE_SOURCE"
+    assert entities[0].source_entity_id == "FAKE-ACME"
+    assert entities[0].issuer_id == "FAKE_SOURCE:FAKE-ACME"
 
     filings = source.discover_filings(entities[0])
     assert filings[0].filing_type == "annual"
@@ -68,6 +80,20 @@ def test_fake_source_satisfies_the_protocol_structurally():
     metadata = source.detect_metadata(entities[0])
     assert metadata.accounting_framework == "ifrs-full"
     assert metadata.reporting_currency == "EUR"
+
+
+def test_source_entity_ticker_is_optional_identity_is_not_ticker():
+    """A source that has no natural ticker at all (e.g. an issuer-only lookup) must still be
+    able to construct a valid SourceEntity -- identity comes from source_id/source_entity_id/
+    issuer_id, ticker is convenience-only input metadata."""
+    entity = SourceEntity(
+        source_id="EU_CURRENT",
+        source_entity_id="96950032TUYMW11FB530",
+        issuer_id="EU_CURRENT:96950032TUYMW11FB530",
+        name="Alstom",
+    )
+    assert entity.ticker is None
+    assert entity.issuer_id == "EU_CURRENT:96950032TUYMW11FB530"
 
 
 def test_source_fact_carries_the_minimum_provenance_fields():

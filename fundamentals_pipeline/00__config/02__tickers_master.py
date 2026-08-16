@@ -999,6 +999,13 @@ _is_us = master["market"] == "US"
 master.loc[_is_us, "accounting_standard"] = "us-gaap"
 master.loc[_is_us, "reporting_currency"]  = "USD"
 
+# Phase 5.0 / ADR-0010 — additive issuer/listing identity columns, always NULL at this write.
+# `issuer_id` is repopulated later in the same pipeline run by 11__fetch_sec_xbrl.py's section
+# 7c; `mic`/`listing_id` stay NULL for the existing universe (see docs/phase5-identity-listing-model.md).
+master["issuer_id"]  = None
+master["mic"]        = None
+master["listing_id"] = None
+
 # COMMAND ----------
 
 # MAGIC %md
@@ -1027,6 +1034,15 @@ schema = StructType([
     # NULL here and are backfilled by 11__fetch_sec_xbrl.py from real per-ticker companyfacts.
     StructField("accounting_standard", StringType(), True),
     StructField("reporting_currency",  StringType(), True),
+    # Phase 5.0 / ADR-0010 — additive issuer/listing identity metadata. `issuer_id` is
+    # backfilled by 11__fetch_sec_xbrl.py's section 7c for every ticker it resolves a CIK for
+    # (this write always sets it NULL; 11 repopulates it later in the same pipeline run).
+    # `mic`/`listing_id` are added here as columns but deliberately left unpopulated for the
+    # existing US/CA universe — backfilling them needs a Yahoo-exchange-mnemonic → real ISO
+    # 10383 MIC mapping that does not exist yet (see docs/phase5-identity-listing-model.md).
+    StructField("issuer_id",  StringType(), True),
+    StructField("mic",        StringType(), True),
+    StructField("listing_id", StringType(), True),
 ])
 
 # createDataFrame(pandas_df, schema=StructType(...)) binds schema fields to DataFrame

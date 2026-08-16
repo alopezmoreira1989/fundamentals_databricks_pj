@@ -20,11 +20,24 @@ from typing import Protocol
 @dataclass(frozen=True)
 class SourceEntity:
     """One issuer as this source identifies it — e.g. an SEC CIK, a future SEDAR+ issuer
-    number, or an LEI. ``source_entity_id`` is opaque outside the adapter that produced it."""
+    number, or an LEI. ``source_entity_id`` is opaque outside the adapter that produced it.
 
-    ticker: str
+    Identity here is ``source_id`` + ``source_entity_id`` + ``issuer_id`` — NOT ``ticker``.
+    ``issuer_id`` (built via ``fundamentals_pipeline.identity.make_issuer_id``) is a
+    source-qualified identity (``f"{source_id}:{source_entity_id}"``): it does not claim to be
+    a universal cross-source issuer identity, and two different sources' `issuer_id` for the
+    same real company do not compare equal (see ADR-0010).
+
+    ``ticker`` is optional and exists only because a concrete adapter (`SECXBRLSource`) happens
+    to take tickers as its discovery input — it is convenience/input metadata, never treated as
+    this entity's identity, and it is NOT globally unique (see `fundamentals_pipeline.identity`
+    for why a bare ticker can legitimately collide across markets)."""
+
+    source_id: str
     source_entity_id: str
+    issuer_id: str
     name: str
+    ticker: str | None = None
 
 
 @dataclass(frozen=True)
