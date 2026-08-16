@@ -86,16 +86,31 @@ except ImportError:
         select_filing_for_period,
     )
 
-EU_HEADERS = {"User-Agent": SEC_USER_AGENT}  # filings.xbrl.org has no auth; a real UA is polite
+# `SEC_USER_AGENT`/`STATEMENTS` are `%run`-injected notebook globals (see section 0 above) --
+# absent when this file is loaded outside Databricks (e.g. the local protocol-conformance test
+# in tests/test_eu_adapter_protocol_conformance.py). Guarded via globals().get(...), the same
+# defensive pattern 11__fetch_sec_xbrl.py already uses for AGGREGATE_OR_SUM_CONCEPTS/
+# DEI_NAMESPACE_CONCEPTS -- a real Databricks run is completely unaffected (the real values are
+# always present there before this cell runs).
+EU_HEADERS = {"User-Agent": globals().get("SEC_USER_AGENT", "unset (loaded outside Databricks)")}
 EU_API_BASE = "https://filings.xbrl.org"
 
 # ── Reverse lookup: canonical label -> (stmt_name, kind), reused directly from STATEMENTS
 # (the same `%run`-injected config SEC ingestion uses) — no duplicated stmt/kind mapping.
 _LABEL_TO_STMT_KIND = {
     label: (stmt_name, kind)
-    for stmt_name, concept_map in STATEMENTS.items()
+    for stmt_name, concept_map in globals().get("STATEMENTS", {}).items()
     for label, (_xbrl_concept, kind) in concept_map.items()
 }
+
+# Gates the actual table creation / network / Delta-write sections below (4-7) -- mirrors
+# 11__fetch_sec_xbrl.py's own `if RUN_TICKERS:` pattern exactly. Definitions above (PILOT_EU_
+# ENTITIES, EUCurrentSource, process_eu_entity) stay unconditional/always-defined, same as `11`'s
+# own get_cik/extract_series/SECXBRLSource -- this is what lets
+# tests/test_eu_adapter_protocol_conformance.py load the real EUCurrentSource class locally
+# (with RUN_EU_PILOT=False pre-seeded) without any network call or Spark session. A real
+# Databricks run is completely unaffected -- RUN_EU_PILOT defaults True there.
+RUN_EU_PILOT = globals().get("RUN_EU_PILOT", True)
 
 # COMMAND ----------
 
@@ -318,53 +333,54 @@ def process_eu_entity(ticker: str, lei: str, mic: str, name: str, scraped_at_ts:
 
 # COMMAND ----------
 
-raw_full = f"{CATALOG}.{SCHEMA}.{RAW_TABLE}"
+if RUN_EU_PILOT:
+    raw_full = f"{CATALOG}.{SCHEMA}.{RAW_TABLE}"
 
-spark.sql(f"""
-    CREATE TABLE IF NOT EXISTS {raw_full} (
-        ticker        STRING    NOT NULL,
-        company       STRING,
-        stmt          STRING    NOT NULL,
-        concept       STRING    NOT NULL,
-        kind          STRING    NOT NULL,
-        fy            INT,
-        fp            STRING,
-        form          STRING,
-        period_start  DATE,
-        period_end    DATE      NOT NULL,
-        period_shape  STRING,
-        value         DOUBLE,
-        filed         DATE,
-        scraped_at    TIMESTAMP,
-        tag_namespace STRING,
-        source_id     STRING
-    )
-    USING DELTA
-    PARTITIONED BY (ticker)
-    TBLPROPERTIES (
-        'delta.autoOptimize.optimizeWrite' = 'true',
-        'delta.autoOptimize.autoCompact'   = 'true'
-    )
-""")
+    spark.sql(f"""
+        CREATE TABLE IF NOT EXISTS {raw_full} (
+            ticker        STRING    NOT NULL,
+            company       STRING,
+            stmt          STRING    NOT NULL,
+            concept       STRING    NOT NULL,
+            kind          STRING    NOT NULL,
+            fy            INT,
+            fp            STRING,
+            form          STRING,
+            period_start  DATE,
+            period_end    DATE      NOT NULL,
+            period_shape  STRING,
+            value         DOUBLE,
+            filed         DATE,
+            scraped_at    TIMESTAMP,
+            tag_namespace STRING,
+            source_id     STRING
+        )
+        USING DELTA
+        PARTITIONED BY (ticker)
+        TBLPROPERTIES (
+            'delta.autoOptimize.optimizeWrite' = 'true',
+            'delta.autoOptimize.autoCompact'   = 'true'
+        )
+    """)
 
-EU_SCHEMA_DEF = StructType([
-    StructField("ticker",        StringType(),    False),
-    StructField("company",       StringType(),    True),
-    StructField("stmt",          StringType(),    False),
-    StructField("concept",       StringType(),    False),
-    StructField("kind",          StringType(),    False),
-    StructField("fy",            IntegerType(),   True),
-    StructField("fp",            StringType(),    True),
-    StructField("form",          StringType(),    True),
-    StructField("period_start",  DateType(),      True),
-    StructField("period_end",    DateType(),      False),
-    StructField("period_shape",  StringType(),    True),
-    StructField("value",         DoubleType(),    True),
-    StructField("filed",         DateType(),      True),
-    StructField("scraped_at",    TimestampType(), True),
-    StructField("tag_namespace", StringType(),    True),
-    StructField("source_id",     StringType(),    True),
-])
+    EU_SCHEMA_DEF = StructType([
+        StructField("ticker",        StringType(),    False),
+        StructField("company",       StringType(),    True),
+        StructField("stmt",          StringType(),    False),
+        StructField("concept",       StringType(),    False),
+        StructField("kind",          StringType(),    False),
+        StructField("fy",            IntegerType(),   True),
+        StructField("fp",            StringType(),    True),
+        StructField("form",          StringType(),    True),
+        StructField("period_start",  DateType(),      True),
+        StructField("period_end",    DateType(),      False),
+        StructField("period_shape",  StringType(),    True),
+        StructField("value",         DoubleType(),    True),
+        StructField("filed",         DateType(),      True),
+        StructField("scraped_at",    TimestampType(), True),
+        StructField("tag_namespace", StringType(),    True),
+        StructField("source_id",     StringType(),    True),
+    ])
 
 # COMMAND ----------
 
@@ -372,28 +388,29 @@ EU_SCHEMA_DEF = StructType([
 
 # COMMAND ----------
 
-scraped_at = datetime.utcnow()
-all_records: list[dict] = []
-all_failures: list[dict] = []
+if RUN_EU_PILOT:
+    scraped_at = datetime.utcnow()
+    all_records: list[dict] = []
+    all_failures: list[dict] = []
 
-for ticker, lei, mic, name in PILOT_EU_ENTITIES:
-    print(f"── {ticker} ({name}) ──")
-    try:
-        records, failures = process_eu_entity(ticker, lei, mic, name, scraped_at)
-    except Exception as e:
-        # One pilot issuer's failure must not abort the other three.
-        failures = [{"ticker": ticker, "error_type": "unhandled_error",
-                     "error_message": str(e)[:500], "step": "process_eu_entity"}]
-        records = []
-    all_records.extend(records)
-    all_failures.extend(failures)
-    years = sorted({r["fy"] for r in records})
-    print(f"   {len(records)} facts across {len(years)} fiscal year(s): {years}")
-    for f in failures:
-        print(f"   ⚠ [{f['error_type']}] {f['error_message'][:120]}")
+    for ticker, lei, mic, name in PILOT_EU_ENTITIES:
+        print(f"── {ticker} ({name}) ──")
+        try:
+            records, failures = process_eu_entity(ticker, lei, mic, name, scraped_at)
+        except Exception as e:
+            # One pilot issuer's failure must not abort the other three.
+            failures = [{"ticker": ticker, "error_type": "unhandled_error",
+                         "error_message": str(e)[:500], "step": "process_eu_entity"}]
+            records = []
+        all_records.extend(records)
+        all_failures.extend(failures)
+        years = sorted({r["fy"] for r in records})
+        print(f"   {len(records)} facts across {len(years)} fiscal year(s): {years}")
+        for f in failures:
+            print(f"   ⚠ [{f['error_type']}] {f['error_message'][:120]}")
 
-print(f"\nTotal: {len(all_records)} records, {len(all_failures)} failures across "
-      f"{len(PILOT_EU_ENTITIES)} pilot issuers")
+    print(f"\nTotal: {len(all_records)} records, {len(all_failures)} failures across "
+          f"{len(PILOT_EU_ENTITIES)} pilot issuers")
 
 # COMMAND ----------
 
@@ -401,14 +418,15 @@ print(f"\nTotal: {len(all_records)} records, {len(all_failures)} failures across
 
 # COMMAND ----------
 
-if all_records:
-    pdf = pd.DataFrame(all_records)
-    pdf["fy"] = pdf["fy"].astype("Int64")
-    sdf = spark.createDataFrame(pdf, schema=EU_SCHEMA_DEF)
-    (sdf.write.mode("append").option("mergeSchema", "true").saveAsTable(raw_full))
-    print(f"✓ {len(pdf)} EU_CURRENT record(s) appended to {raw_full}")
-else:
-    print("✓ No EU_CURRENT records to write this run")
+if RUN_EU_PILOT:
+    if all_records:
+        pdf = pd.DataFrame(all_records)
+        pdf["fy"] = pdf["fy"].astype("Int64")
+        sdf = spark.createDataFrame(pdf, schema=EU_SCHEMA_DEF)
+        (sdf.write.mode("append").option("mergeSchema", "true").saveAsTable(raw_full))
+        print(f"✓ {len(pdf)} EU_CURRENT record(s) appended to {raw_full}")
+    else:
+        print("✓ No EU_CURRENT records to write this run")
 
 # COMMAND ----------
 
@@ -416,37 +434,38 @@ else:
 
 # COMMAND ----------
 
-_failures_tbl = f"{CATALOG}.{SCHEMA}.ingestion_failures"
+if RUN_EU_PILOT:
+    _failures_tbl = f"{CATALOG}.{SCHEMA}.ingestion_failures"
 
-spark.sql(f"""
-    CREATE TABLE IF NOT EXISTS {_failures_tbl} (
-        ticker         STRING    NOT NULL,
-        error_type     STRING    NOT NULL,
-        error_message  STRING,
-        step           STRING    NOT NULL,
-        scraped_at     TIMESTAMP NOT NULL
-    )
-    USING DELTA
-    TBLPROPERTIES (
-        'delta.autoOptimize.optimizeWrite' = 'true',
-        'delta.autoOptimize.autoCompact'   = 'true'
-    )
-""")
+    spark.sql(f"""
+        CREATE TABLE IF NOT EXISTS {_failures_tbl} (
+            ticker         STRING    NOT NULL,
+            error_type     STRING    NOT NULL,
+            error_message  STRING,
+            step           STRING    NOT NULL,
+            scraped_at     TIMESTAMP NOT NULL
+        )
+        USING DELTA
+        TBLPROPERTIES (
+            'delta.autoOptimize.optimizeWrite' = 'true',
+            'delta.autoOptimize.autoCompact'   = 'true'
+        )
+    """)
 
-if all_failures:
-    _fail_schema = StructType([
-        StructField("ticker",        StringType(),    False),
-        StructField("error_type",    StringType(),    False),
-        StructField("error_message", StringType(),    True),
-        StructField("step",          StringType(),    False),
-        StructField("scraped_at",    TimestampType(), False),
-    ])
-    _fail_records = [{
-        "ticker": f["ticker"], "error_type": f["error_type"],
-        "error_message": f["error_message"], "step": f["step"], "scraped_at": scraped_at,
-    } for f in all_failures]
-    spark.createDataFrame(_fail_records, schema=_fail_schema) \
-         .write.mode("append").saveAsTable(_failures_tbl)
-    print(f"✓ {len(_fail_records)} failure(s) written → {_failures_tbl}")
-else:
-    print("✓ No ingestion failures to record")
+    if all_failures:
+        _fail_schema = StructType([
+            StructField("ticker",        StringType(),    False),
+            StructField("error_type",    StringType(),    False),
+            StructField("error_message", StringType(),    True),
+            StructField("step",          StringType(),    False),
+            StructField("scraped_at",    TimestampType(), False),
+        ])
+        _fail_records = [{
+            "ticker": f["ticker"], "error_type": f["error_type"],
+            "error_message": f["error_message"], "step": f["step"], "scraped_at": scraped_at,
+        } for f in all_failures]
+        spark.createDataFrame(_fail_records, schema=_fail_schema) \
+             .write.mode("append").saveAsTable(_failures_tbl)
+        print(f"✓ {len(_fail_records)} failure(s) written → {_failures_tbl}")
+    else:
+        print("✓ No ingestion failures to record")
