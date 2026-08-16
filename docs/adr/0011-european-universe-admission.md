@@ -156,7 +156,12 @@ two lightweight due-diligence checks the repo owner asked for alongside them:
   instruction, this ADR and ADR-0010 are **not** amended by this finding — phase5-2d recommends
   resolving the question before a future phase implements FIRDS-based universe discovery, not
   before this ADR is accepted, since ADR-0011 was already explicitly silent on universe-source
-  mechanics by design.
+  mechanics by design. **Resolved by a dedicated follow-up**:
+  [ADR-0012](0012-listing-identity-key.md) (status Proposed, not yet Accepted) now formally
+  decides this question — `listing_id = MIC:ISIN` for new listings, ticker kept as a mutable
+  attribute rather than part of the identity — scoped explicitly to new (FIRDS-sourced)
+  listings, not a re-key of anything existing. See that ADR, not this one, for the decision
+  itself and its evidence.
 - **FIRDS terms of use — lightweight check only, not a legal review.** ESMA's general
   reproduction/reuse policy (source-attributed reproduction authorised, no commercial-use
   prohibition found) applies; no FIRDS-specific stricter terms were found.
