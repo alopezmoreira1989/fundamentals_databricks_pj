@@ -34,21 +34,26 @@ Alstom has 36 real ISINs) was found and fixed along the way (§19). Combined wit
 established `filings.xbrl.org` ESEF confirmation gate, a **Universe → Listing → ISIN → LEI →
 Issuer → ESEF Entity → Admission** pipeline is confirmed architecturally sound against real data.
 
-What is **not** yet solved: a free, reliably-parseable **universe source** for European index
-membership. `STOXX`'s own interactive "selection-lists" portal requires a paid Third-Party Data
-License (verified live) — but a **separate, free, no-login STOXX PDF** was found this session
-(`stoxx.com/document/Bookmarks/CurrentComponents/{SYMBOL}.pdf`) containing the real, complete
-STOXX Europe 600 list (exactly 600 rows, verified by direct parsing) — company name, country,
-sector, weight, but no ticker/ISIN/MIC, and its own embedded PDF metadata shows a `ModDate` of
-July 2023 despite "Current" in the URL, a real freshness concern not yet resolved. The ETF-
-holdings route (mirroring this project's own Russell 3000/TSX precedent) was tested directly
-against the real iShares site and found blocked by a modern JS-rendered (Astro) frontend with no
-working static CSV/JSON endpoint — a real, reported negative result, not just an unresolved
-question. The recommended Generation-1 universe source is therefore the free STOXX PDF itself,
-bridged to `(ticker, MIC)` via OpenFIGI's name+`micCode` search (proven live for two new
-candidates, §21 of the follow-up doc). Full detail:
+What is **not solved, definitively, per a dedicated follow-up investigation**: a free, current
+**universe source** for European index membership. `STOXX`'s own interactive "selection-lists"
+portal requires a paid Third-Party Data License (verified live). A **separate, free, no-login
+STOXX PDF** was found (`stoxx.com/document/Bookmarks/CurrentComponents/{SYMBOL}.pdf`) containing
+the real, complete STOXX Europe 600 list (exactly 600 rows, verified by direct parsing) —
+company name, country, sector, weight, but no ticker/ISIN/MIC. Its embedded PDF metadata showed
+a `ModDate` of July 2023 despite "Current" in the URL; **a decisive follow-up test resolved this
+from suspicion to confirmed fact**: checked directly against two real, dated 2026 STOXX Europe
+600 quarterly reviews (additions/deletions effective March 23 and June 22, 2026), the PDF
+reflects only 4 of 23 real additions and still lists 17 of 21 real deletions — genuinely stale
+data, not just an old timestamp. A second, independent STOXX "Bookmarks" document was also found
+stale. The ETF-holdings route (mirroring this project's own Russell 3000/TSX precedent) was
+separately tested directly against the real iShares site and found blocked by a modern
+JS-rendered (Astro) frontend with no working static CSV/JSON endpoint. **The European
+universe-source question is therefore classified `C — NOT SOLVED`**, deliberately not forced by
+substituting a source of unverifiable or confirmed-poor quality — a decision left open for the
+repo owner, not resolved by this research. This is independent of, and does not block, the
+identity-resolution architecture (ADR-0011), which is `READY`. Full detail:
 [docs/phase5-2b-european-universe-source-validation.md](phase5-2b-european-universe-source-validation.md)
-(see §20, §21 there).
+(see §27 there for the decisive test).
 
 Two genuine, live-verified ticker collisions were found (§18) — not fabricated, not
 hypothetical — directly confirming the "ticker alone is insufficient identity" principle this
@@ -120,23 +125,28 @@ for the full detail behind every "RESOLVED" verdict below.
 | Candidate | Coverage | Access | Identifiers provided | Verdict |
 |---|---|---|---|---|
 | **STOXX official selection lists** (EURO STOXX 50, STOXX Europe 600) | Eurozone / pan-Europe, exactly the index definitions this project already names as targets | **Paid Third-Party Data License required** — verified live: stoxx.com/selection-lists explicitly states "Access to remaining files are reserved to STOXX Index licensees"; only files prefixed `slpublic` are unrestricted, and it's unconfirmed whether EURO STOXX 50/STOXX 600 selection lists are among them | ISIN, SEDOL, RIC, company name (per a sample factsheet PDF found) | **AUTOMATION_RESTRICTED** for the full, current list — same shape as SEDAR+'s ToS-restricted status in ADR-0009 |
-| **STOXX `CurrentComponents` PDF** (`stoxx.com/document/Bookmarks/CurrentComponents/{SYMBOL}.pdf`) — a **separate, free** resource from the row above, discovered in the follow-up pass | Same index definitions | **RESOLVED: free, no login** — verified live, HTTP 200, real PDF, no auth wall | Company name, supersector, country, weight — **no ticker/ISIN/MIC** | **RESEARCH_ONLY** — free and automatable, but the PDF's own metadata shows `ModDate: 2023-07-12`, a real, unresolved freshness concern despite the "Current" naming |
+| **STOXX `CurrentComponents` PDF** (`stoxx.com/document/Bookmarks/CurrentComponents/{SYMBOL}.pdf`) — a **separate, free** resource from the row above, discovered in the follow-up pass | Same index definitions | **RESOLVED: free, no login** — verified live, HTTP 200, real PDF, no auth wall | Company name, supersector, country, weight — **no ticker/ISIN/MIC** | **UNAVAILABLE (confirmed stale)** — a decisive freshness test against two real, dated 2026 STOXX Europe 600 quarterly reviews found only 4 of 23 real additions present and 17 of 21 real deletions still listed; a second, independent STOXX "Bookmarks" document (a factsheet, different path) was also found stale (`ModDate: 2023-09-13`). See the follow-up doc §27. |
 | **iShares Core EURO STOXX 50 UCITS ETF** (ISIN `IE00B53L3W79`) holdings | Tracks EURO STOXX 50 by construction | **RESOLVED: blocked** — the follow-up pass tested the documented legacy `.ajax?fileType=csv\|json` pattern directly with multiple parameter variants; the current `ishares.com/uk/...` site is an Astro-built SPA that does not expose a working static endpoint this way | Presumably ISIN/ticker/weight, matching the pattern IWV/XIC already expose, but not reachable | **UNAVAILABLE** (this pass) — not merely unresolved; a real negative result |
 | **iShares STOXX Europe 600 UCITS ETF (DE)** (ISIN `DE0002635307`, ticker `EXSA`) holdings | Tracks STOXX Europe 600 | Same as above — confirmed blocked | Same as above | **UNAVAILABLE** (this pass) |
 | **Wikipedia "STOXX Europe 600" article** | Partial | **RESOLVED via direct `pd.read_html`**: exactly **467 rows** (not ~600), columns `Ticker, Company, ICB Sector, Country, Headquarters` | Ticker, company name, sector, country (no ISIN/MIC) | **Confirmed incomplete** relative to the real 600-constituent index — not a viable sole universe source |
 | **Euronext's own market-data portal** | Euronext-listed instruments (Paris/Amsterdam/Milan/Brussels/Lisbon/Dublin) | No public CSV/API endpoint found in this pass; portal points to a commercial "Data Shop" | Unknown | **RESEARCH_ONLY** — not ruled out, but no free automated path found live |
 | **National exchange/regulator security-master files** (BME, Borsa Italiana, AMF, AFM) | Per-country | Not investigated in this pass — real candidate, out of time budget this session | Unknown | **RESEARCH_ONLY**, unexplored |
 
-**Conclusion**: the STOXX `CurrentComponents` PDF is a real, free, verified 600-row source —
-company-name/country/sector/weight only, no ticker/ISIN/MIC — bridgeable to a `(ticker, MIC)`
-candidate via `Country → curated MIC table → OpenFIGI name+micCode search`, proven live for two
-new candidates (Iberdrola, Saint Gobain — see the follow-up doc). Its one serious unresolved
-issue is data freshness. The iShares ETF route, by contrast, is a confirmed dead end for this
-pass, not merely unexplored — the hands-on discovery work that succeeded for Russell 3000 (a
-BlackRock varnish-api endpoint) and TSX Composite (a plain CSV path) does not have a working
-analog on the current, Astro-rebuilt `ishares.com` UK site, at least not one found via a direct
-HTTP approach. This is real, reported honestly — not papered over with an assumption that "it
-must work the same way" just because it worked twice before for other BlackRock products.
+**Conclusion, updated after a decisive follow-up test (full detail:
+[phase5-2b §27](phase5-2b-european-universe-source-validation.md))**: the STOXX
+`CurrentComponents` PDF is real, free, and structurally bridgeable to a `(ticker, MIC)`
+candidate via `Country → curated MIC table → OpenFIGI name+micCode search` — that bridging
+mechanism itself was proven live for two new candidates (Iberdrola, Saint Gobain). **But the PDF
+data is confirmed stale**, not merely suspected: tested directly against two real, dated 2026
+STOXX Europe 600 quarterly reviews (March 23 and June 22, 2026), only 4 of 23 real additions
+were present and 17 of 21 real deletions were still listed. **The European universe-source
+question is therefore classified `C — NOT SOLVED`** (per the requested A/READY-B/READY WITH
+CONDITIONS-C/NOT SOLVED framework), separate from and not blocking the identity-resolution
+architecture (ADR-0011), which is independently `READY`. The iShares ETF route, by contrast, is
+a confirmed dead end for this pass, not merely unexplored — the hands-on discovery work that
+succeeded for Russell 3000 (a BlackRock varnish-api endpoint) and TSX Composite (a plain CSV
+path) does not have a working analog on the current, Astro-rebuilt `ishares.com` UK site, at
+least not one found via a direct HTTP approach.
 
 ## 5. Identity-source options — LEI resolution (the strongest finding this pass)
 
@@ -462,22 +472,28 @@ already-identified issuer without repeating identity resolution.
 | ISO 20022 / ESMA FIRDS (MIC registry) | Authoritative MIC codes | ISO / ESMA (official standards bodies) | CSV download | No | N/A | Reused from Phase 5.0's own prior verification, not re-fetched this pass |
 | `filings.xbrl.org` | ESEF entity/filing confirmation | XBRL International (aggregator, not the regulator) | Yes, JSON:API | No | Not documented publicly; not hit hard enough in Phase 5.1/5.2 to surface one | **Yes** — extensively, Phase 5.1 |
 | STOXX official selection lists (portal) | Index constituent source | STOXX (the index provider itself — authoritative) | PDF/Excel per their site, license-gated | **Yes — paid Third-Party Data License** | N/A | **Yes** (confirmed the paywall, not the data) |
-| STOXX `CurrentComponents` PDF (separate free resource) | Index constituent source | STOXX (same provider, different resource) | Direct PDF GET, no login | No | N/A | **Yes** — full detail in the follow-up doc: real 600-row STOXX Europe 600 list parsed, `ModDate` freshness concern found |
+| STOXX `CurrentComponents` PDF (separate free resource) | Index constituent source | STOXX (same provider, different resource) | Direct PDF GET, no login | No | N/A | **Yes — confirmed stale**: real 600-row list parsed, then decisively tested against two real 2026 quarterly reviews (only 4/23 additions present, 17/21 deletions still listed) — full detail in the follow-up doc §27. **Disqualified as a Generation-1 universe source, not merely flagged.** |
 | iShares ETF holdings (EURO STOXX 50 / STOXX 600 trackers) | Free proxy for index membership | Indirect (the ETF issuer, not STOXX itself) | N/A — confirmed unreachable | N/A | N/A | **Yes, confirmed blocked** — see the follow-up doc §2/§3 for the specific negative test results (multiple magic-number/parameter variants tried, all failed) |
 | Wikipedia (STOXX Europe 600 article) | Free proxy for index membership | Community-maintained, not authoritative | HTML table, `pd.read_html`-compatible | No | N/A | **Yes** — confirmed via direct `pd.read_html`: 467 rows, not ~600, no ISIN/MIC |
 | Euronext data portal | Instrument reference data | Euronext (the exchange itself) | Points to a commercial Data Shop | Likely yes for anything beyond marketing pages | N/A | **No** — no free path found |
 
 ## 21. Recommended Generation-1 architecture
 
+**UPDATED — the universe-source box below is now known-disqualified (phase5-2b §27: confirmed
+stale against real 2026 data), not merely "freshness unresolved."** The diagram is kept to show
+exactly what was proven and what wasn't — everything to the right of "Universe Source" is real,
+live-tested, and ready; the Universe Source box itself is not a working Generation-1 choice as
+things stand.
+
 ```
  Universe Source                    MIC Derivation      Identity Resolution              Admission Gate
 ┌────────────────────┐            ┌───────────────┐   ┌──────────────────────┐        ┌─────────────────┐
-│ STOXX               │  company   │ Country (from │   │ OpenFIGI              │  LEI   │ filings.xbrl.org │
+│ ??? — the STOXX      │  company   │ Country (from │   │ OpenFIGI              │  LEI   │ filings.xbrl.org │
 │ CurrentComponents    │  name +    │ STOXX PDF) -> │──►│ name+micCode search   │───────►│ /api/entities/   │
-│ PDF (free, no login, │  country   │ curated MIC   │   │ -> exactly one Common │        │ {LEI}/filings    │
-│ 600 rows verified —  │───────────►│ table         │   │ Stock instrument      │        │       │           │
-│ freshness UNRESOLVED,│            └───────────────┘   │       │               │        │       ▼           │
-│ ModDate 2023-07)      │                                │       ▼               │        │  ADMITTED /      │
+│ PDF WAS tested here, │  country   │ curated MIC   │   │ -> exactly one Common │        │ {LEI}/filings    │
+│ and DISQUALIFIED     │───────────►│ table         │   │ Stock instrument      │        │       │           │
+│ (confirmed stale     │            └───────────────┘   │       │               │        │       ▼           │
+│  vs. real 2026 data) │                                │       ▼               │        │  ADMITTED /      │
 └────────────────────┘                                │ GLEIF ISIN->LEI        │        │  NOT_INGESTIBLE   │
                                                           │ (via OpenFIGI ID_ISIN  │        └─────────────────┘
                                                           │  reverse + GLEIF       │
@@ -485,16 +501,16 @@ already-identified issuer without repeating identity resolution.
                                                           └──────────────────────┘
 ```
 
-This **updates** the brief's original target diagram (§23) — the original assumed ETF holdings
-as the universe box; that box is confirmed non-working this pass (see the follow-up doc), and
-the corrected diagram above was **live-tested end to end for two genuinely new candidates**
+This **updates** the brief's original target diagram (§23) twice over now: the original assumed
+ETF holdings as the universe box (confirmed non-working); the STOXX PDF substitute investigated
+next was also tested and disqualified (confirmed stale, not merely unresolved). **Everything
+right of the Universe Source box was live-tested end to end for two genuinely new candidates**
 (Iberdrola, Saint Gobain — not the four already-known pilots), with Saint Gobain's chain fully
-completed through to 4 real, clean `filings.xbrl.org` filings. The one still-open piece is the
-leftmost box's data freshness, not a missing or unverified link in the chain itself. Recommend:
-(1) resolve the STOXX PDF freshness question before relying on it in any implementation; (2)
-everything right of the Universe Source box is ready to prototype against real data whenever
-that's authorized, since GLEIF/OpenFIGI/filings.xbrl.org are all confirmed live, free, and
-unauthenticated, and the name+MIC bridge is now proven, not merely proposed.
+completed through to 4 real, clean `filings.xbrl.org` filings — that part of the architecture is
+`READY`. The universe-source question is `NOT SOLVED` and is **not** recommended to be forced by
+substituting a lower-quality or unverified source merely to have "a" universe — see phase5-2b
+§27.6 for the real remaining choices (manual curation, a commercial license, further iShares
+reverse-engineering, or revisiting this later), left as an open decision, not resolved here.
 
 ## 22. Open questions
 

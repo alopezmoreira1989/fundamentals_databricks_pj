@@ -13,7 +13,15 @@ verified that wasn't actually checked.
 
 ## Executive summary
 
-**Answer to the hypothesis (§21 in full below): YES, WITH CONDITIONS.**
+**UPDATED after a dedicated freshness investigation (§27): the answer to the hypothesis
+changes from the original "YES, WITH CONDITIONS" to `C — NOT SOLVED` for the universe-source
+question specifically.** The condition flagged in the first pass — resolve whether the free
+STOXX PDF is actually current — was tested directly against real, dated 2026 index-review
+events and **failed**: the PDF is confirmed stale, not merely suspected stale. See §27 for the
+full, decisive test. The rest of this document (§1–§26) is preserved as originally written,
+since it remains accurate as a record of what was tried and found — only the final verdict
+changes, and it changes because the evidence now supports a stronger conclusion, not because
+anything below turned out to be wrong.
 
 A genuinely free, no-login, official STOXX source exists — **not** the paywalled
 "selection-lists" portal previously identified, but a separate **`CurrentComponents` PDF**
@@ -21,8 +29,10 @@ A genuinely free, no-login, official STOXX source exists — **not** the paywall
 live, HTTP 200, real PDF, and STOXX Europe 600's (`SXXGR`) version has **exactly 600 rows** —
 company name, supersector, country, weight — confirmed by direct parsing, not a page-limited
 sample. **VERIFIED FACT**: this PDF's own embedded metadata shows `ModDate: 2023-07-12` — over
-three years old at the time of this research, despite "Current" in its name and URL — a real,
-unresolved freshness risk, not a minor caveat.
+three years old at the time of this research, despite "Current" in its name and URL. **§27
+resolves this from "risk" to "confirmed disqualifying defect"**: the PDF's actual constituent
+data does not reflect either of the two real, dated 2026 STOXX Europe 600 quarterly reviews
+found and cross-checked this session.
 
 The iShares ETF-holdings route — this project's own established precedent for exactly this kind
 of problem (Russell 3000, TSX Composite) — was tested directly and **found blocked**:
@@ -309,7 +319,11 @@ ceiling on what fraction of STOXX 600 could ever be `EU_CURRENT`-ingestible.
 
 ## 21. Generation-1 recommendation
 
-**YES, WITH CONDITIONS.**
+**SUPERSEDED by §27 below — the answer changes to `C — NOT SOLVED`** once condition 1 (below)
+was actually tested against real 2026 data rather than left as an open question. This section
+is kept as originally written for the review trail; §27 is the current, decisive answer.
+
+**Original (first-pass) answer: YES, WITH CONDITIONS.**
 
 The hypothesis (STOXX Europe 600 + iShares EXSA as the Generation-1 universe mechanism) is
 **partially confirmed and partially disproven**: the STOXX half works (a genuinely free, current-
@@ -396,15 +410,124 @@ name alone → ambiguous" vs. "name + MIC → resolved" — not a repeat of the 
 ticker-collision cases already documented in the main research doc, but a second, independent
 confirmation of the same underlying principle using the search-by-name path specifically.
 
-## 26. What remains open (not resolved this pass)
+## 26. What remained open after the first pass (superseded by §27 below)
 
-- STOXX `CurrentComponents` PDF freshness (§1, §15) — the single most important open item.
-- STOXX's actual terms of use for this specific PDF path — not read.
+- ~~STOXX `CurrentComponents` PDF freshness~~ — **resolved in §27: confirmed stale, not merely
+  suspected.**
+- STOXX's actual terms of use for this specific PDF path — still not read; moot for production
+  use now that the data itself is disqualified on freshness grounds regardless of licensing.
 - The iShares JS-rendered holdings data — not reached; would need browser automation or further
   reverse-engineering effort genuinely out of scope for a research-only pass.
 - Whether the `country → MIC` curated table needs entries beyond the four already-known pilot
   countries to cover STOXX 600's full country list (§19) — only Spain/France were exercised
-  against real new candidates this pass.
+  against real new candidates this pass. Still open — orthogonal to the universe-source verdict.
 - Iberdrola's full chain (ISIN/LEI/ESEF) was not completed to the same depth as Saint Gobain's —
   the two identity-resolution steps that were run (STOXX presence, OpenFIGI name+MIC) succeeded,
-  but this document does not claim the full chain was finished for it.
+  but this document does not claim the full chain was finished for it. Still open, and now lower
+  priority given §27's verdict on the universe source itself.
+
+---
+
+## 27. Final freshness investigation (requested follow-up — decisive)
+
+**Objective**: determine whether the free STOXX `CurrentComponents` PDF is actually current, by
+testing it against real, dated, independently-verifiable 2026 STOXX Europe 600 index-review
+events — not by re-examining PDF metadata alone.
+
+### 27.1 Real, dated composition-change events found
+
+**RESEARCH FINDING**, cross-referenced from STOXX's own press releases: STOXX Europe 600 is
+reviewed quarterly. Two real, dated 2026 reviews were found and fetched directly:
+
+- **March 23, 2026** ("first regular quarterly review 2026"): 12 additions
+  (CSG A, Pan African Resources, ING Bank Slaski BSK, Aixtron, Technoprobe SPA, Hochschild
+  Mining, Tauron, Valiant, Benefit Systems, Pirelli & C. S.p.A., Zabka Group, Amrize), 12
+  deletions (Tecan, Alten, Grafton Grp, Eurazeo, Hexpol 'B', Greggs, Amplifon, Softcat, Azelis
+  Group, Kinnevik B, and 2 more the source page truncated before listing).
+- **June 22, 2026** ("second regular quarterly review 2026"): 11 additions (Soitec, AT&S Austria
+  Tech.&Systemtech, Computacenter, SES, Comet Holdings 'R', Inficon, Acerinox, BAM Groep Kon.,
+  Bank Millennium, Kety, TGS ASA), 11 deletions (Camurus, Christian Dior, Vidrala, Bavarian
+  Nordic, B&M European Value Retail, Big Yellow Group, Wendel, Wallenstam B, INWIT, easyJet,
+  Ambu 'B').
+
+### 27.2 The decisive test
+
+**LIVE TEST RESULT**: re-fetched `stoxx.com/document/Bookmarks/CurrentComponents/SXXGR.pdf`
+fresh (same `ModDate: 2023-07-12` as the original fetch — the cached document has not changed
+between the two fetches, itself a small additional data point), parsed all 9 pages, and searched
+the full text for every one of the 23 real 2026 additions and 21 real 2026 deletions above:
+
+| Test set | Expected if current | Actual result |
+|---|---|---|
+| June 2026 additions (11) | All present | **3 of 11 present** (Soitec, Computacenter, SES — the rest absent) |
+| June 2026 deletions (11) | All absent | **8 of 11 still present** (Christian Dior, Vidrala, Bavarian Nordic, B&M European, Big Yellow, Wendel, Wallenstam, INWIT) |
+| March 2026 additions (12) | All present | **1 of 12 present** (Aixtron) |
+| March 2026 deletions (10 checked) | All absent | **9 of 10 still present** (all except Azelis) |
+
+**Overall: 4 of 23 real 2026 additions found; 17 of 21 real 2026 deletions still present.** This
+is not an ambiguous or borderline result — it is a decisive failure against both independently-
+dated review events. (Caveat, stated plainly: this is a plain-text substring search, so a short
+name like "SES" could in principle false-positive-match inside unrelated text; the pattern
+across 44 total checks is overwhelming enough that a handful of possible false positives among
+the 4 "present" additions does not change the conclusion.)
+
+**VERIFIED FACT**: the PDF is not a stale-metadata-but-fresh-data situation (item 2 of the
+requested investigation) — the actual constituent list itself fails to reflect two real,
+confirmed composition changes from earlier in 2026.
+
+### 27.3 A second, independently-stale STOXX document
+
+**LIVE TEST RESULT**: a different STOXX "Bookmarks" path was found and tested —
+`stoxx.com/document/Bookmarks/CurrentFactsheets/SXXGR.pdf` (a statistics factsheet, not a
+constituent list — market cap, returns, risk figures). HTTP 200, real PDF, but its own metadata
+shows `ModDate: 2023-09-13` — a *different* stale date than the Components PDF, but still over
+three years old. **INFERENCE**: this is not a one-off caching accident on a single URL — the
+entire `stoxx.com/document/Bookmarks/Current*` family of free documents appears to serve
+long-unrefreshed snapshots, a structural pattern rather than an isolated glitch.
+
+### 27.4 Alternative official STOXX endpoints — none found working
+
+**LIVE TEST RESULT**: `stoxx.com/index-updates` — an announcement archive; every download link
+in its table renders with an inactive/grayed-out icon (`pdf-inactive.png`), no active files.
+`stoxx.com/periodic-review-information` — a review-results page with an explicitly empty table
+("No Files Exists"). Neither offers a working, current, downloadable constituent file. **No
+versioned or dated variant of the `CurrentComponents` URL was found or guessed successfully**
+(no alternative path pattern was identified to test).
+
+### 27.5 Alternative free sources — not found, not force-fit
+
+**RESEARCH FINDING**: a search for community-maintained (e.g. GitHub) current STOXX Europe 600
+datasets did not surface a specific, verifiable free dataset — only third-party aggregator
+websites (MarketScreener, ChartMill) referencing the data, neither independently fetched or
+accessibility-checked this pass (their own terms/scraping-friendliness were not evaluated — this
+is an explicit gap, not a silent "assume it's fine"). **No alternative free, current,
+automatable European universe source was identified and verified this pass.**
+
+### 27.6 Classification
+
+**C — NOT SOLVED**, for the universe-source question specifically. Per the exact framework
+requested:
+
+```
+European identity resolution      READY   (GLEIF + OpenFIGI + filings.xbrl.org,
+                                            proven for 4 pilots + 2 new candidates)
+European ESEF ingestion           READY   (Phase 5.1, real production data)
+European canonical mapping        READY   (Phase 5.1)
+European universe discovery       NOT SOLVED  (this section)
+```
+
+This is reported as a real, informative result, not a failure to force past. The free STOXX PDF
+route, tested as rigorously as the identity-resolution chain was, does not meet the bar this
+project already holds every other source to. Forcing it into production merely to have "600
+free tickers" would introduce exactly the kind of undefendable data-quality debt ADR-0010/0011's
+own governing principle (comparability/defensibility over raw availability) exists to prevent.
+
+**RECOMMENDATION**: do not select a universe source in this phase. The real, available choices
+for a future, separate decision are: (a) a manually curated/reviewed candidate list (slow,
+small, but fully defensible — arguably what Phase 5.1's four pilots already are, just not
+labeled as a deliberate strategy), (b) a commercial data license (STOXX's own paid
+selection-lists, or an equivalent), (c) further engineering investment in the iShares-holdings
+route (browser automation to reverse-engineer the current API) if that's judged worth the
+effort, or (d) revisiting this question later in case STOXX's free resources are refreshed or a
+new free source appears. None of these is selected or recommended over the others here — that
+remains a decision for the repo owner, informed by this research, not decided by it.

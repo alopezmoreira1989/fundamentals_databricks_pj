@@ -79,20 +79,35 @@ carrying an identified-but-dataless entity forward — but the two concepts are 
 the model itself, and a future source (e.g. covering Germany/Ireland) could re-admit the same,
 already-identified issuer without redoing identity resolution from scratch.
 
-**Explicitly not decided by this ADR**: which universe source supplies the initial candidate
-`(ticker, MIC)` list. A follow-up research pass
+**Explicitly not decided by this ADR, and now explicitly classified `NOT SOLVED`**: which
+universe source supplies the initial candidate `(ticker, MIC)` list. Two follow-up research
+passes
 ([docs/phase5-2b-european-universe-source-validation.md](../phase5-2b-european-universe-source-validation.md))
-found STOXX's own official constituent lists require a paid license for the interactive
-"selection-lists" portal, but a **separate, free, no-login "CurrentComponents" PDF** exists at
-`stoxx.com/document/Bookmarks/CurrentComponents/{SYMBOL}.pdf` with real, complete data (STOXX
-Europe 600's PDF has exactly 600 rows) — company name, country, sector, weight, but **no
-ticker/ISIN/MIC**, and its own PDF metadata shows a `ModDate` of July 2023 despite the
-"Current" in its name, a real, unresolved freshness concern. The iShares ETF-holdings route
-(mirroring this project's Russell 3000/TSX Composite precedent) was tested directly and found
-blocked: the legacy `.ajax?fileType=csv`/`json` scraping pattern documented in public tooling no
-longer works against the current (Astro-based SPA) `ishares.com` UK site. Neither gap is
-resolved by this ADR — the identity-resolution decision above stands on its own regardless of
-which universe source eventually supplies candidates.
+tested every free candidate found and disqualified each in turn, not merely left them
+unresolved: STOXX's official "selection-lists" portal requires a paid license (confirmed).
+STOXX's separate, free, no-login `CurrentComponents` PDF (`stoxx.com/document/Bookmarks/
+CurrentComponents/{SYMBOL}.pdf`) has real, complete data (STOXX Europe 600's PDF has exactly 600
+rows — company name, country, sector, weight, no ticker/ISIN/MIC) but was **decisively proven
+stale**: checked against two real, dated 2026 quarterly index reviews, it reflects only 4 of 23
+real additions and still lists 17 of 21 real deletions. A second, independent STOXX document was
+also found stale. The iShares ETF-holdings route (mirroring this project's Russell 3000/TSX
+Composite precedent) was tested directly and found blocked: the legacy `.ajax?fileType=csv`/
+`json` scraping pattern documented in public tooling no longer works against the current
+(Astro-based SPA) `ishares.com` UK site.
+
+This yields a clean split, worth stating explicitly:
+```
+identity resolution (this ADR's decision)     READY
+ESEF ingestion (Phase 5.1)                     READY
+canonical mapping (Phase 5.1)                  READY
+universe discovery                              NOT SOLVED
+```
+Neither gap is resolved by this ADR — the identity-resolution decision above stands on its own
+and is not contingent on which universe source (if any) eventually supplies candidates. The
+remaining real choices for universe discovery (manual curation, a commercial license, further
+engineering investment in the iShares route, or revisiting this later) are left as an explicit,
+separate, future decision — deliberately not selected here, and deliberately not forced by
+adopting a source already shown not to meet this project's own evidentiary bar.
 
 ## Consequences
 
