@@ -190,7 +190,12 @@ sources adapt to it, never the reverse.
 
 1. A `FundamentalsSource` adapter contract (§2.2) — `11__fetch_sec_xbrl.py` becomes its first
    implementation, unchanged in behavior (its internal shape already matches the contract).
-2. A `source_id` column on `financials_raw`, additive, backfilled `"SEC_XBRL"` for existing rows.
+2. A `source_id` column on `financials_raw` and `financials`, additive. New/updated rows get
+   `"SEC_XBRL"` going forward; existing unchanged rows are intentionally **not** retroactively
+   backfilled — the MERGE only sets it where its `UPDATE` branch already fires (a real
+   value/`period_end` change), matching `tag_namespace`'s own established behavior on this same
+   table (confirmed live: plenty of existing rows still show `tag_namespace=NULL` too). Not a
+   gap to fix — a deliberate continuity with existing MERGE semantics.
 3. A source registry (§2.3) with an explicit access-status enum (§2.3.1) — this is new relative
    to the first draft of this ADR and directly the product of the SEDAR+ vs. ESEF/filings.xbrl.org
    contrast found in research (§4/§5): "has an API" and "is legally safe to automate against"
@@ -644,8 +649,9 @@ the architecture, not cherry-pick easy cases.
    `SourceFiling`/`SourceFact` (§2.2), the registry (§2.3), the `MappingStatus`/`MappingType`
    model (§2.5) — new, pure-Python, unit-tested, no behavior change to existing ingestion.
    `11__fetch_sec_xbrl.py` is refactored to implement the interface (no logic change — §1.1
-   already showed its structure maps onto the contract). `source_id` added to `financials_raw`,
-   additive, backfilled `"SEC_XBRL"`.
+   already showed its structure maps onto the contract). `source_id` added to `financials_raw`
+   and `financials`, additive — populated going forward on new/updated rows, not retroactively
+   backfilled onto unchanged history (see item 2 above).
 3. **`databricks.yml` ingestion-tier split** (also Phase 3, §2.6): `pipeline_pre22` splits into
    per-source ingestion tasks feeding the existing merge/transform chain. Delivers the brief's
    "source failures isolated" success criterion structurally, testable with just one source

@@ -744,35 +744,54 @@ class SECXBRLSource:
         return list(seen.values())
 
     def retrieve_facts(self, filing):
-        """Illustrative only: matches extracted rows to `filing` by (form, period_end) — the
-        fields `extract_series()` actually preserves — rather than by accession number (which
-        it drops). A real caller would extend `extract_series()` to carry `accn` through for an
-        exact per-filing join; this proves the method's signature/return shape fits, not a
-        production filing-scoped fetch."""
+        """Facts belonging EXACTLY to `filing`, matched by SEC accession number (`accn`) — the
+        same identifier `discover_filings` uses as `source_filing_id`. Reads the raw
+        companyfacts response directly (like `discover_filings` does) rather than going through
+        `extract_series()`, which drops `accn` and would only support an approximate
+        (form, period_end) match — insufficient when two filings share both (e.g. a 10-K and a
+        later 10-K/A restating the same fiscal year).
+
+        Per canonical concept, the highest-priority tag (STATEMENTS' priority list, with the
+        IFRS_FALLBACK_TAGS fallback) that has at least one row in THIS filing wins — the same
+        priority semantics `extract_series_multi` applies across periods, scoped here to one
+        accession number instead."""
         facts = get_facts(filing.source_entity_id)
+        _dei_concepts = globals().get("DEI_NAMESPACE_CONCEPTS", set())
         out = []
         for concept_map in STATEMENTS.values():
             for label, (xbrl_concept, kind) in concept_map.items():
-                series = extract_series_multi(
-                    facts, xbrl_concept, kind, ifrs_concepts=IFRS_FALLBACK_TAGS.get(label)
-                )
-                if series.empty:
-                    continue
-                match = series[
-                    (series["form"] == filing.filing_type)
-                    & (series["period_end"].astype(str) == str(filing.period_end))
-                ]
-                for _, row in match.iterrows():
-                    out.append(SourceFact(
-                        source_id=self.source_id,
-                        source_entity_id=filing.source_entity_id,
-                        source_filing_id=filing.source_filing_id,
-                        source_concept=f"{row['tag_namespace']}:{label}",
-                        source_period_start=str(row["period_start"]) if pd.notna(row["period_start"]) else None,
-                        source_period_end=str(row["period_end"]),
-                        source_currency=None,
-                        source_value=float(row["value"]) if pd.notna(row["value"]) else None,
-                    ))
+                tags = [xbrl_concept] if isinstance(xbrl_concept, str) else list(xbrl_concept)
+                if label in _dei_concepts:
+                    sources = [("dei", t) for t in tags]
+                else:
+                    ifrs_concepts = IFRS_FALLBACK_TAGS.get(label)
+                    ifrs_tags = [] if ifrs_concepts is None else (
+                        [ifrs_concepts] if isinstance(ifrs_concepts, str) else list(ifrs_concepts)
+                    )
+                    sources = [("us-gaap", t) for t in tags] + [("ifrs-full", t) for t in ifrs_tags]
+
+                for ns, tag in sources:
+                    units = facts.get("facts", {}).get(ns, {}).get(tag, {}).get("units", {})
+                    matched = [
+                        (unit, row)
+                        for unit, rows in units.items()
+                        for row in rows
+                        if row.get("accn") == filing.source_filing_id
+                    ]
+                    if not matched:
+                        continue
+                    for unit, row in matched:
+                        out.append(SourceFact(
+                            source_id=self.source_id,
+                            source_entity_id=filing.source_entity_id,
+                            source_filing_id=filing.source_filing_id,
+                            source_concept=f"{ns}:{tag}",
+                            source_period_start=row.get("start"),
+                            source_period_end=row.get("end"),
+                            source_currency=unit,
+                            source_value=row.get("val"),
+                        ))
+                    break  # highest-priority tag with data in this exact filing wins
         return out
 
     def detect_metadata(self, entity):
