@@ -16,4 +16,4 @@ dependencies = []
 # importable sub-packages (digit-prefixed names aren't valid module names), so setuptools
 # must NOT auto-discover — the package list is pinned explicitly.
 [tool.setuptools]
-packages = ["fundamentals_pipeline"]
+packages = ["fundamentals_pipeline", "fundamentals_pipeline.sources"]

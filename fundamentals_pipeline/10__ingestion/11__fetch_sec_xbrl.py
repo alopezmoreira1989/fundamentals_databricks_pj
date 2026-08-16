@@ -648,6 +648,10 @@ def process_ticker(ticker: str, scraped_at_ts: datetime) -> tuple:
         allf["ticker"]     = ticker.upper()
         allf["company"]    = company_name
         allf["scraped_at"] = scraped_at_ts
+        # Source provenance (ADR-0009 §2.2/§10) — a literal today since this notebook is the
+        # only SEC_XBRL adapter; not read from fundamentals_pipeline.sources.registry to avoid
+        # a runtime dependency for what is, for now, a constant.
+        allf["source_id"]  = "SEC_XBRL"
         # Normalize types to match EXACTLY the previous per-row dict output (consumed later
         # by flush_batch): fy → nullable Int; dates → date|None; value/fp → value|None.
         allf["fy"] = allf["fy"].astype("Int64")
@@ -659,11 +663,143 @@ def process_ticker(ticker: str, scraped_at_ts: datetime) -> tuple:
         records = allf[[
             "ticker", "company", "stmt", "concept", "kind", "fy", "fp", "form",
             "period_start", "period_end", "period_shape", "value", "filed", "scraped_at",
-            "tag_namespace",
+            "tag_namespace", "source_id",
         ]].to_dict("records")
         return records, None, meta
     except Exception as e:
         return records, _classify_error(e, "extract"), meta
+
+# COMMAND ----------
+
+# MAGIC %md ## 4b. FundamentalsSource adapter shape (ADR-0009 — additive, not yet called)
+# MAGIC
+# MAGIC `SECXBRLSource` below is the first proof that `fundamentals_pipeline.sources`'
+# MAGIC `FundamentalsSource` contract actually fits this notebook's existing functions —
+# MAGIC each method is a thin delegation to `get_cik`/`get_facts`/`extract_series_multi`/
+# MAGIC `detect_accounting_standard_and_currency`, all defined above, unchanged. **Nothing
+# MAGIC calls this class today** — `process_ticker` and the parallel fetch loop below are the
+# MAGIC real, working ingestion path and are untouched by this addition. A future source
+# MAGIC router (ADR-0009 §7 Phase 9) is what will actually call adapters like this one.
+
+# COMMAND ----------
+
+try:
+    from fundamentals_pipeline.sources.base import (
+        SourceEntity,
+        SourceEntityMetadata,
+        SourceFact,
+        SourceFiling,
+    )
+except ImportError:
+    import subprocess
+    import sys
+
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "-e", "../.."])
+    from fundamentals_pipeline.sources.base import (
+        SourceEntity,
+        SourceEntityMetadata,
+        SourceFact,
+        SourceFiling,
+    )
+
+
+class SECXBRLSource:
+    """SEC EDGAR companyfacts, shaped as a `FundamentalsSource` (structural typing — PEP 544,
+    no inheritance required). See the section header above: this class is not on the real
+    ingestion path."""
+
+    source_id = "SEC_XBRL"
+
+    def discover_entities(self, tickers):
+        out = []
+        for t in tickers:
+            try:
+                cik, company_name = get_cik(t)
+            except ValueError:
+                continue
+            out.append(SourceEntity(ticker=t.upper(), source_entity_id=cik, name=company_name))
+        return out
+
+    def discover_filings(self, entity):
+        """One `SourceFiling` per distinct SEC accession number (`accn`) found across every
+        namespace's facts for this entity — the real SEC filing identifier, which
+        `extract_series()` (used by `retrieve_facts` below) deliberately drops from its
+        trimmed output, so this reads the raw companyfacts response directly instead."""
+        facts = get_facts(entity.source_entity_id)
+        seen = {}
+        for ns_facts in facts.get("facts", {}).values():
+            for payload in ns_facts.values():
+                for rows in payload.get("units", {}).values():
+                    for row in rows:
+                        accn = row.get("accn")
+                        if not accn or accn in seen:
+                            continue
+                        seen[accn] = SourceFiling(
+                            source_entity_id=entity.source_entity_id,
+                            source_filing_id=accn,
+                            filing_type=row.get("form", ""),
+                            filed_date=row.get("filed"),
+                            period_end=row.get("end"),
+                        )
+        return list(seen.values())
+
+    def retrieve_facts(self, filing):
+        """Facts belonging EXACTLY to `filing`, matched by SEC accession number (`accn`) — the
+        same identifier `discover_filings` uses as `source_filing_id`. Reads the raw
+        companyfacts response directly (like `discover_filings` does) rather than going through
+        `extract_series()`, which drops `accn` and would only support an approximate
+        (form, period_end) match — insufficient when two filings share both (e.g. a 10-K and a
+        later 10-K/A restating the same fiscal year).
+
+        Per canonical concept, the highest-priority tag (STATEMENTS' priority list, with the
+        IFRS_FALLBACK_TAGS fallback) that has at least one row in THIS filing wins — the same
+        priority semantics `extract_series_multi` applies across periods, scoped here to one
+        accession number instead."""
+        facts = get_facts(filing.source_entity_id)
+        _dei_concepts = globals().get("DEI_NAMESPACE_CONCEPTS", set())
+        out = []
+        for concept_map in STATEMENTS.values():
+            for label, (xbrl_concept, kind) in concept_map.items():
+                tags = [xbrl_concept] if isinstance(xbrl_concept, str) else list(xbrl_concept)
+                if label in _dei_concepts:
+                    sources = [("dei", t) for t in tags]
+                else:
+                    ifrs_concepts = IFRS_FALLBACK_TAGS.get(label)
+                    ifrs_tags = [] if ifrs_concepts is None else (
+                        [ifrs_concepts] if isinstance(ifrs_concepts, str) else list(ifrs_concepts)
+                    )
+                    sources = [("us-gaap", t) for t in tags] + [("ifrs-full", t) for t in ifrs_tags]
+
+                for ns, tag in sources:
+                    units = facts.get("facts", {}).get(ns, {}).get(tag, {}).get("units", {})
+                    matched = [
+                        (unit, row)
+                        for unit, rows in units.items()
+                        for row in rows
+                        if row.get("accn") == filing.source_filing_id
+                    ]
+                    if not matched:
+                        continue
+                    for unit, row in matched:
+                        out.append(SourceFact(
+                            source_id=self.source_id,
+                            source_entity_id=filing.source_entity_id,
+                            source_filing_id=filing.source_filing_id,
+                            source_concept=f"{ns}:{tag}",
+                            source_period_start=row.get("start"),
+                            source_period_end=row.get("end"),
+                            source_currency=unit,
+                            source_value=row.get("val"),
+                        ))
+                    break  # highest-priority tag with data in this exact filing wins
+        return out
+
+    def detect_metadata(self, entity):
+        facts = get_facts(entity.source_entity_id)
+        accounting_standard, reporting_currency = detect_accounting_standard_and_currency(facts)
+        return SourceEntityMetadata(
+            accounting_framework=accounting_standard, reporting_currency=reporting_currency
+        )
 
 # COMMAND ----------
 
@@ -688,7 +824,8 @@ if RUN_TICKERS:
             value         DOUBLE,
             filed         DATE,
             scraped_at    TIMESTAMP,
-            tag_namespace STRING
+            tag_namespace STRING,
+            source_id     STRING
         )
         USING DELTA
         PARTITIONED BY (ticker)
@@ -714,6 +851,7 @@ if RUN_TICKERS:
         StructField("filed",         DateType(),      True),
         StructField("scraped_at",    TimestampType(), True),
         StructField("tag_namespace", StringType(),    True),
+        StructField("source_id",     StringType(),    True),
     ])
 
 # COMMAND ----------

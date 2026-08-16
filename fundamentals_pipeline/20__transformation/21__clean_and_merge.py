@@ -63,7 +63,8 @@ spark.sql(f"""
         value        DOUBLE,
         is_derived   BOOLEAN,
         scraped_at   TIMESTAMP,
-        tag_namespace STRING
+        tag_namespace STRING,
+        source_id    STRING
     )
     USING DELTA
     PARTITIONED BY (ticker, stmt)
@@ -80,6 +81,11 @@ spark.sql(f"""
 # only runs the ALTER on a genuinely older table (existing columns won't include `tag_namespace`).
 if "tag_namespace" not in spark.table(full_tbl).columns:
     spark.sql(f"ALTER TABLE {full_tbl} ADD COLUMNS (tag_namespace STRING)")
+
+# Same idempotent-ALTER pattern for `source_id` (ADR-0009 §2.2/§10 provenance) — added
+# alongside `tag_namespace`, same reasoning: the MERGE below doesn't auto-evolve schema.
+if "source_id" not in spark.table(full_tbl).columns:
+    spark.sql(f"ALTER TABLE {full_tbl} ADD COLUMNS (source_id STRING)")
 
 # COMMAND ----------
 
@@ -251,6 +257,7 @@ clean_fy = incoming.select(
     F.lit(False).alias("is_derived"),
     F.col("scraped_at"),
     F.col("tag_namespace"),
+    F.col("source_id"),
 )
 
 # clean_fy is consumed 3× downstream: count() here, the MERGE in §3, and `_kept_keys` for
@@ -286,14 +293,16 @@ spark.sql(f"""
             target.period_end    = source.period_end,
             target.company       = source.company,
             target.scraped_at    = source.scraped_at,
-            target.tag_namespace = source.tag_namespace
+            target.tag_namespace = source.tag_namespace,
+            target.source_id     = source.source_id
 
     WHEN NOT MATCHED THEN
         INSERT (ticker, company, stmt, concept, fiscal_year, period_type,
-                period_end, value, is_derived, scraped_at, tag_namespace)
+                period_end, value, is_derived, scraped_at, tag_namespace, source_id)
         VALUES (source.ticker, source.company, source.stmt, source.concept,
                 source.fiscal_year, source.period_type, source.period_end,
-                source.value, source.is_derived, source.scraped_at, source.tag_namespace)
+                source.value, source.is_derived, source.scraped_at, source.tag_namespace,
+                source.source_id)
 """)
 
 print(f"✓ MERGE complete → {full_tbl} (FY rows)")
