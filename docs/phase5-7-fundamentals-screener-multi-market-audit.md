@@ -1,19 +1,20 @@
 # Phase 5.7 — `fundamentals_screener` Multi-Market Audit
 
 **Status (2026-08-17): Phase 5.7a (currency display) is implemented, reviewed against real
-production data, and merged (PR #382).** This audit document (PR #381) remains open/draft,
-targeting `main` — merge it whenever convenient; it is not gating anything further.
+production data, merged (PR #382), deployed (`fundamentals-screener-v0.11.0`), and now
+confirmed live end-to-end for Europe.** PR #381 (this audit) has also been merged into `main`.
 
-> **Open follow-up — not a blocker, tracked for later:** FCC/ALO/IBE/SGO could not be visually
-> validated in a browser because no published GitHub Release has contained the 8 European
-> tickers yet (confirmed: the current `latest` release predates PR #380's merge — see "Final
-> review — real-data validation" below). **Once the next production Databricks run republishes
-> `dashboard_data` with the EU union included, do a quick visual check of `/FCC/`, `/ALO/`,
-> `/IBE/`, `/SGO/` in a browser** — this will be the first real end-to-end confirmation of the
-> full `Databricks → dashboard_data → Django → browser` path for Europe. Everything short of
-> that literal browser check (the currency architecture, the real AEM/CAD-reporting-ticker
-> validation, the NCAV Live pipeline-bug workaround) is already verified against real data —
-> see below.
+> **Closed: the full `Databricks → dashboard_data → Django → browser` path is confirmed working
+> for Europe**, live in production. The morning of 2026-08-17, the production Databricks run
+> (published `07:14:37Z`) republished `dashboard_data` with all 8 European tickers for the
+> first time (confirmed directly against the downloaded artifact: FCC/ALO/IBE/SGO/FCT/NAI/
+> RAND/ISP all present, `market="EU"`, real country/MIC/`reporting_currency="EUR"`). The live
+> site's own cache was stale at that point (its last force-sync, from the 0.11.0 deploy, had
+> pulled the *previous* release, before the EU union existed) — resolved via the consumer
+> repo's `workflow_dispatch` manual-redeploy trigger (built for exactly this: forcing
+> `sync_fundamentals_data --force` with no code change), then `/FCC/`, `/ALO/`, `/IBE/`,
+> `/SGO/` were checked directly against the live production HTML. Full results in "Live Europe
+> validation" below.
 >
 > Phase 5.7b (Net-Net currency follow-through) and 5.7c (toggle/copy cleanup) are deliberately
 > **not started** — next explicit instruction required.
@@ -1174,3 +1175,77 @@ back null.
 - **Quarterly tab relabeling to "Interim", Filings tab redesign, ticker-collision hardening**:
   explicitly out of scope for this phase (per the prompt), unchanged from the audit's own
   findings.
+
+---
+
+## Live Europe validation (2026-08-17, post-deploy)
+
+The first real, production, end-to-end check of Europe through the full path — not a fixture,
+not a local script, the actual live site.
+
+### Artifact confirmation
+
+Downloaded the fresh `latest` release directly (`build_timestamp: 2026-08-17T07:14:37Z`,
+`schema_version: 15`). All 8 tickers present with correct fields:
+
+| Ticker | market | country | exchange (MIC) | reporting_currency |
+|---|---|---|---|---|
+| FCC | EU | ES | XMAD | EUR |
+| ALO | EU | FR | XPAR | EUR |
+| IBE | EU | ES | XMAD | EUR |
+| SGO | EU | FR | XPAR | EUR |
+| FCT | EU | IT | MTAA | EUR |
+| NAI | EU | NL | XAMS | EUR |
+| RAND | EU | NL | XAMS | EUR |
+| ISP | EU | IT | MTAA | EUR |
+
+### The site's own cache was stale — a real, separate, now-resolved gap
+
+`/FCC/` etc. initially returned `404` even after this artifact was confirmed published — not a
+`fundamentals_screener` bug. The consumer site's deploy workflow force-syncs data on every
+deploy (`sync_fundamentals_data --force`), but that deploy (the 0.11.0 rollout, §"Deploy"
+above) ran at `02:59Z`, **before** the `07:14Z` EU-inclusive release existed — so it had pulled
+the prior, EU-less release. Confirmed the site was otherwise healthy throughout (`/AAPL/`,
+`/AQN/`, and the landing page all `200`'d the whole time — this was never an outage). Resolved
+by using the consumer repo's `workflow_dispatch` trigger (`.github/workflows/ci.yml`, built
+specifically for "force a resync with no code change" — its own comment cites two prior,
+identical real incidents, 2026-08-05) to force a fresh `sync_fundamentals_data --force` without
+any code change. **Worth remembering for future phases**: a code deploy and a data-freshness
+deploy are two independent triggers on the consumer side; landing a pipeline publish shortly
+after a code deploy does not automatically get picked up — a manual `workflow_dispatch` (or the
+next day's cron) is needed to actually refresh the live data.
+
+### `/FCC/`, `/ALO/`, `/IBE/`, `/SGO/` — real production HTML, checked directly
+
+All four: `200`, no traceback/error content, currency correct throughout.
+
+| Check | Result |
+|---|---|
+| Overview KPI strip | Real numbers rendered (e.g. FCC Revenue `9.07B`, IBE Total Assets `158.29B`); missing figures (Net Income/Operating CF, for some) render as `—`, never a fabricated `0`/`$0.00` |
+| EUR currency badges | 18–28 per page (KPI strip + all 3 statement-table headers + statement cells) |
+| Stray `$` before a digit anywhere on the page | **0**, all four pages |
+| Price tab | `11.10 <span class="ccy-badge">EUR</span>` (FCC) — the very first fix (`quote_currency`), confirmed correctly wired end to end |
+| `#chart-currency-data` payload | `"EUR"`, confirmed present |
+| Statement tables ("Figures in [badge]") | Present, `EUR` badge, on all three statement tabs |
+| Market Cap KPI card | **Absent** — `market_cap_asof` has no row yet for these tickers (plausible real gap, likely Shares-Diluted-dependent per the audit's own §12; renders as an honestly-missing card, not a $0 or a crash) |
+| Valuation tab (football field / MoS) | **Absent** — no TTM/FY intrinsic-value data computed yet for these tickers; the whole tab-pane correctly doesn't render (`{% if iv_chart or mos_scenarios or valuation_metrics %}`) rather than showing an empty/broken shell |
+| Quarterly tab | **Absent** — confirms the audit's §6 finding live: EU ingestion is `period_type='FY'` only today, so `quarterly.lines` is empty and the tab correctly doesn't render |
+| Filings tab | Renders, shows **"No filings found for this ticker."** — the honest empty state per §7, and critically: **no spurious wrong-company data** (the ticker-collision risk `15__fetch_sec_filings.py`'s bare-ticker CIK matching could theoretically produce, per the audit's own flag, did not materialize for these 4 real tickers) |
+| Net-Net Finder (`?mode=netnet&market=EU`) | "No companies match this level and filter combination" — honest empty state, consistent with Market Cap (Live)/NCAV (Live) not having data for these tickers yet either |
+| General Screener, `?market=EU` | All 8 tickers appear, exactly once each; `market` filter dropdown correctly lists `EU` alongside `CA`/`US` |
+
+### Read on the remaining gaps (Market Cap / Valuation / Net-Net / Quarterly / Filings all empty)
+
+Every one of these degrades to an **honest empty state** — a missing card, a hidden tab, an
+explicit "no results"/"no filings" message — never a wrong number, a crash, or (most
+importantly for this phase's own scope) a mislabeled currency. This is consistent with the
+pilot ESEF ingestion simply not having produced every input these features need yet (Shares
+Diluted for Market Cap/valuation, live pricing feeding NCAV Live for Net-Net, interim periods
+for Quarterly, an ESEF filings source for Filings) — all pipeline-side data-completeness
+questions, not `fundamentals_screener` display bugs, and all already anticipated by name in the
+original audit (§6, §7, §11, §12, §14). None of them block or affect the currency-display work
+this phase actually shipped.
+
+**Conclusion: Phase 5.7a's currency fix is confirmed correct, live, in production, for real
+European companies — not just for the real Canadian ones (§"Final review" above) and not just
+in tests.**
