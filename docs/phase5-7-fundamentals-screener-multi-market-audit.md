@@ -1,5 +1,23 @@
 # Phase 5.7 — `fundamentals_screener` Multi-Market Audit
 
+**Status (2026-08-17): Phase 5.7a (currency display) is implemented, reviewed against real
+production data, and merged (PR #382).** This audit document (PR #381) remains open/draft,
+targeting `main` — merge it whenever convenient; it is not gating anything further.
+
+> **Open follow-up — not a blocker, tracked for later:** FCC/ALO/IBE/SGO could not be visually
+> validated in a browser because no published GitHub Release has contained the 8 European
+> tickers yet (confirmed: the current `latest` release predates PR #380's merge — see "Final
+> review — real-data validation" below). **Once the next production Databricks run republishes
+> `dashboard_data` with the EU union included, do a quick visual check of `/FCC/`, `/ALO/`,
+> `/IBE/`, `/SGO/` in a browser** — this will be the first real end-to-end confirmation of the
+> full `Databricks → dashboard_data → Django → browser` path for Europe. Everything short of
+> that literal browser check (the currency architecture, the real AEM/CAD-reporting-ticker
+> validation, the NCAV Live pipeline-bug workaround) is already verified against real data —
+> see below.
+>
+> Phase 5.7b (Net-Net currency follow-through) and 5.7c (toggle/copy cleanup) are deliberately
+> **not started** — next explicit instruction required.
+
 **Audit only. No production code was changed to produce this document.** Scope: determine
 exactly what `fundamentals_screener` needs before it can correctly display the 8 European
 companies Phase 5.6 published (FCC, ALO, NAI, FCT, IBE, SGO, RAND, ISP), without breaking
