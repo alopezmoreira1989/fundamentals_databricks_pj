@@ -685,3 +685,202 @@ to investigate turned out to be an under-populated *list* inside an already-corr
 not an architectural limitation. The one place a genuinely new decision is needed (Deferred Tax
 Assets/Liabilities, §18) is a pre-existing gap for *every* filer type, not a European-specific
 one, and is explicitly deferred, not designed here.
+
+---
+
+## Implementation — Phase 6.1 (2026-08-17)
+
+**Status: implemented, tested, and validated live against real production Databricks data.
+Draft PR, not merged.**
+
+### What was implemented
+
+`fundamentals_pipeline/sources/eu_current.py`'s `EU_CANONICAL_MAPPING` widened from **5 to 21
+canonical concepts (22 accepted source tags — Revenue has two)**. Every new entry is a verified,
+direct reuse of a tag string already accepted for real `ifrs-full` filers via
+`01__tickers.py`'s `IFRS_FALLBACK_TAGS` — no new canonical concept, no schema change, no change
+to `01__tickers.py`/`21__clean_and_merge.py`/any SEC or Canada logic.
+
+**IMPLEMENTED (16 new Tier 1 concepts, all HIGH confidence, §16):** Income Tax · Operating Cash
+Flow · Investing Cash Flow · Financing Cash Flow · Total Stockholders Equity · Total Equity
+(incl NCI) · PP&E Net · Total Current Assets · Total Current Liabilities · Goodwill · Interest
+Expense (`ifrs-full:FinanceCosts` only — see below) · Dividends Paid · Operating Income ·
+Intangible Assets · Inventory · Cost of Revenue.
+
+**IMPLEMENTED — Revenue special handling (§17's Tier 2 item, re-verified per this prompt's own
+§4 before implementing, not blindly copied from Phase 6.0):** `EU_CANONICAL_MAPPING`'s data
+structure changed from `dict[str, MappingDecision]` to `dict[str, tuple[MappingDecision, ...]]`
+specifically to let "Revenue" accept two source tags — `ifrs-full:Revenue` (already live) and
+`ifrs-full:RevenueFromContractsWithCustomers` (new). Verified before implementing: the two
+variants are mutually exclusive per issuer in every real filing fetched (no issuer tags both), so
+this is a plain either/or lookup — no coalesce-with-priority machinery was built, since no real
+evidence showed a need for one. Direct analogue to the already-accepted `us-gaap` ASC-606
+`"Revenue (contract)"` synonym (`CONCEPT_SYNONYMS`) — same taxonomy-transition pattern, not a
+novel decision.
+
+**INTENTIONALLY NULL — Revenue for ISP and NAI:** neither issuer's real top-line concept was
+added to the mapping. ISP (bank): `isp:InterestIncomeAndSimilarRevenues` is an issuer extension,
+not a standard IFRS tag, and even the standard alternatives found
+(`ifrs-full:RevenueFromDividends`, `ifrs-full:InterestRevenueCalculatedUsingEffectiveInterestMethod`)
+are structurally different concepts (interest/dividend income components, not a single top-line
+revenue figure) — mapping any of them to "Revenue" would misrepresent a bank's real statement
+shape. NAI (real estate): `ifrs-full:RentalIncomeFromInvestmentProperty` is a genuinely different
+IFRS concept from Revenue (rental income from investment property vs. revenue from contracts
+with customers/goods and services), not merely a differently-named alias for the same thing —
+Phase 6.0's own real-data evidence never established economic equivalence, so per this prompt's
+explicit instruction ("NULL > questionable value"), it stays unmapped. Both are recorded as a
+finding for future banking-/real-estate-specific coverage research, not designed here.
+
+**INTENTIONALLY NULL — bare `ifrs-full:InterestExpense`:** only `ifrs-full:FinanceCosts` (5/8
+real coverage) was mapped to "Interest Expense." Phase 6.0's own real-data search found **zero**
+real occurrences of the bare `InterestExpense` tag across all 8 issuers — adding it would have
+been an unverified guess masquerading as reuse of an existing SEC-side fallback list entry.
+
+**INTENTIONALLY NULL — Shares Diluted:** no change. Re-confirmed, not re-derived: no entry was
+added for "Shares Diluted," and none of the real per-issuer share-count concepts (ALO's own
+7-concept share-roll-forward extension, SGO's single `WeightedAverageShares` instance) were used
+to backfill it, exactly per this prompt's explicit instruction not to derive it from EPS, shares
+outstanding, market cap, or price.
+
+**DEFERRED (not implemented this pass, per Phase 6.0's own Tier 2/3 classification, unchanged):**
+Gross Profit and Total Liabilities (real but sparse, `MEDIUM` confidence — §5a); the
+`Accounts Receivable` tag-string correction, Profit Before Tax, Finance Income, EPS Basic/Diluted
+2-tag fallback, and CapEx extension (all real §17 Tier 2 items needing their own targeted
+decision, none touched in this pass to keep this implementation strictly to the highest-
+confidence Tier 1 set plus the one Tier 2 item — Revenue — whose downstream value was judged
+worth the extra scrutiny given it was also a live production gap).
+
+### Data-quality re-verification (per this prompt's §1/§9, not blindly trusted from Phase 6.0)
+
+Every Tier 1 candidate was re-checked against the live implementation, not just the research
+doc's conclusions: canonical concept existence in `STATEMENTS`/`_LABEL_TO_STMT_KIND` confirmed
+for all 16 (no `KeyError` risk — verified by successfully running `16__fetch_eu_xbrl.py` against
+real Databricks data, see below); unit/currency handled by the unmodified, already-proven
+`extract_source_facts()` (no change needed); period shape unaffected (still exclusively
+`FY_or_TTM`/`snapshot`, per §8, re-confirmed by the real ingestion run producing only `fp="FY"`
+rows); dimensions unaffected (`is_consolidated_fact()` untouched); duplicate within-filing facts
+confirmed still safely collapsed by `21d__dedup_clean_table.py`'s existing
+`(ticker, stmt, concept, fiscal_year, period_type)` key (unchanged, not touched this pass).
+
+### Real Databricks validation (live, 2026-08-17)
+
+Ran the actual code — not a simulation — via a personal validation Databricks Repo
+(`/Repos/al.lopez.moreira@gmail.com/phase6-validation`, tracking this branch) against real
+production tables, using the same one-time `jobs/runs/submit` pattern established in earlier
+phases (never the scheduled production job).
+
+**Step 1 — `16__fetch_eu_xbrl.py`** (append-only to `financials_raw`, structurally scoped to only
+the 8 admitted EU tickers by `load_admitted_eu_entities()` — cannot touch any other ticker):
+`SUCCESS`, 94s. `financials_raw` distinct-concept-per-ticker count before → after:
+
+| Ticker | Concepts before | Concepts after |
+|---|---|---|
+| FCC | 5 | 19 |
+| ALO | 4 | 21 |
+| IBE | 5 | 19 |
+| SGO | 4 | 20 |
+| FCT | 3 | 13 |
+| NAI | 4 | 15 |
+| RAND | 5 | 18 |
+| ISP | 4 | 9 |
+
+**Step 2 — `21__clean_and_merge.py`** (merges the new raw scrape into the clean `financials`
+table): confirmed **safe to run unscoped** before running it — its own read (`raw = spark.table
+(raw_full).filter(F.col("scraped_at") == latest_scrape)`) and its orphan-delete step are both
+already scoped to "whatever the most recent scrape contains," and `MAX(scraped_at)` was verified,
+before running, to belong 100% to the just-completed `EU_CURRENT` scrape (648 rows, all 8 EU
+tickers, zero other source/ticker) — so this run was provably incapable of touching any SEC/
+Canada data before it was ever submitted. `SUCCESS`, 137s.
+
+**`financials` (clean, `period_type='FY'`) — real before/after, distinct concepts per ticker:**
+
+| Ticker | Concepts before | Concepts after | Revenue present after? |
+|---|---|---|---|
+| FCC | 4 | 17 | yes (already had it) |
+| ALO | 3 | 19 | **yes — new** |
+| IBE | 4 | 17 | yes (already had it) |
+| SGO | 3 | 18 | **yes — new** |
+| FCT | 3 | 12 | **yes — new** |
+| NAI | 3 | 13 | no (correctly, intentionally NULL) |
+| RAND | 4 | 16 | yes (already had it) |
+| ISP | 3 | 8 | no (correctly, intentionally NULL) |
+
+**The headline Phase 6.0 finding — Revenue missing for 5/8 issuers — is now fixed for exactly the
+3 issuers it was fixable for (ALO, FCT, SGO), and correctly still absent for the 2 issuers (ISP,
+NAI) where mapping it would have been a guess.** Real values, spot-checked: ALO FY2026 Revenue =
+19,171,000,000 EUR (matches the exact real xBRL-JSON value Phase 6.0 cited).
+
+### SEC / Canada regression (real, verified)
+
+| Ticker | `financials` rows before | `financials` rows after |
+|---|---|---|
+| AAPL | 3,303 | 3,303 |
+| MSFT | 2,977 | 2,977 |
+| AEM | 344 | 344 |
+| AQN | 306 | 306 |
+
+**Byte-identical, zero regression** — expected given the scrape-timestamp scoping proof above,
+now empirically confirmed. Whole-table `financials` row count: 4,750,416 → 4,750,782 (+366 rows,
+entirely attributable to the EU expansion; no other ticker's row count changed).
+
+### Downstream metric impact — determined analytically, not by a live `22`/`23` run
+
+**A deliberate scope decision, not an oversight**: `22__derived_metrics.py` has **no
+ticker-scoping mechanism at all** (confirmed directly — "no `tickers_override` in this notebook,
+every run recomputes the entire universe," its own comment, line 1653) and `51__export_dashboard_
+data.py` likewise always exports the full joined universe. Running either for real would mean
+recomputing `financials_metrics`/re-exporting `dashboard_data` for the ENTIRE ~2,600+ ticker
+production universe — a large, slow, broad production action, not proportionate to validating an
+8-ticker mapping change, and neither was unambiguously instructed the way the `16`/`21` scoped
+validation was. Downstream impact is instead determined analytically, directly from the now-real
+`financials` state above cross-referenced against `22__derived_metrics.py`'s actual formulas
+(re-confirmed by direct code read, same method Phase 6.0 §11 used):
+
+| Metric | Real inputs newly available | Issuers newly unlocked |
+|---|---|---|
+| Operating Margin % | Operating Income ∩ Revenue | ALO, FCC, IBE, RAND (4) |
+| Current Ratio | Total Current Assets ∩ Total Current Liabilities | FCC, IBE, NAI, RAND, SGO (5) |
+| Quick Ratio | + Inventory | IBE, SGO (2) |
+| Working Capital | Total Assets (8/8) − Total Current Liabilities | FCC, IBE, NAI, RAND, SGO (5) |
+| Tangible Book Value | Total Assets (8/8) − Goodwill − Intangible Assets (both `COALESCE(...,0)` — degrades gracefully) | more accurate for all 8, not just newly non-null |
+| Goodwill / Total Assets % | Goodwill ∩ Total Assets | ALO, FCC, IBE, RAND, SGO (5) |
+| Interest Coverage | Operating Income ∩ Interest Expense | ALO, FCC, IBE, RAND (4) |
+
+**Still NOT unlocked by this pass** (confirms, doesn't contradict, Phase 6.0's own findings):
+Free Cash Flow (needs CapEx — deferred, §17 Tier 2), EBITDA/Gross Margin % (need Depreciation &
+Amortization / Gross Profit — deferred), any per-share metric (needs Shares Diluted — correctly
+stays NULL, §7).
+
+### Frontend impact — inferred, not live-checked this pass
+
+Per this prompt's own non-goal (§16: do not modify `fundamentals_screener`) and given `51`/`52`
+were not run live (see above), this was not visually confirmed in a browser this pass. It is,
+however, a safe, direct inference from two already-proven facts: Phase 5.7's own live validation
+already confirmed `CompanyRepository.get_statements()` displays *whatever* is in `financials`/
+`dashboard_data` generically, with no per-concept allowlist; and this pass just proved
+`financials` now contains 16 new real concepts (120 (ticker, concept) rows across the 8 issuers,
+up from 27) with real values. The Income Statement/Balance Sheet/Cash Flow tabs will show
+materially more line items the next time `dashboard_data` is republished and synced — genuinely
+expected, not yet observed.
+
+### Tests
+
+16 new/updated tests in `tests/test_sources_eu_current.py`: every new Tier 1 mapping resolves to
+its expected canonical concept; Revenue's dual-tag routing; the bare `InterestExpense` tag stays
+unmapped; every ISP/NAI real top-line concept stays unmapped; `"Shares Diluted"` is absent from
+`EU_CANONICAL_MAPPING` entirely. Full repo suite: 355 passed, 2 skipped (pre-existing, fixture-
+gated, unrelated). `ruff check`: clean.
+
+### Known limitations / remaining technical debt
+
+- **7 real Tier 2 candidates not implemented this pass** (§17, unchanged from Phase 6.0):
+  `Accounts Receivable`'s existing tag string still doesn't match any real EU filing (0/8 verbatim
+  — needs correcting to `CurrentTradeReceivables`/`TradeAndOtherCurrentReceivables`), Profit
+  Before Tax, Finance Income, EPS Basic/Diluted, CapEx extension, Gross Profit, Total Liabilities.
+- **Free Cash Flow and EBITDA remain unavailable** for all 8 issuers pending the CapEx/D&A Tier 2
+  work above.
+- **No live browser/frontend confirmation** this pass (see above) — deferred to whenever
+  `dashboard_data` is next republished, consistent with the tracked follow-up already in this
+  document's status banner.
+- **ISP/NAI Revenue resolution** remains a real, open, deferred research question (§18) — not
+  designed or decided in this pass, correctly left NULL.
