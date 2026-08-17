@@ -139,6 +139,36 @@ def test_get_filings_unknown_ticker_returns_empty(repo):
     assert repo.get_filings("NOPE") == ()
 
 
+def test_get_filings_real_company_with_no_sec_filings_returns_empty():
+    """Phase 6.2: the real, common case for a European ESEF or Canadian MJDS/40-F issuer -- a
+    genuine, known company (with real dashboard_data FY anchor rows) that simply has zero SEC
+    filings, since it was never an SEC filer in the first place. Distinct from
+    `test_get_filings_unknown_ticker_returns_empty` above (a ticker absent from BOTH tables
+    entirely) -- "FCC" here has real FY anchors (matching the live published data for the 8
+    admitted European tickers) but is never inserted into `dashboard_filings` at all, since no
+    ESEF/FIRDS filing-metadata pipeline exists yet (verified live this phase: dashboard_filings
+    has zero rows for any of the 8 real European tickers or for AQN/Canada)."""
+    conn = duckdb.connect(":memory:")
+    conn.execute(
+        "CREATE TABLE dashboard_filings ("
+        " ticker VARCHAR, form VARCHAR, filing_date VARCHAR, report_date VARCHAR,"
+        " description VARCHAR, url VARCHAR)"
+    )
+    conn.execute(
+        "CREATE TABLE dashboard_data ("
+        " ticker VARCHAR, period_end VARCHAR, fiscal_year INTEGER, period_type VARCHAR)"
+    )
+    conn.executemany(
+        "INSERT INTO dashboard_data VALUES (?,?,?,?)",
+        [("FCC", "2024-12-31", 2024, "FY"), ("FCC", "2023-12-31", 2023, "FY")],
+    )
+    repo = CompanyRepository(connection=conn)
+    try:
+        assert repo.get_filings("FCC") == ()
+    finally:
+        conn.close()
+
+
 def test_get_filings_missing_view_degrades_to_empty():
     """No ``dashboard_filings`` view registered at all (artifact not yet published by a
     pipeline run — the 2026-07-30 production incident) → ``()``, never raise."""

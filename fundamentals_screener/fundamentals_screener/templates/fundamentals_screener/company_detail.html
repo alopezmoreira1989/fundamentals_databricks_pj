@@ -306,7 +306,7 @@
     {% if quarterly.lines %}
       <li class="nav-item" role="presentation">
         <button class="nav-link" id="tab-quarterly" data-bs-toggle="tab" data-bs-target="#pane-quarterly"
-                type="button" role="tab" aria-controls="pane-quarterly" aria-selected="false">Quarterly</button>
+                type="button" role="tab" aria-controls="pane-quarterly" aria-selected="false">Periods</button>
       </li>
     {% endif %}
     {% if iv_chart or mos_scenarios or valuation_metrics %}
@@ -485,7 +485,16 @@
       </div>
     {% endfor %}
 
-    <!-- Quarterly (Income Statement by fiscal quarter) -->
+    <!-- Periods (Phase 6.2): Income Statement by whatever sub-annual reporting period the
+         underlying data actually contains -- Q1-Q4 for a US 10-Q filer, but genuinely NOT
+         limited to quarters: `quarterly.columns` is free-text, built directly from each row's
+         own `period_type` (repositories/companies.py's `_QUARTERLY_SQL` filters only
+         `period_type <> 'FY'`, no quarter-specific literal), so an H1/9M reporter would render
+         correctly here with zero further changes. Named "Periods", not "Quarterly" or
+         "Interim" -- see docs/phase6-2-multi-market-periods-reports.md for why. Tab only
+         appears at all when `quarterly.lines` is non-empty (existing guard, unchanged) -- today
+         that means every European/Canadian ticker (annual-only source data) simply omits this
+         tab rather than showing an empty one. -->
     {% if quarterly.lines %}
       <div class="tab-pane fade" id="pane-quarterly" role="tabpanel" aria-labelledby="tab-quarterly" tabindex="0">
         {% if quarterly_chart_data %}
@@ -495,7 +504,7 @@
           </div>
           {{ quarterly_chart_data|json_script:"quarterly-chart-data" }}
         {% endif %}
-        <div class="eyebrow mb-2 d-flex align-items-center gap-1">{{ quarterly.name }} · by fiscal quarter {{ s.reporting_currency|currency_badge }}</div>
+        <div class="eyebrow mb-2 d-flex align-items-center gap-1">{{ quarterly.name }} · by reporting period {{ s.reporting_currency|currency_badge }}</div>
         <div class="card p-0 table-responsive">
           <table class="table table-hover fs-web align-middle mb-0">
             <thead>
@@ -707,14 +716,27 @@
       </div>
     {% endif %}
 
-    <!-- Filings (issue #318): real SEC 10-K/10-Q filings, read straight from the pipeline's
-         own dashboard_filings artifact (15__fetch_sec_filings.py) -- no per-request SEC call,
-         no settings of our own needed. Last tab, deliberately -- the least-used,
-         reference-lookup tab belongs at the end. -->
+    <!-- Filings (issue #318; Phase 6.2 eyebrow/label review): real SEC 10-K/10-Q filings, read
+         straight from the pipeline's own dashboard_filings artifact (15__fetch_sec_filings.py)
+         -- no per-request SEC call, no settings of our own needed. Last tab, deliberately -- the
+         least-used, reference-lookup tab belongs at the end.
+
+         Phase 6.2 kept the tab NAME "Filings" (not renamed to "Reports") -- real data confirms
+         every row this tab has ever shown is a genuine SEC filing (dashboard_filings has zero
+         rows for any of the 8 live European tickers or for AQN/Canada; no ESEF/FIRDS filing-
+         metadata pipeline exists to populate a `form` value other than 10-K/10-Q), so "Filings"
+         remains an accurate description of the actual object, not a US-centric relabel waiting
+         to happen -- see docs/phase6-2-multi-market-periods-reports.md.
+
+         The eyebrow IS conditional (unlike before) -- "SEC filings · 10-K & 10-Q" only appears
+         when there ARE SEC filings to describe; a ticker with none gets a neutral "Filings"
+         eyebrow instead, so the empty state below doesn't read as "this SEC-only feature has
+         nothing for you" for a company that was never going to have SEC filings in the first
+         place (a European or Canadian issuer). -->
     <div class="tab-pane fade" id="pane-filings" role="tabpanel" aria-labelledby="tab-filings" tabindex="0">
       <div class="card p-4">
         <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
-          <div class="eyebrow mb-0">SEC filings · 10-K &amp; 10-Q</div>
+          <div class="eyebrow mb-0">{% if filings %}SEC filings · 10-K &amp; 10-Q{% else %}Filings{% endif %}</div>
           {% if filings %}
             <div class="btn-group btn-group-sm" role="group" aria-label="Filter by form type" id="filings-form-filter">
               <button type="button" class="btn btn-dark active" data-form-filter="all">All</button>
@@ -733,7 +755,7 @@
                   <th scope="col" class="sortable sort-desc" data-sort-key="filing_date">Filed</th>
                   <th scope="col" class="sortable" data-sort-key="report_date">Period</th>
                   <th scope="col" class="sortable" data-sort-key="fiscal_year">FY</th>
-                  <th scope="col" class="sortable" data-sort-key="period_type">Quarter</th>
+                  <th scope="col" class="sortable" data-sort-key="period_type">Period</th>
                 </tr>
               </thead>
               <tbody>
