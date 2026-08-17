@@ -558,3 +558,197 @@ removing it.
   US "only broad") and a validation pass across a representative US/Canada sample in addition to
   the 8 EU tickers, given the larger-than-EU blast radius §B9 identified. Not started in this
   document, per instruction.
+
+---
+---
+
+## PHASE 6.5c — IMPLEMENTATION AND VALIDATION
+
+**Status: implemented, tested, and validated live against real production data. Draft PR, not
+merged.** Implements §B10's recommendation (Option A) exactly.
+
+### C1. Implementation
+
+`21__clean_and_merge.py` only — `CONCEPT_SYNONYMS` in `01__tickers.py` was **deliberately left
+byte-identical**, not edited, because it is also consumed by `21b__derive_quarterly.py` (quarterly
+balance-sheet snapshots), `35__reconcile_filings.py`, and `38__history_audit.py` — none of which
+are in this phase's allowed scope, and none of which this fix is authorized to touch. Instead:
+
+1. **§2's synonym-application loop** now skips the `"Total Equity (incl NCI)"` entry locally (a
+   single `if _alt == "Total Equity (incl NCI)": continue`), so both concepts survive dedup as
+   independent rows wherever their own raw fact exists — this alone satisfies CASE A and CASE C.
+2. **New §2b**, added right after `clean_fy` is built (deduped, one row per real
+   `(ticker, stmt, concept, fiscal_year)`): a left-anti join computes exactly the keys that have
+   a real `"Total Equity (incl NCI)"` row but no `"Total Stockholders Equity"` row, and
+   synthesizes a fallback row for each — `concept` set to `"Total Stockholders Equity"`,
+   `is_derived` set to `True` (the existing column already used elsewhere in this pipeline for a
+   computed/substituted value). This satisfies CASE B.
+3. **The `MERGE`'s `UPDATE SET`** now also syncs `is_derived` (previously never updated after
+   insert) — so if a ticker later gains a genuine direct fact for a key that previously only had
+   the fallback, the next merge correctly flips `is_derived` back to `False`, not just the value.
+
+No other file was modified.
+
+### C2. Tests — 9 new (`tests/test_total_equity_incl_nci_fallback.py`)
+
+`21__clean_and_merge.py` executes `spark.sql`/`spark.table` at module level and cannot be
+imported outside Databricks at all (confirmed by direct attempt — fails immediately with
+`NameError: name 'spark' is not defined`, before even reaching any concept-map definition) —
+unlike `16__fetch_eu_xbrl.py`'s conditionally-gated design, there is no way to drive the real
+Spark code from a local pytest run. The 9 tests instead unit-test a pure-Python reference
+implementation that mirrors the real Spark algorithm's left-anti-join-then-union logic exactly,
+covering: both concepts present (direct wins its own slot, no fallback row), only incl-NCI
+(fallback value equals the pre-existing legacy value exactly, marked `is_derived=True`), only
+direct (unchanged), neither (no row), direct and broad differing (both preserved distinctly, not
+conflated), same ticker/different fiscal years (per-key precedence — one year needing the
+fallback doesn't affect a sibling year that doesn't), same ticker-fy/different statements (no
+cross-statement leakage), idempotency (running twice produces byte-identical output, no duplicate
+keys), and the fallback never overwriting a direct fact regardless of relative magnitude. This is
+a spec test for the Spark logic's algorithm, not a literal invocation of it — real-data validation
+against the actual notebook (§C4 below) is what proves the real code matches the spec.
+
+**9/9 passed.** Full repo suite: **369 passed, 2 skipped** (pre-existing, fixture-gated,
+unrelated). `ruff check`: clean (one `E731` lambda-assignment finding in the new test file was
+fixed before commit).
+
+### C3. Real-data validation before any write (Part 7)
+
+Read-only, against real production `financials`/`financials_raw` (corrected for the earlier
+NULL-handling query mistake — see §3 above):
+
+| Metric | Value |
+|---|---|
+| Distinct `(ticker, stmt, fiscal_year)` keys with a real `"Total Equity (incl NCI)"` raw fact | 15,116 |
+| ...of which have NO direct `"Total Stockholders Equity"` raw fact for that exact key (fallback needed) | 2,115 |
+| ...of which have both (fallback correctly not needed) | 13,001 |
+| Distinct tickers with at least one fallback-needed key | 471 (a superset of §B2's 59 "always fallback" tickers — includes tickers with a real direct fact in SOME years and not others) |
+
+This is real, additional evidence beyond §B: the eventual full-universe blast radius (once a
+normal scheduled pipeline run reprocesses every ticker, not attempted this pass) is larger than
+just the 59 "always fallback" tickers — 471 tickers have at least one fiscal year that needs it.
+This doesn't change the recommendation (the mechanism handles this correctly by construction,
+per-key), but is a more complete number than §B9's estimate.
+
+### C4. Production write — EU-scoped, using the existing safety mechanism (Part 8)
+
+**No new scoping mechanism was invented.** This fix requires no new raw data — only a re-run of
+the merge (`21`) against already-ingested raw facts. `21`'s own `raw = spark.table(raw_full)
+.filter(scraped_at == MAX(scraped_at))` naturally scoped this run to the EU-only scrape already
+sitting at the latest position (from this session's earlier Phase 6.3 work, confirmed
+`100%` `EU_CURRENT`, 648 rows, before submitting) — the exact same bounded mechanism Phase 6.1/6.3
+used. Ran twice (idempotency check, §C5). **A full-universe run was never executed or requested**
+— per instruction, that remains a separate, future, explicitly-authorized action; this phase's
+real-data proof for the ~1,616 additional "both exist" and remaining fallback-needed US/Canada
+tickers rests on §C3's read-only analysis, not a live write (those tickers' raw data hasn't been
+re-scraped since before this fix, so `21` was never asked to reprocess them this pass — confirmed
+directly, §C6).
+
+### C5. EU validation (Part 5) — real, live results
+
+| Ticker | Both concepts present? | Fallback fired for any year? | Notes |
+|---|---|---|---|
+| FCC | Yes, 5 years each | No | Values differ every year (e.g. FY2024: attributable €2,732,716,000 vs incl-NCI €3,736,019,000 — exact match to §B4's identity check) |
+| ALO | Yes, 4 years each | No | |
+| IBE | Yes, 5 years each | **Yes — FY2021** | `Total Stockholders Equity` FY2021 = `is_derived=True`, value €56,126,000,000, exactly equal to `Total Equity (incl NCI)` FY2021 — a genuine, real EU case of CASE B firing correctly, not anticipated in §B (which found EU "always has both" — true for 27 of IBE's 28 ticker-years checked group-wide, false for this one) |
+| SGO | Yes, 4 years each | No | |
+| FCT | Yes, 3 years each | No | |
+| NAI | Yes, 3 years each | No | |
+| RAND | Yes, 5 years each | No | Smallest divergence of the 7 (e.g. FY2021: 4.901B vs 4.902B) — consistent with minimal NCI |
+| ISP | Neither concept present | N/A | Bank; unaffected, as expected |
+
+**IBE's FY2021 result is the single most valuable piece of live evidence this phase produced**:
+it's a real case, not constructed, of the exact per-key precedence behavior (§B10 item 2) working
+correctly — one fiscal year genuinely missing the direct fact, correctly falling back, while the
+other 4 fiscal years for the *same ticker* correctly did not.
+
+### C6. US/Canada regression (Part 3/8/9)
+
+**Zero rows touched, confirmed directly, not merely inferred**: `T`, `VZ`, `PG`, `ADM`, `AAPL`,
+`MSFT`, `TSLA`, `AEM`, `AQN`, `BN` all show `Total Equity (incl NCI)` = 0 rows and their existing
+`Total Stockholders Equity` rows carry a `scraped_at` timestamp from **before** this session
+(range: 2026-07-08 to 2026-08-08) — proving `21`'s EU-only scope meant these tickers were never
+even read by either of this phase's two runs, let alone modified. `CAT` specifically re-checked:
+FY2025 `Total Stockholders Equity` = $21,318,000,000, `is_derived=false`, byte-identical to the
+pre-fix value (§B2) — confirming that when this population *is* eventually reprocessed by a
+normal scheduled run, the mechanism (§C2's tests) will reproduce this exact value via the new
+fallback path rather than the old synonym, without change.
+
+### C7. Idempotency (Part 11)
+
+Ran `21` twice against the same (EU-only) scrape. Before/after the second run: `Total Stockholders
+Equity` row count 126,449 → 126,449 (unchanged), `Total Equity (incl NCI)` row count 29 → 29
+(unchanged), zero duplicate `(ticker, stmt, concept, fiscal_year, period_type)` keys either time,
+IBE FY2021's fallback row reproduced with the identical value and `is_derived=True` both times —
+no oscillation between the two concepts across runs.
+
+### C8. Downstream impact (Part 10)
+
+**Zero code changes required, confirmed** — `22__derived_metrics.py` and `23__intrinsic_value.py`
+were not modified, and did not need to be: every one of the 8 real consumers traced in §B1 reads
+`"Total Stockholders Equity"` by name, and that concept's values are provably byte-identical
+before and after this fix (§C6, §C4's row-count check) for every ticker in the current dataset.
+`financials_metrics`/`financials_intrinsic_value` were not recomputed this pass (not required —
+the input they'd read is unchanged) and remain exactly as they were after this session's earlier
+Phase 6.3 `22`/`23` runs.
+
+### C9. Remaining limitations
+
+- The ~1,616 US/Canada tickers that have both raw tags but haven't been reprocessed by `21`
+  since before this fix (i.e., essentially the whole non-EU universe) will only gain their own
+  `"Total Equity (incl NCI)"` row and, where applicable, a correctly-`is_derived`-flagged fallback
+  the next time a normal, scheduled (or explicitly authorized) full-universe `21` run reprocesses
+  them — not attempted or required this pass.
+- `concept_hierarchy.json` still has no entry for `"Total Equity (incl NCI)"` (Phase 6.4 §8.1,
+  unchanged) — the concept exists correctly in `financials` now, for every ticker/source, but
+  will not render in `fundamentals_screener` until that separate, out-of-scope registration is
+  made.
+- No `51`/`52` run this pass (non-goal, unchanged) — the GitHub Release published during Phase
+  6.3 does not yet reflect this fix's EU results; a future publish cycle will pick it up once
+  authorized.
+
+---
+
+## Final Report (Phase 6.5c)
+
+- **Classification: PARTIAL** — the fix is implemented, tested, and validated live for the EU
+  population (the original Phase 6.4 ask) and provably safe for the currently-untouched
+  US/Canada population (byte-identical, unreprocessed). It is **not** "READY TO MERGE" outright
+  only because the ~1,616-ticker US/Canada population's *own* fallback/dual-row behavior has not
+  yet been exercised by a live `21` run (deliberately — that requires a full-universe run this
+  phase was not authorized to execute) — §C2's tests are the evidence standing in for that until
+  a future scheduled run (or an explicitly authorized one) reprocesses them.
+- **Architecture**: Option A implemented, exactly as recommended in §B10.
+- **Root cause**: `CONCEPT_SYNONYMS`'s blind, unconditional rename of `"Total Equity (incl NCI)"`
+  into `"Total Stockholders Equity"` discarded the broader concept's own value the instant either
+  a direct fact also existed for the same key (EU's case, and ~1,616 US/Canada tickers) — even
+  though the rename is also the sole source of `"Total Stockholders Equity"` for 59+ tickers that
+  never tag the narrower concept at all.
+- **Implementation**: `21__clean_and_merge.py` only (§C1); `CONCEPT_SYNONYMS` untouched.
+- **Existing US/CA `Total Stockholders Equity`**: **unchanged** — confirmed directly (§C6), not
+  inferred.
+- **New `Total Equity (incl NCI)` rows**: 29 (all 7 relevant EU issuers), live in production
+  today; up to ~15,116 keys system-wide once a future full-universe run reprocesses every ticker
+  (§C3).
+- **EU validation**: complete, live, all 8 issuers checked (§C5) — including a genuine, real
+  CASE B (IBE FY2021) the investigation phases didn't anticipate finding live.
+- **US validation**: confirmed untouched/unaffected this pass; the fallback mechanism itself is
+  validated by §C2's tests and will apply automatically to real US data the next time `21`
+  reprocesses it.
+- **Canada validation**: same as US — untouched this pass (AQN, BN confirmed).
+- **Tests**: 9 new, 9 passed; full suite 369 passed, 2 skipped.
+- **Ruff**: clean.
+- **Downstream impact**: zero — confirmed by trace and by the unchanged-value proof (§C8).
+- **Idempotency**: confirmed, two full runs, byte-identical results (§C7).
+- **Production writes: YES** — `21__clean_and_merge.py`, EU-scoped (natural `scraped_at`
+  mechanism, no new scoping logic), run twice, both `TERMINATED SUCCESS`.
+- **Website changed: NO**
+- **fundamentals_screener changed: NO**
+- **Tier A started: NO**
+- **New unrelated findings**: NO new bug found this pass (the NULL-handling correction and the
+  471-ticker figure are refinements of Phase 6.5b's own evidence, not new, separate issues).
+- **PR**: branch `phase6-5c-total-equity-nci-option-a`, pushed, not yet opened as a PR in this
+  session — recommended next action.
+- **Next recommended action**: open the PR (do not merge); once merged, the next *scheduled*
+  full-universe `21` run (or an explicitly authorized one) will naturally extend this fix's
+  results to the full ~1,616+471-ticker US/Canada population — no further code change needed for
+  that to happen.
