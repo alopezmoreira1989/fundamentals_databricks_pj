@@ -934,12 +934,83 @@ comparisons used only `SELECT`/`DESCRIBE HISTORY`/`VERSION AS OF` queries.
 
 ### 14.6 What remains
 
-- **The live bounded run has not been re-attempted with this fix applied** — `18` succeeded
-  live (§13.2); `22` was blocked, diagnosed, and fixed, but the fix itself has only been
-  verified via `DRY_RUN`, never via a real MERGE. `23`/`51` have never run in this validation
-  attempt at all. Needs its own explicit go-ahead.
+- ~~The live bounded run has not been re-attempted with this fix applied~~ — **it was, twice,
+  see §15. Both runs succeeded completely, with full idempotency confirmed.**
 - **`Shares Diluted` remains unmapped** (§11.5) — unchanged, still out of scope.
-- **The `23` blind-`UPDATE`-with-`NULL` guard** (§12.3, fixed) is still unverified against a
-  real live write for the same reason as above.
-- **PR #380 remains a draft, not merged.** No new PR opened. No European universe expansion.
-  No DAG scheduling change. No `fundamentals_screener`/Django file touched.
+- **PR #380 remains a draft, not merged.** Still true after §15.
+
+## 15. Final live validation — the complete chain, run twice, fully clean (2026-08-17)
+
+With §14's ownership fix verified via `DRY_RUN`, the full `18 → 22 → 23 → 51` sequence was
+explicitly authorized and executed **twice** — once for the real validation, once immediately
+after for idempotency — with a mandatory preflight first.
+
+### 15.1 Preflight
+
+EU target universe: 8 admitted companies (confirmed). Full US/CA production universe: 2,662
+tickers (confirmed). `config.tickers`: 0 EU rows (confirmed, both before and after). Personal
+Databricks Repo synced to the exact latest commit before executing.
+
+### 15.2 Run 1 — real validation
+
+| Step | Result | Key evidence |
+|---|---|---|
+| `18` | SUCCESS | **8 of 8** EU tickers passed the safety gate (incl. `FCC`/`SGO`); `market_prices_daily` +46,372 rows / +8 tickers via clean MERGE; zero `ingestion_failures` |
+| `22` | SUCCESS | `financials_metrics`: 2,039,873 → 2,040,004 (**exactly +131**, matching the dry-run's prediction to the row); the three sampled `23`-owned IV-label metrics (`Owner Earnings (FY)` 31,977, `Graham Revised Value (FY)` 23,031, `DCF Value per Share (FY)` 14,438) **byte-identical** to pre-run — zero deleted; `market_cap_asof`/`market_cap_live` recomputed cleanly, US/CA values unchanged |
+| `23` | SUCCESS | `financials_intrinsic_value`: 221,273 rows, unchanged; `AAPL` TTM `price_close` real (`304.91`, not `NULL`); 0 EU rows (still correctly blocked by the `Shares Diluted` gap, not guessed) |
+| `51` | SUCCESS | `dashboard_data.parquet`: 2,640 distinct tickers, all 8 EU tickers present; `config.tickers` still 0 EU rows |
+
+**Alstom fiscal-year check**: `period_end` consistently `2023-03-31` → `2026-03-31` across all
+4 FY rows — never normalized to a December calendar boundary.
+
+**EU output table** (all 8, `financials`/`market_data`/`derived_metrics` = populated,
+`intrinsic_value` = legitimate `NULL`, `dashboard_export` = populated):
+
+| Ticker | MIC | ISIN | Currency | financials | market_data | metrics | intrinsic_value |
+|---|---|---|---|---|---|---|---|
+| ALO | XPAR | FR0010220475 | EUR | 12 | 5,382 | 16 | 0 (legitimate) |
+| FCC | XMAD | ES0122060314 | EUR | 20 | 6,834 | 32 | 0 (legitimate) |
+| FCT | MTAA | IT0005599938 | EUR | 9 | 3,078 | 12 | 0 (legitimate) |
+| IBE | XMAD | ES0144580Y14 | EUR | 20 | 6,834 | 32 | 0 (legitimate) |
+| ISP | MTAA | IT0000072618 | EUR | 6 | 8,043 | 8 | 0 (legitimate) |
+| NAI | XAMS | NL0015000CG2 | EUR | 9 | 1,308 | 12 | 0 (legitimate) |
+| RAND | XAMS | NL0000379121 | EUR | 20 | 8,054 | 32 | 0 (legitimate) |
+| SGO | XPAR | FR0000125007 | EUR | 12 | 6,839 | 18 | 0 (legitimate) |
+
+(metrics column sums to 162, exactly matching the dashboard export's own EU metric-row count —
+cross-verified two ways.) Every `issuer_id`/`listing_id` correctly `EU_CURRENT:<LEI>` /
+`<MIC>:<ISIN>` — no ticker-as-identity conflation anywhere in this chain.
+
+### 15.3 Run 2 — idempotency
+
+Identical sequence, same 8-ticker universe, run immediately after Run 1. All four steps
+succeeded again. **Every table's row count is byte-identical to its post-Run-1 state**:
+
+| Table | After Run 1 | After Run 2 |
+|---|---|---|
+| `financials` | 4,750,488 | 4,750,488 |
+| `financials_metrics` | 2,040,035 | 2,040,035 |
+| `financials_intrinsic_value` | 221,273 | 221,273 |
+| `market_prices_daily` | 15,315,168 | 15,315,168 |
+| `market_cap_asof` | 27,240 | 27,240 |
+| `market_cap_live` | 2,175 | 2,175 |
+| `stock_splits` | 4,330 | 4,330 |
+| `config.tickers` (EU rows) | 0 | 0 |
+
+A direct duplicate-key check (`GROUP BY ticker, fiscal_year, metric HAVING COUNT(*) > 1`)
+returned zero rows. The dashboard export itself was re-downloaded and compared: 1,323,996 rows
+/ 2,640 tickers, identical between Run 1 and Run 2, all 8 EU tickers present in both. US/CA
+representatives (`AAPL`/`MSFT`/`TSLA`/`AEM`/`AQN`) spot-checked byte-identical after both runs.
+
+### 15.4 Conclusion
+
+**Phase 5.6's core technical objective is achieved and verified, twice, against real
+production data**: the pipeline can incorporate the 8 admitted European companies into the
+dataset `fundamentals_screener`/the dashboard export consume, without adding them to
+`config.tickers` and without disturbing the existing US/CA universe — proven not by inference
+but by direct before/after measurement across every affected table, run twice for idempotency.
+
+**Not done, deliberately, per instruction**: PR #380 remains a draft, not merged.
+`fundamentals_screener`/Django were not touched. No Phase 5.7 work started. `Shares Diluted`
+remains a real, researched, unmapped gap for EU tickers (not attempted here). Full universe
+expansion beyond the 8 currently-admitted issuers was not attempted.
