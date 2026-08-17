@@ -223,3 +223,338 @@ one option over another without that sign-off.
   should that population go NULL instead) before any implementation is attempted. This is a
   genuine architectural/data-quality decision, not an engineering task this phase should resolve
   by picking an option unilaterally.
+
+---
+---
+
+## PHASE 6.5b — ARCHITECTURAL DECISION
+
+**READ-ONLY investigation. No code changed, no table written, nothing published, nothing
+implemented.** This section resolves the open architectural question §4/§5 of the section above
+raised, with the additional real evidence this phase's own instructions required, and ends with
+one concrete, chosen recommendation — not a menu.
+
+Every claim is labeled **VERIFIED** (obtained directly, this pass, from real code or real
+production data), **INFERRED** (a reasonable conclusion from verified facts), or **PROPOSED**
+(a design recommendation, not yet decided or built).
+
+---
+
+## B1. How `Total Stockholders Equity` is actually consumed downstream (Part 1)
+
+**VERIFIED**, direct code read, current branch tip.
+
+`22__derived_metrics.py` reads `"Total Stockholders Equity"` in **eight** places: `Debt / Equity`
+(`:321-322`), `Invested Capital` → `ROIC %` (`:379`), `ROE %` (`:390`), the NCAV/Net-Net Finder's
+Total-Liabilities fallback (`Total Assets − Total Stockholders Equity` when a filer doesn't tag
+`Liabilities` directly, `:438-439`), `Tangible Book Value` (`:521-526`), the same computation
+reused for `val_wide`'s own lineage (`_tbv_val`, `:1259-1264`), `P/B` (`:1302`), `Book Yield %`
+(`:1325`), and the Altman Z-Score's `X4` leverage-ratio fallback (`:1348-1358`, whose own comment
+already explicitly documents accepting "the usually small" NCI-approximation error — direct,
+pre-existing evidence the project already tolerates this exact trade-off elsewhere, deliberately,
+not by oversight).
+
+`23__intrinsic_value.py` reads it via the `"equity"` alias (`:216`, one of `STOCK_ALIASES`) into
+`bvps` (Book Value Per Share, `:789`) and the TTM margin-of-safety scenarios' `_ttm_equity`
+(`:808`).
+
+**No formula anywhere reads `"Total Equity (incl NCI)"` by its own name** — confirmed again this
+pass (§1 item 6 of the section above already established this via repo-wide grep).
+
+---
+
+## B2. Real US/Canada evidence (Part 2)
+
+**VERIFIED**, direct query against `main.financials.financials_raw` (deduplicated).
+
+**All five named tickers (CAT, T, VZ, PG, ADM) have *only* the incl-NCI tag across their ENTIRE
+ingested history** — not just recently:
+
+| Ticker | Years with `Total Equity (incl NCI)` raw fact | Years with `Total Stockholders Equity` raw fact |
+|---|---|---|
+| CAT | 2006–2025 (20 years) | 0 |
+| T | 2006–2025 (20 years) | 0 |
+| VZ | 2007–2025 (19 years) | 0 |
+| PG | 2007–2026 (20 years, fiscal-June) | 0 |
+| ADM | 2007–2025 (19 years) | 0 |
+
+This is a **structural, permanent characteristic** of how these five filers tag their XBRL, not
+an intermittent gap — none of them has ever, in this pipeline's ingestion history, tagged the
+narrower `us-gaap:StockholdersEquity` concept at all. **INFERRED**: for a company like PG (widely
+known to carry negligible non-controlling interest), this is very likely a tagging-convention
+choice with near-zero practical distortion (the two figures are probably nearly identical in
+practice, even though only the broader tag was ever filed) — not independently verified this
+pass, since no separate "Non-Controlling Interest" concept exists in the canonical model to
+cross-check against for US filers (Phase 6.4's own cross-cutting gap finding). For T and VZ,
+real, material NCI from telecom joint ventures/tower entities is plausible and would introduce a
+real, non-trivial approximation — also not independently quantified this pass for lack of a
+canonical NCI concept to compare against.
+
+**Materiality where both tags exist** (1,514 distinct US/Canada tickers, 20,112 ticker-years):
+
+| Statistic | Value |
+|---|---|
+| Median absolute % difference (incl-NCI vs. attributable) | **0.73%** |
+| 90th percentile | 25.14% |
+| Ticker-years where the two values are *exactly* equal | 4,267 (21%) |
+
+**INFERRED**: for the typical filer, the two figures are close; a real, meaningful minority
+(roughly the top decile) diverges substantially — consistent with the file's own pre-existing
+comment citing VNOM's ~40% NCI as a known, real outlier case. The current tiebreak
+(`CONCEPT_PRIORITY`: direct tag wins, 0 vs. 1) already handles this population correctly today —
+**this evidence doesn't change anything about how "both exist" cases are resolved; it only
+confirms that resolution is already working as intended.**
+
+---
+
+## B3. Real European evidence (Part 3)
+
+**VERIFIED**, direct query against `main.financials.financials_raw` (`source_id = 'EU_CURRENT'`).
+
+| Ticker | `Total Equity (incl NCI)` raw | `Total Stockholders Equity` raw | Both present every year? |
+|---|---|---|---|
+| FCC | ✓ | ✓ | Yes |
+| ALO | ✓ | ✓ | Yes |
+| IBE | ✓ | ✓ | Yes |
+| SGO | ✓ | ✓ | Yes |
+| FCT | ✓ | ✓ | Yes |
+| NAI | ✓ | ✓ | Yes |
+| RAND | ✓ | ✓ | Yes |
+| ISP | — | — | Neither (bank; structurally different equity presentation, per Phase 6.4 §7) |
+
+**Every one of the 7 EU issuers that has either concept has *both*, every fiscal year on
+record — the exact opposite population shape from §B2's 59 single-tag US tickers.** EU never
+needs the "only the broad figure exists" fallback case at all; it only ever needs "both exist,
+preserve both."
+
+---
+
+## B4. Semantic test — does the accounting identity hold? (Part 4)
+
+**VERIFIED for FCC** (re-confirmed, Phase 6.4's own finding): €2,732,716,000 (`Total Stockholders
+Equity`, direct `EquityAttributableToOwnersOfParent` tag) + €1,003,303,000
+(`NoncontrollingInterests`) = €3,736,019,000, exactly the `Total Equity (incl NCI)` raw value.
+
+**Not independently re-verified for the other 6 EU issuers or for any US ticker this pass** (no
+canonical `Non-Controlling Interest` concept exists to join against for US data at all — a
+pre-existing, separate gap, Phase 6.4 §12 Tier A). **INFERRED, not verified**: the identity is a
+basic accounting relationship (`Total Equity = Equity attributable to owners + NCI`) that should
+hold generally by construction of the underlying financial statements, but this document does not
+claim to have checked it beyond the one FCC data point.
+
+**Does `Total Stockholders Equity` mean "attributable to owners of the parent," or has the
+project used it more broadly in practice?** **VERIFIED, and this is the crux of the semantic
+question**: the *canonical definition* (the SEC tag `StockholdersEquity`, the IFRS fallback
+`EquityAttributableToOwnersOfParent`, and `22__derived_metrics.py`'s own Altman-Z comment, which
+explicitly reasons about "attributable-only equity" as the norm it's deviating from) is
+unambiguously "attributable to the parent only." **But the *actual, currently-published data*,
+for 59 real US/Canada tickers, has never once contained that narrower figure** — every single
+value ever shown under this label for those 59 tickers has been the broader, incl-NCI total,
+silently, without any indication in the data that it's an approximation. The label's stated
+meaning and its lived behavior for this subset of tickers have quietly diverged since before this
+project's EU work began.
+
+---
+
+## B5. Evaluating the three existing options (Part 5)
+
+Retrieved verbatim from §4 above, not silently replaced.
+
+| | **A — Keyed two-pass merge** | **B — Per-key conditional synonym** | **C — Duplicate, don't rename** |
+|---|---|---|---|
+| **Semantics** | Direct facts populate `Total Stockholders Equity` first; a second pass fills remaining keys from incl-NCI; incl-NCI facts *always* also produce their own row | Rename to `Total Stockholders Equity` only when no direct fact exists for that exact key; otherwise leave the label alone | Incl-NCI facts always survive as their own row (delete the synonym); *separately*, an explicit, additional coalesce step reproduces today's fallback for `Total Stockholders Equity` |
+| **Implementation complexity** | Medium — one new merge pass + a per-key existence check | Medium — functionally identical to A, phrased as a filtered rename (a join against "does a direct fact exist for this key" before deciding to rename) | Medium — same two ingredients as A/B (a "don't discard" step + a "fill missing" step), just organized as "duplicate then patch" rather than "two ordered passes" |
+| **US impact** | None for existing `Total Stockholders Equity` values (identical fallback behavior preserved); **new** `Total Equity (incl NCI)` rows appear for ~1,675 tickers (not just the 59) — see §B7 | Same as A | Same as A/B |
+| **Canada impact** | Same reasoning as US — no Canada-specific evidence gathered this pass, but the mechanism is source-agnostic by construction | Same | Same |
+| **EU impact** | Both concepts now survive distinctly for all 7 affected issuers — the original Phase 6.4 ask, satisfied | Same | Same |
+| **Downstream impact** | Zero formula changes needed — every consumer of `Total Stockholders Equity` (§B1) keeps reading the exact same values it does today | Same | Same |
+| **Migration requirements** | Remove the `CONCEPT_SYNONYMS` entry; add the new keyed-fallback logic to `21__clean_and_merge.py`; the two `CONCEPT_PRIORITY` entries for these labels become vestigial once nothing competes under a shared key anymore (worth removing for clarity, not required for correctness) | Same removals; the "filter" framing may reuse more of the existing prio/window-based Spark idioms already in `21` | Same removals, plus care that the "duplicate" step doesn't double-write when both concepts already exist independently |
+| **Risk** | Low — additive only; no existing row's value changes | Low — same | Low, but slightly higher: a "duplicate" framing risks accidentally writing `Total Stockholders Equity` = incl-NCI value even for the 1,616 "both exist" tickers if the "don't overwrite when direct exists" guard is implemented incorrectly — A/B's ordered-pass framing makes that mistake structurally harder to make |
+| **Reversibility** | Fully reversible (logic/config only); already-written new rows persist until a future cleanup if reverted, the same characteristic Phase 6.3's own stale-row fix already had to handle | Same | Same |
+
+**A and B are functionally equivalent** — they express the identical rule ("direct wins;
+incl-NCI fills only genuinely empty keys; incl-NCI always independently survives") through two
+different but equally valid Spark implementation shapes. **C is the same rule, organized
+differently, with a slightly higher chance of an implementation bug reintroducing exactly the kind
+of silent overwrite this whole investigation exists to prevent.**
+
+**No fourth option is proposed** — A/B already form a complete, minimal, safe answer once
+combined with the real evidence in §B2-B4; nothing in this investigation surfaced a need for a
+structurally different approach.
+
+---
+
+## B6. The "specific wins, fallback only fills gaps, never overwrite" model (Part 6)
+
+**Is this semantically defensible?** **Yes — and this is the recommended rule (B10).** It matches
+real accounting practice (present the parent-attributable figure as primary book equity; treat
+the broader consolidated figure as a last-resort proxy only when nothing narrower is available)
+and, critically, it is **exactly today's actual behavior for the 59 single-tag US tickers**
+— the fix does not change what those 59 tickers show, it only stops throwing away real EU (and,
+incidentally, US/Canada) data that was previously discarded even when a *better* figure already
+existed for the exact same key.
+
+**Important, explicit caveat** (per this phase's own instruction not to conflate numerical
+usefulness with semantic correctness): this rule does **not** claim `"Total Stockholders Equity"`
+*is* attributable-only equity for those 59 tickers — it claims that showing the best real figure
+available, unchanged from current behavior, remains an acceptable, already-precedented trade-off
+(§B1's Altman-Z comment), not that the label becomes newly, fully accurate for them. That
+labeling imprecision is real, pre-existing, and not resolved by this fix — see §B7's open
+question.
+
+---
+
+## B7. NULL vs. fallback (Part 7)
+
+**Is using `Total Equity (incl NCI)` as a fallback for `Total Stockholders Equity` "a
+questionable value" under this project's own "NULL > questionable value" principle, or "a
+documented, deterministic approximation"?**
+
+**PROPOSED classification: a documented, deterministic approximation — not the kind of
+"questionable value" that principle was built to prevent.** The principle's own precedent cases
+(ISP/NAI's Revenue, Phase 6.3's Net Income stmt-misclassification) are all situations where the
+*wrong* concept was at risk of silently substituting for the *right* one, or where a source
+concept is **structurally different** from the canonical target (a bank's interest income is not
+economically the same thing as corporate Revenue). Here, by contrast, `Total Equity (incl NCI)`
+is the *same underlying quantity* (total book equity) at a slightly different level of
+consolidation — a real, if imprecise, proxy, not a category error. The Altman-Z fallback
+(`22__derived_metrics.py:1348-1358`) already treats this exact kind of approximation as acceptable
+for a comparable purpose, in code the repo owner has already reviewed and merged.
+
+**That said — this is a real, unresolved imprecision, not a closed question.** Two enhancements
+are **PROPOSED, not decided or implemented** this pass, should the repo owner want to close the
+labeling gap in the future: (1) a boolean/enum "provenance" column on `financials`
+(e.g. `is_approximated` or `source_concept`) so a consumer could distinguish an exact attributable
+figure from an incl-NCI proxy; (2) surfacing that distinction in `fundamentals_screener`'s display
+(e.g. a footnote marker). **Neither is implemented, scoped, or recommended for immediate action**
+— they would meaningfully widen this phase's footprint (schema change, `51`/`52`/frontend touch),
+explicitly out of scope per this phase's own non-goals.
+
+---
+
+## B8. Generic architecture (Part 8)
+
+**Does the recommended design depend on ticker/country/market?** **No — confirmed by
+construction.** The rule ("prefer the direct concept; fall back to the broader one only when the
+direct one is absent for that exact key; never discard the broader one when both exist") is
+expressed purely in terms of **canonical concepts and their relationship** (`Total Stockholders
+Equity` = primary, `Total Equity (incl NCI)` = fallback source), with no `if market == "EU"` or
+`if ticker in (...)` branch anywhere. It happens to resolve correctly for both real population
+shapes found in this investigation — EU's "always both" case (§B3) and the 59-ticker US "only
+broad" case (§B2) — *because* it's generic, not despite being generic. This satisfies Part 8's
+explicit preference for a market-agnostic mechanism, and no evidence gathered this pass showed a
+need to deviate from that preference.
+
+---
+
+## B9. Regression analysis for the recommended design (Part 9)
+
+**VERIFIED counts, real production data, read-only:**
+
+| | Count |
+|---|---|
+| US/Canada tickers where `Total Stockholders Equity`'s *value* changes | **0** — by construction, the fallback rule for this concept is unchanged from today |
+| US/Canada tickers where a NEW `Total Equity (incl NCI)` row appears | **up to 1,675** (every ticker with a real raw fact for it — the 59 single-tag ones already show this value under `Total Stockholders Equity` today; the other ~1,616 "both exist" tickers would see it appear as a genuinely new, previously-invisible row) |
+| EU tickers where a NEW `Total Equity (incl NCI)` row appears | **7** (FCC, ALO, IBE, SGO, FCT, NAI, RAND) |
+| EU tickers affected at all | 7 of 8 (ISP has neither tag) |
+| Rows that would become NULL | **0** |
+| Rows whose value would change | **0** |
+| Downstream metrics affected | **0 formula changes** — every consumer in §B1 keeps reading `Total Stockholders Equity` exactly as it does today; none of them currently reads `Total Equity (incl NCI)` |
+
+**The one real, non-trivial consequence worth flagging explicitly**: this fix's blast radius, done
+generically (per Part 8's own instruction not to scope it to EU only), is **much larger than the
+8 EU tickers Phase 6.4 originally found** — roughly 1,675 US/Canada tickers would newly show a
+`Total Equity (incl NCI)` row too. This is additive and non-destructive (§B9's own count table),
+but it is a real, sizeable increase in published data volume the repo owner should be aware of
+before authorizing implementation, and it means the eventual validation pass (Part 7 of the
+section above, still not run) should check a representative US/Canada sample **in addition to**
+the 8 EU tickers, not just the EU set.
+
+**Known, separate, already-flagged limitation, unaffected by this fix**: `concept_hierarchy.json`
+has no entry for `"Total Equity (incl NCI)"` (Phase 6.4 §8.1) — so even after this fix lands,
+the concept would not render in `fundamentals_screener` for EU *or* the newly-surfaced US/Canada
+tickers without a separate, later registration. Not addressed here — explicitly out of this
+phase's scope (no `fundamentals_screener`/display changes).
+
+---
+
+## B10. Recommendation (Part 10) — ONE chosen architecture
+
+**Recommended: Option A (keyed two-pass merge), generic, source-agnostic.**
+
+1. **Canonical semantics**: `"Total Stockholders Equity"` = equity attributable to the parent/
+   shareholders (unchanged definition). `"Total Equity (incl NCI)"` = total equity including
+   non-controlling interests (unchanged definition). Both remain independent, first-class
+   canonical concepts in `STATEMENTS`/`financials` — no schema change.
+2. **Fallback semantics**: `"Total Equity (incl NCI)"` may fill the `"Total Stockholders Equity"`
+   canonical slot **only** for an exact `(ticker, stmt, fy)` key that has **no** direct
+   `"Total Stockholders Equity"` fact at all. This is a per-key, existence-conditioned fallback,
+   not a blanket rename.
+3. **Precedence**: direct `"Total Stockholders Equity"` fact always wins when present (unchanged
+   from today).
+4. **Both exist**: both concepts survive as two independent rows in `financials` — `"Total
+   Stockholders Equity"` keeps the direct value; `"Total Equity (incl NCI)"` is no longer
+   discarded.
+5. **Only fallback exists**: `"Total Stockholders Equity"` = the incl-NCI value (identical to
+   today's actual behavior for the 59 known tickers — §B2); `"Total Equity (incl NCI)"` *also*
+   independently appears as its own row (new).
+6. **Neither exists**: both NULL (unchanged).
+7. **NCI interaction**: none introduced by this fix. The accounting identity (§B4) is not derived
+   or enforced by any new code — both values simply come from their own real, independent source
+   facts. A standalone `"Non-Controlling Interest"` canonical concept remains a separate, deferred
+   Tier A candidate (Phase 6.4 §12), not part of this recommendation.
+8. **Downstream metric behavior**: zero changes required. Every one of the eight `22`/two `23`
+   consumers in §B1 continues reading `"Total Stockholders Equity"` unmodified — its values are
+   identical before and after this fix for every ticker in the current dataset.
+9. **Migration strategy**: remove the `CONCEPT_SYNONYMS` entry for this pair; add the keyed
+   fallback as new logic in `21__clean_and_merge.py` (distinct from, not an extension of, the
+   existing blanket-rename synonym loop — that loop remains exactly as-is for every *other*
+   synonym, including Net Income's, which is intentionally out of scope); remove or repurpose the
+   now-vestigial `CONCEPT_PRIORITY` entries for these two labels as part of the same change, since
+   nothing will compete under a shared key for them anymore.
+10. **Regression risk**: LOW for correctness (§B9: zero value changes, zero new NULLs), MODERATE
+    for *scope* (§B9: ~1,675 US/Canada tickers gain a new row, not just the 8 EU ones) — a real,
+    manageable, additive consequence to plan validation around, not a reason to narrow the fix to
+    EU-only (which Part 8 explicitly discourages and which would reintroduce a market-specific
+    branch this evidence doesn't justify).
+
+**Why this beats simply deleting the synonym**: deleting it outright (the original Phase 6.5 plan)
+would have silently NULLed `"Total Stockholders Equity"` — and every metric in §B1 — for the 59
+real tickers in §B2, a severe regression this investigation caught before implementation. The
+recommended design achieves the original goal (EU keeps both concepts distinctly) **without**
+that regression, because it reproduces §B2's existing fallback behavior exactly rather than
+removing it.
+
+---
+
+## Final Report (Phase 6.5b)
+
+- **Classification: NEEDS ARCHITECTURAL DECISION → RESOLVED to a single recommendation
+  (Option A). Implementation is not authorized by this document — it remains a decision for the
+  repo owner to approve before any code is written.**
+- **Recommended architecture**: keyed two-pass merge (direct-wins, existence-conditioned
+  fallback, incl-NCI always independently preserved) — §B10.
+- **Why**: the only design evaluated that satisfies all three hard constraints simultaneously —
+  EU keeps both concepts, the 59 real US/Canada tickers see zero change, and the mechanism is
+  generic (no market/ticker branching) — §B5-B8.
+- **Fallback rule**: `Total Equity (incl NCI)` fills `Total Stockholders Equity` only for keys
+  with no direct fact; never overwrites a direct fact when one exists.
+- **Both-concepts rule**: both survive as independent rows whenever both raw facts exist.
+- **NCI handling**: not introduced by this fix; deferred to Phase 6.4's separate Tier A
+  candidate.
+- **US/Canada impact**: zero value changes to `Total Stockholders Equity` for any ticker; up to
+  1,675 tickers gain a new, previously-discarded `Total Equity (incl NCI)` row.
+- **EU impact**: 7 of 8 issuers gain a distinct, correct `Total Equity (incl NCI)` row; zero
+  change to their existing `Total Stockholders Equity` values.
+- **Downstream impact**: zero formula changes in `22__derived_metrics.py`/`23__intrinsic_value.py`
+  — confirmed by direct code trace, §B1.
+- **Production writes: NO**
+- **Code changes: NO**
+- **Tier A started: NO**
+- **Website changed: NO**
+- **Next step**: if this recommendation is approved, implement it as Phase 6.5's actual code
+  change (scoped to `21__clean_and_merge.py` + the `CONCEPT_SYNONYMS`/`CONCEPT_PRIORITY` config
+  entries, per §B10 item 9), with tests covering both population shapes (EU "always both," the 59
+  US "only broad") and a validation pass across a representative US/Canada sample in addition to
+  the 8 EU tickers, given the larger-than-EU blast radius §B9 identified. Not started in this
+  document, per instruction.
