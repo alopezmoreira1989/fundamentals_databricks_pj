@@ -30,6 +30,25 @@ from pyspark.sql import functions as F
 from pyspark.sql.types import StringType, StructField, StructType, TimestampType
 from pyspark.sql.window import Window
 
+# Same reinstall-on-ImportError pattern as 11__fetch_sec_xbrl.py — this notebook has no
+# guarantee of a shared session install when run standalone or as its own Databricks Job task.
+try:
+    from fundamentals_pipeline.write_safety import (
+        UnsafeOrphanDeleteError,
+        assert_orphan_delete_safe,
+        is_full_universe_run,
+    )
+except ImportError:
+    import subprocess
+    import sys
+
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "-e", "../.."])
+    from fundamentals_pipeline.write_safety import (
+        UnsafeOrphanDeleteError,
+        assert_orphan_delete_safe,
+        is_full_universe_run,
+    )
+
 # CONTRACT: the currency-conversion arithmetic below (native Spark F.when/multiply, for
 # performance over ~30k rows) mirrors fundamentals_pipeline/fx.py's convert_price() scalar
 # semantics — no-op when currencies match, multiply by rate otherwise, never guess a missing
@@ -50,7 +69,13 @@ mcl_tbl     = f"{CATALOG}.{SCHEMA}.market_cap_live"       # genuinely live price
 # reporting_currency (main.config.tickers) — e.g. a USD-reporting, CAD-quoted Canadian gold
 # miner — which is a same-ticker unit-mismatch bug independent of any cross-market
 # comparability question (see fundamentals_pipeline/fx.py).
-QUOTE_CURRENCY_BY_MARKET = {"US": "USD", "CA": "CAD"}
+QUOTE_CURRENCY_BY_MARKET = {"US": "USD", "CA": "CAD", "EU": "EUR"}
+# "EU" (Phase 5.6): the single Generation-1 `market` value for FIRDS-admitted European
+# listings (see fundamentals_pipeline/sources/eu_admission.py) -- not per-country, matching
+# FIRDS' own EU-wide scope. Only used defensively here (the actual EU quote/reporting
+# currency for the ticker-alignment join below comes from `eu_admission_candidates.currency`
+# directly, not derived from this dict) -- kept in sync for any other market-keyed logic that
+# might read this dict.
 
 # COMMAND ----------
 
@@ -691,6 +716,17 @@ print(f"Base metrics long: {long_base.count():,} rows")
 
 # COMMAND ----------
 
+# Structural guard (2026-08-17 hardening, docs/phase5-6-european-dashboard-data-integration.md
+# §12): `_has_prices` used to be a bare "does market_prices_daily have ANY rows" check — true
+# even for the 2026-08-16 incident's 7-ticker corrupted table, which is exactly how a narrow
+# upstream input reached market_cap_asof/market_cap_live's unconditional full-table overwrites
+# (both wiped to 0 rows) and financials_metrics' orphan-cleanup DELETE (which then removed
+# every valuation metric for the whole universe, §10.2). `_has_prices` is now gated on real
+# ticker COVERAGE, not bare presence — this is the PRIMARY defense (semantic: "does this run's
+# price input actually represent the full universe"), evaluated before ANY of the downstream
+# writes/deletes are even attempted, not a percentage-of-what-would-be-destroyed check after
+# the fact. `assert_orphan_delete_safe()`'s threshold (§11.3) remains as a secondary,
+# independent check on the financials_metrics MERGE specifically.
 try:
     _prices = (
         spark.table(prices_tbl)
@@ -698,11 +734,21 @@ try:
         .filter(F.col("close").isNotNull())
     )
     _has_prices = _prices.limit(1).count() > 0
+    if _has_prices:
+        _price_ticker_count = _prices.select("ticker").distinct().count()
+        _fundamentals_ticker_count = spark.table(full_tbl).select("ticker").distinct().count()
+        _has_prices = is_full_universe_run(_price_ticker_count, _fundamentals_ticker_count)
+        if not _has_prices:
+            print(f"⚠ market_prices_daily covers only {_price_ticker_count:,} of "
+                  f"{_fundamentals_ticker_count:,} tickers with fundamentals data — below the "
+                  f"full-universe coverage threshold. Treating this as NOT a full-universe run: "
+                  f"skipping valuation metrics, market_cap_asof, and market_cap_live this run "
+                  f"rather than risk a destructive write against a partial upstream input.")
 except Exception:
     _has_prices = False
 
 if not _has_prices:
-    print("⚠ market_prices_daily not found/empty — skipping valuation metrics.")
+    print("⚠ market_prices_daily not found/empty/partial — skipping valuation metrics.")
     pe_mcap = None
 else:
     # FY period_end per (ticker, fiscal_year). One fiscal close per FY; MAX is defensive.
@@ -757,6 +803,31 @@ else:
         print(f"⚠ Could not read config.tickers for currency alignment ({_e}) — assuming "
               f"quote_currency=reporting_currency='USD' for every ticker.")
         ticker_currency = None
+
+    # Phase 5.6: extend with FIRDS-admitted European issuers -- real currency (FIRDS' own
+    # NtnlCcy, captured on main.config.eu_admission_candidates.currency), never defaulted or
+    # guessed. Quote currency and reporting currency are the SAME value here because every
+    # currently-admitted MIC (XMAD/XPAR/XAMS/MTAA) is Eurozone -- a future non-Eurozone EU
+    # admission (e.g. a Swedish/Danish listing) would need a genuine market->quote-currency
+    # split the way QUOTE_CURRENCY_BY_MARKET already provides for US/CA; not built here, since
+    # no such candidate is admitted yet. Without this union, a EU ticker reaching this join
+    # would silently fall through to the "USD" default below -- exactly the wrong-but-silent
+    # failure mode this alignment logic exists to prevent for US/CA in the first place.
+    try:
+        _eu_ccy = (
+            spark.table(f"{CATALOG}.config.eu_admission_candidates")
+            .filter((F.col("admission_status") == "admitted") & F.col("currency").isNotNull())
+            .select(
+                "ticker",
+                F.col("currency").alias("quote_currency"),
+                F.col("currency").alias("reporting_currency"),
+            )
+        )
+        ticker_currency = _eu_ccy if ticker_currency is None else ticker_currency.unionByName(_eu_ccy)
+    except Exception as _eu_e:
+        print(f"⚠ Could not read config.eu_admission_candidates for currency alignment "
+              f"({_eu_e}) — European tickers, if any reach this point, fall through to the "
+              f"USD default below.")
 
     def _log_missing_fx(missing_df, step_label: str) -> None:
         """Log rows needing currency conversion with no resolvable FX rate to
@@ -1401,6 +1472,182 @@ spark.sql(f"""
 
 final_long.createOrReplaceTempView("incoming_metrics")
 
+# ── DRY_RUN diagnostic mode (2026-08-17, docs/phase5-6-european-dashboard-data-integration.md
+# §13) ────────────────────────────────────────────────────────────────────────────────────
+# Read-only classification of `incoming_metrics` (the exact real DataFrame the MERGE below
+# would consume — NOT a reimplementation of the pivot/derive logic in SQL) against the current
+# `financials_metrics`, for diagnosing a large orphan-delete count WITHOUT running the write
+# that would answer the question destructively. Same override-mode pattern as ACTIVE_TICKERS/
+# force_full_refresh above; defaults to False, so a normal run is byte-for-byte unaffected.
+# Exits via `dbutils.notebook.exit()` (JSON), never writes anywhere — no throwaway Databricks
+# table, per explicit instruction; the caller reads the result from the Jobs API's
+# `notebook_output.result` field.
+if "DRY_RUN" in globals():
+    DRY_RUN = str(DRY_RUN).strip().lower() == "true"  # noqa: F821 -- %run/importlib inheritance
+else:
+    try:
+        DRY_RUN = dbutils.widgets.get("DRY_RUN").strip().lower() == "true"
+    except Exception:
+        DRY_RUN = False
+if DRY_RUN:
+    print("=" * 55)
+    print("DRY RUN — classifying incoming_metrics vs financials_metrics; NO WRITE")
+    print("=" * 55)
+
+    _key = ["ticker", "fiscal_year", "metric"]
+    _target = spark.table(metrics_tbl)
+    _source = final_long
+
+    _target_count = _target.count()
+    _source_count = _source.count()
+
+    _matched = _target.alias("t").join(_source.alias("s"), on=_key, how="inner")
+    _matched_count = _matched.count()
+    _new_rows = _source.join(_target, on=_key, how="left_anti")
+    _new_count = _new_rows.count()
+    _orphaned_rows = _target.join(_source, on=_key, how="left_anti")
+    _orphaned_count = _orphaned_rows.count()
+    _modified_rows = _matched.filter(F.col("t.value") != F.col("s.value"))
+    _modified_count = _modified_rows.count()
+
+    # Ownership-scoped orphan count (2026-08-17, §14) -- the Spark-scale equivalent of
+    # fundamentals_pipeline.write_safety.scoped_orphan_keys(), computed directly here (not by
+    # collecting millions of keys into the driver to call the pure Python function) since the
+    # pure function's job is to be the unit-tested SPECIFICATION of this exact filter, not the
+    # thing literally executed at this scale. This is what the real (non-dry-run) guard/MERGE
+    # now actually deletes -- shown here so a dry-run can directly verify the fix without a
+    # live run.
+    _22_owned_metrics_dryrun = list(dict.fromkeys([*base_metric_cols, *globals().get("val_metric_cols", [])]))
+    _scoped_orphaned_count = _orphaned_rows.filter(F.col("metric").isin(_22_owned_metrics_dryrun)).count()
+
+    # New-row breakdown (2026-08-17, §14 item 6) -- characterize what "new" actually contains,
+    # not just its count. Compact: new rows are typically few relative to orphans.
+    _new_rows_detail = [
+        {"ticker": r["ticker"], "fiscal_year": r["fiscal_year"], "metric": r["metric"]}
+        for r in _new_rows.select("ticker", "fiscal_year", "metric").orderBy("ticker", "fiscal_year").limit(200).collect()
+    ]
+    _new_by_market = [
+        {"market": r["market_bucket"] if r["market_bucket"] is not None else "OTHER (not in config.tickers or eu_admission_candidates)", "n": r["n"]}
+        for r in (
+            _new_rows
+            .join(
+                spark.table(f"{CATALOG}.config.tickers")
+                .select("ticker", F.coalesce(F.col("market"), F.lit("US")).alias("market_bucket"))
+                .unionByName(
+                    spark.table(f"{CATALOG}.config.eu_admission_candidates")
+                    .filter(F.col("admission_status") == "admitted")
+                    .select("ticker").withColumn("market_bucket", F.lit("EU"))
+                ),
+                on="ticker", how="left",
+            )
+            .groupBy("market_bucket").count().withColumnRenamed("count", "n")
+            .orderBy(F.desc("n")).collect()
+        )
+    ]
+
+    # Orphan breakdown by metric (compact — a few dozen distinct metric labels at most).
+    _orphan_by_metric = [
+        {"metric": r["metric"], "n": r["n"]}
+        for r in _orphaned_rows.groupBy("metric").count().withColumnRenamed("count", "n")
+                                .orderBy(F.desc("n")).collect()
+    ]
+
+    # Orphan breakdown by fiscal_year.
+    _orphan_by_fy = [
+        {"fiscal_year": r["fiscal_year"], "n": r["n"]}
+        for r in _orphaned_rows.groupBy("fiscal_year").count().withColumnRenamed("count", "n")
+                                .orderBy("fiscal_year").collect()
+    ]
+
+    # Orphan breakdown by market (EU admitted vs US/CA vs other) -- read-only lookups against
+    # config.tickers / eu_admission_candidates, same tables the real pipeline already reads.
+    _eu_tickers_df = (
+        spark.table(f"{CATALOG}.config.eu_admission_candidates")
+        .filter(F.col("admission_status") == "admitted")
+        .select("ticker").withColumn("market_bucket", F.lit("EU"))
+    )
+    _us_ca_tickers_df = (
+        spark.table(f"{CATALOG}.config.tickers")
+        .select("ticker", F.coalesce(F.col("market"), F.lit("US")).alias("market_bucket"))
+    )
+    _market_lookup = _us_ca_tickers_df.unionByName(_eu_tickers_df)
+    _orphan_by_market = [
+        {"market": r["market_bucket"] if r["market_bucket"] is not None else "OTHER (not in config.tickers or eu_admission_candidates)", "n": r["n"]}
+        for r in (
+            _orphaned_rows.join(_market_lookup, on="ticker", how="left")
+            .groupBy("market_bucket").count().withColumnRenamed("count", "n")
+            .orderBy(F.desc("n")).collect()
+        )
+    ]
+
+    # Orphan top-50 tickers (not all ~2,662+ -- keeps notebook.exit()'s payload compact).
+    _orphan_by_ticker_top50 = [
+        {"ticker": r["ticker"], "n": r["n"]}
+        for r in _orphaned_rows.groupBy("ticker").count().withColumnRenamed("count", "n")
+                                .orderBy(F.desc("n")).limit(50).collect()
+    ]
+
+    # Base vs valuation classification -- reuses the SAME base_metric_cols/val_metric_cols
+    # lists the real pivot logic above already defines; not a second, independently-invented
+    # taxonomy. val_metric_cols only exists when pe_mcap is not None (this run's own coverage
+    # gate passed, so it does) -- defensively handled for a DRY_RUN under the opposite branch.
+    _val_cols_set = set(globals().get("val_metric_cols", []))
+    _base_cols_set = set(base_metric_cols)
+    _orphan_by_category = [
+        {"category": r["category"], "n": r["n"]}
+        for r in (
+            _orphaned_rows
+            .withColumn(
+                "category",
+                F.when(F.col("metric").isin(list(_val_cols_set)), F.lit("valuation"))
+                 .when(F.col("metric").isin(list(_base_cols_set)), F.lit("base"))
+                 .otherwise(F.lit("unclassified")),
+            )
+            .groupBy("category").count().withColumnRenamed("count", "n")
+            .orderBy(F.desc("n")).collect()
+        )
+    ]
+
+    _sample_modified = [
+        {"ticker": r["ticker"], "fiscal_year": r["fiscal_year"], "metric": r["metric"],
+         "old_value": r["old_value"], "new_value": r["new_value"]}
+        for r in (
+            _modified_rows
+            .select(
+                F.col("t.ticker").alias("ticker"),
+                F.col("t.fiscal_year").alias("fiscal_year"),
+                F.col("t.metric").alias("metric"),
+                F.col("t.value").alias("old_value"),
+                F.col("s.value").alias("new_value"),
+            )
+            .limit(20).collect()
+        )
+    ] if _modified_count else []
+
+    _result = {
+        "dry_run": True,
+        "generated_with_branch_code": "phase5-6-european-dashboard-data-integration",
+        "target_financials_metrics_count": _target_count,
+        "source_incoming_metrics_count": _source_count,
+        "matched_count": _matched_count,
+        "new_count": _new_count,
+        "orphaned_count": _orphaned_count,
+        "orphaned_pct_of_target": (_orphaned_count / _target_count) if _target_count else None,
+        "scoped_orphaned_count": _scoped_orphaned_count,
+        "scoped_orphaned_pct_of_target": (_scoped_orphaned_count / _target_count) if _target_count else None,
+        "modified_count": _modified_count,
+        "orphan_by_metric": _orphan_by_metric,
+        "orphan_by_fiscal_year": _orphan_by_fy,
+        "orphan_by_market": _orphan_by_market,
+        "orphan_by_category_base_vs_valuation": _orphan_by_category,
+        "orphan_top50_tickers": _orphan_by_ticker_top50,
+        "new_rows_detail": _new_rows_detail,
+        "new_by_market": _new_by_market,
+        "sample_modified_rows": _sample_modified,
+    }
+    print(json.dumps(_result, indent=2, default=str))
+    dbutils.notebook.exit(json.dumps(_result, default=str))
+
 # `unpivot()` drops NULL-valued metrics before they ever reach `incoming_metrics` (NULL = "absent",
 # no row stored). Combined with `raw`/`_raw_full` above always reading the FULL financials table
 # (no tickers_override in this notebook — every run recomputes the entire universe), that means a
@@ -1410,6 +1657,59 @@ final_long.createOrReplaceTempView("incoming_metrics")
 # persist forever even though the current code no longer produces it. `WHEN NOT MATCHED BY SOURCE`
 # deletes exactly those orphans. Safe here specifically because source is a full-universe rebuild
 # each run — a partial/incremental source would incorrectly delete untouched tickers.
+#
+# Ownership scoping (2026-08-17, docs/phase5-6-european-dashboard-data-integration.md §14):
+# `financials_metrics` is jointly populated by THIS notebook and `23__intrinsic_value.py`, each
+# via its own independent MERGE into the same table. A real 2026-08-17 dry-run found that "source
+# is a full-universe rebuild each run" is true for THIS notebook's own metric vocabulary but was
+# never true for `23`'s — `incoming_metrics` (built purely from `base_metric_cols`/
+# `val_metric_cols`) never contains a single one of `23`'s intrinsic-value labels, so running this
+# notebook alone made every one of `23`'s rows look orphaned (474,698 of them, in that real run —
+# 100% unrelated to any actual data problem). `_22_owned_metrics` is this notebook's own,
+# positively-declared vocabulary — mirrors the exact allow-list pattern `23__intrinsic_value.py`'s
+# own `_iv_labels`-scoped cleanup already uses for the reverse case (never touching `22`'s rows).
+# `WHEN NOT MATCHED BY SOURCE` below is now scoped to it: a `23`-owned row absent from THIS run's
+# source is simply not this notebook's business, regardless of source shape — it is never treated
+# as an orphan, so it can never be deleted here.
+_22_owned_metrics = list(dict.fromkeys([*base_metric_cols, *globals().get("val_metric_cols", [])]))
+_22_owned_metrics_sql = ", ".join("'" + m.replace("'", "''") + "'" for m in _22_owned_metrics)
+
+# Structural guard (2026-08-16 incident, docs/phase5-6-european-dashboard-data-integration.md
+# §10): "source is a full-universe rebuild each run" held true for TICKER coverage even during
+# the incident (this notebook has no ticker-scoping mechanism at all) but failed at the METRIC
+# level — an upstream dependency (market_prices_daily) came back anomalously empty, so `long_val`
+# (valuation-dependent metrics) collapsed to near-zero, and this exact DELETE then correctly, per
+# its own literal logic, removed every valuation metric for the ENTIRE universe. A healthy run's
+# orphan cleanup is a small drift (occasional stale-value retirement), not a bulk wipe — sanity
+# check the blast radius before committing to it, rather than trusting "empty source" to always
+# mean "legitimately nothing left to keep." Both counts below are scoped to `_22_owned_metrics`
+# (§14) — comparing against rows this notebook doesn't own would both mis-state the percentage
+# and (before the ownership-scoped DELETE below existed) have nothing to do with what would
+# actually be deleted.
+_metrics_before = spark.sql(f"""
+    SELECT COUNT(*) AS n FROM {metrics_tbl} WHERE metric IN ({_22_owned_metrics_sql})
+""").collect()[0]["n"]
+_metrics_would_delete = spark.sql(f"""
+    SELECT COUNT(*) AS n FROM {metrics_tbl} t
+    WHERE t.metric IN ({_22_owned_metrics_sql})
+      AND NOT EXISTS (
+        SELECT 1 FROM incoming_metrics s
+        WHERE s.ticker = t.ticker AND s.fiscal_year = t.fiscal_year AND s.metric = t.metric
+    )
+""").collect()[0]["n"]
+try:
+    assert_orphan_delete_safe(_metrics_would_delete, _metrics_before)
+except UnsafeOrphanDeleteError as _e:
+    raise RuntimeError(
+        f"Refusing to MERGE into {metrics_tbl}: the orphan-cleanup (WHEN NOT MATCHED BY SOURCE "
+        f"DELETE, scoped to this notebook's own {len(_22_owned_metrics)} known metrics) {_e}. "
+        f"This usually means an upstream dependency (e.g. market_prices_daily) came back "
+        f"anomalously empty/narrow this run, not that this many metrics genuinely became "
+        f"inapplicable at once. See docs/phase5-6-european-dashboard-data-integration.md §10/"
+        f"§14. Investigate before re-running — do not bypass this check without understanding "
+        f"why the count is high."
+    ) from _e
+
 spark.sql(f"""
     MERGE INTO {metrics_tbl} AS target
     USING incoming_metrics AS source
@@ -1426,11 +1726,12 @@ spark.sql(f"""
         INSERT (ticker, company, fiscal_year, metric, value)
         VALUES (source.ticker, source.company, source.fiscal_year, source.metric, source.value)
 
-    WHEN NOT MATCHED BY SOURCE THEN
+    WHEN NOT MATCHED BY SOURCE AND target.metric IN ({_22_owned_metrics_sql}) THEN
         DELETE
 """)
 
-print(f"✓ MERGE complete → {metrics_tbl}")
+print(f"✓ MERGE complete → {metrics_tbl} (orphan-cleanup scoped to this notebook's own "
+      f"{len(_22_owned_metrics)} metrics — 23__intrinsic_value.py's rows are never touched here)")
 
 # COMMAND ----------
 

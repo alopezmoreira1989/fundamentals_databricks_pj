@@ -366,6 +366,7 @@ if RUN_FIRDS_ADMISSION:
             listing_id               STRING,
             issuer_name              STRING,
             country                  STRING,
+            currency                 STRING,
             ticker                   STRING,
             ticker_status            STRING    NOT NULL,
             admission_status         STRING    NOT NULL,
@@ -392,6 +393,7 @@ if RUN_FIRDS_ADMISSION:
         StructField("listing_id", StringType(), True),
         StructField("issuer_name", StringType(), True),
         StructField("country", StringType(), True),
+        StructField("currency", StringType(), True),
         StructField("ticker", StringType(), True),
         StructField("ticker_status", StringType(), False),
         StructField("admission_status", StringType(), False),
@@ -407,6 +409,7 @@ if RUN_FIRDS_ADMISSION:
     rows = [{
         "isin": c.isin, "lei": c.lei, "mic": c.mic, "issuer_id": c.issuer_id,
         "listing_id": c.listing_id, "issuer_name": c.issuer_name, "country": c.country,
+        "currency": c.currency,
         "ticker": c.ticker, "ticker_status": c.ticker_status,
         "admission_status": c.admission_status.value,
         "rejection_reason": c.rejection_reason.value if c.rejection_reason else None,

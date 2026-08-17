@@ -51,6 +51,25 @@ import pyspark.sql.functions as F
 import pyspark.sql.types as T
 from pyspark.sql.window import Window
 
+# Same reinstall-on-ImportError pattern as 11__fetch_sec_xbrl.py — this notebook has no
+# guarantee of a shared session install when run standalone or as its own Databricks Job task.
+try:
+    from fundamentals_pipeline.write_safety import (
+        UnsafeOrphanDeleteError,
+        assert_orphan_delete_safe,
+        is_full_universe_run,
+    )
+except ImportError:
+    import subprocess
+    import sys
+
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "-e", "../.."])
+    from fundamentals_pipeline.write_safety import (
+        UnsafeOrphanDeleteError,
+        assert_orphan_delete_safe,
+        is_full_universe_run,
+    )
+
 # CONTRACT: the currency-conversion arithmetic below (native Spark F.when/multiply) mirrors
 # fundamentals_pipeline/fx.py's convert_price() scalar semantics — no-op when currencies
 # match, multiply by rate otherwise, never guess a missing rate. fx.py is the pure reference
@@ -67,7 +86,8 @@ ASSUMPTIONS_JSON_PATH = "../00__config/valuation_assumptions.json"
 # below. See fundamentals_pipeline/fx.py for why this matters: a ticker's TTM live price is
 # quoted in whatever currency its listing market trades in, but its fundamentals are reported
 # in `reporting_currency` — these can differ for the SAME ticker.
-QUOTE_CURRENCY_BY_MARKET = {"US": "USD", "CA": "CAD"}
+QUOTE_CURRENCY_BY_MARKET = {"US": "USD", "CA": "CAD", "EU": "EUR"}
+# "EU" (Phase 5.6) -- see 22__derived_metrics.py's own copy of this dict for the full note.
 
 full_table  = f"{CATALOG}.{SCHEMA}.{TABLE}"
 # Period_end-aligned price + market cap written by 22 (replaces legacy calendar-aligned
@@ -505,6 +525,17 @@ else:
 
 # TTM: live price — the latest close in market_prices_daily per ticker, independent of any
 # fiscal_year row (unlike the FY join above, which is deliberately period_end-aligned).
+#
+# Structural guard (2026-08-17 hardening, docs/phase5-6-european-dashboard-data-integration.md
+# §12): unlike 22's own coverage gate, tightening `has_live_price` alone does NOT fix the real
+# risk here — even when False, the `else` branch below still produces a NULL-filled
+# `ttm_with_price` row for EVERY ticker (by design, so `ttm_pdf`/`incoming_iv` always has a
+# complete shape), and those NULLs still reach the MERGE below. The actual harm in the
+# 2026-08-16 incident was that MERGE's plain, unconditional `UPDATE SET price_close =
+# source.price_close` overwriting AAPL's real price with that NULL. `_ttm_full_universe_run`
+# is computed here and consumed by the MERGE further down (§8a below) to gate ONLY the
+# price/margin-of-safety columns specifically — never blindly trust a NULL enough to destroy a
+# real existing value unless this run's price coverage was actually representative.
 try:
     _daily_prices = (
         spark.table(prices_daily_tbl)
@@ -512,9 +543,21 @@ try:
         .filter(F.col("close").isNotNull())
     )
     has_live_price = _daily_prices.limit(1).count() > 0
+    _live_price_ticker_count = _daily_prices.select("ticker").distinct().count() if has_live_price else 0
 except Exception:
     print("⚠ market_prices_daily not available — TTM price/market_cap will be NULL.")
     has_live_price = False
+    _live_price_ticker_count = 0
+
+_ttm_ticker_count = ttm_wide.select("ticker").distinct().count()
+_ttm_full_universe_run = is_full_universe_run(_live_price_ticker_count, _ttm_ticker_count)
+if has_live_price and not _ttm_full_universe_run:
+    print(f"⚠ market_prices_daily covers only {_live_price_ticker_count:,} of "
+          f"{_ttm_ticker_count:,} TTM-eligible tickers — below the full-universe coverage "
+          f"threshold. TTM price_close/margin_of_safety_pct will compute as NULL for "
+          f"under-covered tickers this run, but the MERGE below will not let that NULL "
+          f"overwrite an existing real value (see "
+          f"docs/phase5-6-european-dashboard-data-integration.md §12).")
 
 if has_live_price:
     w_live_price = Window.partitionBy("ticker").orderBy(F.col("date").desc())
@@ -550,6 +593,25 @@ if has_live_price:
         print(f"⚠ Could not read config.tickers for TTM currency alignment ({_e}) — assuming "
               f"quote_currency=reporting_currency='USD' for every ticker.")
         ticker_currency = None
+
+    # Phase 5.6: same extension as 22__derived_metrics.py's FY-basis version (see there for the
+    # full rationale) -- real FIRDS NtnlCcy from eu_admission_candidates.currency, never
+    # defaulted to USD.
+    try:
+        _eu_ccy = (
+            spark.table(f"{CATALOG}.config.eu_admission_candidates")
+            .filter((F.col("admission_status") == "admitted") & F.col("currency").isNotNull())
+            .select(
+                "ticker",
+                F.col("currency").alias("quote_currency"),
+                F.col("currency").alias("reporting_currency"),
+            )
+        )
+        ticker_currency = _eu_ccy if ticker_currency is None else ticker_currency.unionByName(_eu_ccy)
+    except Exception as _eu_e:
+        print(f"⚠ Could not read config.eu_admission_candidates for TTM currency alignment "
+              f"({_eu_e}) — European tickers, if any reach this point, fall through to the "
+              f"USD default below.")
 
     def _log_missing_fx_ttm(missing_df) -> None:
         """Log TTM rows needing currency conversion with no resolvable FX rate to
@@ -1082,6 +1144,22 @@ if len(iv_pdf):
     # For TTM, fiscal_year is that of the most recent quarter, so each TTM run
     # upserts the same row (if the quarter hasn't changed) or inserts a new one
     # (if there is a more recent quarter). `scenario` makes bull/mid/bear coexist.
+    #
+    # Structural guard (2026-08-17 hardening, docs/phase5-6-european-dashboard-data-
+    # integration.md §12): TWO `WHEN MATCHED` clauses, not one — this is what actually
+    # degraded AAPL's TTM `price_close`/`margin_of_safety_pct` to `NULL` in the 2026-08-16
+    # incident (a plain, unconditional `UPDATE SET price_close = source.price_close` blindly
+    # trusted whatever this run computed, even a NULL from a partial upstream input). FY rows
+    # are unaffected by this split — their price comes from `market_cap_asof` via a plain LEFT
+    # JOIN (§4b above), which already degrades to NULL safely with no destructive write
+    # involved. Only TTM rows needed this: the first clause covers the SAFE cases (an FY row,
+    # or a TTM row with a genuine non-NULL price, or a TTM row when this run's price coverage
+    # was confirmed representative) and updates every column as before; the second clause
+    # covers the one unsafe case (a TTM row whose price computed NULL AND this run's price
+    # coverage was NOT representative) and updates everything EXCEPT price_close/
+    # margin_of_safety_pct — preserving whatever real value already exists rather than
+    # destroying it with an untrustworthy NULL.
+    _ttm_price_trustworthy_sql = "TRUE" if _ttm_full_universe_run else "FALSE"
     spark.sql(f"""
         MERGE INTO {iv_tbl} AS target
         USING incoming_iv AS source
@@ -1091,7 +1169,11 @@ if len(iv_pdf):
         AND target.method      = source.method
         AND target.scenario    = source.scenario
 
-        WHEN MATCHED THEN UPDATE SET
+        WHEN MATCHED AND (
+            source.period_type != 'TTM'
+            OR source.price_close IS NOT NULL
+            OR {_ttm_price_trustworthy_sql}
+        ) THEN UPDATE SET
             target.intrinsic_value_per_share = source.intrinsic_value_per_share,
             target.intrinsic_value_total     = source.intrinsic_value_total,
             target.price_close               = source.price_close,
@@ -1100,6 +1182,17 @@ if len(iv_pdf):
             target.computed_at               = source.computed_at,
             target.period_end                = source.period_end,
             target.company                   = source.company
+
+        WHEN MATCHED THEN UPDATE SET
+            target.intrinsic_value_per_share = source.intrinsic_value_per_share,
+            target.intrinsic_value_total     = source.intrinsic_value_total,
+            target.assumptions               = source.assumptions,
+            target.computed_at               = source.computed_at,
+            target.period_end                = source.period_end,
+            target.company                   = source.company
+            -- price_close/margin_of_safety_pct deliberately NOT touched here --
+            -- preserves the existing real value instead of overwriting it with an
+            -- untrustworthy NULL (see the guard note above).
 
         WHEN NOT MATCHED THEN INSERT *
     """)
@@ -1121,6 +1214,24 @@ if len(iv_pdf):
               AND COALESCE(s.fiscal_year, -1) = COALESCE(t.fiscal_year, -1)
               AND s.method = t.method AND s.scenario = t.scenario)
     """).count()
+
+    # Structural guard (2026-08-16 incident, docs/phase5-6-european-dashboard-data-integration.md
+    # §10): scoping to iv_processed_tickers already prevents this cleanup from touching tickers
+    # not recomputed this run, but it doesn't protect against an upstream dependency (e.g.
+    # market_prices_daily) coming back anomalously empty for tickers that WERE recomputed —
+    # every method/scenario for every such ticker would look like a legitimate orphan and be
+    # deleted in one pass. Sanity check the blast radius before committing.
+    _iv_before = spark.table(iv_tbl).count()
+    try:
+        assert_orphan_delete_safe(n_orphan_iv, _iv_before)
+    except UnsafeOrphanDeleteError as _e:
+        raise RuntimeError(
+            f"Refusing the orphan cleanup on {iv_tbl}: it {_e}. This usually means an "
+            f"upstream dependency came back anomalously empty/narrow this run. See "
+            f"docs/phase5-6-european-dashboard-data-integration.md §10. Investigate before "
+            f"re-running — do not bypass this check without understanding why the count is high."
+        ) from _e
+
     spark.sql(f"""
         MERGE INTO {iv_tbl} AS t
         USING (
@@ -1282,6 +1393,33 @@ if exposed_frames:
         ] + ["Owner Earnings (FY)", "Owner Earnings (TTM)",
              "P/E (TTM, live)", "P/B (TTM, live)", "EV/EBITDA (TTM, live)"]
         _iv_labels_sql = ", ".join("'" + lbl.replace("'", "''") + "'" for lbl in _iv_labels)
+
+        # Structural guard (2026-08-16 incident, docs/phase5-6-european-dashboard-data-integration.md
+        # §10) — same rationale as 8b's guard above, scoped to just the IV-owned labels this
+        # cleanup touches (comparing against the WHOLE financials_metrics table, which also holds
+        # 22's own base/val metrics, would never trip a meaningful percentage here).
+        _iv_metrics_before = spark.sql(f"""
+            SELECT COUNT(*) AS n FROM {metrics_tbl} WHERE metric IN ({_iv_labels_sql})
+        """).collect()[0]["n"]
+        _iv_metrics_would_delete = spark.sql(f"""
+            SELECT COUNT(*) AS n
+            FROM {metrics_tbl} t
+            JOIN iv_processed_tickers p ON t.ticker = p.ticker
+            WHERE t.metric IN ({_iv_labels_sql})
+              AND NOT EXISTS (
+                SELECT 1 FROM incoming_iv_metrics s
+                WHERE s.ticker = t.ticker AND s.{year_col} = t.{year_col}
+                  AND s.metric = t.metric)
+        """).collect()[0]["n"]
+        try:
+            assert_orphan_delete_safe(_iv_metrics_would_delete, _iv_metrics_before)
+        except UnsafeOrphanDeleteError as _e:
+            raise RuntimeError(
+                f"Refusing the IV-label orphan cleanup on {metrics_tbl}: it {_e}. See "
+                f"docs/phase5-6-european-dashboard-data-integration.md §10. Investigate before "
+                f"re-running — do not bypass this check without understanding why the count is high."
+            ) from _e
+
         spark.sql(f"""
             MERGE INTO {metrics_tbl} AS t
             USING (

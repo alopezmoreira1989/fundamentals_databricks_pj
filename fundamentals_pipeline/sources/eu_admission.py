@@ -125,6 +125,9 @@ class AdmissionCandidate:
     listing_id: str | None  # MIC:ISIN (ADR-0012), if primary listing resolved
     issuer_name: str | None
     country: str | None  # RCA, from the primary listing's own venue record
+    currency: str | None  # NtnlCcy from the primary listing's own venue record -- real,
+    # FIRDS-sourced, never guessed/defaulted (see Phase 5.6's own currency-alignment fix,
+    # which reads this instead of falling through to a silent "USD" default)
     ticker: str | None
     ticker_status: TickerStatus
     admission_status: AdmissionStatus
@@ -222,7 +225,7 @@ def build_admission_candidate(
     if not records:
         return AdmissionCandidate(
             isin=isin, lei=None, mic=None, issuer_id=None, listing_id=None,
-            issuer_name=None, country=None, ticker=None, ticker_status="not_attempted",
+            issuer_name=None, country=None, currency=None, ticker=None, ticker_status="not_attempted",
             admission_status=AdmissionStatus.REJECTED, rejection_reason=RejectionReason.NON_EQUITY,
             n_venue_records=n_venue_records, primary_frst_trad_dt=None,
             source_file=source_file, source_publication_date=source_publication_date,
@@ -240,7 +243,7 @@ def build_admission_candidate(
     if not is_equity_cfi(representative.cfi):
         return AdmissionCandidate(
             isin=isin, lei=None, mic=None, issuer_id=None, listing_id=None,
-            issuer_name=None, country=None, ticker=None, ticker_status="not_attempted",
+            issuer_name=None, country=None, currency=None, ticker=None, ticker_status="not_attempted",
             admission_status=AdmissionStatus.REJECTED, rejection_reason=RejectionReason.NON_EQUITY,
             n_venue_records=n_venue_records, primary_frst_trad_dt=None,
             source_file=source_file, source_publication_date=source_publication_date,
@@ -250,7 +253,7 @@ def build_admission_candidate(
     if primary.winner is None:
         return AdmissionCandidate(
             isin=isin, lei=None, mic=None, issuer_id=None, listing_id=None,
-            issuer_name=representative.full_nm or None, country=None,
+            issuer_name=representative.full_nm or None, country=None, currency=None,
             ticker=None, ticker_status="not_attempted",
             admission_status=AdmissionStatus.REJECTED, rejection_reason=primary.reason,
             n_venue_records=n_venue_records, primary_frst_trad_dt=None,
@@ -261,7 +264,7 @@ def build_admission_candidate(
     if not winner.lei:
         return AdmissionCandidate(
             isin=isin, lei=None, mic=winner.mic, issuer_id=None, listing_id=None,
-            issuer_name=winner.full_nm or None, country=winner.rca,
+            issuer_name=winner.full_nm or None, country=winner.rca, currency=winner.ntnl_ccy,
             ticker=None, ticker_status="not_attempted",
             admission_status=AdmissionStatus.REJECTED, rejection_reason=RejectionReason.NO_LEI,
             n_venue_records=n_venue_records, primary_frst_trad_dt=winner.frst_trad_dt,
@@ -278,6 +281,7 @@ def build_admission_candidate(
         listing_id=make_listing_id_from_isin(winner.mic, isin),
         issuer_name=winner.full_nm or None,
         country=winner.rca,
+        currency=winner.ntnl_ccy,
         ticker=None,
         ticker_status="not_attempted",
         admission_status=AdmissionStatus.PENDING_ESEF_CHECK,

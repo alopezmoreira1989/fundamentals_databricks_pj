@@ -45,12 +45,14 @@ import pandas as pd
 # 11__fetch_sec_xbrl.py.
 try:
     from fundamentals_pipeline import schemas as _schemas
+    from fundamentals_pipeline.identity import check_no_export_ticker_collision
 except ImportError:
     import subprocess
     import sys
 
     subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "-e", "../.."])
     from fundamentals_pipeline import schemas as _schemas
+    from fundamentals_pipeline.identity import check_no_export_ticker_collision
 
 SCHEMA_VERSION = 15  # +dashboard_forecast artifact (10-year cross-sectional ML scenario
                      # forecasts — see 24__forecasting.py; issue #333)
@@ -77,6 +79,29 @@ FORECAST_PARQUET = OUT_DIR / "dashboard_forecast.parquet"
 
 # Universe flags (is_favorite / in_sp500 / in_r3000 / in_tsx_composite) drive the
 # Streamlit screener's universe filter. COALESCE to false so NULLs don't leak through.
+#
+# Phase 5.6: UNION ALL with a second, structurally-separate branch for FIRDS-admitted European
+# issuers (main.config.eu_admission_candidates, admission_status = 'admitted' only) --
+# deliberately NOT an extra row in `config.tickers` itself. `config.tickers` is, by its own
+# documented purpose (00__config/02__tickers_master.py's own header), the INDEX-MEMBERSHIP-
+# DRIVEN US/CA ticker universe (S&P 500 / Russell 3000 / TSX Composite / favorites.json) --  a
+# semantically different admission concept from FIRDS' regulatory-eligibility-driven European
+# universe. Conflating the two into one table just to satisfy this one JOIN would answer an
+# unresolved identity question (ADR-0012's still-open MIC:ISIN vs. MIC:TICKER decision)
+# prematurely, and would misrepresent European issuers as if they were part of a US/CA index.
+# See docs/phase5-6-european-dashboard-data-integration.md for the full architectural decision.
+#
+# European rows carry `market = 'EU'` (a single Generation-1 value across all admitted
+# countries, matching FIRDS' own EU-wide scope -- see fundamentals_pipeline/sources/
+# eu_admission.py), `exchange` = the primary-listing MIC (the closest real equivalent to the
+# US/CA `exchange` field's own Yahoo-mnemonic style), `accounting_standard = 'ifrs-full'`
+# (verified true for every EU_CURRENT filing ingested so far -- Phase 5.1's own `detect_
+# metadata()` check), and `reporting_currency` from the admission layer's own real, FIRDS-
+# sourced `currency` field (never guessed, never defaulted to USD). Fields with no European
+# equivalent yet (sector/industry/employees/website/founded/has_logo/description) are NULL --
+# real absence, not a fabricated value -- and every universe-membership flag is `false` (a
+# FIRDS-admitted issuer is not S&P 500/Russell 3000/TSX Composite/favorites membership, a
+# different concept entirely).
 tickers_df = spark.sql(f"""
     SELECT
       t.ticker, t.company, t.sector, t.industry, t.has_logo,
@@ -89,11 +114,40 @@ tickers_df = spark.sql(f"""
     FROM {CATALOG}.config.tickers t
     JOIN (SELECT DISTINCT ticker FROM {CATALOG}.{SCHEMA}.financials) f
       ON f.ticker = t.ticker
-    ORDER BY t.ticker
+
+    UNION ALL
+
+    SELECT
+      e.ticker, e.issuer_name AS company, CAST(NULL AS STRING) AS sector,
+      CAST(NULL AS STRING) AS industry, CAST(NULL AS BOOLEAN) AS has_logo,
+      CAST(NULL AS STRING) AS description, e.mic AS exchange, e.country,
+      CAST(NULL AS BIGINT) AS employees, CAST(NULL AS STRING) AS website,
+      CAST(NULL AS INT) AS founded,
+      'ifrs-full' AS accounting_standard, e.currency AS reporting_currency, 'EU' AS market,
+      false AS is_favorite, false AS in_sp500, false AS in_r3000, false AS in_tsx_composite
+    FROM {CATALOG}.config.eu_admission_candidates e
+    JOIN (SELECT DISTINCT ticker FROM {CATALOG}.{SCHEMA}.financials) f
+      ON f.ticker = e.ticker
+    WHERE e.admission_status = 'admitted'
+
+    ORDER BY ticker
 """).toPandas()
 
 if tickers_df.empty:
     raise ValueError("No tickers with financial data found")
+
+# Ticker-collision guard (Phase 5.6): the US/CA and European branches above are two
+# structurally independent admission processes with no shared gate against each other -- unlike
+# `config.tickers` itself, which already guards against a US/CA collision via
+# `identity.py`'s `check_no_cross_market_collision()` before its own write. A ticker appearing
+# in BOTH branches would silently produce two rows for one ticker string in `tickers_df`,
+# corrupting every downstream `{ticker: record}` dict this export (and fundamentals_screener's
+# own repositories, per the Phase 5.5 audit) builds. Not observed today (FCC/FCT are absent
+# from config.tickers, confirmed live) -- but per this project's own "reject, never silently
+# guess" principle, a real collision here must stop the run, not corrupt the export.
+# Extracted into fundamentals_pipeline/identity.py's check_no_export_ticker_collision() so
+# this exact logic is unit-tested (tests/test_identity.py) without needing a Spark session.
+check_no_export_ticker_collision(tickers_df["ticker"])
 
 tickers = tickers_df["ticker"].tolist()
 # Build records with native Python bools — pandas/numpy bool_ would be stringified
