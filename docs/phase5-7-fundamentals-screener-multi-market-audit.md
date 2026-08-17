@@ -1008,24 +1008,129 @@ pattern in two different places.
 
 ### Real EU companies verified
 
-**Not done — no local `FUNDAMENTALS_DATA_PATH` cache with a real synced dashboard export was
-available in this environment** (same limitation the original audit's §16 already disclosed).
-Every fix above was verified against: (a) the exact real code path each finding traced through
-in the audit, re-confirmed unchanged at implementation time; (b) unit tests using realistic
-fixture data (EUR/CAD tickers, `reporting_currency` populated the same way
-`51__export_dashboard_data.py` actually populates it); (c) `ruff check` and the full existing
-test suite (no regressions). **Recommended before merge**: sync a real
-`FUNDAMENTALS_DATA_PATH` and load `/FCC/`, `/ALO/`, `/AAPL/`, and a real CAD ticker (e.g. `/AQN/`)
-in a browser to visually confirm — this phase's own testing could not do that in this
-environment.
+**Update (final review pass): real production data WAS obtained and used** — this section
+originally reported no local data was available; that has since been superseded, see "Final
+review — real-data validation" below. **The EU-specific conclusion is unchanged**: the 8 Phase
+5.6 European tickers are not present in any published GitHub Release yet (confirmed directly —
+see below), so a real end-to-end EU render genuinely cannot be validated right now, for reasons
+external to this PR's code.
 
 ### US / Canada regression
 
-No behavioral change for USD tickers (verified via the "Figures in [badge]" empty-string
-degradation and `compact_money_ccy`'s unchanged USD branch — both exercised by the new tests).
-Canadian tickers gain corrected native-currency labeling outside Market Cap (a fix to a
-pre-existing bug, not a new risk) — no live Canadian data was available to visually confirm
-either, same limitation as above.
+**Superseded by the final review pass below** — this was originally "not verified, no local
+data"; it has since been verified against real, live, currently-published production data
+(AAPL, AEM, AQN, and five additional real CAD-reporting tickers), not synthetic fixtures.
+
+---
+
+## Final review — real-data validation (pre-merge)
+
+Performed as a distinct, later pass — **not part of the original implementation's own testing**
+(which had no data available) — using real artifacts downloaded directly from this repo's own
+GitHub Release (`https://github.com/alopezmoreira1989/fundamentals_databricks_pj/releases/
+download/latest/...`), run through the actual `fundamentals_screener` service/repository code
+on the `phase5-7a-currency-display` branch (not a reimplementation).
+
+### What was actually available
+
+The published `latest` release (`build_timestamp: 2026-08-16T07:28:09Z`, confirmed via
+`gh api repos/.../releases --paginate`, no newer tag exists) **predates PR #380's merge into
+`main`** — it is the last successful scheduled daily production run, which ran before the Phase
+5.6 European integration work even started that day. **The 8 European tickers (FCC, ALO, NAI,
+FCT, IBE, SGO, RAND, ISP) are absent from every currently-published release, `latest` included**
+— confirmed directly by loading the real `dashboard_meta.json` and checking. This is not an
+environment limitation; it is a fact about the public artifact's current state: `51__export_
+dashboard_data.py`'s EU union (and `52__publish_to_github.py` after it) has not run in
+production since PR #380 merged. **A real EU render will only be checkable after the next
+scheduled Databricks daily run** (08:00 Europe/Madrid) — or an explicit one-time `52` run —
+actually republishes with the EU union included.
+
+AAPL/AEM/AQN, and the whole US/CA universe, **are** present and current in this same release, so
+the US/CA half of the regression check was done for real, not just via fixtures.
+
+### AAPL / AEM / AQN — real production data, real code path
+
+Ran `services.get_company_summary`/`headline_kpis`/`get_market_cap_kpi`/`get_net_net_snapshot`/
+`get_intrinsic_value_field`/`get_company_statements` directly (a minimal `django.conf.settings.
+configure()` + `django.setup()`, `FUNDAMENTALS_DATA_PATH` pointed at the downloaded release —
+same code the view calls, not a reimplementation) and rendered each value through the real
+`templatetags.fmt` filters:
+
+| Ticker | `market` | `reporting_currency` | Revenue KPI rendered | Net-Net price rendered | Market Cap rendered |
+|---|---|---|---|---|---|
+| AAPL | US | USD | `$416.16B` | `$304.91` | `$4.45T` |
+| AEM | CA | **USD** (real, confirmed) | `$11.91B` | `$253.20` | `$126.61B` |
+| AQN | CA | **CAD** (real, confirmed) | `2.43B CAD` badge | `8.08 CAD` badge | *(no live market cap row this build)* |
+
+AEM and AQN are both `market="CA"` (both quote in CAD via `quote_currency("CA")`), but AEM's
+real `reporting_currency` is USD and AQN's is CAD — the exact documented distinction the
+implementation prompt called out, confirmed against real data, not asserted from memory. AEM's
+figures correctly stay `$`; AQN's figures correctly switched from what would have been a wrong
+`$` to a correct `CAD` badge.
+
+### The `NCAV / Share (Live)` pipeline bug — confirmed live, with real tickers
+
+Queried the real `dashboard_metrics.parquet` directly: for every real CAD-reporting ticker with
+both rows present (**CP, ENB, FTS, IMO, TRP** — not a hypothetical), `"Market Cap (Live)"`'s
+`unit` is correctly `'cad'`, but `"NCAV / Share (Live)"`'s `unit` is `'usd'` for the exact same
+ticker — the mismatch this phase's implementation section already flagged, now proven against
+real, currently-published data rather than inferred from reading the export script. Then
+confirmed `CompanyRepository.net_net_snapshot()` on this branch correctly resolves
+`currency="CAD"` for all five (not the metric's own wrong `"usd"`), rendering e.g. CP's NCAV/
+Share as `-41.16 CAD`, not `$-41.16`. **This is the single strongest piece of evidence in this
+review** — it's a real, live, already-published data quality bug, and this phase's workaround
+is proven to neutralize it for real tickers today, not just in a synthetic test fixture.
+
+### USD-lens toggle — semantics confirmed, real data
+
+Checked the user's specific concern directly: does "View Market Cap in USD" still mean only
+that, after generalizing the toggle's visibility gate?
+
+- `services.available_markets()` on real data returns `('CA', 'US')`; the generalized gate
+  `any(quote_currency(m) not in (None, "USD") for m in markets)` evaluates `True` — the toggle
+  still appears, no regression from the old `"CA" in markets` check.
+- For CP/ENB/TRP: `get_market_cap_kpi(t, usd_lens=True)` converts Market Cap only (e.g. CP:
+  `112.53B CAD` native → `$80.76B` with the lens on, via a real FX rate from `dashboard_fx`) —
+  and `headline_kpis()`'s Revenue figure for the same tickers is confirmed **identical**
+  regardless of `usd_lens`, still `15.08B CAD`. The toggle does exactly and only what its label
+  says; it was not broadened into an implicit "convert everything" control by this phase's
+  changes.
+
+### Hardcoded-currency re-sweep
+
+Re-grepped the full diff for `"$"`/`"usd"`/`"USD"`/`"CAD"`/`"EUR"` and classified every hit.
+One item worth noting explicitly (not a bug, but flagged for completeness): `views.py`'s
+`_NET_NET_HEADER_COLUMNS` still tags the Price/NCAV/Market Cap **header** columns with a literal
+`"usd"` — but that value only feeds `_sort_headers()`'s `numeric` flag (right-align styling) and
+is never rendered as text; `_netnet_content.html`'s header `<th>` markup doesn't read `.unit` at
+all, and every cell's actual value already goes through `item.row.currency` (the real fix).
+Confirmed dead/inert for this purpose, not a leak. Everything else found is either the one real
+FX mechanism (`get_market_cap_kpi`/`_apply_usd_lens`, unchanged, in-scope-by-design), the filter
+implementations themselves, or the pre-existing `usd=1` querystring parameter name (unrelated to
+currency labeling).
+
+### Null semantics — real-data note
+
+Every one of the 2,600+ real US/CA tickers in the current release already has a non-null
+`reporting_currency` (checked directly) — so `currency=None`'s degrade-to-USD-default path
+(`compact_money_ccy`'s own documented, pre-existing convention) is not exercised by any ticker
+live today. It remains defensive/forward-looking code, validated by the unit tests
+(`tests/test_currency.py`), for the day a EU (or future-market) row's currency genuinely comes
+back null.
+
+### Verdict inputs
+
+- **Diff scope**: confirmed via `git diff bf94e8e..HEAD --stat -- fundamentals_screener/` — 17
+  files, no file outside `currency.py`/`dtos.py`/`services.py`/`views.py`/two repository files/
+  `templatetags/fmt.py`/three templates/three JS files/four test files. `urls.py` has zero diff.
+  `dtos.py`'s only change is the one additive `NetNetRow.currency` field.
+- **Regression**: `pytest` (full suite) and `ruff check` both clean, re-run at review time.
+- **Public contract**: unchanged (confirmed via the `urls.py` diff above and the DTO diff being
+  purely additive).
+- **EU validation**: still not possible — confirmed to be an external/timing gap (no published
+  release contains EU data yet), not a defect in this PR. High confidence by analogy (the CAD
+  case, which uses the identical code path, is now proven correct against real data) but not
+  literally observed for a EUR figure.
 
 ### Known limitations / deferred work
 
