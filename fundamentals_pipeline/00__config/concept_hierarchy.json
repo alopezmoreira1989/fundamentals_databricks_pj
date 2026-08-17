@@ -27,6 +27,7 @@
     {
       "group": "Non-Operating",
       "children": [
+        { "concept": "Finance Income" },
         { "concept": "Interest Expense" },
         { "concept": "Income Before Tax" }
       ]
@@ -106,6 +107,7 @@
           "children": [
             { "concept": "Additional Paid-in Capital", "display_name": "Paid-in Capital" },
             { "concept": "Retained Earnings" },
+            { "concept": "Non-Controlling Interests",  "display_name": "NCI" },
             { "concept": "Total Stockholders Equity" }
           ]
         },

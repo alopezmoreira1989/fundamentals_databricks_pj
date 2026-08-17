@@ -79,6 +79,17 @@ INCOME_STATEMENT = {
     "R&D Expense":                ("ResearchAndDevelopmentExpense",                                                             "flow_additive"),
     "SG&A Expense":               ("SellingGeneralAndAdministrativeExpense",                                                    "flow_additive"),
     "Operating Income":           ("OperatingIncomeLoss",                                                                       "flow_additive"),
+    # ── Finance Income (Phase 6.6 — Tier A) — a NEW canonical concept, added specifically to
+    # give the EU adapter's real `ifrs-full:FinanceIncome` (5/8 issuers, real, gross, non-netted
+    # income — docs/phase6-4-european-financial-statement-coverage-audit.md §12) a canonical
+    # home; there was no existing SEC-side slot for the income side of interest/finance activity
+    # (only "Interest Expense" existed, cost side only). `InvestmentIncomeInterest` is a real,
+    # standard us-gaap taxonomy element (interest/investment income) — a reasonable, gross-income
+    # counterpart, consistent with this file's own "NET tags are EXCLUDED on purpose" policy for
+    # Interest Expense just below. NOT independently re-verified against live SEC company-facts
+    # data this pass (unlike every EU-side tag in this file, which Phase 6.0/6.4/6.6 fetched and
+    # checked live) — flag for a future confirming pass if real US coverage looks off.
+    "Finance Income":             ("InvestmentIncomeInterest",                                                                  "flow_additive"),
     "Interest Expense":           ("InterestExpense",                                                                           "flow_additive"),
     "Interest Expense (nonoperating)": ("InterestExpenseNonoperating",                                                          "flow_additive"),
     "Interest Expense (incl debt)":    ("InterestAndDebtExpense",                                                               "flow_additive"),
@@ -143,6 +154,13 @@ BALANCE_SHEET = {
     "Total Liabilities":          ("Liabilities",                                "stock"),
     "Additional Paid-in Capital": ("AdditionalPaidInCapital",                    "stock"),
     "Retained Earnings":          ("RetainedEarningsAccumulatedDeficit",         "stock"),
+    # ── Non-Controlling Interests (Phase 6.6 — Tier A) — a NEW canonical concept, distinct from
+    # "Total Equity (incl NCI)" (Phase 6.5): this is the NCI BALANCE itself (a real, standalone
+    # equity-section line), not the aggregate total that includes it. Added for the EU adapter's
+    # real `ifrs-full:NoncontrollingInterests` (8/8 issuers, docs/phase6-4-european-financial-
+    # statement-coverage-audit.md §12) — no existing SEC-side slot for this line existed.
+    # `MinorityInterest` is the standard, well-established us-gaap taxonomy element for it.
+    "Non-Controlling Interests":  ("MinorityInterest",                           "stock"),
     "Total Stockholders Equity":  ("StockholdersEquity",                         "stock"),
     "Total Equity (incl NCI)":    ("StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest", "stock"),
     "Total Liabilities & Equity": ("LiabilitiesAndStockholdersEquity",           "stock"),
