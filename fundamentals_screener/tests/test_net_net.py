@@ -19,12 +19,22 @@ from fundamentals_screener.repositories.company_listing import (
 _META = {
     "tickers": [
         {"ticker": "GOOD1", "company": "Good One Corp", "sector": "Industrials",
-         "industry": "Machinery", "country": "United States", "market": "US"},
+         "industry": "Machinery", "country": "United States", "market": "US",
+         "reporting_currency": "USD"},
         {"ticker": "NOMATCH1", "company": "No Match One Corp", "sector": "Industrials",
          "industry": "Machinery", "country": "United States", "market": "US"},
         {"ticker": "MODTICK", "company": "Mod Tick Corp", "sector": "Industrials",
          "industry": "Machinery", "country": "United States", "market": "US"},
         {"ticker": "JOINBUG1", "company": "Join Bug One Corp", "sector": "Industrials",
+         "industry": "Machinery", "country": "United States", "market": "US"},
+        # Phase 5.7a: a EUR-reporting European candidate — currency must come through on the
+        # DTO instead of the Net-Net Finder's previously-hardcoded "usd".
+        {"ticker": "EURTICK", "company": "Eur Tick S.A.", "sector": "Industrials",
+         "industry": "Machinery", "country": "France", "market": "EU",
+         "reporting_currency": "EUR"},
+        # No "reporting_currency" key at all — a genuinely unknown currency must stay None,
+        # not silently default to "USD" (see NetNetRow.currency's own docstring).
+        {"ticker": "NOCCY1", "company": "No Currency One Corp", "sector": "Industrials",
          "industry": "Machinery", "country": "United States", "market": "US"},
     ]
 }
@@ -63,6 +73,15 @@ _METRIC_ROWS = [
     ("JOINBUG1", "Piotroski F-Score", 2022, 4.0, "FY"),
     ("JOINBUG1", "Altman Z-Score", 2023, 1.9, "FY"),
     ("JOINBUG1", "Market Cap (Live)", 9999, 3_000_000.0, "FY"),
+
+    # Phase 5.7a: EURTICK/NOCCY1 — same shape as GOOD1, only to exercise NetNetRow.currency.
+    ("EURTICK", "NCAV Ratio (Live)", 2024, 0.4, "FY"),
+    ("EURTICK", "NCAV / Share (Live)", 2024, 9.0, "FY"),
+    ("EURTICK", "Market Cap (Live)", 2024, 4_000_000.0, "FY"),
+
+    ("NOCCY1", "NCAV Ratio (Live)", 2024, 0.4, "FY"),
+    ("NOCCY1", "NCAV / Share (Live)", 2024, 9.0, "FY"),
+    ("NOCCY1", "Market Cap (Live)", 2024, 4_000_000.0, "FY"),
 ]
 
 # ticker, date, close
@@ -144,3 +163,19 @@ def test_market_cap_live_fetched_independently_of_fiscal_year(repo):
 )
 def test_altman_zone_thresholds(z_score, expected):
     assert _altman_zone(z_score) == expected
+
+
+# ── currency (Phase 5.7a) ────────────────────────────────────────────────────────────────────
+
+
+def test_net_net_row_carries_the_ticker_reporting_currency(repo):
+    rows = {r.ticker: r for r in repo.net_net_screen(level="relaxed")}
+    assert rows["GOOD1"].currency == "USD"
+    assert rows["EURTICK"].currency == "EUR"
+
+
+def test_net_net_row_currency_is_none_not_a_guessed_usd_when_meta_lacks_it(repo):
+    # Confirms the fix doesn't quietly reintroduce a "default to USD" fallback for a ticker
+    # whose meta record simply never carries a reporting_currency at all.
+    rows = {r.ticker: r for r in repo.net_net_screen(level="relaxed")}
+    assert rows["NOCCY1"].currency is None

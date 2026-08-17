@@ -210,8 +210,15 @@ def split_metrics(
     return derived, valuation
 
 
-def headline_kpis(statements: CompanyStatements) -> tuple[HeadlineKpi, ...]:
-    """Pick the overview headline figures (latest FY) from already-fetched statements."""
+def headline_kpis(statements: CompanyStatements, *, currency: str | None = None) -> tuple[HeadlineKpi, ...]:
+    """Pick the overview headline figures (latest FY) from already-fetched statements.
+
+    `currency`: the ticker's own reporting currency (e.g. `summary.reporting_currency`) —
+    every statement-derived KPI (Revenue, Net Income, ...) is denominated in it, so it's stamped
+    onto each row rather than left `None` (which `compact_money_ccy` would otherwise default to
+    "USD" — see templatetags/fmt.py). `None` here still degrades to that same USD default, for a
+    ticker with no known reporting currency.
+    """
     latest: dict[tuple[str, str], tuple[float | None, int | None]] = {}
     for statement in statements.statements:
         year = statement.years[0] if statement.years else None
@@ -221,7 +228,7 @@ def headline_kpis(statements: CompanyStatements) -> tuple[HeadlineKpi, ...]:
     kpis = []
     for stmt, concept, label in _HEADLINE:
         value, year = latest.get((stmt, concept), (None, None))
-        kpis.append(HeadlineKpi(label=label, value=value, fiscal_year=year))
+        kpis.append(HeadlineKpi(label=label, value=value, fiscal_year=year, currency=currency))
     return tuple(kpis)
 
 

@@ -686,6 +686,9 @@ class CompanyListingRepository(DuckDBRepository):
                 f_score=f_score,
                 z_score=z_score,
                 z_score_zone=_altman_zone(z_score),
+                # Phase 5.7a: the ticker's real reporting currency (meta artifact), not the
+                # metric's own `unit` — see NetNetRow.currency's own docstring for why.
+                currency=rec.get("reporting_currency") or None,
             ))
         return tuple(rows)
 

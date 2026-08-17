@@ -14,11 +14,17 @@ from fundamentals_screener.repositories.companies import CompanyRepository
 _META = {
     "tickers": [
         {"ticker": "GOOD1", "company": "Good One Corp", "sector": "Industrials",
-         "industry": "Machinery", "country": "United States", "market": "US"},
+         "industry": "Machinery", "country": "United States", "market": "US",
+         "reporting_currency": "USD"},
         {"ticker": "NEG1", "company": "Negative One Corp", "sector": "Technology",
          "industry": "Software", "country": "United States", "market": "US"},
         {"ticker": "NOPRICE1", "company": "No Price One Corp", "sector": "Industrials",
          "industry": "Machinery", "country": "United States", "market": "US"},
+        # Phase 5.7a: a CAD-reporting Canadian candidate — the real, already-live AQN-style
+        # case, not a hypothetical.
+        {"ticker": "CADTICK", "company": "Cad Tick Inc.", "sector": "Industrials",
+         "industry": "Machinery", "country": "Canada", "market": "CA",
+         "reporting_currency": "CAD"},
     ]
 }
 
@@ -39,6 +45,8 @@ _METRIC_ROWS = [
     ("NEG1", "Altman Z-Score", "ratio", 2024, 12.0, "Quality", None, 1.0, "FY", "2024-12-31"),
 
     ("NOPRICE1", "NCAV / Share (Live)", "usd", 2024, 4.0, None, None, 1.0, "FY", "2024-12-31"),
+
+    ("CADTICK", "NCAV / Share (Live)", "usd", 2024, 3.0, None, None, 1.0, "FY", "2024-12-31"),
 ]
 
 # ticker, date, close
@@ -109,3 +117,15 @@ def test_missing_live_ncav_degrades_to_none_not_a_crash(repo):
     # fixture — must degrade to None per level independently, never raise.
     assert repo.net_net_snapshot("NEG1").ncav_per_share_moderate is None
     assert repo.net_net_snapshot("NEG1").ncav_per_share_strict is None
+
+
+# ── currency (Phase 5.7a) ────────────────────────────────────────────────────────────────────
+
+
+def test_snapshot_carries_the_ticker_reporting_currency(repo):
+    assert repo.net_net_snapshot("GOOD1").currency == "USD"
+    assert repo.net_net_snapshot("CADTICK").currency == "CAD"
+
+
+def test_snapshot_currency_is_none_not_a_guessed_usd_when_meta_lacks_it(repo):
+    assert repo.net_net_snapshot("NEG1").currency is None

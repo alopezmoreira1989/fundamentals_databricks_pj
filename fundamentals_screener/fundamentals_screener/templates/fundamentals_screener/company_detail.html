@@ -418,6 +418,10 @@
       </div>
     {% endif %}
 
+    <!-- Shared reporting-currency signal for the Chart.js scripts (statement/quarterly/balance
+         sheet/forecasting), Phase 5.7a — one payload, not duplicated into every chart's own. -->
+    {{ chart_currency|json_script:"chart-currency-data" }}
+
     <!-- Statement tabs -->
     {% if statement_chart_data %}{{ statement_chart_data|json_script:"statement-chart-data" }}{% endif %}
     {% for st, chart in statement_panes %}
@@ -449,6 +453,9 @@
             <div class="cjs-chart-wrap"><canvas data-statement-chart="{{ st.name }}"></canvas></div>
           </div>
         {% endif %}
+        {% if s.reporting_currency|currency_badge %}
+          <div class="eyebrow mb-2 d-flex align-items-center gap-1">Figures in {{ s.reporting_currency|currency_badge }}</div>
+        {% endif %}
         <div class="card p-0 table-responsive">
           <table class="table table-hover fs-web align-middle mb-0">
             <thead>
@@ -467,7 +474,7 @@
                 {% for line in sec.list %}
                   <tr class="{{ line.row_class }}">
                     <td class="label indent-{{ line.indent }}">{{ line.display_name }}</td>
-                    {% for v in line.values|slice:"::-1" %}<td class="num">{{ v|compact_money }}</td>{% endfor %}
+                    {% for v in line.values|slice:"::-1" %}<td class="num">{{ v|compact_money_ccy:s.reporting_currency }}</td>{% endfor %}
                     <td class="spark">{{ line.values|sparkline }}</td>
                   </tr>
                 {% endfor %}
@@ -488,7 +495,7 @@
           </div>
           {{ quarterly_chart_data|json_script:"quarterly-chart-data" }}
         {% endif %}
-        <div class="eyebrow mb-2">{{ quarterly.name }} · by fiscal quarter</div>
+        <div class="eyebrow mb-2 d-flex align-items-center gap-1">{{ quarterly.name }} · by fiscal quarter {{ s.reporting_currency|currency_badge }}</div>
         <div class="card p-0 table-responsive">
           <table class="table table-hover fs-web align-middle mb-0">
             <thead>
@@ -502,7 +509,7 @@
               {% for line in quarterly.lines %}
                 <tr class="{{ line.row_class }}">
                   <td class="label indent-{{ line.indent }}">{{ line.display_name }}</td>
-                  {% for v in line.values|slice:"::-1" %}<td class="num">{{ v|compact_money }}</td>{% endfor %}
+                  {% for v in line.values|slice:"::-1" %}<td class="num">{{ v|compact_money_ccy:s.reporting_currency }}</td>{% endfor %}
                   <td class="spark">{{ line.values|sparkline }}</td>
                 </tr>
               {% endfor %}
@@ -528,7 +535,7 @@
               <div class="mb-3">
                 <div class="d-flex justify-content-between small mb-1">
                   <span>{{ b.method }} <span class="text-muted">· FY{{ b.fiscal_year }}</span></span>
-                  <span class="mono">{{ b.bear|metric_value:"usd" }} – {{ b.mid|metric_value:"usd" }} – {{ b.bull|metric_value:"usd" }}</span>
+                  <span class="mono">{{ b.bear|metric_value:s.reporting_currency }} – {{ b.mid|metric_value:s.reporting_currency }} – {{ b.bull|metric_value:s.reporting_currency }}</span>
                 </div>
                 <div class="ff-track">
                   <div class="ff-range {% if b.covers_price %}covers{% endif %}" style="left:{{ b.left_pct }}%; width:{{ b.width_pct }}%"></div>

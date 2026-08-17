@@ -19,8 +19,14 @@ register = template.Library()
 _EMPTY = "—"  # em dash for missing values
 
 
+@register.filter
 def currency_badge(currency: str | None) -> str:
-    """Small inline label for a non-USD currency; "" for USD/empty (no badge shown)."""
+    """Small inline label for a non-USD currency; "" for USD/empty (no badge shown).
+
+    Registered as a filter (Phase 5.7a) so a table/section header can disclose its figures'
+    currency once (e.g. next to a statement tab's title) without repeating a badge on every
+    cell — see company_detail.html's statement/quarterly tab headers.
+    """
     if not currency or currency.upper() == "USD":
         return ""
     return format_html('<span class="ccy-badge">{}</span>', currency.upper())

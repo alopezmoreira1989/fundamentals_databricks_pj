@@ -99,8 +99,8 @@ this same content) — see screener.js's initModeNav / views._render_mode's docs
                 </td>
                 <td class="text-body-secondary">{{ item.row.name|default:"—" }}</td>
                 <td class="text-muted">{{ item.row.sector|default:"—" }}</td>
-                <td class="text-end font-monospace">{{ item.row.price|metric_value:"usd" }}</td>
-                <td class="text-end font-monospace">{{ item.ncav_per_share|metric_value:"usd" }}</td>
+                <td class="text-end font-monospace">{{ item.row.price|metric_value:item.row.currency }}</td>
+                <td class="text-end font-monospace">{{ item.ncav_per_share|metric_value:item.row.currency }}</td>
                 <td>
                   {% if item.ratio is not None %}
                     <div class="nn-bar" title="{{ item.ratio|floatformat:2 }}&times; NCAV/share">
@@ -129,7 +129,7 @@ this same content) — see screener.js's initModeNav / views._render_mode's docs
                     {{ item.row.z_score_zone|default:"—"|title }}
                   </span>
                 </td>
-                <td class="text-end font-monospace">${{ item.row.market_cap|compact_money }}</td>
+                <td class="text-end font-monospace">{{ item.row.market_cap|compact_money_ccy:item.row.currency }}</td>
               </tr>
             {% endfor %}
           </tbody>
