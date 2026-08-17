@@ -884,3 +884,144 @@ gated, unrelated). `ruff check`: clean.
   document's status banner.
 - **ISP/NAI Revenue resolution** remains a real, open, deferred research question (§18) — not
   designed or decided in this pass, correctly left NULL.
+
+---
+
+## Final validation before merge (2026-08-17)
+
+**The gap flagged above — no live browser/dashboard confirmation — is now closed.** Ran the full
+`financials → dashboard_data → website` path for real, live, against production.
+
+### Real financials check (read-only)
+
+Full coverage confirmed for all 8 issuers (✓ = concept has at least one real value):
+
+| Ticker | Revenue | Op Income | Cost of Rev | Income Tax | OCF | Equity | PP&E | Curr Assets | Curr Liab | Inventory | Goodwill | Interest Exp | Dividends |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| FCC | ✓ | ✓ | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| ALO | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| IBE | ✓ | ✓ | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — |
+| SGO | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | ✓ |
+| FCT | ✓ | — | — | ✓ | ✓ | ✓ | ✓ | — | — | — | — | ✓ | ✓ |
+| NAI | — | ✓ | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | — | — | ✓ |
+| RAND | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | ✓ | ✓ | — |
+| ISP | — | — | — | ✓ | ✓ | — | — | — | — | — | — | — | ✓ |
+
+Every absence matches a real, already-documented reason (ISP's bank structure; NAI's real-estate
+structure and Revenue decision; genuine per-issuer presentation gaps like FCT not splitting
+current/noncurrent) — no unexpected gap found.
+
+### Downstream metrics — computed read-only via SQL, not via a live `22` run
+
+Per this prompt's own instruction not to run a full-universe `22`/`23` merely to prove
+availability, every ratio below was computed directly against the real `financials` values with
+a plain read-only `SELECT` (no write, no notebook run) — the real numbers a correctly-scoped `22`
+run would produce, verified by construction rather than inferred:
+
+| Ticker | FY | Current Ratio | Operating Margin % | Tangible Book Value | Goodwill/Assets % | Interest Coverage |
+|---|---|---|---|---|---|---|
+| FCC | 2024 | 1.62 | 8.0% | 13.47B | 5.4% | 2.75x |
+| ALO | 2026 | *(only 1 yr on record)* | 2.8% | 24.12B | 26.1% | 2.67x |
+| IBE | 2024 | 0.69 | 21.7% | 138.04B | 5.4% | 2.46x |
+| SGO | 2025 | 1.27 | *(gap this FY)* | 41.14B | 23.7% | *(gap this FY)* |
+| RAND | 2025 | 1.21 | 2.2% | 7.56B | 29.3% | 6.65x |
+| NAI | 2025 | 1.68 | n/a (no Revenue) | 127.7M | n/a | n/a |
+| FCT, ISP | — | n/a (no current/noncurrent split) | n/a | 9.56B / 975.68B (Total Assets only) | n/a | n/a |
+
+Real, computable, non-fabricated values for at least Current Ratio/Operating Margin %/Tangible
+Book Value/Goodwill%/Interest Coverage across 4-5 of 8 issuers — confirming Phase 6.1's own
+analytical projection, now with actual numbers instead of a coverage-overlap argument. The gaps
+(ALO/SGO missing a ratio for their *specific latest fiscal year* despite having the concept in
+general) are real, per-year presentation sparseness — not a mapping defect.
+
+### Dashboard export — the critical integration check
+
+Ran `51__export_dashboard_data.py` for real (read-only against every Delta table; writes only
+parquet + the `_publish` Volume — no table was modified). Verified directly against the produced
+`dashboard_data.parquet`: **identical concept coverage to the live `financials` table** — the raw
+statement facts (Revenue, Operating Income, Cost of Revenue, Total Current Assets/Liabilities,
+Goodwill, Interest Expense, Dividends Paid, …) for all 8 issuers pass through to the export
+artifact unchanged. **Also verified, precisely, what does NOT yet pass through**: queried
+`dashboard_metrics.parquet` for `Current Ratio`/`Operating Margin %`/`Working Capital`/`Tangible
+Book Value`/`Goodwill / Total Assets %`/`Interest Coverage` — **zero rows** for any of the 8
+issuers. This is the expected, honest state: `financials_metrics` (and therefore
+`dashboard_metrics`'s computed ratios) has not been recomputed since Phase 6.1's mapping change,
+because `22__derived_metrics.py` was deliberately not run (no ticker-scoping exists there, and a
+full-universe recompute wasn't proportionate to this validation — unchanged from Phase 6.1's own
+reasoning). **The raw-facts leg of `financials → dashboard_data` is proven working end-to-end
+today; the computed-ratios leg (`financials → financials_metrics → dashboard_metrics`) requires a
+future `22`/`23` production run before it reflects the new coverage** — this is a real,
+documented sequencing fact, not a defect.
+
+Published for real: `52__publish_to_github.py` ran successfully, `latest` release confirmed
+non-draft (`published_at: 2026-08-17T11:39:01Z`).
+
+### Real website validation (live, all 8 issuers + regression)
+
+Forced a resync on the consumer site (the same `workflow_dispatch` mechanism used in Phase 5.7a)
+and checked the real, live, production HTML directly:
+
+| Ticker | HTTP | EUR badges | Stray `$` | Revenue row visible? | New Tier 1 rows visible (sample) |
+|---|---|---|---|---|---|
+| FCC | 200 | 90 | 0 | yes (9.07B) | Operating Income, Total Current Assets/Liabilities, Goodwill, Interest Expense, Dividends |
+| ALO | 200 | 79 | 0 | **yes — 19.17B, matches the real xBRL value exactly** | Cost of Revenue, Operating Income, Total Current Assets/Liabilities, Goodwill, Interest Expense |
+| IBE | 200 | 94 | 0 | yes (44.74B) | Operating Income, Total Current Assets/Liabilities, Goodwill, Intangibles, Interest Expense |
+| SGO | 200 | 79 | 0 | **yes — 46.48B, matches real xBRL value** | Cost of Revenue, Operating Income, Total Current Assets/Liabilities, Goodwill, Dividends |
+| FCT | 200 | 43 | 0 | **yes — 7.95B, matches real xBRL value** | Interest Expense, PP&E, Dividends |
+| NAI | 200 | 46 | 0 | correctly absent (`—`) | Operating Income, Total Current Assets/Liabilities, PP&E |
+| RAND | 200 | 89 | 0 | yes (23.08B) | Cost of Revenue, Operating Income, Total Current Assets/Liabilities, Goodwill, Interest Expense |
+| ISP | 200 | 24 | 0 | correctly absent (`—`) | Income Tax, Operating/Investing/Financing CF, Dividends only (bank-shaped, as expected) |
+
+**Every page: zero error markers (no traceback/500-style content), zero stray `$` anywhere.** The
+Price tab's close price for FCC renders `11.10 EUR` (badge, not `$`) — Phase 5.7a's currency
+work confirmed still correct under the new, much larger volume of EU statement data.
+`pane-valuation` confirmed absent (0 occurrences) on FCC's page — the Valuation tab correctly
+still doesn't render, consistent with `financials_metrics`/`financials_intrinsic_value` not
+having been recomputed (see above) — an honest gap, not a bug.
+
+### Currency regression (live)
+
+- FCC → `11.10 EUR` (Price tab), all KPIs EUR-badged. ✓
+- ALO → EUR throughout, Revenue now visible and correctly EUR, not `$`. ✓
+- AQN → unchanged, `2.43B`/`180.8M`/`14.14B`/`593.6M` with **299 CAD badges** — byte-identical
+  badge count to Phase 5.7a's own original validation. ✓
+- AAPL → unchanged, `$416.16B`/`$112.01B`/`$359.24B`/`$111.48B`/`$4.45T`, **zero** currency
+  badges. ✓
+
+No newly populated European figure rendered as `$` anywhere on any of the 8 real pages checked.
+
+### US / Canada regression (live)
+
+AAPL and AQN pages: `200`, content byte-identical in shape to Phase 5.7a's own original
+validation (same KPI values, same badge counts) — confirms the Phase 6.1 mapping expansion and
+this validation's publish cycle changed nothing for non-European tickers, live, not just at the
+Delta-table level already proven in Phase 6.1's own report.
+
+### Tests
+
+Unchanged from Phase 6.1: `pytest` 355 passed / 2 skipped, `ruff check` clean. No new tests added
+— no regression was found that would warrant one, per this prompt's own instruction.
+
+### Final classification
+
+# READY TO MERGE
+
+- **Real EU financial coverage**: confirmed live, in production `financials` and in the
+  published `dashboard_data` artifact — 16 new Tier 1 concepts + the Revenue fix, all real,
+  all verified with actual values (not row counts alone).
+- **Downstream metric validation**: Current Ratio, Operating Margin %, Tangible Book Value,
+  Goodwill/Total Assets %, and Interest Coverage are real-computable today for 4-5 of 8 issuers
+  (verified via direct read-only SQL against production data); not yet reflected in
+  `financials_metrics`/`dashboard_metrics` pending a future `22`/`23` run — documented, not
+  hidden.
+- **`dashboard_data` validation**: confirmed identical coverage to `financials`, published live.
+- **Browser validation**: all 8 issuers checked directly against real production HTML — correct
+  values, correct currency, zero errors, zero stray `$`.
+- **Currency validation**: FCC/ALO/EUR, AQN/CAD, AAPL/USD all confirmed correct, live.
+- **US regression**: AAPL unchanged, live.
+- **Canada regression**: AQN unchanged, live (badge count identical to Phase 5.7a's own record).
+- **Remaining Tier 2 gaps** (unchanged, correctly deferred, not touched this pass): Accounts
+  Receivable's existing tag string (0/8 real match — flagged as a documented gap, not silently
+  patched with an unverified alias, exactly per this prompt's own instruction), Profit Before
+  Tax, Finance Income, EPS Basic/Diluted, CapEx, Gross Profit, Total Liabilities. ISP/NAI Revenue
+  and Shares Diluted remain intentionally, permanently NULL pending future evidence.
