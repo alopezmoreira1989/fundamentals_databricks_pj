@@ -26,6 +26,11 @@
   var DATA = JSON.parse(dataEl.textContent);
   if (!DATA.metrics || !DATA.metrics.length) return;
 
+  // Phase 5.7a: the ticker's real reporting currency (company_detail.html's shared
+  // #chart-currency-data payload) — replaces a hardcoded "$" that mislabeled non-USD figures.
+  var ccyEl = document.getElementById("chart-currency-data");
+  var CCY = ccyEl ? JSON.parse(ccyEl.textContent) : "USD";
+
   var METRICS = {};
   DATA.metrics.forEach(function (m) { METRICS[m.metric] = m; });
 
@@ -57,14 +62,17 @@
     return hex + Math.round(alpha * 255).toString(16).padStart(2, "0");
   }
 
-  // Auto-scaled $ formatter (B/M/K) -- real figures span from small-cap millions to AAPL-scale
-  // hundreds of billions.
+  // Auto-scaled currency formatter (B/M/K) -- real figures span from small-cap millions to
+  // AAPL-scale hundreds of billions. Prefixes "$" for USD (unchanged behavior); any other
+  // reporting currency gets a suffix instead, matching compact_money_ccy's own convention.
   function fmtY(v) {
     var abs = Math.abs(v);
-    if (abs >= 1e9) return "$" + (v / 1e9).toFixed(abs / 1e9 >= 100 ? 0 : 1) + "B";
-    if (abs >= 1e6) return "$" + (v / 1e6).toFixed(abs / 1e6 >= 100 ? 0 : 1) + "M";
-    if (abs >= 1e3) return "$" + (v / 1e3).toFixed(abs / 1e3 >= 100 ? 0 : 1) + "K";
-    return "$" + v.toFixed(1);
+    var body;
+    if (abs >= 1e9) body = (v / 1e9).toFixed(abs / 1e9 >= 100 ? 0 : 1) + "B";
+    else if (abs >= 1e6) body = (v / 1e6).toFixed(abs / 1e6 >= 100 ? 0 : 1) + "M";
+    else if (abs >= 1e3) body = (v / 1e3).toFixed(abs / 1e3 >= 100 ? 0 : 1) + "K";
+    else body = v.toFixed(1);
+    return CCY === "USD" ? "$" + body : body + " " + CCY;
   }
   function fmtX(v) {
     return v === 0 ? "FY0" : (v > 0 ? "FY+" + v : "FY" + v);

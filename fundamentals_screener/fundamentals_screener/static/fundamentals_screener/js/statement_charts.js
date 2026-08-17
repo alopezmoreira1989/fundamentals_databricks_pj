@@ -28,6 +28,12 @@
   var COLOR_RULE = tok("--rule");
   var FONT_MONO = tok("--mono");
 
+  // Phase 5.7a: the ticker's real reporting currency (company_detail.html's shared
+  // #chart-currency-data payload) — replaces a hardcoded "$" that mislabeled non-USD figures
+  // in the tooltip (the axis ticks below stay bare/unprefixed, unchanged).
+  var ccyEl = document.getElementById("chart-currency-data");
+  var CCY = ccyEl ? JSON.parse(ccyEl.textContent) : "USD";
+
   function compact(v) {
     var a = Math.abs(v);
     if (a >= 1e12) return (v / 1e12).toFixed(1) + "T";
@@ -82,7 +88,10 @@
         },
         plugins: {
           legend: { display: false },
-          tooltip: { callbacks: { label: function (c) { return c.dataset.label + ": $" + compact(c.parsed.y); } } },
+          tooltip: { callbacks: { label: function (c) {
+            var body = compact(c.parsed.y);
+            return c.dataset.label + ": " + (CCY === "USD" ? "$" + body : body + " " + CCY);
+          } } },
         },
       },
     });

@@ -267,10 +267,13 @@ def screen(request: HttpRequest) -> HttpResponse:
     industries = services.available_industries(sector=sector)
     if industry not in industries:
         industry = ""
-    # Only meaningful once the universe actually has non-US tickers; otherwise there's nothing
-    # for it to convert, so it isn't offered.
+    # Only meaningful once the universe actually has a non-USD market; otherwise there's
+    # nothing for it to convert, so it isn't offered. Generic over any market this app knows a
+    # real quote currency for (not just "CA") — mirrors company_detail()'s own market-agnostic
+    # gate; Phase 5.7a's fix for the stale "CA"-only check (docs/phase5-7-fundamentals-screener-
+    # multi-market-audit.md §5.3 item 8).
     markets = services.available_markets()
-    show_usd_toggle = "CA" in markets
+    show_usd_toggle = any(quote_currency(m) not in (None, "USD") for m in markets)
     usd_lens = show_usd_toggle and request.GET.get("usd") == "1"
     page = _parse_page(request.GET.get("page"))
 
@@ -778,10 +781,13 @@ def company_detail(request: HttpRequest, ticker: str) -> HttpResponse:
 
     # Moved up from its old spot (right before market_cap_kpi) — only needs `summary`, so both
     # the fragment and full-page branches below can share it without needing statements/price
-    # data first.
-    price_currency = quote_currency(summary.market).lower()
+    # data first. `price_currency` is `None` for a listing market this app has no real
+    # quote-currency mapping for yet — the Price tab then renders a bare, unlabeled number
+    # (metric_value's own None-unit fallback) rather than a guessed/mislabeled `$`.
+    _price_ccy = quote_currency(summary.market)
+    price_currency = _price_ccy.lower() if _price_ccy else None
     reporting_currency = (summary.reporting_currency or "USD").upper()
-    show_usd_toggle = price_currency != "usd" or reporting_currency != "USD"
+    show_usd_toggle = price_currency not in (None, "usd") or reporting_currency != "USD"
     usd_lens = show_usd_toggle and request.GET.get("usd") == "1"
 
     bench = request.GET.get("bench", "").strip().lower()
@@ -813,7 +819,7 @@ def company_detail(request: HttpRequest, ticker: str) -> HttpResponse:
     if detail is None:  # defensive only — `summary` above already confirmed the ticker exists
         raise Http404(f"unknown ticker {ticker!r}")
     statements = services.get_company_statements(ticker)
-    headline = services.headline_kpis(statements)
+    headline = services.headline_kpis(statements, currency=summary.reporting_currency)
     price_windows = services.price_windows()
     price_window = request.GET.get("window", "").strip()
     if price_window not in price_windows:
@@ -864,6 +870,10 @@ def company_detail(request: HttpRequest, ticker: str) -> HttpResponse:
         "price_windows": price_windows,
         "price_window": price_window,
         "price_currency": price_currency,
+        # Phase 5.7a: the ticker's reporting currency, embedded once for the Chart.js scripts
+        # (forecasting.js/balance_sheet_chart.js/statement_charts.js) that used to hardcode "$"
+        # client-side with no currency signal from the server at all.
+        "chart_currency": summary.reporting_currency or "USD",
         "show_usd_toggle": show_usd_toggle,
         "usd_lens": usd_lens,
         "quarterly": quarterly,

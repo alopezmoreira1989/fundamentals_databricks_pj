@@ -426,6 +426,9 @@ class CompanyRepository(DuckDBRepository):
             f_score=values.get("Piotroski F-Score"),
             z_score=z_score,
             z_score_zone=_altman_zone(z_score),
+            # Phase 5.7a: the ticker's real reporting currency — see NetNetRow.currency's own
+            # docstring for why this, not a per-metric `unit`, is the source used.
+            currency=summary.reporting_currency,
         )
 
     def metric_history(self, ticker: str, *, years: int = 5) -> tuple[MetricSeries, ...]:

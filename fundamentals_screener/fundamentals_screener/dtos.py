@@ -338,6 +338,17 @@ class NetNetRow:
     z_score: float | None
     z_score_zone: str | None
     has_logo: bool | None = None
+    # Phase 5.7a: the ticker's own reporting currency (meta artifact — always the real,
+    # FIRDS/SEC-sourced currency, never inferred from country/market), since `price`/
+    # `market_cap`/every `ncav_per_share_*` field here are all denominated in it. Deliberately
+    # NOT read from dashboard_metrics' own per-metric `unit` column: confirmed during Phase
+    # 5.7a that "NCAV / Share (Live)" (and its Moderate/Strict siblings) are exported with a
+    # hardcoded `'usd'` unit literal (fundamentals_pipeline/50__publish/
+    # 51__export_dashboard_data.py's `_NCAV_LIVE_COLUMNS`), unlike "Market Cap (Live)" which
+    # already uses the real per-row currency — so the metric's own unit is not a reliable
+    # source for this DTO. See docs/phase5-7-fundamentals-screener-multi-market-audit.md's
+    # implementation section for the full note.
+    currency: str | None = None
 
 
 @dataclass(frozen=True)
