@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from datetime import date
 
+import pytest
+
 from fundamentals_pipeline.sources.base import SourceFiling
 from fundamentals_pipeline.sources.eu_current import (
     EU_CANONICAL_MAPPING,
@@ -271,11 +273,86 @@ def test_map_source_fact_to_canonical_unmapped_concept_returns_none():
 
 
 def test_eu_canonical_mapping_all_entries_are_accepted_and_usable():
-    assert len(EU_CANONICAL_MAPPING) == 5
-    for decision in EU_CANONICAL_MAPPING.values():
+    # Phase 6.1: EU_CANONICAL_MAPPING values are now tuples of one-or-more MappingDecisions
+    # (Revenue has two: the bare tag and the RevenueFromContractsWithCustomers variant).
+    assert len(EU_CANONICAL_MAPPING) == 21
+    all_decisions = [d for decisions in EU_CANONICAL_MAPPING.values() for d in decisions]
+    assert len(all_decisions) == 22
+    for decision in all_decisions:
         assert decision.status == MappingStatus.ACCEPTED
         assert is_usable(decision)
         assert decision.source_concept.startswith("ifrs-full:")
+
+
+# ── Phase 6.1: Tier 1 coverage-expansion mappings ───────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "source_concept, expected_canonical",
+    [
+        ("ifrs-full:IncomeTaxExpenseContinuingOperations", "Income Tax"),
+        ("ifrs-full:CashFlowsFromUsedInOperatingActivities", "Operating Cash Flow"),
+        ("ifrs-full:CashFlowsFromUsedInInvestingActivities", "Investing Cash Flow"),
+        ("ifrs-full:CashFlowsFromUsedInFinancingActivities", "Financing Cash Flow"),
+        ("ifrs-full:EquityAttributableToOwnersOfParent", "Total Stockholders Equity"),
+        ("ifrs-full:Equity", "Total Equity (incl NCI)"),
+        ("ifrs-full:PropertyPlantAndEquipment", "PP&E Net"),
+        ("ifrs-full:CurrentAssets", "Total Current Assets"),
+        ("ifrs-full:CurrentLiabilities", "Total Current Liabilities"),
+        ("ifrs-full:Goodwill", "Goodwill"),
+        ("ifrs-full:FinanceCosts", "Interest Expense"),
+        ("ifrs-full:DividendsPaid", "Dividends Paid"),
+        ("ifrs-full:ProfitLossFromOperatingActivities", "Operating Income"),
+        ("ifrs-full:IntangibleAssetsOtherThanGoodwill", "Intangible Assets"),
+        ("ifrs-full:Inventories", "Inventory"),
+        ("ifrs-full:CostOfSales", "Cost of Revenue"),
+    ],
+)
+def test_tier1_mappings_resolve_to_the_expected_canonical_concept(source_concept, expected_canonical):
+    decision = map_source_fact_to_canonical(source_concept)
+    assert decision is not None
+    assert decision.canonical_concept == expected_canonical
+    assert is_usable(decision)
+
+
+def test_revenue_maps_from_either_real_tag_variant():
+    # Real evidence (Phase 6.0): FCC/IBE/RAND tag the bare concept; ALO/FCT/SGO tag the IFRS 15
+    # contract-revenue concept instead -- both must route to the same canonical "Revenue".
+    bare = map_source_fact_to_canonical("ifrs-full:Revenue")
+    contract = map_source_fact_to_canonical("ifrs-full:RevenueFromContractsWithCustomers")
+    assert bare.canonical_concept == "Revenue"
+    assert contract.canonical_concept == "Revenue"
+    assert bare.source_concept != contract.source_concept
+
+
+def test_bare_interest_expense_tag_is_not_mapped_no_real_evidence():
+    # Phase 6.0 research found zero real occurrences of the bare ifrs-full:InterestExpense tag
+    # across all 8 issuers -- only FinanceCosts is backed by real evidence, so only FinanceCosts
+    # is mapped. Adding InterestExpense here would be an unverified guess.
+    assert map_source_fact_to_canonical("ifrs-full:InterestExpense") is None
+
+
+def test_isp_bank_revenue_concepts_are_not_mapped_to_revenue():
+    # ISP's real top-line concepts (a bank) are never mapped to canonical Revenue -- NULL is
+    # correct, not a questionable guess (docs/phase6-european-esef-financial-coverage.md §5c).
+    for isp_concept in (
+        "isp:InterestIncomeAndSimilarRevenues",
+        "ifrs-full:RevenueFromDividends",
+        "ifrs-full:InterestRevenueCalculatedUsingEffectiveInterestMethod",
+    ):
+        assert map_source_fact_to_canonical(isp_concept) is None
+
+
+def test_nai_real_estate_top_line_is_not_mapped_to_revenue():
+    # NAI's real top-line concept (a real-estate investment company) is a genuinely different
+    # accounting concept from Revenue, not an alias -- must stay unmapped.
+    assert map_source_fact_to_canonical("ifrs-full:RentalIncomeFromInvestmentProperty") is None
+
+
+def test_shares_diluted_has_no_eu_mapping():
+    # Phase 6.0 confirmed zero usable share-count concepts across all 8 real issuers -- there
+    # must be no EU_CANONICAL_MAPPING entry for "Shares Diluted" at all (NULL, not derived).
+    assert "Shares Diluted" not in EU_CANONICAL_MAPPING
 
 
 # ── Entity construction ─────────────────────────────────────────────────────────────────────

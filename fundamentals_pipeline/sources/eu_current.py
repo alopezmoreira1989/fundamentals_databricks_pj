@@ -212,62 +212,300 @@ def entity_from_pilot(source_id: str, ticker: str, lei: str, name: str) -> Sourc
     )
 
 
-# ── Canonical mapping (Phase 5.1 pilot -- five high-confidence IFRS concepts only) ──────────
-# These ifrs-full tag strings duplicate 00__config/01__tickers.py's IFRS_FALLBACK_TAGS values --
+# ── Canonical mapping ─────────────────────────────────────────────────────────────────────
+# Phase 5.1 pilot: five high-confidence IFRS concepts. Phase 6.1 (docs/phase6-european-esef-
+# financial-coverage.md): widened to reuse concepts already accepted for real `ifrs-full`
+# filers elsewhere in this codebase (00__config/01__tickers.py's IFRS_FALLBACK_TAGS, verified
+# 2026-07 against Toyota/Vale/Infosys companyfacts) -- Phase 6.0's research re-fetched real
+# xBRL-JSON from filings.xbrl.org for all 8 admitted issuers and cross-checked every
+# IFRS_FALLBACK_TAGS entry against it (605 real distinct consolidated, current-period concepts
+# found total). Every entry below whose canonical_concept already has an IFRS_FALLBACK_TAGS
+# row is a verified, direct reuse of that SAME accepted tag string -- not an independently
+# invented mapping. These ifrs-full tag strings duplicate IFRS_FALLBACK_TAGS's own values --
 # that file is a notebook-only `%run` global, unreachable from this importable, non-Spark
-# package. 01__tickers.py remains the single source of truth for the tag strings themselves;
-# this is a small, deliberately-documented duplication (per Phase 5.1's own plan), not an
-# independent taxonomy mapping invented in parallel.
-EU_CANONICAL_MAPPING: dict[str, MappingDecision] = {
-    "Revenue": MappingDecision(
-        canonical_concept="Revenue",
-        status=MappingStatus.ACCEPTED,
-        mapping_type=MappingType.DIRECT,
-        source_concept="ifrs-full:Revenue",
-        notes="Verified live 2026-08 against FCC's real FY2024 xBRL-JSON filing (fact-105, "
-        "value 9,071,416,000 EUR, consolidated, non-dimensional). Matches 01__tickers.py "
-        "IFRS_FALLBACK_TAGS['Revenue'].",
+# package, so the tag strings are deliberately re-declared here (per Phase 5.1's own plan), not
+# an independent taxonomy invented in parallel; 01__tickers.py remains the single source of
+# truth for the SEC/Canada side.
+#
+# A canonical concept may now have MORE THAN ONE accepted source tag (see "Revenue" below) --
+# real evidence shows the two Revenue variants are mutually exclusive per issuer within a single
+# filing (no issuer tags both), so this is a plain either/or lookup, not a coalesce-with-
+# priority mechanism like the SEC side's `extract_series_multi`/`CONCEPT_PRIORITY` -- deliberately
+# not building that machinery here since no real EU filing has shown a need for it yet.
+EU_CANONICAL_MAPPING: dict[str, tuple[MappingDecision, ...]] = {
+    "Revenue": (
+        MappingDecision(
+            canonical_concept="Revenue",
+            status=MappingStatus.ACCEPTED,
+            mapping_type=MappingType.DIRECT,
+            source_concept="ifrs-full:Revenue",
+            notes="Verified live 2026-08 against FCC's real FY2024 xBRL-JSON filing (fact-105, "
+            "value 9,071,416,000 EUR, consolidated, non-dimensional). Matches 01__tickers.py "
+            "IFRS_FALLBACK_TAGS['Revenue']. Real coverage (Phase 6.0): FCC, IBE, RAND.",
+        ),
+        MappingDecision(
+            canonical_concept="Revenue",
+            status=MappingStatus.ACCEPTED,
+            mapping_type=MappingType.SEMANTIC_EQUIVALENT,
+            source_concept="ifrs-full:RevenueFromContractsWithCustomers",
+            notes="Phase 6.1: the standard IFRS 15 top-line tag -- the direct IFRS analogue of "
+            "the us-gaap ASC-606 'Revenue (contract)' synonym this codebase already accepts as "
+            "Revenue (01__tickers.py CONCEPT_SYNONYMS). Verified live via Phase 6.0 research "
+            "against ALO's real FY2026 filing (value 19,171,000,000 EUR, consolidated, "
+            "non-dimensional). Real coverage: ALO, FCT, SGO -- confirmed as a PRODUCTION GAP "
+            "before this change: main.financials.financials had zero 'Revenue' rows for these "
+            "3 tickers (and for ISP/NAI, which do NOT get this tag -- see below) across every "
+            "fiscal year on record. Deliberately NOT mapped for ISP (a bank; its real top-line "
+            "concepts are isp:InterestIncomeAndSimilarRevenues / ifrs-full:RevenueFromDividends "
+            "/ ifrs-full:InterestRevenueCalculatedUsingEffectiveInterestMethod -- an issuer "
+            "extension or a fundamentally different IFRS concept, not this tag, and not "
+            "economically the same as a corporate Revenue line -- NULL > a questionable value) "
+            "or NAI (a real-estate investment company; its real top line is "
+            "ifrs-full:RentalIncomeFromInvestmentProperty, a genuinely different accounting "
+            "concept from Revenue, not merely a differently-named alias -- also left NULL). "
+            "See docs/phase6-european-esef-financial-coverage.md §5c/§13/§17.",
+        ),
     ),
-    "Net Income": MappingDecision(
-        canonical_concept="Net Income",
-        status=MappingStatus.ACCEPTED,
-        mapping_type=MappingType.DIRECT,
-        source_concept="ifrs-full:ProfitLossAttributableToOwnersOfParent",
-        notes="Matches 01__tickers.py IFRS_FALLBACK_TAGS['Net Income'] -- the parent-"
-        "attributable profit figure, the same 'Net Income' definition SEC filers use.",
+    "Net Income": (
+        MappingDecision(
+            canonical_concept="Net Income",
+            status=MappingStatus.ACCEPTED,
+            mapping_type=MappingType.DIRECT,
+            source_concept="ifrs-full:ProfitLossAttributableToOwnersOfParent",
+            notes="Matches 01__tickers.py IFRS_FALLBACK_TAGS['Net Income'] -- the parent-"
+            "attributable profit figure, the same 'Net Income' definition SEC filers use.",
+        ),
     ),
-    "Net Income (incl NCI)": MappingDecision(
-        canonical_concept="Net Income (incl NCI)",
-        status=MappingStatus.ACCEPTED,
-        mapping_type=MappingType.DIRECT,
-        source_concept="ifrs-full:ProfitLoss",
-        notes="Verified live 2026-08 against FCC's real FY2024 filing (fact-145, value "
-        "567,584,000 EUR). Matches 01__tickers.py IFRS_FALLBACK_TAGS['Net Income (incl NCI)'].",
+    "Net Income (incl NCI)": (
+        MappingDecision(
+            canonical_concept="Net Income (incl NCI)",
+            status=MappingStatus.ACCEPTED,
+            mapping_type=MappingType.DIRECT,
+            source_concept="ifrs-full:ProfitLoss",
+            notes="Verified live 2026-08 against FCC's real FY2024 filing (fact-145, value "
+            "567,584,000 EUR). Matches 01__tickers.py IFRS_FALLBACK_TAGS['Net Income (incl NCI)'].",
+        ),
     ),
-    "Total Assets": MappingDecision(
-        canonical_concept="Total Assets",
-        status=MappingStatus.ACCEPTED,
-        mapping_type=MappingType.DIRECT,
-        source_concept="ifrs-full:Assets",
-        notes="Verified live 2026-08 against FCC's real FY2024 filing (fact-45, value "
-        "14,235,959,000 EUR). Matches 01__tickers.py IFRS_FALLBACK_TAGS['Total Assets'].",
+    "Total Assets": (
+        MappingDecision(
+            canonical_concept="Total Assets",
+            status=MappingStatus.ACCEPTED,
+            mapping_type=MappingType.DIRECT,
+            source_concept="ifrs-full:Assets",
+            notes="Verified live 2026-08 against FCC's real FY2024 filing (fact-45, value "
+            "14,235,959,000 EUR). Matches 01__tickers.py IFRS_FALLBACK_TAGS['Total Assets'].",
+        ),
     ),
-    "Cash & Equivalents": MappingDecision(
-        canonical_concept="Cash & Equivalents",
-        status=MappingStatus.ACCEPTED,
-        mapping_type=MappingType.DIRECT,
-        source_concept="ifrs-full:CashAndCashEquivalents",
-        notes="Verified live 2026-08 against FCC's real FY2024 filing (fact-43, value "
-        "1,849,617,000 EUR). Matches 01__tickers.py IFRS_FALLBACK_TAGS['Cash & Equivalents'].",
+    "Cash & Equivalents": (
+        MappingDecision(
+            canonical_concept="Cash & Equivalents",
+            status=MappingStatus.ACCEPTED,
+            mapping_type=MappingType.DIRECT,
+            source_concept="ifrs-full:CashAndCashEquivalents",
+            notes="Verified live 2026-08 against FCC's real FY2024 filing (fact-43, value "
+            "1,849,617,000 EUR). Matches 01__tickers.py IFRS_FALLBACK_TAGS['Cash & Equivalents'].",
+        ),
+    ),
+    # ── Phase 6.1 additions -- all Tier 1 (docs/phase6-european-esef-financial-coverage.md §16):
+    # exact reuse of an existing IFRS_FALLBACK_TAGS tag string, each individually re-verified
+    # against real Phase 6.0 xBRL-JSON evidence (ticker/value cited per entry).
+    "Income Tax": (
+        MappingDecision(
+            canonical_concept="Income Tax",
+            status=MappingStatus.ACCEPTED,
+            mapping_type=MappingType.DIRECT,
+            source_concept="ifrs-full:IncomeTaxExpenseContinuingOperations",
+            notes="Matches IFRS_FALLBACK_TAGS['Income Tax']. Verified live via Phase 6.0 "
+            "research against ALO's real FY2026 filing (value 199,000,000 EUR). Real coverage: "
+            "8/8 issuers -- the single most universal concept found in this research.",
+        ),
+    ),
+    "Operating Cash Flow": (
+        MappingDecision(
+            canonical_concept="Operating Cash Flow",
+            status=MappingStatus.ACCEPTED,
+            mapping_type=MappingType.DIRECT,
+            source_concept="ifrs-full:CashFlowsFromUsedInOperatingActivities",
+            notes="Matches IFRS_FALLBACK_TAGS['Operating Cash Flow']. Verified live via Phase "
+            "6.0 research against ALO's real FY2026 filing (value 891,000,000 EUR). Real "
+            "coverage: 8/8 issuers.",
+        ),
+    ),
+    "Investing Cash Flow": (
+        MappingDecision(
+            canonical_concept="Investing Cash Flow",
+            status=MappingStatus.ACCEPTED,
+            mapping_type=MappingType.DIRECT,
+            source_concept="ifrs-full:CashFlowsFromUsedInInvestingActivities",
+            notes="Matches IFRS_FALLBACK_TAGS['Investing Cash Flow']. Verified live via Phase "
+            "6.0 research against ALO's real FY2026 filing (value -552,000,000 EUR). Real "
+            "coverage: 8/8 issuers.",
+        ),
+    ),
+    "Financing Cash Flow": (
+        MappingDecision(
+            canonical_concept="Financing Cash Flow",
+            status=MappingStatus.ACCEPTED,
+            mapping_type=MappingType.DIRECT,
+            source_concept="ifrs-full:CashFlowsFromUsedInFinancingActivities",
+            notes="Matches IFRS_FALLBACK_TAGS['Financing Cash Flow']. Verified live via Phase "
+            "6.0 research against ALO's real FY2026 filing (value -273,000,000 EUR). Real "
+            "coverage: 8/8 issuers.",
+        ),
+    ),
+    "Total Stockholders Equity": (
+        MappingDecision(
+            canonical_concept="Total Stockholders Equity",
+            status=MappingStatus.ACCEPTED,
+            mapping_type=MappingType.DIRECT,
+            source_concept="ifrs-full:EquityAttributableToOwnersOfParent",
+            notes="Matches IFRS_FALLBACK_TAGS['Total Stockholders Equity']. Verified live via "
+            "Phase 6.0 research against ALO's real FY2026 filing (value 10,663,000,000 EUR). "
+            "Real coverage: 7/8 issuers (all but ISP, a bank -- see NAI/ISP note on Revenue).",
+        ),
+    ),
+    "Total Equity (incl NCI)": (
+        MappingDecision(
+            canonical_concept="Total Equity (incl NCI)",
+            status=MappingStatus.ACCEPTED,
+            mapping_type=MappingType.DIRECT,
+            source_concept="ifrs-full:Equity",
+            notes="Matches IFRS_FALLBACK_TAGS['Total Equity (incl NCI)']. Verified live via "
+            "Phase 6.0 research against ALO's real FY2026 filing (value 10,784,000,000 EUR). "
+            "Real coverage: 7/8 issuers (all but ISP).",
+        ),
+    ),
+    "PP&E Net": (
+        MappingDecision(
+            canonical_concept="PP&E Net",
+            status=MappingStatus.ACCEPTED,
+            mapping_type=MappingType.DIRECT,
+            source_concept="ifrs-full:PropertyPlantAndEquipment",
+            notes="Matches IFRS_FALLBACK_TAGS['PP&E Net']. Verified live via Phase 6.0 "
+            "research against ALO's real FY2026 filing (value 2,858,000,000 EUR). Real "
+            "coverage: 7/8 issuers (all but ISP -- a bank's balance sheet has no comparable "
+            "PP&E line at this scale).",
+        ),
+    ),
+    "Total Current Assets": (
+        MappingDecision(
+            canonical_concept="Total Current Assets",
+            status=MappingStatus.ACCEPTED,
+            mapping_type=MappingType.DIRECT,
+            source_concept="ifrs-full:CurrentAssets",
+            notes="Matches IFRS_FALLBACK_TAGS['Total Current Assets']. Verified live via Phase "
+            "6.0 research against FCC's real FY2024 filing (value 5,724,200,000 EUR). Real "
+            "coverage: 5/8 issuers -- absence for the other 3 reflects those issuers not "
+            "presenting a current/noncurrent split (a real IFRS presentation choice), not a "
+            "mapping gap; unlocks Current Ratio / Quick Ratio / Net-Net Finder inputs (see "
+            "docs/phase6-european-esef-financial-coverage.md §11).",
+        ),
+    ),
+    "Total Current Liabilities": (
+        MappingDecision(
+            canonical_concept="Total Current Liabilities",
+            status=MappingStatus.ACCEPTED,
+            mapping_type=MappingType.DIRECT,
+            source_concept="ifrs-full:CurrentLiabilities",
+            notes="Matches IFRS_FALLBACK_TAGS['Total Current Liabilities']. Verified live via "
+            "Phase 6.0 research against FCC's real FY2024 filing (value 3,528,830,000 EUR). "
+            "Real coverage: 5/8 issuers, same presentation-choice caveat as Total Current Assets.",
+        ),
+    ),
+    "Goodwill": (
+        MappingDecision(
+            canonical_concept="Goodwill",
+            status=MappingStatus.ACCEPTED,
+            mapping_type=MappingType.DIRECT,
+            source_concept="ifrs-full:Goodwill",
+            notes="Matches IFRS_FALLBACK_TAGS['Goodwill']. Verified live via Phase 6.0 research "
+            "against ALO's real FY2026 filing (value 9,121,000,000 EUR). Real coverage: 5/8 "
+            "issuers.",
+        ),
+    ),
+    "Interest Expense": (
+        MappingDecision(
+            canonical_concept="Interest Expense",
+            status=MappingStatus.ACCEPTED,
+            mapping_type=MappingType.DIRECT,
+            source_concept="ifrs-full:FinanceCosts",
+            notes="Matches the first entry of IFRS_FALLBACK_TAGS['Interest Expense'] "
+            "(['FinanceCosts', 'InterestExpense']) -- only FinanceCosts is mapped here: "
+            "Phase 6.0 research found zero real occurrences of the bare ifrs-full:InterestExpense "
+            "tag across all 8 issuers, so adding it would be an unverified guess, not a "
+            "confirmed reuse. Verified live against ALO's real FY2026 filing (value "
+            "204,000,000 EUR). Real coverage: 5/8 issuers.",
+        ),
+    ),
+    "Dividends Paid": (
+        MappingDecision(
+            canonical_concept="Dividends Paid",
+            status=MappingStatus.ACCEPTED,
+            mapping_type=MappingType.DIRECT,
+            source_concept="ifrs-full:DividendsPaid",
+            notes="Matches IFRS_FALLBACK_TAGS['Dividends Paid']. Verified live via Phase 6.0 "
+            "research against ALO's real FY2026 filing (value 38,000,000 EUR). Real coverage: "
+            "6/8 issuers.",
+        ),
+    ),
+    "Operating Income": (
+        MappingDecision(
+            canonical_concept="Operating Income",
+            status=MappingStatus.ACCEPTED,
+            mapping_type=MappingType.DIRECT,
+            source_concept="ifrs-full:ProfitLossFromOperatingActivities",
+            notes="Matches IFRS_FALLBACK_TAGS['Operating Income']. Verified live via Phase 6.0 "
+            "research against ALO's real FY2026 filing (value 544,000,000 EUR). Real coverage: "
+            "5/8 issuers -- unlocks EBITDA / Interest Coverage / ROIC / ROCE / ROTCE for those 5 "
+            "(docs/phase6-european-esef-financial-coverage.md §11).",
+        ),
+    ),
+    "Intangible Assets": (
+        MappingDecision(
+            canonical_concept="Intangible Assets",
+            status=MappingStatus.ACCEPTED,
+            mapping_type=MappingType.DIRECT,
+            source_concept="ifrs-full:IntangibleAssetsOtherThanGoodwill",
+            notes="Matches the canonical tag in IFRS_FALLBACK_TAGS['Intangible Assets']. "
+            "Verified live via Phase 6.0 research against ALO's real FY2026 filing (value "
+            "1,766,000,000 EUR). Real coverage: 3/8 issuers.",
+        ),
+    ),
+    "Inventory": (
+        MappingDecision(
+            canonical_concept="Inventory",
+            status=MappingStatus.ACCEPTED,
+            mapping_type=MappingType.DIRECT,
+            source_concept="ifrs-full:Inventories",
+            notes="Matches IFRS_FALLBACK_TAGS['Inventory']. Verified live via Phase 6.0 "
+            "research against ALO's real FY2026 filing (value 4,276,000,000 EUR). Real "
+            "coverage: 3/8 issuers.",
+        ),
+    ),
+    "Cost of Revenue": (
+        MappingDecision(
+            canonical_concept="Cost of Revenue",
+            status=MappingStatus.ACCEPTED,
+            mapping_type=MappingType.DIRECT,
+            source_concept="ifrs-full:CostOfSales",
+            notes="Matches IFRS_FALLBACK_TAGS['Cost of Revenue']. Verified live via Phase 6.0 "
+            "research against ALO's real FY2026 filing (value 16,819,000,000 EUR). Real "
+            "coverage: 3/8 issuers (ALO, RAND, SGO -- the same 3 issuers using the "
+            "RevenueFromContractsWithCustomers Revenue variant above).",
+        ),
     ),
 }
 
-_SOURCE_CONCEPT_TO_DECISION = {d.source_concept: d for d in EU_CANONICAL_MAPPING.values()}
+_SOURCE_CONCEPT_TO_DECISION = {
+    decision.source_concept: decision
+    for decisions in EU_CANONICAL_MAPPING.values()
+    for decision in decisions
+}
 
 
 def map_source_fact_to_canonical(source_concept: str) -> MappingDecision | None:
     """Look up this source concept's canonical mapping decision. `None` (excluded outright, not
-    NULL-valued-and-kept) for anything outside the five high-confidence pilot concepts --
-    deliberately narrow, per "start with high-confidence concepts, don't build a giant IFRS
-    taxonomy mapping"."""
+    NULL-valued-and-kept) for anything outside the accepted concepts above -- deliberately still
+    a narrow, evidence-verified allow-list (22 accepted source tags across 21 canonical concepts
+    as of Phase 6.1), not a giant IFRS taxonomy mapping guessed wholesale."""
     return _SOURCE_CONCEPT_TO_DECISION.get(source_concept)
