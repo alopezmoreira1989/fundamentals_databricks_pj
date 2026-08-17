@@ -96,11 +96,31 @@ EU_API_BASE = "https://filings.xbrl.org"
 
 # ── Reverse lookup: canonical label -> (stmt_name, kind), reused directly from STATEMENTS
 # (the same `%run`-injected config SEC ingestion uses) — no duplicated stmt/kind mapping.
-_LABEL_TO_STMT_KIND = {
-    label: (stmt_name, kind)
-    for stmt_name, concept_map in globals().get("STATEMENTS", {}).items()
-    for label, (_xbrl_concept, kind) in concept_map.items()
-}
+#
+# Deterministic priority (Phase 6.3 fix — docs/phase6-3-net-income-statement-classification.md),
+# NOT a naive dict-comprehension collapse. Three labels ("Net Income", "Net Income (to common)",
+# "Net Income (incl NCI)") genuinely exist in BOTH STATEMENTS["Income Statement"] and
+# STATEMENTS["Cash Flow"] — correct and load-bearing for SEC ingestion, which extracts each
+# statement's concept map independently (11__fetch_sec_xbrl.py's own `for stmt_name, concept_map
+# in STATEMENTS.items()` loop) and so genuinely produces TWO real, separately-sourced rows per
+# collision (confirmed: AAPL has 17 Income Statement + 17 Cash Flow Net Income rows, one pair per
+# fiscal year — real GAAP contexts, not a duplicate). The EU adapter has no second XBRL context to
+# draw on — one ESEF fact must resolve to exactly ONE statement — so a plain last-key-wins
+# dict comprehension (whichever statement STATEMENTS.items() happens to yield last) silently
+# picked "Cash Flow" for all three, which is wrong: every current collision is a P&L bottom-line
+# concept, and a statement's Cash Flow appearance is always a RECONCILIATION reuse of a figure
+# computed elsewhere (Income Statement for a flow concept; Balance Sheet for a stock concept),
+# never that concept's own primary source. `_STMT_PRIORITY` encodes that general rule (primary-
+# source statements before the reconciliation statement) explicitly, so the result no longer
+# depends on `STATEMENTS`' own dict/insertion order, and any *future* label collision — including
+# today's dormant "Net Income (to common)" — resolves the same safe way automatically, with no
+# per-label override list to remember to update.
+_STMT_PRIORITY = ("Income Statement", "Balance Sheet", "Cash Flow")
+
+_LABEL_TO_STMT_KIND: dict = {}
+for _stmt_name in _STMT_PRIORITY:
+    for _label, (_xbrl_concept, _kind) in globals().get("STATEMENTS", {}).get(_stmt_name, {}).items():
+        _LABEL_TO_STMT_KIND.setdefault(_label, (_stmt_name, _kind))
 
 # Gates the actual table creation / network / Delta-write sections below (4-7) -- mirrors
 # 11__fetch_sec_xbrl.py's own `if RUN_TICKERS:` pattern exactly. Definitions above (PILOT_EU_
