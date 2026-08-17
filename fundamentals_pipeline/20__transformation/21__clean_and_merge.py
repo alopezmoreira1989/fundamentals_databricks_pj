@@ -380,6 +380,101 @@ print(f"✓ Orphan FY DELETE complete → {full_tbl}")
 
 # COMMAND ----------
 
+# MAGIC %md ## 4b. Delete stale rows for a concept whose `stmt` classification changed
+# MAGIC
+# MAGIC A different failure mode from §4's "fabricated annual" cleanup, discovered validating the
+# MAGIC Phase 6.3 EU Net Income statement-classification fix
+# MAGIC (docs/phase6-3-net-income-statement-classification.md): a concept classified under one
+# MAGIC `stmt` by a PRIOR scrape can be reclassified to a DIFFERENT `stmt` by a later scrape (e.g.
+# MAGIC 16__fetch_eu_xbrl.py's `_LABEL_TO_STMT_KIND` fix moved EU's "Net Income" from `Cash Flow`
+# MAGIC to `Income Statement`). The plain UPSERT MERGE above never deletes, and §4's own
+# MAGIC orphan-DELETE only catches keys that ARE part of this scrape's reported-key universe under
+# MAGIC their CURRENT `stmt` but failed the "genuine annual" test — a key whose `stmt` moved
+# MAGIC elsewhere never enters that universe at all, so it's invisible to §4. Confirmed against real
+# MAGIC production data: without this step, re-running the fixed ingestion left a stale, wrong-value
+# MAGIC `stmt="Cash Flow"` "Net Income" row (the pre-fix consolidated incl-NCI figure) sitting
+# MAGIC alongside the new, correct `stmt="Income Statement"` row for every one of the 8 EU tickers.
+# MAGIC
+# MAGIC Deliberately narrow, at the same `(ticker, stmt, concept, fiscal_year)` granularity §4
+# MAGIC already uses, to avoid widening into the unrelated (and already-accepted) "concept vanished
+# MAGIC from the filer's reports entirely" case. Only deletes an existing FY row when, for that
+# MAGIC EXACT `(ticker, concept, fiscal_year)`: (a) the ticker was actually re-scraped this run
+# MAGIC (same universe §4 already uses — a targeted EU re-scrape can never touch an SEC/Canada
+# MAGIC ticker's rows, since those tickers are simply absent from `raw`), (b) THIS scrape reports
+# MAGIC zero raw facts under the row's CURRENT `stmt` for that year (any annual-report form, not
+# MAGIC just the genuine-annual shapes §4 checks), AND (c) THIS scrape DOES report a raw fact for
+# MAGIC that exact `(ticker, concept, fiscal_year)` under a genuinely different `stmt` — proof a
+# MAGIC reclassification happened for that specific year, not that the concept simply went
+# MAGIC unreported this time (which stays untouched, matching §4's own existing conservative
+# MAGIC behaviour for that separate, unrelated case). This is a general safety property, not an
+# MAGIC EU-only one: the identical logic would just as correctly clean up a genuine SEC/Canada
+# MAGIC re-tag, should one ever occur — it only ever deletes a row this scrape can positively prove
+# MAGIC moved elsewhere.
+
+# COMMAND ----------
+
+# Fresh re-read (not the §1 `raw` checkpoint) — mirrors §4's own `_flow_fy_all` re-read and its
+# documented reasoning: a local checkpoint this far downstream, after §3's long-running MERGE,
+# isn't reliably still alive on serverless.
+_reclass_raw = (
+    spark.table(raw_full).filter(F.col("scraped_at") == latest_scrape)
+    .filter(F.col("form").isin("10-K", "10-K/A", "20-F", "20-F/A", "40-F", "40-F/A", "ESEF"))
+    .filter(F.col("fp") == "FY")
+    .filter(F.col("value").isNotNull())
+)
+for _alt, _canon in CONCEPT_SYNONYMS.items():
+    _reclass_raw = _reclass_raw.withColumn(
+        "concept", F.when(F.col("concept") == _alt, _canon).otherwise(F.col("concept"))
+    )
+
+_reclass_scraped_tickers = _reclass_raw.select("ticker").distinct()
+
+_reclass_reported_stmt_fy = _reclass_raw.select(
+    "ticker", "stmt", "concept", F.col("fy").alias("fiscal_year")
+).distinct()
+_reclass_reported_concept_fy = _reclass_reported_stmt_fy.select(
+    "ticker", "concept", "fiscal_year"
+).distinct()
+
+_reclass_target = (
+    spark.table(full_tbl)
+    .filter(F.col("period_type") == "FY")
+    .join(_reclass_scraped_tickers, on="ticker", how="inner")
+    .select("ticker", "stmt", "concept", "fiscal_year")
+    .distinct()
+)
+
+# Existing rows this scrape has NO current evidence for, under their OWN stmt.
+_reclass_unsupported = _reclass_target.join(
+    _reclass_reported_stmt_fy, on=["ticker", "stmt", "concept", "fiscal_year"], how="left_anti"
+)
+
+# ...of those, keep only rows where the SAME (ticker, concept, fiscal_year) IS reported this
+# scrape under a (necessarily different, by construction of the anti-join above) stmt — proof
+# of reclassification, not a concept that just went unreported this year.
+reclassified_stmt_keys = _reclass_unsupported.join(
+    _reclass_reported_concept_fy, on=["ticker", "concept", "fiscal_year"], how="inner"
+).select("ticker", "stmt", "concept", "fiscal_year").distinct()
+
+reclassified_stmt_keys.createOrReplaceTempView("reclassified_stmt_keys")
+
+n_reclassified = reclassified_stmt_keys.count()
+print(f"Stale rows to delete (concept reclassified to a different stmt): {n_reclassified:,}")
+
+spark.sql(f"""
+    MERGE INTO {full_tbl} AS t
+    USING reclassified_stmt_keys AS s
+    ON  t.ticker      = s.ticker
+    AND t.stmt        = s.stmt
+    AND t.concept     = s.concept
+    AND t.fiscal_year = s.fiscal_year
+    AND t.period_type = 'FY'
+    WHEN MATCHED THEN DELETE
+""")
+print(f"✓ Stmt-reclassification stale-row DELETE complete → {full_tbl}")
+
+# COMMAND ----------
+
 # MAGIC %md ## Sanity check
 
 # COMMAND ----------
