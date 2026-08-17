@@ -564,8 +564,10 @@ removing it.
 
 ## PHASE 6.5c — IMPLEMENTATION AND VALIDATION
 
-**Status: implemented, tested, and validated live against real production data. Draft PR, not
-merged.** Implements §B10's recommendation (Option A) exactly.
+**Status: implemented, tested, and validated live against real production data. Merged to `main`
+via PR #388 (2026-08-17, merge commit `b217e15`) — see §PHASE 6.5d below for the merge sequence
+and the deferred US/Canada validation contract.** Implements §B10's recommendation (Option A)
+exactly.
 
 ### C1. Implementation
 
@@ -746,9 +748,115 @@ Phase 6.3 `22`/`23` runs.
 - **Tier A started: NO**
 - **New unrelated findings**: NO new bug found this pass (the NULL-handling correction and the
   471-ticker figure are refinements of Phase 6.5b's own evidence, not new, separate issues).
-- **PR**: branch `phase6-5c-total-equity-nci-option-a`, pushed, not yet opened as a PR in this
-  session — recommended next action.
-- **Next recommended action**: open the PR (do not merge); once merged, the next *scheduled*
-  full-universe `21` run (or an explicitly authorized one) will naturally extend this fix's
-  results to the full ~1,616+471-ticker US/Canada population — no further code change needed for
-  that to happen.
+- **PR**: opened as #388. See §PHASE 6.5d below for the merge sequence and current status —
+  merged to `main`, but Phase 6.5 as a whole is not yet closed pending the next normal
+  full-universe `21` run's own US/Canada validation.
+- **Next recommended action**: superseded — see §PHASE 6.5d.
+
+---
+---
+
+## PHASE 6.5d — MERGE AND CLOSE
+
+### D1. Pre-merge finding: PR #388 bundled PR #387's still-unmerged changes
+
+**VERIFIED.** Before merging, PR #388's diff against `main` was inspected and found to include
+files belonging to Phase 6.3 (`docs/phase6-3-net-income-statement-classification.md`,
+`16__fetch_eu_xbrl.py`, and two Phase 6.3 test files) — not Phase 6.4/Tier A content, but
+genuinely unrelated-to-6.5 content nonetheless. Root cause: `phase6-5c-total-equity-nci-option-a`
+was branched sequentially from `phase6-5-total-equity-nci-normalization-fix`, itself branched
+from `phase6-3-net-income-statement-classification-research` — the correct choice at each step
+(Phase 6.5's fix needed Phase 6.3's already-fixed `21__clean_and_merge.py` to build on), but PR
+#387 (Phase 6.3) had never been separately merged (`state: OPEN, mergedAt: null`, confirmed
+directly). Per this phase's own STOP condition #1, this was flagged rather than silently merged
+through.
+
+**Resolution** (repo owner's explicit choice among three presented options): merge PR #387 first,
+then PR #388, so each lands as its own distinct, reviewable merge commit rather than bundled
+together.
+
+### D2. Merge sequence — both executed
+
+1. PR #387 was still a draft (from its original "documentation only" opening in Phase 6.3's
+   pause-and-root-cause step) — marked ready for review, then merged (`--merge`, no squash/rebase,
+   branch not deleted). **Merge commit: `ec58a514b4a91181b7e70aa92c2ce0eea7f2913a`.**
+2. Local `main` fast-forwarded to match; confirmed `git rev-parse HEAD == origin/main`.
+3. PR #388's diff against the now-updated `main` was re-verified via direct `git diff --stat
+   origin/main origin/phase6-5c-total-equity-nci-option-a` (not trusting `gh pr view --json
+   files`, which returned a stale, cached file list even after the base updated) — confirmed
+   clean: exactly the 3 Phase 6.5 files (`docs/phase6-5-total-equity-nci-normalization-fix.md`,
+   `21__clean_and_merge.py`'s own 59-line Option A addition, `tests/
+   test_total_equity_incl_nci_fallback.py`), nothing from Phase 6.3 left in the diff.
+4. CI green (`pipeline tests`, `ruff`, both pass) — PR #388 merged (`--merge`, branch not
+   deleted). **Merge commit: `b217e15d29d763070a6e7be0877bb0769ead2072`.**
+5. Local `main` fast-forwarded again; confirmed `git rev-parse HEAD == origin/main ==
+   b217e15d29d763070a6e7be0877bb0769ead2072`, working tree clean (the one untracked file,
+   `docs/phase6-4-european-financial-statement-coverage-audit.md`, predates this session's work
+   and is unrelated — left untouched).
+
+### D3. Explicit VERIFIED-NOW vs. DEFERRED split
+
+**VERIFIED NOW** (this session, real evidence, documented in §C above): the Option A
+implementation itself; EU behavior for all 8 issuers including the genuine IBE FY2021 fallback
+case; idempotency (two full EU-scoped runs); zero downstream (`22`/`23`) code changes needed;
+9 passing unit tests + 369/2 full suite; ruff clean; zero change to any existing production row
+this session touched.
+
+**DEFERRED to the next normal full-universe `21` run** (NOT performed this session, per explicit
+instruction not to trigger one specially): live materialization of new `"Total Equity (incl
+NCI)"` rows for the ~1,616 US/Canada tickers that already have both raw tags but haven't been
+reprocessed since this fix landed; live re-confirmation that the ~471 tickers needing the
+fallback (59 of them exclusively, every year) — including the five named representative cases,
+CAT/T/VZ/PG/ADM — produce byte-identical `"Total Stockholders Equity"` values through the new
+code path that they previously produced through the old `CONCEPT_SYNONYMS` rename. **This has
+NOT been validated as completed** — only analytically predicted (§C3's read-only cross-reference)
+and structurally guaranteed by the passing unit tests (§C2), not yet observed against a live
+reprocessing of that population.
+
+### D4. Next normal full-universe run — validation checklist (not executed this session)
+
+When the next normal (scheduled or otherwise separately authorized) full-universe `21` run
+occurs, the following should be checked — **not triggered specially for this purpose**:
+
+- **CAT, T, VZ, PG, ADM**: `Total Stockholders Equity` value unchanged from its pre-Option-A
+  figure; a new `Total Equity (incl NCI)` row now exists with the same value; the
+  `Total Stockholders Equity` row is `is_derived=True` (the fallback correctly fired, since these
+  five have zero direct raw facts across their entire history — §B2).
+- **AAPL, MSFT, TSLA, AEM, AQN, BN**: no unexpected row deletions, no value changes, no duplicate
+  `(ticker, stmt, concept, fiscal_year)` keys, Net Income still `stmt="Income Statement"` with no
+  stale `Cash Flow` duplicate (Phase 6.3's fix, now merged in the same `main` history, remains
+  intact).
+- **FCC, ALO, IBE, SGO, FCT, NAI, RAND, ISP**: re-confirm the §C5 results are unchanged
+  (particularly IBE FY2021's `is_derived=True` fallback row) — a regression here would mean the
+  full-universe run's broader scope somehow altered EU-specific behavior already proven correct
+  under the EU-only scope.
+- General: no duplicate canonical keys anywhere for either concept; idempotency, if the normal
+  cycle happens to run twice in short succession, recorded opportunistically (not forced).
+
+Only once this checklist is confirmed against real data from that run should Phase 6.5 be
+reclassified `COMPLETE`.
+
+---
+
+## Final Report (Phase 6.5d)
+
+- **Phase 6.5 status: MERGED — AWAITING NORMAL-RUN VALIDATION** (not yet `COMPLETE`; the
+  US/Canada population's own live behavior remains unobserved pending the next normal
+  full-universe `21` run, per §D3/§D4).
+- **PR #387: MERGED** — commit `ec58a514b4a91181b7e70aa92c2ce0eea7f2913a`.
+- **PR #388: MERGED** — commit `b217e15d29d763070a6e7be0877bb0769ead2072`.
+- **Main synchronization**: local `main` == `origin/main` == `b217e15d29d763070a6e7be0877bb0769ead2072`,
+  working tree clean (one pre-existing, unrelated untracked file left alone).
+- **Option A**: live in `main`, unchanged from §B10/§C1's design.
+- **EU validation**: complete (§C5) — carried forward unchanged by this merge.
+- **US/Canada validation**: **not yet performed** — deferred to the next normal full-universe `21`
+  run (§D3/§D4), not triggered this session.
+- **Legacy fallback cases (CAT/T/VZ/PG/ADM)**: mechanism validated via unit tests and EU live
+  evidence; **not yet individually re-observed live post-merge** — pending §D4's checklist.
+- **Regression**: none found this session (no full-universe run was performed to check against).
+- **Unexpected findings**: the PR #387/#388 bundling issue (§D1) — resolved by sequencing the two
+  merges rather than combining them.
+- **Phase 6.5 documentation**: updated (this section).
+- **Tier A: NOT STARTED.**
+- **Proposed next phase**: see the separate Tier A implementation-readiness plan below (not part
+  of Phase 6.5, prepared but not started, per instruction).
