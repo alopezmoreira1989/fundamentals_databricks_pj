@@ -28,6 +28,11 @@
   var YEARS = JSON.parse(dataEl.textContent);
   if (!YEARS.length) return;
 
+  // Phase 5.7a: the ticker's real reporting currency (company_detail.html's shared
+  // #chart-currency-data payload) — replaces a hardcoded "$" that mislabeled non-USD figures.
+  var ccyEl = document.getElementById("chart-currency-data");
+  var CCY = ccyEl ? JSON.parse(ccyEl.textContent) : "USD";
+
   var root = getComputedStyle(document.documentElement);
   var tok = function (name) { return root.getPropertyValue(name).trim(); };
   var COLOR_INK = tok("--ink");
@@ -36,9 +41,11 @@
 
   function compact(v) {
     var a = Math.abs(v);
-    if (a >= 1e9) return "$" + (v / 1e9).toFixed(1) + "B";
-    if (a >= 1e6) return "$" + (v / 1e6).toFixed(1) + "M";
-    return "$" + v.toFixed(0);
+    var body;
+    if (a >= 1e9) body = (v / 1e9).toFixed(1) + "B";
+    else if (a >= 1e6) body = (v / 1e6).toFixed(1) + "M";
+    else body = v.toFixed(0);
+    return CCY === "USD" ? "$" + body : body + " " + CCY;
   }
 
   var dividerPlugin = {

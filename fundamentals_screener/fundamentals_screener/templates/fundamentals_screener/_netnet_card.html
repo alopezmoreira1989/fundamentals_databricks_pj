@@ -36,7 +36,7 @@ off %} needed here — both callers already wrap their whole content block in on
         {% for lv in net_net_levels %}
           <tr>
             <td>{{ lv.label }}</td>
-            <td class="text-end font-monospace">{{ lv.ncav_per_share|metric_value:"usd" }}</td>
+            <td class="text-end font-monospace">{{ lv.ncav_per_share|metric_value:net_net.currency }}</td>
             <td>
               {% if lv.ratio is not None %}
                 <div class="nn-bar" title="{{ lv.ratio|floatformat:2 }}&times; NCAV/share">

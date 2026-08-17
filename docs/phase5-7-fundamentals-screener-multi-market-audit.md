@@ -916,3 +916,243 @@ correct for all 8 EU companies. Phase 5.7a+b closes every currency-mislabeling f
 audit. Nothing in any of the three phases touches the public contract, so none of it needs to
 be coordinated with the external consumer's own deploy — each can ship as an ordinary
 `fundamentals_screener` patch/minor release, independently, in the order above.
+
+---
+
+## Implementation — Phase 5.7a (currency display)
+
+**Status: implemented and verified locally (pytest/ruff). Not live-data-validated (see
+Limitations). Draft PR, not merged.**
+
+### What was implemented
+
+Covers §17.1 (`currency.py` map), §17.2 (hardcoded `"usd"` literals — football field, Net-Net
+Finder), §17.3 (`HeadlineKpi.currency`), §17.4 (`NetNetRow.currency` — the one additive DTO
+change), §17.6 (JS/chart hardcoded `$`), §17.7 (USD-lens toggle gate), plus statement/quarterly
+table currency disclosure (originally §17.5/17.9, folded into this pass since it shares the
+same "thread `reporting_currency` through an existing render path" shape as everything else
+here).
+
+| Current behavior | Implemented change | Files |
+|---|---|---|
+| `quote_currency("EU")` fell through `.get(..., "USD")` to a guessed `"USD"` | `QUOTE_CURRENCY_BY_MARKET` now has `"EU": "EUR"` (mirrors the pipeline's own already-fixed map in `22__derived_metrics.py`/`23__intrinsic_value.py`); an unmapped market now returns `None`, never a guessed `"USD"` | `currency.py` |
+| `price_currency = quote_currency(summary.market).lower()` | `None`-safe; `show_usd_toggle` no longer treats an unknown price currency as "definitely USD" | `views.py` (`company_detail`) |
+| General Screener's USD-lens toggle: `"CA" in markets` | `any(quote_currency(m) not in (None, "USD") for m in markets)` — generic over any market this app has a real quote currency for | `views.py` (`screen`) |
+| Overview KPIs (Revenue/Net Income/Total Assets/Operating CF): `HeadlineKpi(currency=None)` always → defaulted to `$` | `headline_kpis(statements, currency=summary.reporting_currency)` — stamps the ticker's real reporting currency on every row | `services.py`, `views.py` |
+| Football field bear/mid/bull: `metric_value:"usd"` literal | `metric_value:s.reporting_currency` | `company_detail.html` |
+| Income Statement/Balance Sheet/Cash Flow/Quarterly cells: bare `compact_money` (correct, currency-silent) | `compact_money_ccy:s.reporting_currency` + a one-line "Figures in [badge]" disclosure per tab (badge-only, so a USD company's page is byte-for-byte unchanged) | `company_detail.html` |
+| Net-Net Finder: `metric_value:"usd"` (Price/NCAV), literal `${{ ... }}` (Market Cap) | `NetNetRow` gained an additive `currency: str | None = None` field, populated from the ticker's own `reporting_currency` (see "A finding made during implementation" below for why, not from the metric's own `unit`); template now reads `item.row.currency` | `dtos.py`, `repositories/company_listing.py`, `repositories/companies.py` (`net_net_snapshot`), `_netnet_content.html`, `_netnet_card.html` |
+| `forecasting.js`/`balance_sheet_chart.js`/`statement_charts.js`: hardcoded `"$"` client-side | One shared `#chart-currency-data` `json_script` payload (`chart_currency` context key); each script prefixes `$` only for `"USD"`, else suffixes the real currency code | `views.py`, `company_detail.html`, the three `.js` files |
+
+### A finding made during implementation (not in the original audit)
+
+While wiring `NetNetRow.currency`, found that `"NCAV / Share (Live)"` and its Moderate/Strict
+siblings are exported with a **hardcoded `'usd'` unit literal**
+(`fundamentals_pipeline/50__publish/51__export_dashboard_data.py`'s `_NCAV_LIVE_COLUMNS`),
+unlike `"Market Cap (Live)"` in the same file, which already uses the real per-row currency
+(`_live_unit_expr = "LOWER(md.currency)" if "currency" in _mcl_cols else "'usd'"`). This means
+`dashboard_metrics`'s own `unit` column for NCAV Live is **not a reliable currency source** —
+using it would have reproduced the exact bug this phase set out to fix, just moved one layer
+down. Per the currency-model principle in the prompt this phase followed ("prefer explicit
+currency metadata... from the existing authoritative data path"), `NetNetRow.currency` is
+sourced from the ticker's own `reporting_currency` (the meta artifact) instead — always correct,
+independent of this per-metric export quirk. **Documented, not fixed** — this is
+`51__export_dashboard_data.py`, outside this phase's Django-only scope (§14 of the prompt this
+phase followed). Flagged for the pipeline owner alongside the audit's own §17.8 finding
+(`metrics_hierarchy.json`'s generic `"usd"` unit label) — the two are the same root-cause
+pattern in two different places.
+
+### Currency model actually implemented
+
+- **Native/reporting currency** = each ticker's own `reporting_currency` (meta artifact,
+  FIRDS/SEC-sourced, never inferred from country/market) — used for every statement-derived and
+  intrinsic-value figure (Overview KPIs, Income Statement/Balance Sheet/Cash Flow/Quarterly,
+  football field, Net-Net Finder).
+- **Quote/price currency** = `quote_currency(market)` — `dashboard_prices` carries no currency
+  column of its own (confirmed against `fundamentals_pipeline/artifacts.py`'s `_PRICES_SPEC`),
+  so market-keyed inference is the only signal available, same as the pipeline's own
+  `market_cap_asof`/`market_cap_live` currency-alignment logic. Used only for the Price tab's
+  raw close/SMA figures and the football field's own market-price line (both pre-existing, not
+  changed by this phase beyond the `None`-safety fix).
+- **No FX conversion was built.** Every value displayed is shown in its own native currency,
+  labeled correctly — never converted. The one place real conversion already existed before this
+  phase (`get_market_cap_kpi`'s USD-lens toggle, via `fundamentals_pipeline.fx.convert_price` +
+  a real same-date FX rate, degrading to native+badge on a missing rate) is unchanged.
+
+### Backward compatibility
+
+- Every US ticker (`reporting_currency="USD"`) renders **identically** to before this phase:
+  `compact_money_ccy`/`metric_value`'s USD branch still prefixes `$` with no badge, and the new
+  "Figures in [badge]" statement-tab header renders empty (no DOM change at all) since
+  `currency_badge("USD")` returns `""`.
+- Every existing Canadian ticker keeps its already-correct behavior for Market Cap
+  (`get_market_cap_kpi`, `_apply_usd_lens` — untouched) and now additionally gets correct native
+  labeling everywhere else it previously silently showed `$` (Overview KPIs, statements,
+  football field, Net-Net Finder) — a **fix**, not a regression, for the pre-existing CAD case
+  the audit found this bug was already live for.
+- `NetNetRow.currency` and `quote_currency()`'s `None`-capable return type are the only type
+  changes; both are additive/internal (see the audit's own §3 classification table) — no public
+  URL, DTO removal, or template filename changed.
+
+### Tests added (59 assertions across 2 new + 2 extended files, full suite: all passing, `ruff check`: clean)
+
+- `tests/test_currency.py` (new) — `quote_currency()` for US/CA/EU/unmapped/None; the real
+  AEM (CA-quoted, USD-reporting) vs. AQN (CA-quoted, CAD-reporting) distinction explicitly, per
+  the prompt's own emphasis that this is a live case, not hypothetical; `metric_value`/
+  `compact_money`/`compact_money_ccy`/`currency_badge` across USD/CAD/EUR/None/zero/missing.
+- `tests/test_headline_kpis.py` (new) — `services.headline_kpis()` stamps the given currency on
+  every row, defaults to `None` (never a fabricated currency), never alters the underlying value.
+- `tests/test_net_net.py` / `tests/test_net_net_snapshot.py` (extended) — `NetNetRow.currency`
+  populated from a EUR/CAD ticker's real `reporting_currency`, and `None` (not a guessed `"USD"`)
+  for a ticker whose meta record has none.
+
+### Real EU companies verified
+
+**Update (final review pass): real production data WAS obtained and used** — this section
+originally reported no local data was available; that has since been superseded, see "Final
+review — real-data validation" below. **The EU-specific conclusion is unchanged**: the 8 Phase
+5.6 European tickers are not present in any published GitHub Release yet (confirmed directly —
+see below), so a real end-to-end EU render genuinely cannot be validated right now, for reasons
+external to this PR's code.
+
+### US / Canada regression
+
+**Superseded by the final review pass below** — this was originally "not verified, no local
+data"; it has since been verified against real, live, currently-published production data
+(AAPL, AEM, AQN, and five additional real CAD-reporting tickers), not synthetic fixtures.
+
+---
+
+## Final review — real-data validation (pre-merge)
+
+Performed as a distinct, later pass — **not part of the original implementation's own testing**
+(which had no data available) — using real artifacts downloaded directly from this repo's own
+GitHub Release (`https://github.com/alopezmoreira1989/fundamentals_databricks_pj/releases/
+download/latest/...`), run through the actual `fundamentals_screener` service/repository code
+on the `phase5-7a-currency-display` branch (not a reimplementation).
+
+### What was actually available
+
+The published `latest` release (`build_timestamp: 2026-08-16T07:28:09Z`, confirmed via
+`gh api repos/.../releases --paginate`, no newer tag exists) **predates PR #380's merge into
+`main`** — it is the last successful scheduled daily production run, which ran before the Phase
+5.6 European integration work even started that day. **The 8 European tickers (FCC, ALO, NAI,
+FCT, IBE, SGO, RAND, ISP) are absent from every currently-published release, `latest` included**
+— confirmed directly by loading the real `dashboard_meta.json` and checking. This is not an
+environment limitation; it is a fact about the public artifact's current state: `51__export_
+dashboard_data.py`'s EU union (and `52__publish_to_github.py` after it) has not run in
+production since PR #380 merged. **A real EU render will only be checkable after the next
+scheduled Databricks daily run** (08:00 Europe/Madrid) — or an explicit one-time `52` run —
+actually republishes with the EU union included.
+
+AAPL/AEM/AQN, and the whole US/CA universe, **are** present and current in this same release, so
+the US/CA half of the regression check was done for real, not just via fixtures.
+
+### AAPL / AEM / AQN — real production data, real code path
+
+Ran `services.get_company_summary`/`headline_kpis`/`get_market_cap_kpi`/`get_net_net_snapshot`/
+`get_intrinsic_value_field`/`get_company_statements` directly (a minimal `django.conf.settings.
+configure()` + `django.setup()`, `FUNDAMENTALS_DATA_PATH` pointed at the downloaded release —
+same code the view calls, not a reimplementation) and rendered each value through the real
+`templatetags.fmt` filters:
+
+| Ticker | `market` | `reporting_currency` | Revenue KPI rendered | Net-Net price rendered | Market Cap rendered |
+|---|---|---|---|---|---|
+| AAPL | US | USD | `$416.16B` | `$304.91` | `$4.45T` |
+| AEM | CA | **USD** (real, confirmed) | `$11.91B` | `$253.20` | `$126.61B` |
+| AQN | CA | **CAD** (real, confirmed) | `2.43B CAD` badge | `8.08 CAD` badge | *(no live market cap row this build)* |
+
+AEM and AQN are both `market="CA"` (both quote in CAD via `quote_currency("CA")`), but AEM's
+real `reporting_currency` is USD and AQN's is CAD — the exact documented distinction the
+implementation prompt called out, confirmed against real data, not asserted from memory. AEM's
+figures correctly stay `$`; AQN's figures correctly switched from what would have been a wrong
+`$` to a correct `CAD` badge.
+
+### The `NCAV / Share (Live)` pipeline bug — confirmed live, with real tickers
+
+Queried the real `dashboard_metrics.parquet` directly: for every real CAD-reporting ticker with
+both rows present (**CP, ENB, FTS, IMO, TRP** — not a hypothetical), `"Market Cap (Live)"`'s
+`unit` is correctly `'cad'`, but `"NCAV / Share (Live)"`'s `unit` is `'usd'` for the exact same
+ticker — the mismatch this phase's implementation section already flagged, now proven against
+real, currently-published data rather than inferred from reading the export script. Then
+confirmed `CompanyRepository.net_net_snapshot()` on this branch correctly resolves
+`currency="CAD"` for all five (not the metric's own wrong `"usd"`), rendering e.g. CP's NCAV/
+Share as `-41.16 CAD`, not `$-41.16`. **This is the single strongest piece of evidence in this
+review** — it's a real, live, already-published data quality bug, and this phase's workaround
+is proven to neutralize it for real tickers today, not just in a synthetic test fixture.
+
+### USD-lens toggle — semantics confirmed, real data
+
+Checked the user's specific concern directly: does "View Market Cap in USD" still mean only
+that, after generalizing the toggle's visibility gate?
+
+- `services.available_markets()` on real data returns `('CA', 'US')`; the generalized gate
+  `any(quote_currency(m) not in (None, "USD") for m in markets)` evaluates `True` — the toggle
+  still appears, no regression from the old `"CA" in markets` check.
+- For CP/ENB/TRP: `get_market_cap_kpi(t, usd_lens=True)` converts Market Cap only (e.g. CP:
+  `112.53B CAD` native → `$80.76B` with the lens on, via a real FX rate from `dashboard_fx`) —
+  and `headline_kpis()`'s Revenue figure for the same tickers is confirmed **identical**
+  regardless of `usd_lens`, still `15.08B CAD`. The toggle does exactly and only what its label
+  says; it was not broadened into an implicit "convert everything" control by this phase's
+  changes.
+
+### Hardcoded-currency re-sweep
+
+Re-grepped the full diff for `"$"`/`"usd"`/`"USD"`/`"CAD"`/`"EUR"` and classified every hit.
+One item worth noting explicitly (not a bug, but flagged for completeness): `views.py`'s
+`_NET_NET_HEADER_COLUMNS` still tags the Price/NCAV/Market Cap **header** columns with a literal
+`"usd"` — but that value only feeds `_sort_headers()`'s `numeric` flag (right-align styling) and
+is never rendered as text; `_netnet_content.html`'s header `<th>` markup doesn't read `.unit` at
+all, and every cell's actual value already goes through `item.row.currency` (the real fix).
+Confirmed dead/inert for this purpose, not a leak. Everything else found is either the one real
+FX mechanism (`get_market_cap_kpi`/`_apply_usd_lens`, unchanged, in-scope-by-design), the filter
+implementations themselves, or the pre-existing `usd=1` querystring parameter name (unrelated to
+currency labeling).
+
+### Null semantics — real-data note
+
+Every one of the 2,600+ real US/CA tickers in the current release already has a non-null
+`reporting_currency` (checked directly) — so `currency=None`'s degrade-to-USD-default path
+(`compact_money_ccy`'s own documented, pre-existing convention) is not exercised by any ticker
+live today. It remains defensive/forward-looking code, validated by the unit tests
+(`tests/test_currency.py`), for the day a EU (or future-market) row's currency genuinely comes
+back null.
+
+### Verdict inputs
+
+- **Diff scope**: confirmed via `git diff bf94e8e..HEAD --stat -- fundamentals_screener/` — 17
+  files, no file outside `currency.py`/`dtos.py`/`services.py`/`views.py`/two repository files/
+  `templatetags/fmt.py`/three templates/three JS files/four test files. `urls.py` has zero diff.
+  `dtos.py`'s only change is the one additive `NetNetRow.currency` field.
+- **Regression**: `pytest` (full suite) and `ruff check` both clean, re-run at review time.
+- **Public contract**: unchanged (confirmed via the `urls.py` diff above and the DTO diff being
+  purely additive).
+- **EU validation**: still not possible — confirmed to be an external/timing gap (no published
+  release contains EU data yet), not a defect in this PR. High confidence by analogy (the CAD
+  case, which uses the identical code path, is now proven correct against real data) but not
+  literally observed for a EUR figure.
+
+### Known limitations / deferred work
+
+- **General Screener / Investor Presets table columns** (any metric other than Market Cap)
+  still inherit the generic `"usd"` unit label from `metrics_hierarchy.json` — the mechanism
+  (`ScreenTableRow.units`, per-row) is correct and required no Django change; the *data* it
+  reads is wrong at the source. Deferred to the pipeline owner (§17.8, unchanged from the
+  audit).
+- **`NCAV / Share (Live)`'s exported `unit` is hardcoded `'usd'`** — the new finding above.
+  Worked around for `NetNetRow.currency` (sourced from `reporting_currency` instead); the raw
+  `dashboard_metrics` row itself is still mislabeled for any other consumer that might read it
+  directly. Deferred to the pipeline owner.
+- **Cross-currency sort/filter correctness** (General Screener metric bounds, Net-Net Finder's
+  Price/NCAV/Market Cap column sorts) is unchanged — these still compare raw native-currency
+  values across tickers with different currencies. This is a numeric-correctness concern
+  distinct from display mislabeling, and building comparability (via FX conversion or
+  currency-scoped comparison) was explicitly out of scope for this phase.
+- **"View Market Cap in USD (other figures stay native)" toggle wording**: investigated per the
+  prompt's §9 — the copy already accurately describes its own scope (only Market Cap converts,
+  via a real FX rate; everything else stays native) and is, if anything, *more* accurate now
+  that "everything else" visibly shows its real native currency instead of a misleading `$`. No
+  wording change made.
+- **Quarterly tab relabeling to "Interim", Filings tab redesign, ticker-collision hardening**:
+  explicitly out of scope for this phase (per the prompt), unchanged from the audit's own
+  findings.
