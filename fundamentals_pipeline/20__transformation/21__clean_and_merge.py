@@ -187,7 +187,22 @@ incoming = incoming.withColumn("prio", _prio)
 # Normalise: collapse XBRL synonyms to the canonical concept via CONCEPT_SYNONYMS
 # (inherited from the %run of 01__tickers). If both report the same (ticker, stmt, fy),
 # the downstream dedup keeps one — prio asc, latest filed, largest value.
+#
+# EXCEPTION — "Total Equity (incl NCI)" (Phase 6.5c, docs/phase6-5-total-equity-nci-
+# normalization-fix.md): CONCEPT_SYNONYMS still maps it to "Total Stockholders Equity" (real,
+# active US/Canada production data depends on that fallback for ~59 tickers — CAT, T, VZ, PG,
+# ADM, … — that have never tagged the narrower concept at all), but a blind rename here would
+# silently discard the broader concept's own value for every filer that has BOTH (all 7
+# mapped EU issuers, plus ~1,616 US/Canada tickers) the moment the narrower one wins the
+# dedup tiebreak. Deliberately skipped in THIS loop only — CONCEPT_SYNONYMS itself is left
+# byte-identical so every other consumer (21b__derive_quarterly.py, 35__reconcile_filings.py,
+# 38__history_audit.py, sources/eu_current.py) keeps its existing, unrelated-to-this-phase
+# behavior for this pair unchanged. The keyed fallback that reproduces the old behavior WITHOUT
+# discarding data is implemented explicitly below (§2b), after both concepts have independently
+# survived dedup as their own rows.
 for _alt, _canon in CONCEPT_SYNONYMS.items():
+    if _alt == "Total Equity (incl NCI)":
+        continue
     incoming = incoming.withColumn(
         "concept",
         F.when(F.col("concept") == _alt, _canon).otherwise(F.col("concept"))
@@ -275,6 +290,43 @@ print(f"After dedupe & normalize: {clean_fy.count():,} FY rows ready for MERGE")
 
 # COMMAND ----------
 
+# MAGIC %md ## 2b. "Total Equity (incl NCI)" fallback for "Total Stockholders Equity"
+# MAGIC
+# MAGIC Phase 6.5c (docs/phase6-5-total-equity-nci-normalization-fix.md). Both concepts already
+# MAGIC survive `clean_fy` as independent rows wherever their own raw fact exists — §2's synonym
+# MAGIC loop no longer collapses this one pair. This step ADDITIVELY reproduces the pre-existing
+# MAGIC "Total Stockholders Equity" fallback behavior real production data has always had for
+# MAGIC filers that only ever tag the broader concept, WITHOUT overwriting a genuine direct fact
+# MAGIC when one exists: for every `(ticker, stmt, fiscal_year)` key that has a real
+# MAGIC "Total Equity (incl NCI)" row but NO "Total Stockholders Equity" row, a fallback row is
+# MAGIC synthesized with that same value, marked `is_derived=True` (the existing column already
+# MAGIC used elsewhere in this pipeline for a computed/substituted, not directly-reported, value).
+# MAGIC Generic and source-agnostic by construction — keyed only on `(ticker, stmt, fiscal_year)`,
+# MAGIC no market/ticker/country branch.
+
+# COMMAND ----------
+
+_direct_equity_keys = (
+    clean_fy
+    .filter(F.col("concept") == "Total Stockholders Equity")
+    .select("ticker", "stmt", "fiscal_year")
+    .distinct()
+)
+_equity_fallback_rows = (
+    clean_fy
+    .filter(F.col("concept") == "Total Equity (incl NCI)")
+    .join(_direct_equity_keys, on=["ticker", "stmt", "fiscal_year"], how="left_anti")
+    .withColumn("concept", F.lit("Total Stockholders Equity"))
+    .withColumn("is_derived", F.lit(True))
+)
+n_equity_fallback = _equity_fallback_rows.count()
+print(f"Total Stockholders Equity fallback rows synthesized (no direct fact for that key): "
+      f"{n_equity_fallback:,}")
+
+clean_fy = clean_fy.unionByName(_equity_fallback_rows)
+
+# COMMAND ----------
+
 # MAGIC %md ## 3. MERGE — upsert FY rows into clean table
 
 # COMMAND ----------
@@ -290,11 +342,16 @@ spark.sql(f"""
     AND target.fiscal_year = source.fiscal_year
     AND target.period_type = source.period_type
 
-    WHEN MATCHED AND (target.value != source.value OR target.period_end != source.period_end) THEN
+    WHEN MATCHED AND (
+        target.value != source.value
+        OR target.period_end != source.period_end
+        OR target.is_derived != source.is_derived
+    ) THEN
         UPDATE SET
             target.value         = source.value,
             target.period_end    = source.period_end,
             target.company       = source.company,
+            target.is_derived    = source.is_derived,
             target.scraped_at    = source.scraped_at,
             target.tag_namespace = source.tag_namespace,
             target.source_id     = source.source_id
