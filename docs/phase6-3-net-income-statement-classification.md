@@ -1,12 +1,17 @@
-# Phase 6.3 — Net Income statement-classification bug: root cause + fix design
+# Phase 6.3 — Net Income statement-classification bug: root cause, fix, and validation
 
-**Research + fix design only. No production code was changed, no notebook was run, nothing was
-published.** This document exists because validating Phase 6.3's live `23__intrinsic_value.py`
-run (`docs/phase6-3-derived-metrics-recomputation.md`) surfaced a real defect — `Owner Earnings
+**STATUS: IMPLEMENTED AND VALIDATED.** §§1–7 below are the original root-cause analysis and fix
+design (research-only at the time they were written). §8 records what was actually implemented,
+tested, and validated against real production data — including a second, related bug found
+during validation and fixed in the same pass. See §8 for current status;
+**Databricks pipeline: VERIFIED. GitHub Release: VERIFIED. Website cache refresh: PENDING
+EXTERNAL CRON** (not a pipeline defect — see §8.8).
+
+This document exists because validating Phase 6.3's live `23__intrinsic_value.py` run
+(`docs/phase6-3-derived-metrics-recomputation.md`) surfaced a real defect — `Owner Earnings
 (FY) = 0.0` for all 8 European issuers — that turned out to be a symptom of something more
-fundamental and more consequential than a missing-input gap. This document root-causes it fully
-against real production data and real code, and proposes (but does not implement) the minimal
-fix.
+fundamental and more consequential than a missing-input gap. §§1–7 root-cause it fully against
+real production data and real code, and design the minimal fix. §8 implements and validates it.
 
 Every claim below is labeled **VERIFIED** (checked directly against real code and/or real
 production data in this session), **INFERRED** (a reasonable conclusion from verified facts, not
@@ -176,9 +181,9 @@ common)" as a live landmine for the next EU mapping phase.
 
 ---
 
-## 6. Proposed minimal fix (NOT implemented)
+## 6. Proposed minimal fix (implemented as designed — see §8)
 
-**PROPOSED.**
+**PROPOSED** (at the time this section was written; implemented essentially verbatim, see §8.1).
 
 **Scope: `fundamentals_pipeline/10__ingestion/16__fetch_eu_xbrl.py` only.** Zero changes to
 `01__tickers.py` (the `STATEMENTS` duplication there is correct and load-bearing for SEC — do
@@ -321,5 +326,141 @@ trade-off of the fix (§6) — deferred to whoever implements and validates the 
    becomes real (not 0.0) where inputs exist and stays NULL where they genuinely don't, and a
    byte-identical US/Canada regression check — detailed in §7 above.
 
-**This document proposes a fix. It does not implement one.** Per instruction, waiting for
-explicit approval before any code change, notebook run, or publish.
+---
+
+## 8. Implementation and validation (executed)
+
+**VERIFIED**, against real production data, in the personal validation Databricks Repo
+(`/Repos/al.lopez.moreira@gmail.com/phase6-validation`, tracking this PR's branch). Executed in
+the order below; nothing was run out of sequence.
+
+### 8.1 Code change
+
+`16__fetch_eu_xbrl.py`'s `_LABEL_TO_STMT_KIND` construction replaced with the `setdefault()`-based
+deterministic priority exactly as designed in §6, over `_STMT_PRIORITY = ("Income Statement",
+"Balance Sheet", "Cash Flow")`. Scope held exactly as specified: no changes to `01__tickers.py`,
+SEC ingestion, Canada ingestion, `22`, `23`, `51`, `52`, `fundamentals_screener`, or the frontend.
+
+### 8.2 Tests — priority validated as general, not Net-Income-specific
+
+Added `tests/test_eu_adapter_stmt_kind_priority.py` (5 tests) + extended
+`test_eu_adapter_protocol_conformance.py`'s loader to accept a pre-seeded synthetic `STATEMENTS`
+dict. Per the explicit requirement that `Income Statement > Balance Sheet > Cash Flow` be proven
+as a genuine 3-tier rule and not merely asserted because it happens to fix Net Income:
+
+- The 3 real production collisions all resolve to `Income Statement` (regression test for the
+  actual bug).
+- Non-colliding labels are unaffected (no over-application).
+- **`test_priority_generalizes_beyond_income_statement_vs_cash_flow`**: two synthetic collisions
+  *unrelated to Net Income* — a Balance-Sheet-vs-Cash-Flow pairing (`"Cash and Equivalents"`, a
+  stock balance that also legitimately appears as the Cash Flow statement's ending-balance
+  reconciliation line) and an Income-Statement-vs-Cash-Flow pairing (`"Interest Expense"`) — both
+  resolve to the higher-priority statement, proving the rule holds for pairings the real Net
+  Income bug never exercises.
+- **`test_result_is_independent_of_statements_dict_insertion_order`**: the same fixture rebuilt
+  with the outer `STATEMENTS` dict reversed, the inner concept-map dicts reversed, and both
+  reversed together — all three produce byte-identical results to the baseline. Direct proof the
+  old bug class (result depends on dict/insertion order) cannot recur.
+- Missing-`STATEMENTS` fallback (outside Databricks) still yields an empty, harmless map.
+
+7/7 new+updated tests pass. Full suite: 360 passed, 2 skipped (fixture-gated, expected). Ruff
+clean on all touched files.
+
+### 8.3 EU re-ingestion (16) — real production data
+
+Fresh scrape, all 8 tickers: 100% of `"Net Income"` and `"Net Income (incl NCI)"` facts now stamp
+`stmt="Income Statement"` — zero remaining `"Cash Flow"` rows (was 100% `"Cash Flow"` pre-fix).
+
+### 8.4 Clean merge (21) — a second bug found and fixed mid-validation
+
+Re-running `21__clean_and_merge.py` after the corrected ingestion surfaced a real, unanticipated
+consequence: the plain UPSERT `MERGE` never deletes, and §4's existing orphan-DELETE (scoped to
+"fabricated annual from a sub-annual shape") only catches keys that ARE part of the current
+scrape's reported-key universe under their *current* stmt — a key whose stmt moved elsewhere
+entirely never enters that universe, so it was invisible. Result: for all 8 EU tickers, the OLD
+`stmt="Cash Flow"` Net Income row (the wrong, pre-fix incl-NCI value) stayed in `financials`
+forever, sitting alongside the new, correct `stmt="Income Statement"` row.
+
+Paused and presented three remediation options (extend `21`'s orphan logic / one-time manual
+DELETE / accept and defer). Chose to extend `21__clean_and_merge.py` with a second, narrowly-
+scoped DELETE step (§4b in the notebook) at the same `(ticker, stmt, concept, fiscal_year)`
+granularity the existing orphan-DELETE already uses, scoped to tickers actually present in the
+current scrape — only deletes a row when the current scrape can positively prove that exact key
+moved to a different stmt (not merely that it went unreported this time, which stays untouched,
+matching the existing conservative behavior for that separate case). This is a general safety
+property, not EU-specific — the identical logic would correctly clean up a genuine future
+SEC/Canada re-tag too.
+
+Re-ran 16→21 after this change: all 8 EU tickers now show exactly **one** Net Income row each
+(`Income Statement`, correct value); the stale `Cash Flow` duplicates are gone. SEC/Canada's
+genuine dual-statement rows (AAPL, MSFT, TSLA, AEM, AQN, BN — both `Income Statement` and
+`Cash Flow` Net Income rows, by design, per §2) confirmed completely untouched, same row counts
+before and after.
+
+### 8.5 FCC/ALO value validation
+
+| Ticker | FY | Pre-fix (wrong) | Post-fix (correct) | Matches §1 target? |
+|---|---|---|---|---|
+| FCC | 2024 | €567,584,000 | €429,865,000 | Yes, exact |
+| ALO | 2026 | €365,000,000 | €324,000,000 | Yes, exact |
+
+### 8.6 22 — full-universe run
+
+Ran twice (initial + idempotency check). Row counts identical to the pre-fix Phase 6.3 baseline
+for every ticker checked (US/CA and EU) — expected, since the fix corrects *values*, not which
+metrics get computed. Decisive cross-check: FCC's `Net Margin %` = 4.7387%, which reconciles
+exactly to €429,865,000 / €9,071,416,000 (its FY2024 Revenue) — proof the corrected Net Income is
+flowing through `22`'s derivation, not just sitting in `financials` unused. IBE (€5.612B) and SGO
+also confirmed on the real Income Statement Net Income. No safety-guard exception raised (both
+runs `TERMINATED SUCCESS`).
+
+### 8.7 23 — Owner Earnings validation
+
+`Owner Earnings (FY)` is non-zero for all 31 EU ticker-year rows checked across all 8 tickers —
+zero remaining `0.0` values. Note: `23`'s existing, unrelated `fillna(0)` formula design means
+Owner Earnings for EU currently reduces to exactly Net Income (Tier 2 inputs — CapEx/D&A/SBC/ΔWC —
+remain unmapped, contribute `0`, unchanged by this fix and out of scope per instruction). AAPL
+unchanged: $123.856B FY2025, matching the pre-fix baseline exactly.
+
+### 8.8 Idempotency, 51, 52
+
+Re-ran `22`+`23` a second time: identical row counts and value sums for every ticker checked, no
+duplicates, no drift. `51__export_dashboard_data.py` and `52__publish_to_github.py` both
+succeeded; the GitHub Release was confirmed `draft: false` and freshly published
+(`published_at: 2026-08-17T16:53:02Z`).
+
+**Website cache — PENDING EXTERNAL CRON, not a pipeline defect.** The live public site
+(`fundamentals_screener` deployment) still showed the pre-fix €567.6M for FCC after the Release
+was published. This is expected and documented, not a bug: the production deployment reads from
+a cron-refreshed on-disk cache (see the package's "Keeping data fresh" design, CLAUDE.md's
+External consumers section) rather than fetching the GitHub Release live on the request path.
+Confirmed the GitHub Release side is correct and complete; the remaining step (the site's own
+scheduled cache refresh) is outside this session's reach and outside this fix's scope.
+
+### 8.9 US/Canada regression
+
+Clean throughout every checkpoint (16 was EU-only so these tickers were never touched; 21/22/23
+row counts and dual-statement Net Income rows byte-identical before/after for AAPL, MSFT, TSLA,
+AEM, AQN, BN).
+
+### 8.10 Remaining limitations
+
+- Tier 2 EU inputs (CapEx, D&A, SBC, ΔWC, Accounts Receivable, Profit Before Tax, Finance Income,
+  EPS, Gross Profit, Total Liabilities) remain unmapped — untouched by design, per instruction.
+- `"Net Income (to common)"` stays a defused-but-dormant landmine (never populated for EU today,
+  but would resolve safely if a future mapping phase ever produces it).
+- Website cache refresh pending (§8.8) — expected to resolve on the next scheduled cron cycle,
+  external to this repo.
+
+---
+
+## Final status
+
+**Databricks pipeline: VERIFIED. GitHub Release: VERIFIED. Website cache refresh: PENDING
+EXTERNAL CRON.**
+
+**Classification: READY TO MERGE — EXTERNAL WEBSITE REFRESH PENDING.** The fix (§6), its general-
+priority validation (§8.2), and the additional stale-row cleanup discovered and fixed during
+validation (§8.4) are implemented, tested, and validated end-to-end against real production data.
+The one open item — the live site's own cache refresh — is an external, asynchronous dependency
+outside this PR's control and is not a reason to hold or modify the implementation.
