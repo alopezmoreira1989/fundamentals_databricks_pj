@@ -494,6 +494,179 @@ EU_CANONICAL_MAPPING: dict[str, tuple[MappingDecision, ...]] = {
             "RevenueFromContractsWithCustomers Revenue variant above).",
         ),
     ),
+    # ── Phase 6.6 (Tier A) — 8 concepts identified and evidence-gathered by the Phase 6.4 audit
+    # (docs/phase6-4-european-financial-statement-coverage-audit.md §12), re-verified against a
+    # fresh live re-fetch during that same phase before implementation here. Two
+    # (Non-Controlling Interests, Finance Income) required a brand-new SEC-side canonical slot in
+    # 01__tickers.py's STATEMENTS (documented there); the other six reuse an existing canonical
+    # concept, adding real EU tags only.
+    "Accounts Payable": (
+        MappingDecision(
+            canonical_concept="Accounts Payable",
+            status=MappingStatus.ACCEPTED,
+            mapping_type=MappingType.DIRECT,
+            source_concept="ifrs-full:TradeAndOtherCurrentPayablesToTradeSuppliers",
+            notes="Verified live 2026-08 (Phase 6.4 fresh fetch) against FCC's real FY2024 "
+            "filing (value 1,118,620,000 EUR). Real coverage: FCC, ALO, SGO, NAI (4/8).",
+        ),
+        MappingDecision(
+            canonical_concept="Accounts Payable",
+            status=MappingStatus.ACCEPTED,
+            mapping_type=MappingType.SEMANTIC_EQUIVALENT,
+            source_concept="ifrs-full:TradeAndOtherPayablesToTradeSuppliers",
+            notes="Same concept as the above, without the 'Current' qualifier -- IBE's own real "
+            "tag variant (value 6,183,000,000 EUR, Phase 6.4 fresh fetch). Real coverage: IBE "
+            "only (1/8).",
+        ),
+        MappingDecision(
+            canonical_concept="Accounts Payable",
+            status=MappingStatus.ACCEPTED,
+            mapping_type=MappingType.SEMANTIC_EQUIVALENT,
+            source_concept="ifrs-full:TradeAndOtherCurrentPayables",
+            notes="A broader aggregate (trade + other payables, not trade-suppliers-only) used "
+            "by issuers that don't split the two -- FCT (3,570,852,000 EUR) and RAND "
+            "(4,217,000,000 EUR), Phase 6.4 fresh fetch. Real coverage: FCT, RAND (2/8). "
+            "Combined with the two entries above: 7/8 real coverage (all but ISP, a bank).",
+        ),
+    ),
+    "Non-Controlling Interests": (
+        MappingDecision(
+            canonical_concept="Non-Controlling Interests",
+            status=MappingStatus.ACCEPTED,
+            mapping_type=MappingType.DIRECT,
+            source_concept="ifrs-full:NoncontrollingInterests",
+            notes="Verified live 2026-08 (Phase 6.4 fresh fetch) against FCC's real FY2024 "
+            "filing (value 1,003,303,000 EUR -- independently cross-checked to reconcile "
+            "exactly against Total Stockholders Equity + this value = Total Equity (incl NCI), "
+            "Phase 6.5's own §B4 identity test). Real coverage: 8/8 issuers -- the single most "
+            "universal Tier A concept found. New canonical concept (01__tickers.py "
+            "BALANCE_SHEET['Non-Controlling Interests'], distinct from 'Total Equity (incl "
+            "NCI)' -- see that concept's own notes for the distinction).",
+        ),
+    ),
+    "Stock-based Compensation": (
+        MappingDecision(
+            canonical_concept="Stock-based Compensation",
+            status=MappingStatus.ACCEPTED,
+            mapping_type=MappingType.DIRECT,
+            source_concept="ifrs-full:IncreaseDecreaseThroughSharebasedPaymentTransactions",
+            notes="Verified live 2026-08 (Phase 6.4 fresh fetch) against SGO's real filing "
+            "(value 89,000,000 EUR). Real coverage: ALO, IBE, SGO, FCT, RAND, ISP (6/8). "
+            "`ifrs-full:AdjustmentsForSharebasedPayments` also appears for ALO/RAND but adds no "
+            "issuer this tag doesn't already cover -- deliberately not mapped, to avoid an "
+            "unnecessary second source tag for zero coverage gain (the exact kind of avoidable "
+            "multi-tag complexity Phase 6.5 spent real effort untangling for a different "
+            "concept pair). Reuses the existing canonical concept "
+            "(01__tickers.py CASH_FLOW['Stock-based Compensation'] -- already present, not new; "
+            "Phase 6.4's own 'new canonical concept' framing for this one was corrected during "
+            "implementation).",
+        ),
+    ),
+    "Changes in Working Capital": (
+        MappingDecision(
+            canonical_concept="Changes in Working Capital",
+            status=MappingStatus.ACCEPTED,
+            mapping_type=MappingType.DIRECT,
+            source_concept="ifrs-full:IncreaseDecreaseInWorkingCapital",
+            notes="Verified live 2026-08 (Phase 6.4 fresh fetch) against FCT's real filing "
+            "(value 730,093,000 EUR). Real coverage: FCC, ALO, FCT, NAI, RAND (5/8). Reuses the "
+            "existing canonical concept -- note the canonical label is plural ('Changes', not "
+            "'Change') to match 01__tickers.py CASH_FLOW's existing entry exactly.",
+        ),
+    ),
+    "Income Before Tax": (
+        MappingDecision(
+            canonical_concept="Income Before Tax",
+            status=MappingStatus.ACCEPTED,
+            mapping_type=MappingType.DIRECT,
+            source_concept="ifrs-full:ProfitLossBeforeTax",
+            notes="Verified live 2026-08 (Phase 6.4 fresh fetch) against IBE's real filing "
+            "(value 8,117,000,000 EUR). Real coverage: FCC, ALO, IBE, FCT, NAI, RAND, ISP (7/8, "
+            "all but SGO). Reuses the existing canonical concept -- no new 'Profit Before Tax' "
+            "concept was created, per instruction.",
+        ),
+    ),
+    "EPS Basic": (
+        MappingDecision(
+            canonical_concept="EPS Basic",
+            status=MappingStatus.ACCEPTED,
+            mapping_type=MappingType.DIRECT,
+            source_concept="ifrs-full:BasicEarningsLossPerShare",
+            notes="Verified live 2026-08 (Phase 6.4 fresh fetch). Real coverage: FCC, ALO, SGO, "
+            "FCT, NAI, RAND, ISP (7/8).",
+        ),
+        MappingDecision(
+            canonical_concept="EPS Basic",
+            status=MappingStatus.ACCEPTED,
+            mapping_type=MappingType.SEMANTIC_EQUIVALENT,
+            source_concept="ifrs-full:BasicEarningsLossPerShareFromContinuingOperations",
+            notes="IBE's own real variant (the only issuer that tags this instead of the plain "
+            "form; FCT tags both, with an identical value, a normal ESEF duplicate-tagging "
+            "pattern per Phase 6.0 §13). Combined with the entry above: 8/8 real coverage.",
+        ),
+    ),
+    "EPS Diluted": (
+        MappingDecision(
+            canonical_concept="EPS Diluted",
+            status=MappingStatus.ACCEPTED,
+            mapping_type=MappingType.DIRECT,
+            source_concept="ifrs-full:DilutedEarningsLossPerShare",
+            notes="Verified live 2026-08 (Phase 6.4 fresh fetch). Real coverage: FCC, ALO, SGO, "
+            "FCT, NAI, RAND, ISP (7/8) -- same pattern as EPS Basic.",
+        ),
+        MappingDecision(
+            canonical_concept="EPS Diluted",
+            status=MappingStatus.ACCEPTED,
+            mapping_type=MappingType.SEMANTIC_EQUIVALENT,
+            source_concept="ifrs-full:DilutedEarningsLossPerShareFromContinuingOperations",
+            notes="IBE's own real variant, same pattern as EPS Basic's own second entry. "
+            "Combined: 8/8 real coverage.",
+        ),
+    ),
+    "Finance Income": (
+        MappingDecision(
+            canonical_concept="Finance Income",
+            status=MappingStatus.ACCEPTED,
+            mapping_type=MappingType.DIRECT,
+            source_concept="ifrs-full:FinanceIncome",
+            notes="Verified live 2026-08 (Phase 6.4 fresh fetch) against IBE's real filing "
+            "(value 2,377,000,000 EUR). Real coverage: FCC, ALO, IBE, FCT, RAND (5/8). "
+            "`ifrs-full:FinanceIncomeCost` (SGO, NAI, ISP-adjacent) is a NET tag (income minus "
+            "cost, ambiguous sign) -- deliberately excluded, consistent with this codebase's "
+            "existing 'NET tags are EXCLUDED on purpose' policy for Interest Expense "
+            "(01__tickers.py, CONCEPT_SYNONYMS section). ISP's own real tag is an "
+            "insurance-specific extension (bank/insurer-specific), correctly excluded too. New "
+            "canonical concept (01__tickers.py INCOME_STATEMENT['Finance Income'] -- see that "
+            "entry's own notes on the us-gaap tag choice, which is less independently verified "
+            "than every other entry here).",
+        ),
+    ),
+    "Accounts Receivable": (
+        MappingDecision(
+            canonical_concept="Accounts Receivable",
+            status=MappingStatus.ACCEPTED,
+            mapping_type=MappingType.DIRECT,
+            source_concept="ifrs-full:CurrentTradeReceivables",
+            notes="Verified live 2026-08 (Phase 6.4 fresh fetch) against FCC's real filing "
+            "(value 2,597,142,000 EUR). Real coverage: FCC, ALO, SGO, NAI (4/8). Implemented "
+            "here (EU_CANONICAL_MAPPING) only -- deliberately does NOT touch "
+            "01__tickers.py's IFRS_FALLBACK_TAGS['Accounts Receivable'] entry (a separate, "
+            "pre-existing tag-string error affecting real ifrs-full 20-F/40-F SEC/Canada "
+            "filers, 0/8 match for EU either way) -- the EU adapter never reads "
+            "IFRS_FALLBACK_TAGS at all (confirmed: no reference anywhere in "
+            "16__fetch_eu_xbrl.py), so this mapping carries zero shared-infrastructure risk. "
+            "Fixing the separate SEC-side tag error is out of this phase's scope.",
+        ),
+        MappingDecision(
+            canonical_concept="Accounts Receivable",
+            status=MappingStatus.ACCEPTED,
+            mapping_type=MappingType.SEMANTIC_EQUIVALENT,
+            source_concept="ifrs-full:TradeAndOtherCurrentReceivables",
+            notes="A broader aggregate variant (trade + other receivables) -- IBE "
+            "(10,777,000,000 EUR), FCT, RAND, Phase 6.4 fresh fetch. Combined with the entry "
+            "above: 7/8 real coverage (all but ISP, a bank).",
+        ),
+    ),
 }
 
 _SOURCE_CONCEPT_TO_DECISION = {
@@ -506,6 +679,6 @@ _SOURCE_CONCEPT_TO_DECISION = {
 def map_source_fact_to_canonical(source_concept: str) -> MappingDecision | None:
     """Look up this source concept's canonical mapping decision. `None` (excluded outright, not
     NULL-valued-and-kept) for anything outside the accepted concepts above -- deliberately still
-    a narrow, evidence-verified allow-list (22 accepted source tags across 21 canonical concepts
-    as of Phase 6.1), not a giant IFRS taxonomy mapping guessed wholesale."""
+    a narrow, evidence-verified allow-list (36 accepted source tags across 30 canonical concepts
+    as of Phase 6.6), not a giant IFRS taxonomy mapping guessed wholesale."""
     return _SOURCE_CONCEPT_TO_DECISION.get(source_concept)
