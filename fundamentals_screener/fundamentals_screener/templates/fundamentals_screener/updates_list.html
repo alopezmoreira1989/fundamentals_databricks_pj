@@ -1,5 +1,5 @@
 {% extends "fundamentals_screener/base_screener.html" %}
-{% load markdown_extras %}
+{% load i18n markdown_extras %}
 {% block title %}Updates{% endblock %}
 {% block meta_description %}Updates — the development journal for Fundamentals Screener: what changed, why, and how, across the project.{% endblock %}
 {% block extra_head %}
@@ -25,7 +25,15 @@
               {% if forloop.first %}open{% endif %}>
       <summary class="fs-update-summary">
         <span class="fs-update-summary-meta">
-          <span class="mono small" style="color:var(--ink-3)">{{ update.published_at|date:"j F Y" }}</span>
+          {% comment %}
+          This package's pages stay English regardless of the host's active locale (see the
+          package README's "No i18n" section) -- but Django's date filter translates month
+          names via the currently active language even with an explicit format string, so a
+          host with Spanish active (e.g. via its own LocaleMiddleware) would otherwise render
+          "21 agosto 2026" here. The language block tag below scopes English to just this
+          date, without touching any global setting or affecting any other page.
+          {% endcomment %}
+          {% language "en" %}<span class="mono small" style="color:var(--ink-3)">{{ update.published_at|date:"j F Y" }}</span>{% endlanguage %}
           <span class="mono small" style="color:var(--ink-3)">·</span>
           <span class="mono small text-uppercase" style="color:var(--accent-ink); letter-spacing:.05em">{{ update.get_category_display }}</span>
         </span>

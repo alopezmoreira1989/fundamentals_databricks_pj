@@ -21,6 +21,7 @@ from django.contrib import admin
 from django.db import IntegrityError
 from django.test import Client
 from django.urls import reverse
+from django.utils import translation
 from fundamentals_screener.models import Update
 
 pytestmark = pytest.mark.django_db
@@ -134,6 +135,31 @@ def test_index_shows_full_day_month_year_date_from_published_at():
     # (date(2026, 3, 5)) rendered with Django's `date:"j F Y"` filter -- the previous index
     # design only rendered "March 2026" (no day).
     assert "5 March 2026" in body
+
+
+def test_index_date_stays_english_under_non_english_active_locale():
+    """Real bug, caught live on the production host (bilingual ES/EN): Django's `date` filter
+    translates month names via the currently ACTIVE language even with an explicit format
+    string, regardless of whether this template itself loads i18n -- so a request the host's
+    own locale machinery serves in Spanish rendered "21 agosto 2026" here instead of "21 August
+    2026". translation.override("es") reproduces that active-language condition directly,
+    without needing LocaleMiddleware in this package's own (deliberately minimal) test
+    settings."""
+    _make_update(title="Locale Regression Entry", slug="locale-regression", published_at=date(2026, 8, 21))
+    with translation.override("es"):
+        body = Client().get(reverse("fundamentals_screener:updates_list")).content.decode()
+    assert "21 August 2026" in body
+    assert "21 agosto 2026" not in body
+
+
+def test_detail_date_stays_english_under_non_english_active_locale():
+    _make_update(title="Locale Regression Detail Entry", slug="locale-regression-detail", published_at=date(2026, 8, 21))
+    with translation.override("es"):
+        body = Client().get(
+            reverse("fundamentals_screener:update_detail", args=["locale-regression-detail"])
+        ).content.decode()
+    assert "August 2026" in body
+    assert "agosto 2026" not in body
 
 
 def test_navigation_includes_updates_link():
