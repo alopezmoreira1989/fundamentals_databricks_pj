@@ -18,8 +18,10 @@
   </div>
 
   {% for update in updates %}
-    {# The queryset (Update.Meta.ordering = -published_at) is already newest-first, so
-       forloop.first is genuinely "the newest published Update" — never a hardcoded slug/id. #}
+    {% comment %}
+    The queryset (Update.Meta.ordering = -published_at) is already newest-first, so
+    forloop.first is genuinely "the newest published Update" -- never a hardcoded slug/id.
+    {% endcomment %}
     <details class="fs-update-card fs-update-item card mb-3"
               name="fs-updates-accordion"
               {% if forloop.first %}open{% endif %}>
