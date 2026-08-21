@@ -1,5 +1,5 @@
 {% extends "fundamentals_screener/base_screener.html" %}
-{% load markdown_extras %}
+{% load i18n markdown_extras %}
 {% block title %}{{ update.title }}{% endblock %}
 {% block meta_description %}{{ update.summary }}{% endblock %}
 {% block extra_head %}
@@ -13,7 +13,13 @@
 
   <article class="card p-4">
     <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
-      <span class="mono small" style="color:var(--ink-3)">{{ update.published_at|date:"F Y" }}</span>
+      {% comment %}
+      See updates_list.html's comment on the same pattern: Django's date filter translates
+      month names via the active locale even with an explicit format string; the language
+      block tag below keeps this page's date in English regardless of the host's own locale,
+      scoped to just this tag.
+      {% endcomment %}
+      {% language "en" %}<span class="mono small" style="color:var(--ink-3)">{{ update.published_at|date:"F Y" }}</span>{% endlanguage %}
       <span class="mono small" style="color:var(--ink-3)">·</span>
       <span class="mono small text-uppercase" style="color:var(--accent-ink); letter-spacing:.05em">{{ update.get_category_display }}</span>
     </div>
