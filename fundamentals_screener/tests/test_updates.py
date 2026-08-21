@@ -13,6 +13,7 @@ back) -- assertions are written to tolerate that seed data rather than assume an
 
 from __future__ import annotations
 
+import re
 from datetime import date
 
 import pytest
@@ -90,6 +91,49 @@ def test_index_orders_newest_first():
     _make_update(title="Newer Marker Entry", slug="newer-marker", published_at=date(2030, 1, 1))
     body = Client().get(reverse("fundamentals_screener:updates_list")).content.decode()
     assert body.index("Newer Marker Entry") < body.index("Older Marker Entry")
+
+
+def _details_block(html, marker_text):
+    """The raw <details>...</details> markup for whichever accordion item contains
+    marker_text -- <details> items aren't nested here, so a non-greedy match correctly stops
+    at that item's own closing tag rather than a later one."""
+    blocks = re.findall(r"<details.*?</details>", html, re.S)
+    return next(b for b in blocks if marker_text in b)
+
+
+def _details_is_open(block):
+    # Only the opening `<details ...>` tag can carry `open` -- checking the whole block would
+    # false-positive on the word "open" appearing anywhere in an entry's own prose/content.
+    open_tag = block[: block.index(">") + 1]
+    return bool(re.search(r"(?<![\w-])open(?![\w-])", open_tag))
+
+
+def test_newest_published_update_is_expanded_by_default():
+    _make_update(title="Accordion Newest Entry", slug="accordion-newest", published_at=date(2031, 1, 1))
+    _make_update(title="Accordion Older Entry", slug="accordion-older", published_at=date(1999, 1, 1))
+    body = Client().get(reverse("fundamentals_screener:updates_list")).content.decode()
+    assert _details_is_open(_details_block(body, "Accordion Newest Entry"))
+
+
+def test_older_updates_are_collapsed_by_default():
+    _make_update(title="Accordion Newest Entry 2", slug="accordion-newest-2", published_at=date(2032, 1, 1))
+    _make_update(title="Accordion Older Entry 2", slug="accordion-older-2", published_at=date(1998, 1, 1))
+    body = Client().get(reverse("fundamentals_screener:updates_list")).content.decode()
+    assert not _details_is_open(_details_block(body, "Accordion Older Entry 2"))
+    # Every OTHER item (the pre-existing seeded/migration entries included) must also be
+    # collapsed -- only the one genuinely-newest item may carry `open`.
+    for block in re.findall(r"<details.*?</details>", body, re.S):
+        if "Accordion Newest Entry 2" not in block:
+            assert not _details_is_open(block)
+
+
+def test_index_shows_full_day_month_year_date_from_published_at():
+    _make_update(title="Dated Accordion Entry", slug="dated-accordion", published_at=date(2026, 3, 5))
+    body = Client().get(reverse("fundamentals_screener:updates_list")).content.decode()
+    # Not hardcoded: this exact string can only come from the model's own published_at value
+    # (date(2026, 3, 5)) rendered with Django's `date:"j F Y"` filter -- the previous index
+    # design only rendered "March 2026" (no day).
+    assert "5 March 2026" in body
 
 
 def test_navigation_includes_updates_link():

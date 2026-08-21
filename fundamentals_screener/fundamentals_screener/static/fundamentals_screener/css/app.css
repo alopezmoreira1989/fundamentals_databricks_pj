@@ -93,7 +93,8 @@ body.fs-app { font-family: var(--sans); background: var(--bg); color: var(--ink)
 
 /* Visible keyboard focus everywhere. */
 .fs-app a:focus-visible, .fs-app button:focus-visible, .fs-app .btn:focus-visible,
-.fs-app .form-control:focus-visible, .fs-app .form-select:focus-visible {
+.fs-app .form-control:focus-visible, .fs-app .form-select:focus-visible,
+.fs-app summary:focus-visible {
   outline: 3px solid var(--accent); outline-offset: 2px; box-shadow: none;
 }
 
@@ -599,11 +600,40 @@ body.fs-app { font-family: var(--sans); background: var(--bg); color: var(--ink)
 .fs-app .fc-about { border-left: 3px solid var(--accent); }
 
 /* ── Updates (development journal) ─────────────────────────────────────── */
+/* Index page accordion: the newest update (details[open]) reads as the primary item on the
+   page; older ones collapse to a single compact, lighter-weight row (date/category/title +
+   chevron only, per the page's "latest → readable, archive → scannable" goal). Native
+   <details name="..."> gives single-open-at-a-time and full keyboard/screen-reader semantics
+   for free — no JS. name= is a modern-browser feature; on a browser that ignores it, multiple
+   items can stay open at once, which degrades gracefully rather than breaking anything. */
 .fs-app .fs-update-card { transition: border-color .15s, box-shadow .15s; }
 .fs-app .fs-update-card:hover {
   border-color: var(--accent);
   box-shadow: 0 1px 8px rgba(14, 165, 176, .12);
 }
+.fs-app .fs-update-item summary { list-style: none; cursor: pointer; }
+.fs-app .fs-update-item summary::-webkit-details-marker { display: none; }
+.fs-app .fs-update-summary {
+  display: flex; flex-wrap: wrap; align-items: center; gap: .15rem .6rem;
+  padding: 1rem 1.25rem;
+}
+.fs-app .fs-update-summary-meta { display: flex; align-items: center; gap: .5rem; flex: 0 0 auto; }
+.fs-app .fs-update-summary-title {
+  color: var(--ink); font-weight: 500; flex: 1 1 260px;
+}
+.fs-app .fs-update-chevron {
+  color: var(--ink-3); font-family: var(--mono); font-size: 1rem; line-height: 1;
+  transition: transform .15s; flex: 0 0 auto;
+}
+.fs-app .fs-update-item[open] .fs-update-chevron { transform: rotate(180deg); color: var(--accent-ink); }
+.fs-app .fs-update-item-body { padding: 0 1.25rem 1.25rem; }
+.fs-app .fs-update-excerpt { color: var(--ink-2); line-height: 1.6; margin-bottom: 1rem; }
+/* Collapsed rows: denser and visually lighter, so the archive scans quickly. */
+.fs-app .fs-update-item:not([open]) .fs-update-summary { padding: .75rem 1.25rem; }
+.fs-app .fs-update-item:not([open]) .fs-update-summary-title { color: var(--ink-2); font-weight: 400; }
+/* The open (newest, by default) entry reads as the page's primary item. */
+.fs-app .fs-update-item[open] { border-color: var(--accent); }
+.fs-app .fs-update-item[open] .fs-update-summary-title { font-size: 1.05rem; }
 .fs-app .fs-update-body { color: var(--ink-2); line-height: 1.7; }
 .fs-app .fs-update-body h1,
 .fs-app .fs-update-body h2,

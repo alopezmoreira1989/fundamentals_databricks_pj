@@ -1,4 +1,5 @@
 {% extends "fundamentals_screener/base_screener.html" %}
+{% load markdown_extras %}
 {% block title %}Updates{% endblock %}
 {% block meta_description %}Updates — the development journal for Fundamentals Screener: what changed, why, and how, across the project.{% endblock %}
 {% block extra_head %}
@@ -17,16 +18,28 @@
   </div>
 
   {% for update in updates %}
-    <a class="fs-update-card card p-4 mb-3 d-block text-decoration-none" href="{% url 'fundamentals_screener:update_detail' update.slug %}">
-      <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
-        <span class="mono small" style="color:var(--ink-3)">{{ update.published_at|date:"F Y" }}</span>
-        <span class="mono small" style="color:var(--ink-3)">·</span>
-        <span class="mono small text-uppercase" style="color:var(--accent-ink); letter-spacing:.05em">{{ update.get_category_display }}</span>
+    {# The queryset (Update.Meta.ordering = -published_at) is already newest-first, so
+       forloop.first is genuinely "the newest published Update" — never a hardcoded slug/id. #}
+    <details class="fs-update-card fs-update-item card mb-3"
+              name="fs-updates-accordion"
+              {% if forloop.first %}open{% endif %}>
+      <summary class="fs-update-summary">
+        <span class="fs-update-summary-meta">
+          <span class="mono small" style="color:var(--ink-3)">{{ update.published_at|date:"j F Y" }}</span>
+          <span class="mono small" style="color:var(--ink-3)">·</span>
+          <span class="mono small text-uppercase" style="color:var(--accent-ink); letter-spacing:.05em">{{ update.get_category_display }}</span>
+        </span>
+        <span class="fs-update-summary-title">{{ update.title }}</span>
+        <span class="fs-update-chevron" aria-hidden="true">⌄</span>
+      </summary>
+      <div class="fs-update-item-body">
+        <p class="fs-update-excerpt">{{ update.summary }}</p>
+        <div class="fs-update-body">
+          {{ update.content|markdownify }}
+        </div>
+        <a class="mono small" style="color:var(--accent-ink)" href="{% url 'fundamentals_screener:update_detail' update.slug %}">Read update →</a>
       </div>
-      <h2 class="h5 mb-2" style="color:var(--ink)">{{ update.title }}</h2>
-      <p class="mb-2" style="color:var(--ink-2); line-height:1.6">{{ update.summary }}</p>
-      <span class="mono small" style="color:var(--accent-ink)">Read update →</span>
-    </a>
+    </details>
   {% empty %}
     <p style="color:var(--ink-3)">No updates published yet.</p>
   {% endfor %}
