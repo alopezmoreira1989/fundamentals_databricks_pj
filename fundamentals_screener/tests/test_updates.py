@@ -128,6 +128,45 @@ def test_older_updates_are_collapsed_by_default():
             assert not _details_is_open(block)
 
 
+def test_index_never_leaks_the_forloop_first_implementation_comment():
+    """Real bug, caught live in production: Django's {# #} comment token requires the WHOLE
+    comment to sit on one line (no re.DOTALL in the tokenizer) -- a multi-line {# ... #} isn't
+    recognized as a comment at all and falls through as literal template TEXT, rendered once
+    per loop iteration (so it appeared before every one of the 11 entries on the real page).
+    Fixed by switching to the block-form {% comment %}/{% endcomment %}, which does support
+    multi-line content. This asserts the exact leaked substrings are gone from real rendered
+    output, not just that the template source looks right."""
+    resp = Client().get(reverse("fundamentals_screener:updates_list"))
+    body = resp.content.decode()
+    assert "Update.Meta.ordering" not in body
+    assert "forloop.first" not in body
+    assert "{#" not in body
+    assert "{%" not in body
+    # And confirm nothing else in the page is leaking as raw, unconverted Markdown -- every
+    # `### <heading>` in an entry's source content must become a real <h3> tag (present for
+    # every entry, including collapsed ones -- that's how <details> can expand without a
+    # server round-trip -- so a bare "###" appearing in a naive text-view of the page is a
+    # viewing-tool artifact, not something that should exist in the raw HTML itself).
+    assert "###" not in body
+    assert body.count("<h3>") > 0
+
+
+def test_index_renders_all_eleven_seeded_updates_with_correct_accordion_state():
+    resp = Client().get(reverse("fundamentals_screener:updates_list"))
+    body = resp.content.decode()
+    blocks = re.findall(r"<details.*?</details>", body, re.S)
+    assert len(blocks) == 11
+    open_blocks = [b for b in blocks if _details_is_open(b)]
+    assert len(open_blocks) == 1
+    assert "A public development journal" in open_blocks[0]
+    assert "21 August 2026" in body
+
+
+def test_seeded_update_detail_page_returns_200():
+    resp = Client().get(reverse("fundamentals_screener:update_detail", args=["public-development-journal"]))
+    assert resp.status_code == 200
+
+
 def test_index_shows_full_day_month_year_date_from_published_at():
     _make_update(title="Dated Accordion Entry", slug="dated-accordion", published_at=date(2026, 3, 5))
     body = Client().get(reverse("fundamentals_screener:updates_list")).content.decode()
