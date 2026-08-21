@@ -597,3 +597,35 @@ body.fs-app { font-family: var(--sans); background: var(--bg); color: var(--ink)
 
 .fs-app .fc-metric-note { font-size: .78rem; color: var(--ink-2); }
 .fs-app .fc-about { border-left: 3px solid var(--accent); }
+
+/* ── Updates (development journal) ─────────────────────────────────────── */
+.fs-app .fs-update-card { transition: border-color .15s, box-shadow .15s; }
+.fs-app .fs-update-card:hover {
+  border-color: var(--accent);
+  box-shadow: 0 1px 8px rgba(14, 165, 176, .12);
+}
+.fs-app .fs-update-body { color: var(--ink-2); line-height: 1.7; }
+.fs-app .fs-update-body h1,
+.fs-app .fs-update-body h2,
+.fs-app .fs-update-body h3 {
+  color: var(--ink); margin-top: 1.6em; margin-bottom: .6em;
+}
+.fs-app .fs-update-body h1:first-child,
+.fs-app .fs-update-body h2:first-child,
+.fs-app .fs-update-body h3:first-child { margin-top: 0; }
+.fs-app .fs-update-body p { margin-bottom: 1em; }
+.fs-app .fs-update-body ul,
+.fs-app .fs-update-body ol { margin-bottom: 1em; padding-left: 1.4em; }
+.fs-app .fs-update-body li { margin-bottom: .3em; }
+.fs-app .fs-update-body code {
+  font-family: var(--mono); font-size: .88em;
+  background: var(--bg-subtle); padding: .1em .35em; border-radius: 3px; color: var(--ink);
+}
+.fs-app .fs-update-body pre {
+  font-family: var(--mono); font-size: .82rem; line-height: 1.5;
+  background: var(--bg-subtle); border: 1px solid var(--rule); border-radius: 4px;
+  padding: .9em 1em; overflow-x: auto; margin-bottom: 1em;
+}
+.fs-app .fs-update-body pre code { background: none; padding: 0; }
+.fs-app .fs-update-body a { color: var(--accent-ink); }
+.fs-app .fs-update-body em:first-child { color: var(--ink-3); }

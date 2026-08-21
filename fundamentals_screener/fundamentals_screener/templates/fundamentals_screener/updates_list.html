@@ -1,0 +1,33 @@
+{% extends "fundamentals_screener/base_screener.html" %}
+{% block title %}Updates{% endblock %}
+{% block meta_description %}Updates — the development journal for Fundamentals Screener: what changed, why, and how, across the project.{% endblock %}
+{% block extra_head %}
+  <link rel="canonical" href="{{ request.build_absolute_uri }}">
+  <link rel="alternate" type="application/rss+xml" title="Fundamentals Screener — Updates" href="{% url 'fundamentals_screener:updates_feed' %}">
+{% endblock %}
+{% block content %}
+  <div class="mb-4">
+    <div class="eyebrow mb-2">Updates</div>
+    <h1 class="h3 mb-2">Development journal</h1>
+    <p class="mb-0" style="color:var(--ink-2); line-height:1.6">
+      What changed in this project, why, and how — documented in the order it actually
+      happened.
+      <a href="{% url 'fundamentals_screener:updates_feed' %}">RSS feed</a>
+    </p>
+  </div>
+
+  {% for update in updates %}
+    <a class="fs-update-card card p-4 mb-3 d-block text-decoration-none" href="{% url 'fundamentals_screener:update_detail' update.slug %}">
+      <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+        <span class="mono small" style="color:var(--ink-3)">{{ update.published_at|date:"F Y" }}</span>
+        <span class="mono small" style="color:var(--ink-3)">·</span>
+        <span class="mono small text-uppercase" style="color:var(--accent-ink); letter-spacing:.05em">{{ update.get_category_display }}</span>
+      </div>
+      <h2 class="h5 mb-2" style="color:var(--ink)">{{ update.title }}</h2>
+      <p class="mb-2" style="color:var(--ink-2); line-height:1.6">{{ update.summary }}</p>
+      <span class="mono small" style="color:var(--accent-ink)">Read update →</span>
+    </a>
+  {% empty %}
+    <p style="color:var(--ink-3)">No updates published yet.</p>
+  {% endfor %}
+{% endblock %}

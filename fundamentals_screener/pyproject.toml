@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fundamentals-screener"
-version = "0.12.0"
+version = "0.13.0"
 description = "Installable Django app: a self-contained SEC EDGAR fundamentals screener, company detail, and valuation views, reading published Parquet artifacts via DuckDB. Extracted from fundamentals_databricks_pj's web/ Django app for reuse by external Django projects (originally: alopezm.xyz's /apps/screener/)."
 readme = "README.md"
 license = {text = "MIT"}
@@ -33,11 +33,20 @@ dependencies = [
     "pandas==2.3.3",
     "pyarrow>=15",
     "requests>=2.31,<3",
+    # Renders Update.content (Updates / development-journal section) from Markdown to HTML.
+    # Pure Python, no compiled extensions — safe on the Python 3.9.2 CGI target. This is the
+    # one feature in the package backed by a real Django model/DB table (see
+    # docs/adr/0013-updates-development-journal-model.md) rather than the read-only
+    # parquet/DuckDB data layer every other view uses.
+    "markdown>=3.4,<4",
     "fundamentals_pipeline @ git+https://github.com/alopezmoreira1989/fundamentals_databricks_pj.git",
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=8,<9"]
+# pytest-django is test-only — it's what lets tests/test_updates.py exercise the Update model/
+# admin/feed against a real (in-memory SQLite) Django DB via tests/settings.py. Every other
+# test in this suite still runs with zero Django configuration (see their own docstrings).
+test = ["pytest>=8,<9", "pytest-django>=4.5,<5"]
 
 # Explicit package list, not find: — mirrors the root fundamentals_pipeline/pyproject.toml
 # convention in this repo.
@@ -48,6 +57,7 @@ packages = [
     "fundamentals_screener.templatetags",
     "fundamentals_screener.management",
     "fundamentals_screener.management.commands",
+    "fundamentals_screener.migrations",
 ]
 
 [tool.setuptools.package-data]

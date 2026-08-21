@@ -19,7 +19,7 @@ import math
 from urllib.parse import quote, urlencode
 
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
-from django.shortcuts import render
+from django.shortcuts import get_object_or_404, render
 
 from . import football, pricechart, services
 from .charts import (
@@ -31,6 +31,7 @@ from .charts import (
     quarterly_chart,
 )
 from .currency import quote_currency
+from .models import Update
 from .repositories.company_listing import MetricFilter, SortSpec
 
 PAGE_SIZE = 50
@@ -709,6 +710,19 @@ def _presets_screen(request: HttpRequest) -> HttpResponse:
 def about(request: HttpRequest) -> HttpResponse:
     """Static About page: value-investing framing + legal disclaimer. No dynamic context."""
     return render(request, "fundamentals_screener/about.html")
+
+
+def updates_list(request: HttpRequest) -> HttpResponse:
+    """Public index of the development journal — published updates, newest first."""
+    updates = Update.objects.filter(is_published=True)
+    return render(request, "fundamentals_screener/updates_list.html", {"updates": updates})
+
+
+def update_detail(request: HttpRequest, slug: str) -> HttpResponse:
+    """One development-journal entry. 404s for an unpublished or unknown slug — never leaks a
+    draft's existence to the public site."""
+    update = get_object_or_404(Update, slug=slug, is_published=True)
+    return render(request, "fundamentals_screener/update_detail.html", {"update": update})
 
 
 def screen_data(request: HttpRequest) -> JsonResponse:
