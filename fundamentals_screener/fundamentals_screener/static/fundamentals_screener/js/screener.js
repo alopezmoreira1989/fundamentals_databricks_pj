@@ -93,11 +93,56 @@
     // Metric filters: add/remove rows client-side. The server already accepts any number of
     // fmetric/fmin/fmax triplets (no hardcoded cap) — this only adds the UI to grow past the
     // 3 rows rendered by default.
+    var rowTemplate = document.querySelector('.scr-filter-row-template');
     var addBtn = document.querySelector('.scr-add-filter');
     if (addBtn && rowsContainer) {
-      var rowTemplate = document.querySelector('.scr-filter-row-template');
       addBtn.addEventListener('click', function () {
         rowsContainer.appendChild(rowTemplate.content.cloneNode(true));
+      });
+    }
+
+    // Checking a "Columns" checkbox mirrors it into a Metric-filters row (blank bounds) so it's
+    // one click away from being bounded too — one-directional, the reverse never happens
+    // (picking a metric in a filter row never touches a Columns checkbox; see views.py's
+    // filter_rows comment for the server-side half of this, which covers non-JS/first-load).
+    var chipGrid = document.querySelector('.scr-chip-grid');
+    if (chipGrid && rowsContainer && rowTemplate) {
+      var rowForMetric = function (metric) {
+        var rows = rowsContainer.querySelectorAll('.scr-filter-rule');
+        for (var i = 0; i < rows.length; i++) {
+          if (rows[i].querySelector('select[name="fmetric"]').value === metric) return rows[i];
+        }
+        return null;
+      };
+      var blankRow = function () {
+        var rows = rowsContainer.querySelectorAll('.scr-filter-rule');
+        for (var i = 0; i < rows.length; i++) {
+          var sel = rows[i].querySelector('select[name="fmetric"]');
+          var min = rows[i].querySelector('input[name="fmin"]');
+          var max = rows[i].querySelector('input[name="fmax"]');
+          if (!sel.value && !min.value.trim() && !max.value.trim()) return rows[i];
+        }
+        return null;
+      };
+      chipGrid.addEventListener('change', function (e) {
+        var box = e.target.closest('input[type="checkbox"][name="col"]');
+        if (!box) return;
+        var existing = rowForMetric(box.value);
+        if (box.checked) {
+          if (existing) return;  // already filterable (bounded or not) — leave it as-is
+          var row = blankRow();
+          if (!row) {
+            rowsContainer.appendChild(rowTemplate.content.cloneNode(true));
+            row = rowsContainer.lastElementChild;
+          }
+          row.querySelector('select[name="fmetric"]').value = box.value;
+        } else if (existing) {
+          // Only drop rows this feature created itself — a real user-typed bound must survive
+          // unchecking the column (filters stay independent of Columns once they have a bound).
+          var min = existing.querySelector('input[name="fmin"]');
+          var max = existing.querySelector('input[name="fmax"]');
+          if (!min.value.trim() && !max.value.trim()) existing.remove();
+        }
       });
     }
 
