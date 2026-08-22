@@ -443,6 +443,7 @@ def screen(request: HttpRequest) -> HttpResponse:
             "show_usd_toggle": show_usd_toggle,
             "usd_lens": usd_lens,
             "cols": cols,
+            "col_explicit": col_explicit,
             "sort_key": sort_key,
             "sort_dir": "desc" if descending else "asc",
             "filter_rows": filter_rows,
