@@ -55,6 +55,13 @@ _SORT_KEYS_DESC = frozenset(k for k, _ in _DESC_COLUMNS)
 _OPTIONAL_DESC_COLUMNS = (("sector", "Sector"), ("industry", "Industry"),
                           ("country", "Country"), ("market", "Market"))
 
+# Metric columns shown checked before the user has touched the "Columns" picker. `col_on` is a
+# hidden marker submitted unconditionally alongside the picker's own `col` checkboxes (see
+# _screen_main.html) — its presence is what distinguishes "user unchecked every metric column"
+# (col_on present, col absent) from "URL never mentioned columns at all" (both absent), the same
+# ambiguity `desc_on` resolves above for the separate table-columns toggle.
+_DEFAULT_METRIC_COLUMNS = ("Market Cap (Live)", "P/E (TTM, live)", "Current Ratio", "Debt / Equity")
+
 
 # ── screener ─────────────────────────────────────────────────────────────────────────────
 def _parse_optional_float(raw: str | None) -> tuple[float | None, bool]:
@@ -288,7 +295,10 @@ def screen(request: HttpRequest) -> HttpResponse:
         visible_desc = [k for k, _ in _OPTIONAL_DESC_COLUMNS]
 
     # Selected display columns + metric filters, with the legacy single-metric URL folded in.
+    col_explicit = "col_on" in request.GET
     cols = [c for c in (c.strip() for c in request.GET.getlist("col")) if c]
+    if not col_explicit and not cols:
+        cols = list(_DEFAULT_METRIC_COLUMNS)
     filters, ok_filters = _parse_filters(request)
     legacy_cols, legacy_filters, ok_legacy = _legacy_single_metric(request)
     cols = list(dict.fromkeys([*cols, *legacy_cols]))
@@ -384,6 +394,18 @@ def screen(request: HttpRequest) -> HttpResponse:
         lf = legacy_filters[0]
         filter_rows = [{"metric": lf.metric, "min": request.GET.get("min", ""),
                         "max": request.GET.get("max", "")}]
+    # Every column selected in the "Columns" picker also gets a visible row here (blank bounds,
+    # unless the user already typed a real one above) — one-directional: a column implies a
+    # filter row, but picking a metric in a filter row never checks its "Columns" box. These
+    # synthetic rows are never written into `request.GET`, so `_parse_filters`/`filters`/
+    # `active_filter_count` (which read the GET params directly, not this list) never see them —
+    # this stays purely cosmetic, not a query change; `cols` already puts the metric in
+    # `display_cols` on its own.
+    _shown_metrics = {r["metric"] for r in filter_rows}
+    for m in cols:
+        if m not in _shown_metrics:
+            filter_rows.append({"metric": m, "min": "", "max": ""})
+            _shown_metrics.add(m)
     while len(filter_rows) < 3:
         filter_rows.append({"metric": "", "min": "", "max": ""})
 

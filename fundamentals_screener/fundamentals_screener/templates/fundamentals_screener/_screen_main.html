@@ -32,6 +32,10 @@ inherited across {% include %} boundaries.
     {# Keep the active sort when the filter form is re-submitted. #}
     <input type="hidden" name="sort" value="{{ sort_key }}">
     <input type="hidden" name="dir" value="{{ sort_dir }}">
+    {# Marks the metric-column checkbox state below as explicit — see _DEFAULT_METRIC_COLUMNS
+       in views.py for why this is needed (distinguishes "no columns checked" from "fresh
+       page, defaults apply"). #}
+    <input type="hidden" name="col_on" value="1">
     {# Carry the table-columns choice through Apply too, once the user has made one. #}
     {% if desc_explicit %}
       <input type="hidden" name="desc_on" value="1">
