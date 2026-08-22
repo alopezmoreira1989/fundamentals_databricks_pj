@@ -224,6 +224,101 @@ def get_facts(cik: str) -> dict:
     return resp.json()
 
 
+try:
+    from fundamentals_pipeline import xbrl_instance
+except ImportError:
+    import subprocess
+    import sys
+
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "-e", "../.."])
+    from fundamentals_pipeline import xbrl_instance
+
+
+def get_latest_10k_instance_url(cik: str) -> tuple | None:
+    """(fy, filed_date, instance_xml_url) for the most recently FILED 10-K — 10-K/A amendments
+    excluded (simplest, rare for this data point). `fy` is the reportDate's YEAR (confirmed
+    against real WDAY data: its Jan-end fiscal year is labeled by the calendar year its
+    period_end falls in, e.g. reportDate 2026-01-31 → fy=2026, matching the fy the plain dei
+    concept already carries for this same company pre-2018). None if `cik` has no 10-K in
+    submissions.json's `filings.recent` window (real edge case for very new/thin filers —
+    degrades gracefully like every other soft path in this file).
+
+    URL construction: strip the accession number's dashes for the path segment, replace the
+    primaryDocument's `.htm` extension with `_htm.xml` for the instance-document filename —
+    confirmed live against real SEC filings (WDAY 10-K/10-Q, 2026-08).
+    """
+    resp = rate_limited_get(f"https://data.sec.gov/submissions/CIK{cik}.json")
+    resp.raise_for_status()
+    rec = resp.json().get("filings", {}).get("recent", {})
+    best = None
+    for form, acc, doc, filed, report_date in zip(
+        rec.get("form", []), rec.get("accessionNumber", []), rec.get("primaryDocument", []),
+        rec.get("filingDate", []), rec.get("reportDate", []),
+        strict=True,
+    ):
+        if form != "10-K":
+            continue
+        if best is None or filed > best[1]:
+            acc_nodash = acc.replace("-", "")
+            stem = doc[:-4] if doc.lower().endswith(".htm") else doc
+            url = f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{acc_nodash}/{stem}_htm.xml"
+            fy = int(report_date[:4]) if report_date else None
+            best = (fy, filed, url)
+    return best
+
+
+def fetch_multiclass_cover_page_shares(ticker: str, cik: str) -> pd.DataFrame:
+    """Best-effort ENRICHMENT fallback for "Shares Outstanding (Cover Page)", called ONLY when
+    the normal dei-namespace companyfacts extraction came back completely empty for this ticker
+    this run (see process_ticker's step 4c). Multi-class-stock filers (Workday's dual Class A /
+    Class B common stock — confirmed live 2026-08) report
+    `dei:EntityCommonStockSharesOutstanding` ONLY per-share-class, dimensioned by a
+    "ClassOfStock"-like axis; SEC's companyfacts/companyconcept convenience JSON APIs silently
+    drop every dimensioned fact, so the concept looks entirely unreported there even though the
+    filer discloses it normally every 10-K, in that filing's own raw XBRL instance document.
+
+    Restricted to the most recent 10-K only (not 10-Q) — lets the returned row carry REAL,
+    honest form="10-K"/fp="FY" values that satisfy 21__clean_and_merge.py's existing `stock_fy`
+    filter unmodified, rather than needing a synthetic marker threaded through that file's (and
+    21b__derive_quarterly.py's) real classification logic. See 00__config/01__tickers.py's
+    comment on this concept for the full rationale.
+
+    ANY failure (network, unexpected shape, no matching dimensioned facts, implausible total)
+    returns an EMPTY DataFrame — never raises. Shape matches extract_series' trimmed output
+    columns exactly (fy, fp, form, period_start, period_end, period_shape, value, filed,
+    tag_namespace) — ticker/company/scraped_at/source_id are stamped uniformly on the whole
+    concatenated frame later in process_ticker, same as every other extracted series.
+    """
+    try:
+        found = get_latest_10k_instance_url(cik)
+        if found is None:
+            return pd.DataFrame()
+        fy, filed_date, instance_url = found
+        if fy is None:
+            return pd.DataFrame()
+        resp = rate_limited_get(instance_url, timeout=60)
+        resp.raise_for_status()
+        facts = xbrl_instance.extract_class_of_stock_shares(resp.content)
+        result = xbrl_instance.sum_latest_instant(facts)
+        if result is None:
+            return pd.DataFrame()
+        instant, total = result
+        if total <= 0:
+            return pd.DataFrame()
+        return pd.DataFrame([{
+            "fy": fy, "fp": "FY", "form": "10-K",
+            "period_start": pd.NaT,
+            "period_end": pd.to_datetime(instant),
+            "period_shape": "snapshot",
+            "value": float(total),
+            "filed": pd.to_datetime(filed_date) if filed_date else pd.NaT,
+            "tag_namespace": "dei",
+        }])
+    except Exception as e:
+        print(f"  ⚠ {ticker}: multiclass Shares Outstanding fallback failed ({e})")
+        return pd.DataFrame()
+
+
 def merge_facts(*facts_dicts: dict) -> dict:
     """
     Concatenates the `facts[ns][concept]["units"][unit]` arrays across multiple
@@ -612,6 +707,7 @@ def process_ticker(ticker: str, scraped_at_ts: datetime) -> tuple:
         # T/VZ/WMB): same counts and values. (extract — the other ~50% — would need real
         # parallelism to improve; see ingestion bottleneck investigation.)
         frames = []
+        _cover_shares_found = False
         _agg_sum = globals().get("AGGREGATE_OR_SUM_CONCEPTS", {})
         _dei_concepts = globals().get("DEI_NAMESPACE_CONCEPTS", set())
         for stmt_name, concept_map in STATEMENTS.items():
@@ -637,6 +733,8 @@ def process_ticker(ticker: str, scraped_at_ts: datetime) -> tuple:
                         ifrs_concepts=IFRS_FALLBACK_TAGS.get(label))
                 if series.empty:
                     continue
+                if label == "Shares Outstanding (Cover Page)":
+                    _cover_shares_found = True
                 # Share Repurchases is a positive cash-outflow MAGNITUDE by definition. Some filers
                 # report it with the treasury / contra-equity (negative) convention — both in the cash
                 # tags (e.g. GE PaymentsForRepurchaseOfCommonStock = -22.6B) and in the
@@ -645,6 +743,18 @@ def process_ticker(ticker: str, scraped_at_ts: datetime) -> tuple:
                 if label == "Share Repurchases":
                     series = series.assign(value=series["value"].abs())
                 frames.append(series.assign(stmt=stmt_name, concept=label, kind=kind))
+
+        # 4c. Multi-class-stock fallback for "Shares Outstanding (Cover Page)" — deliberately a
+        # SEPARATE step from the generic loop above. Everything in that loop is pure in-memory
+        # extraction over the single already-fetched `facts` companyfacts blob; this does its OWN
+        # network I/O (submissions.json + the 10-K's raw XBRL instance document) and XML parsing.
+        # See fetch_multiclass_cover_page_shares's docstring and the doc-comment on "Shares
+        # Outstanding (Cover Page)" in 00__config/01__tickers.py.
+        if not _cover_shares_found:
+            _fallback = fetch_multiclass_cover_page_shares(ticker, cik)
+            if not _fallback.empty:
+                frames.append(_fallback.assign(
+                    stmt="Balance Sheet", concept="Shares Outstanding (Cover Page)", kind="stock"))
 
         if not frames:
             return (

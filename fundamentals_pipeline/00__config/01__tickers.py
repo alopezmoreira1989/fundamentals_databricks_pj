@@ -177,6 +177,19 @@ BALANCE_SHEET = {
     # for free. Deliberately excluded from concept_hierarchy.json (see DEI_NAMESPACE_CONCEPTS
     # comment below) — it exists purely as an input to the "live" Market Cap metric, not as a
     # displayable statement line.
+    #
+    # Multi-class-stock fallback (2026-08, Market Cap (Live)/P/E (TTM, live) coverage-gap
+    # investigation): companyfacts/companyconcept ONLY expose undimensioned (default-context)
+    # facts. Filers with dual-class common stock (Workday — Class A / Class B, confirmed live)
+    # report this concept ONLY per-share-class, dimensioned by a "ClassOfStock"-like axis, from
+    # the year they adopt the dual-class structure onward — companyfacts then shows ZERO rows for
+    # this concept forever after, even though the filer discloses it every 10-K. When the normal
+    # dei extraction below comes back completely empty, 11__fetch_sec_xbrl.py's
+    # fetch_multiclass_cover_page_shares falls back to the ticker's most recent 10-K's own raw
+    # XBRL instance document, sums the per-class dimensioned facts at the latest reported
+    # instant, and emits one normal "stock" row (form="10-K", fp="FY") for this SAME concept —
+    # same downstream mechanism this comment already documents, just recovered from a different
+    # SEC endpoint. See fundamentals_pipeline/xbrl_instance.py.
     "Shares Outstanding (Cover Page)": ("EntityCommonStockSharesOutstanding",    "stock"),
 }
 
@@ -196,6 +209,9 @@ BALANCE_SHEET = {
 # `11__fetch_sec_xbrl.py` instead of the default `"us-gaap"`. No new SEC API call is needed for
 # this — `get_facts(cik)` already pulls the whole companyfacts document (all namespaces) in one
 # request per ticker; this just reads one more field already present in that same response.
+# (For the multi-class-stock filers where that field comes back EMPTY, see the fallback
+# documented on the STATEMENTS entry above and in xbrl_instance.py — a separate, extra HTTP
+# fetch of the filing's raw instance document, not part of this shared companyfacts response.)
 # Deliberately NOT added to `concept_hierarchy.json` — that file controls Statement-tab display
 # layout, and this concept would look out of place mixed into the Balance Sheet's real line
 # items. The `validate-concept-hierarchy` skill's own cross-check will report this concept as
