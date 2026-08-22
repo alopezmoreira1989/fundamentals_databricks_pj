@@ -32,9 +32,11 @@ inherited across {% include %} boundaries.
     {# Keep the active sort when the filter form is re-submitted. #}
     <input type="hidden" name="sort" value="{{ sort_key }}">
     <input type="hidden" name="dir" value="{{ sort_dir }}">
-    {# Marks the metric-column checkbox state below as explicit — see _DEFAULT_METRIC_COLUMNS
-       in views.py for why this is needed (distinguishes "no columns checked" from "fresh
-       page, defaults apply"). #}
+    {% comment %}
+    Marks the metric-column checkbox state below as explicit — see _DEFAULT_METRIC_COLUMNS
+    in views.py for why this is needed (distinguishes "no columns checked" from "fresh
+    page, defaults apply").
+    {% endcomment %}
     <input type="hidden" name="col_on" value="1">
     {# Carry the table-columns choice through Apply too, once the user has made one. #}
     {% if desc_explicit %}
@@ -96,7 +98,11 @@ inherited across {% include %} boundaries.
     </div>
 
     <div class="scr-toolbar">
-      <details class="scr-disclosure" name="scr_toggle" {% if cols %}open{% endif %}>
+      {% comment %}
+      Never auto-open just because default columns are selected (see _DEFAULT_METRIC_COLUMNS
+      in views.py) — only once the user has actually touched the picker (col_explicit).
+      {% endcomment %}
+      <details class="scr-disclosure" name="scr_toggle" {% if col_explicit and cols %}open{% endif %}>
         <summary>Columns {% if cols %}<span class="scr-count">{{ cols|length }}</span>{% endif %} <span class="scr-chev">▾</span></summary>
         <div class="scr-panel">
           <div class="scr-panel-title">Metric columns to display</div>
