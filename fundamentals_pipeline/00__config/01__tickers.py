@@ -107,7 +107,15 @@ INCOME_STATEMENT = {
                                     "EarningsPerShareBasicAndDiluted",                  # single combined tag (basic == diluted)
                                     "EarningsPerShareBasic"],                           # last resort: negligible dilution (BRK-B, TR)
                                    "flow_nonadditive"),
-    "Shares Diluted":             ("WeightedAverageNumberOfDilutedSharesOutstanding",                                           "flow_nonadditive"),
+    # Fallback confirmed live against SEC data (2026-08, Market Cap (Live)/P/E (TTM, live)
+    # coverage-gap investigation): KKR & Co Inc reports ZERO facts under the standard tag
+    # (confirmed 404 on SEC's own companyconcept endpoint) — a holdover from its pre-2018
+    # KKR & Co. L.P. structure, its diluted share count is tagged as limited-partnership UNITS
+    # instead. Same "coalesce a priority list" pattern as EPS Basic/Diluted just above, not a
+    # new mechanism — extract_series_multi already resolves either form per period.
+    "Shares Diluted":             (["WeightedAverageNumberOfDilutedSharesOutstanding",  # standard tag (wins whenever present)
+                                    "WeightedAverageLimitedPartnershipUnitsOutstandingDiluted"], # LP/unit-structured filers (KKR)
+                                   "flow_nonadditive"),
 }
 
 BALANCE_SHEET = {
