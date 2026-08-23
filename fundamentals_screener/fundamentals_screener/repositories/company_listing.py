@@ -27,6 +27,7 @@ from fundamentals_pipeline.fx import convert_price
 from ..data_source import get_meta as load_meta
 from ..dtos import CompanyListRow, NetNetRow, ScreenColumn, ScreenTablePage, ScreenTableRow
 from .base import DuckDBRepository
+from .fx_lens import RateKey, resolve_rates
 
 # Latest-FY value per scoped ticker for one metric, bounded + ordered + paged inside DuckDB.
 # ``list_contains(?, ticker)`` restricts to the meta-filtered scope; the optional min/max are
@@ -49,21 +50,24 @@ _METRIC_PAGE_SQL = """
 # scope table, not the metrics pivot). Any other sort key must name a selected metric column.
 _SORTABLE_DESCRIPTIVE = ("ticker", "name", "sector", "industry", "country", "market")
 
-# Market Cap's FX rate for tickers whose native unit isn't already USD, for the USD-lens
-# toggle — date-anchored to each ticker's own Market Cap period_end. Scoped to just the
-# page's tickers.
-_MARKET_CAP_FX_SQL = """
-    WITH mc AS (
-        SELECT ticker, unit, period_end
-        FROM dashboard_metrics
-        WHERE metric = 'Market Cap' AND period_type = 'FY' AND value IS NOT NULL
-          AND UPPER(unit) != 'USD' AND list_contains(?, ticker)
-        QUALIFY row_number() OVER (PARTITION BY ticker ORDER BY fiscal_year DESC) = 1
+# Metrics whose per-row `unit` is a genuine per-ticker native currency (read from
+# market_cap_asof/market_cap_live's own `currency` column) rather than a fixed, column-wide
+# string -- forced into the currency-lens/relabel machinery regardless of what _metric_units()
+# (which just picks an arbitrary row's unit) would report for them.
+_ALWAYS_CURRENCY_METRICS = frozenset({"Market Cap", "Market Cap (Live)"})
+
+# Metrics whose "usd"-labeled unit is a static, column-wide literal from metrics_hierarchy.json
+# rather than a per-ticker real currency -- see _relabel_native_currency's own docstring.
+_MISLABELED_USD_EXCLUDE = _ALWAYS_CURRENCY_METRICS
+
+# Every currency this app has real FX data for -- see available_target_currencies.
+_CURRENCY_UNIVERSE_SQL = """
+    SELECT DISTINCT ccy FROM (
+        SELECT base AS ccy FROM dashboard_fx
+        UNION
+        SELECT quote AS ccy FROM dashboard_fx
     )
-    SELECT mc.ticker, fx.rate
-    FROM mc
-    LEFT JOIN dashboard_fx AS fx ON fx.base = UPPER(mc.unit) AND fx.quote = 'USD' AND fx.date <= mc.period_end
-    QUALIFY row_number() OVER (PARTITION BY mc.ticker ORDER BY fx.date DESC) = 1
+    ORDER BY ccy
 """
 
 
@@ -325,6 +329,18 @@ class CompanyListingRepository(DuckDBRepository):
         }
         return tuple(sorted(markets))
 
+    def available_target_currencies(self) -> tuple[str, ...]:
+        """Every currency this app has real FX data for (today: ``("CAD", "USD")``) —
+        dynamically enumerated from `dashboard_fx`'s own base/quote union, never a hardcoded
+        list, so a newly onboarded market's currency (e.g. EUR) appears here automatically the
+        day its FX pairs are first published, with zero code change here. Empty tuple if the
+        `dashboard_fx` view is absent (same optional-artifact degradation the currency lens
+        itself uses)."""
+        try:
+            return tuple(self._fetch_column(_CURRENCY_UNIVERSE_SQL))
+        except duckdb.Error:
+            return ()
+
     def available_industries(self, *, sector: str = "") -> tuple[str, ...]:
         """Distinct non-empty industry names in the universe, alphabetical (for the filter
         picker). Scoped to `sector` when given — Yahoo's ~145-value industry taxonomy is too
@@ -487,7 +503,7 @@ class CompanyListingRepository(DuckDBRepository):
         sort: SortSpec | None = None,
         page: int = 1,
         page_size: int = 50,
-        usd_lens: bool = False,
+        target_currency: str | None = None,
     ) -> ScreenTablePage:
         """One page of the multi-metric screener table.
 
@@ -495,10 +511,21 @@ class CompanyListingRepository(DuckDBRepository):
         universe) is pushed into a DuckDB temp table; each selected/​filtered metric's latest-FY
         value is pivoted per ticker in DuckDB, the metric filters and the sort/pagination are
         all applied there. Only the page's rows (≤ ``page_size``) ever cross back into Python.
-        ``usd_lens`` converts the Market Cap column to USD (only, date-anchored per ticker's own
-        Market Cap period_end) when it's a displayed column; every other ``$``-unit column stays
-        native regardless. Returns the rows, the total match count, and the ordered display
-        columns (with units, for formatting)."""
+
+        ``target_currency`` (an ISO code like "CAD", or ``None`` for no conversion — the
+        default, reproducing today's native-currency rendering) converts EVERY currency-
+        denominated display column — Market Cap, Market Cap (Live), and every other dollar-unit
+        metric (Free Cash Flow, EV, NCAV, the Graham/DCF/Owner-Earnings valuation columns,
+        etc.) — each cell independently date-anchored to ITS OWN observation date (that
+        metric's own `period_end`, not today's date and not a shared per-ticker date).
+        Ratio/percent columns are never touched. Metric filters (`filters`) always bind on
+        RAW/NATIVE values — the currency lens is a pure DISPLAY transform applied to the
+        already-filtered/sorted/paginated page's rows.
+
+        Independently of ``target_currency``, every currency-denominated column OTHER than
+        Market Cap / Market Cap (Live) also has its displayed unit corrected from the
+        pipeline's static "usd" label to that ticker's real reporting_currency when they
+        differ — see `_relabel_native_currency`'s own docstring."""
         scope = self._scope(search=search, sector=sector, index=index, country=country,
                             market=market, industry=industry)
         offset = max(0, (page - 1) * page_size)
@@ -526,6 +553,9 @@ class CompanyListingRepository(DuckDBRepository):
             )
             for rec in scope
         ]
+        reporting_currency_by_ticker = {
+            rec.get("ticker", ""): rec.get("reporting_currency") for rec in scope
+        }
 
         with self._connection() as con:
             con.execute("DROP TABLE IF EXISTS scoped")
@@ -537,12 +567,22 @@ class CompanyListingRepository(DuckDBRepository):
             con.executemany("INSERT INTO scoped VALUES (?, ?, ?, ?, ?, ?, ?)", scope_rows)
 
             units = self._metric_units(con, all_metrics)
-            cte, cte_params = self._pivot_cte(all_metrics, alias)
+            currency_metrics = frozenset(
+                m for m in display_metrics
+                if m in _ALWAYS_CURRENCY_METRICS or (units.get(m) or "").lower() == "usd"
+            )
+            currency_display_metrics = [m for m in display_metrics if m in currency_metrics]
+
+            cte, cte_params = self._pivot_cte(
+                all_metrics, alias, currency_metrics=frozenset(currency_display_metrics),
+            )
             where, where_params = self._filter_clause(filters, alias)
             select_cols = ", ".join(f"p.{alias[m]}, p.{alias[m]}_u" for m in display_metrics)
+            pe_cols = ", ".join(f"p.{alias[m]}_pe" for m in currency_display_metrics)
             projection = (
                 "s.ticker, s.name, s.sector, s.industry, s.country, s.market, s.has_logo"
                 + (f", {select_cols}" if select_cols else "")
+                + (f", {pe_cols}" if pe_cols else "")
             )
             from_join = (
                 "scoped s LEFT JOIN pivoted p USING (ticker)" if all_metrics else "scoped s"
@@ -562,6 +602,8 @@ class CompanyListingRepository(DuckDBRepository):
             )
             hits = cursor.fetchall()
 
+            n_desc = 7
+            n_value_cols = 2 * len(display_metrics)
             rows = tuple(
                 ScreenTableRow(
                     ticker=row[0],
@@ -571,13 +613,28 @@ class CompanyListingRepository(DuckDBRepository):
                     country=row[4],
                     market=row[5],
                     has_logo=row[6],
-                    values={m: row[7 + 2 * i] for i, m in enumerate(display_metrics)},
-                    units={m: row[7 + 2 * i + 1] for i, m in enumerate(display_metrics)},
+                    values={m: row[n_desc + 2 * i] for i, m in enumerate(display_metrics)},
+                    units={m: row[n_desc + 2 * i + 1] for i, m in enumerate(display_metrics)},
                 )
                 for row in hits
             )
-            if usd_lens and "Market Cap" in display_metrics and rows:
-                rows = self._apply_usd_lens(con, rows)
+            period_end_by_row_metric = {
+                (row[0], m): row[n_desc + n_value_cols + j]
+                for row in hits
+                for j, m in enumerate(currency_display_metrics)
+            }
+
+            if currency_metrics and rows:
+                rows = self._relabel_native_currency(
+                    rows, currency_metrics, reporting_currency_by_ticker,
+                )
+                if target_currency:
+                    rows = self._apply_currency_lens(
+                        con, rows,
+                        target_currency=target_currency,
+                        currency_metrics=currency_metrics,
+                        period_end_by_row_metric=period_end_by_row_metric,
+                    )
 
         columns_meta = tuple(
             ScreenColumn(key=m, unit=units.get(m)) for m in display_metrics
@@ -1054,31 +1111,116 @@ class CompanyListingRepository(DuckDBRepository):
         return rows, total, columns_meta
 
     @staticmethod
-    def _apply_usd_lens(con: Any, rows: tuple[ScreenTableRow, ...]) -> tuple[ScreenTableRow, ...]:
-        """Convert each row's Market Cap to USD where a same-date FX rate exists; rows with no
-        rate (missing `fx` view, or no rate dated early enough) are returned unchanged — still
-        native-currency, still badged, never silently guessed."""
+    def _relabel_native_currency(
+        rows: tuple[ScreenTableRow, ...],
+        currency_metrics: frozenset[str],
+        reporting_currency_by_ticker: dict[str, Any],
+    ) -> tuple[ScreenTableRow, ...]:
+        """Fix a real pre-existing mislabeling bug — always applied, independent of any
+        currency-lens conversion, since this is a display-correctness fix, not a conversion
+        feature. Only `price_close`/`market_cap` get FX-aligned into `reporting_currency`
+        before storage in the pipeline; every OTHER derived dollar metric (Free Cash Flow, EV,
+        NCAV, Graham Number, DCF Value, Owner Earnings, etc.) is computed straight from
+        financial-statement inputs already in the ticker's native reporting currency — never
+        converted — but `metrics_hierarchy.json` stamps a static, column-wide `"usd"` literal
+        on all of them regardless (confirmed: Free Cash Flow's `unit` column is 100% `"usd"`
+        across every row, even for CAD-reporting tickers). Replaces each affected cell's unit
+        with the ticker's real `reporting_currency`. Market Cap / Market Cap (Live) are
+        excluded — their per-row `unit` is already correct (read from `market_cap_asof`/
+        `market_cap_live`'s own `currency` column). A ticker with no known
+        `reporting_currency` is left exactly as-is: never guessed. A USD-reporting ticker's
+        cells are also left exactly as-is."""
+        targets = currency_metrics - _MISLABELED_USD_EXCLUDE
+        if not targets:
+            return rows
+        relabeled = []
+        for row in rows:
+            ccy = reporting_currency_by_ticker.get(row.ticker)
+            if not ccy:
+                relabeled.append(row)
+                continue
+            ccy_lower = ccy.lower()
+            new_units = dict(row.units)
+            changed = False
+            for m in targets:
+                current = row.units.get(m)
+                if current and current.lower() != ccy_lower:
+                    new_units[m] = ccy_lower
+                    changed = True
+            relabeled.append(replace(row, units=new_units) if changed else row)
+        return tuple(relabeled)
+
+    @staticmethod
+    def _apply_currency_lens(
+        con: Any,
+        rows: tuple[ScreenTableRow, ...],
+        *,
+        target_currency: str,
+        currency_metrics: frozenset[str],
+        period_end_by_row_metric: dict[tuple[str, str], Any],
+    ) -> tuple[ScreenTableRow, ...]:
+        """Convert every `currency_metrics` cell to `target_currency`, each cell independently
+        date-anchored to ITS OWN `period_end` (from `period_end_by_row_metric`, populated by
+        `screen_table` from `_pivot_cte`'s `{alias}_pe` columns — the same mechanism covers
+        Market Cap, Market Cap (Live), and every other currency metric uniformly).
+
+        Same 3-level graceful degradation the old Market-Cap-only USD lens established:
+        `dashboard_fx` view missing -> rows unchanged; no rate resolvable for the whole page ->
+        rows unchanged; one cell missing its value/unit/period_end/rate -> that ONE cell stays
+        native, every other cell (same row or a different row) still converts. Never raises to
+        the user; never guesses."""
+        target = target_currency.upper()
+
+        def _cell_key(row: ScreenTableRow, m: str) -> RateKey | None:
+            native = row.units.get(m)
+            value = row.values.get(m)
+            as_of = period_end_by_row_metric.get((row.ticker, m))
+            if native is None or value is None or as_of is None:
+                return None
+            native_u = native.upper()
+            return None if native_u == target else RateKey(native=native_u, as_of=as_of)
+
+        needed = {
+            key
+            for row in rows
+            for m in currency_metrics
+            if (key := _cell_key(row, m)) is not None
+        }
+        if not needed:
+            return rows
         try:
-            rate_rows = con.execute(_MARKET_CAP_FX_SQL, [[r.ticker for r in rows]]).fetchall()
+            rates = resolve_rates(con, frozenset(needed), target)
         except duckdb.Error:
             return rows  # `fx` view not registered (dashboard_fx.parquet unavailable) — degrade
-        rate_by_ticker = {ticker: rate for ticker, rate in rate_rows if rate is not None}
-        if not rate_by_ticker:
+        if not rates:
             return rows
+
         converted = []
         for row in rows:
-            rate = rate_by_ticker.get(row.ticker)
-            native_value = row.values.get("Market Cap")
-            native_unit = row.units.get("Market Cap")
-            if rate is None or native_value is None or not native_unit:
-                converted.append(row)
-                continue
-            usd_value = convert_price(native_value, native_unit.upper(), "USD", rate)
-            converted.append(replace(
-                row,
-                values={**row.values, "Market Cap": usd_value},
-                units={**row.units, "Market Cap": "usd"},
-            ))
+            new_values = dict(row.values)
+            new_units = dict(row.units)
+            changed = False
+            for m in currency_metrics:
+                native = row.units.get(m)
+                value = row.values.get(m)
+                as_of = period_end_by_row_metric.get((row.ticker, m))
+                if native is None or value is None or as_of is None:
+                    continue
+                native_u = native.upper()
+                if native_u == target:
+                    if (row.units.get(m) or "").lower() != target.lower():
+                        new_units[m] = target.lower()
+                        changed = True
+                    continue
+                rate = rates.get(RateKey(native=native_u, as_of=as_of))
+                if rate is None:
+                    continue  # this one cell stays native
+                new_values[m] = convert_price(value, native_u, target, rate)
+                new_units[m] = target.lower()
+                changed = True
+            converted.append(
+                replace(row, values=new_values, units=new_units) if changed else row
+            )
         return tuple(converted)
 
     @staticmethod
@@ -1094,13 +1236,25 @@ class CompanyListingRepository(DuckDBRepository):
         return {metric: unit for metric, unit in rows}
 
     @staticmethod
-    def _pivot_cte(metrics: list[str], alias: dict[str, str]) -> tuple[str, list[Any]]:
+    def _pivot_cte(
+        metrics: list[str],
+        alias: dict[str, str],
+        *,
+        currency_metrics: frozenset[str] = frozenset(),
+    ) -> tuple[str, list[Any]]:
         """The ``WITH latest, pivoted`` CTE that gives each scoped ticker its latest-FY value of
         every needed metric, one value column (``m0``, ``m1``, …) plus its own unit column
         (``m0_u``, ``m1_u``, …) per metric. Most metrics carry one fixed unit across every
         ticker (``ScreenColumn.unit`` covers those), but Market Cap's unit is each ticker's own
         native reporting currency — read per row here rather than assumed column-wide. Empty
-        when no metrics."""
+        when no metrics.
+
+        `currency_metrics` (a subset of `metrics`) additionally gets its own ``{alias}_pe``
+        column — that metric's own `period_end`, needed to date-anchor the currency lens's FX
+        lookup per cell (see `_apply_currency_lens`). Already a real per-row column on
+        `dashboard_metrics` (the pipeline's own export script stamps it) — this only projects
+        it, no pipeline change needed. Omitted for every other metric to avoid an unused date
+        column on every ratio/percent column."""
         if not metrics:
             return "", []
         parts: list[str] = []
@@ -1110,10 +1264,13 @@ class CompanyListingRepository(DuckDBRepository):
             params.append(m)
             parts.append(f"any_value(unit) FILTER (WHERE metric = ?) AS {alias[m]}_u")
             params.append(m)
+            if m in currency_metrics:
+                parts.append(f"any_value(period_end) FILTER (WHERE metric = ?) AS {alias[m]}_pe")
+                params.append(m)
         filters_sql = ", ".join(parts)
         cte = (
             "WITH latest AS ("
-            "  SELECT ticker, metric, value, unit FROM dashboard_metrics"
+            "  SELECT ticker, metric, value, unit, period_end FROM dashboard_metrics"
             "  WHERE period_type = 'FY' AND value IS NOT NULL AND list_contains(?, metric)"
             "    AND ticker IN (SELECT ticker FROM scoped)"
             "  QUALIFY row_number() OVER (PARTITION BY ticker, metric ORDER BY fiscal_year DESC) = 1"

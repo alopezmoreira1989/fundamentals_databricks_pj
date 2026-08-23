@@ -146,6 +146,17 @@
       });
     }
 
+    // Instant visual disable of the currency dropdown on checkbox change -- purely same-frame
+    // polish; the form's own 'change' listener below already re-submits and the server
+    // re-renders the correct disabled state within that same round trip regardless.
+    var nativeToggle = form.querySelector('input[name="native"]');
+    var ccySelect = form.querySelector('#scr-ccy');
+    if (nativeToggle && ccySelect) {
+      nativeToggle.addEventListener('change', function () {
+        ccySelect.disabled = nativeToggle.checked;
+      });
+    }
+
     var debounceTimer = null;
 
     function applyForm() {

@@ -275,14 +275,20 @@ def screen(request: HttpRequest) -> HttpResponse:
     industries = services.available_industries(sector=sector)
     if industry not in industries:
         industry = ""
-    # Only meaningful once the universe actually has a non-USD market; otherwise there's
-    # nothing for it to convert, so it isn't offered. Generic over any market this app knows a
-    # real quote currency for (not just "CA") — mirrors company_detail()'s own market-agnostic
-    # gate; Phase 5.7a's fix for the stale "CA"-only check (docs/phase5-7-fundamentals-screener-
-    # multi-market-audit.md §5.3 item 8).
     markets = services.available_markets()
-    show_usd_toggle = any(quote_currency(m) not in (None, "USD") for m in markets)
-    usd_lens = show_usd_toggle and request.GET.get("usd") == "1"
+    # Currency-lens selector: only meaningful once there are ≥2 currencies with real FX data to
+    # pick between — a 0-or-1-currency universe gives the user nothing to convert. Dynamically
+    # enumerated from dashboard_fx itself (today: CAD/USD), not the ticker universe's listing
+    # markets — grows automatically once a new currency's FX pairs are published, never a
+    # hardcoded list.
+    target_currencies = services.available_target_currencies()
+    show_currency_selector = len(target_currencies) >= 2
+    native_lens = show_currency_selector and request.GET.get("native") == "1"
+    raw_ccy = request.GET.get("ccy", "").strip().upper()
+    selected_currency = raw_ccy if raw_ccy in target_currencies else ""
+    # `native` wins if both are somehow present (hand-edited URL) — the repository only ever
+    # sees a single target_currency: str | None, never "native_lens" as a separate concept.
+    target_currency = None if native_lens else (selected_currency or None)
     page = _parse_page(request.GET.get("page"))
 
     desc_explicit = "desc_on" in request.GET
@@ -322,16 +328,16 @@ def screen(request: HttpRequest) -> HttpResponse:
         search=search, sector=sector, index=index, country=country, market=market,
         industry=industry, columns=display_cols, filters=filters,
         sort=SortSpec(key=sort_key, descending=descending),
-        page=page, page_size=PAGE_SIZE, usd_lens=usd_lens,
+        page=page, page_size=PAGE_SIZE, target_currency=target_currency,
     )
 
     num_pages = max(1, math.ceil(result.total / PAGE_SIZE))
     page = min(page, num_pages)
 
     # State-carrying param pairs. `base_pairs` (no page/sort/dir) drives the sort-header links;
-    # `state_pairs` (adds the active sort) drives the pagination links. usd_lens rides along in
-    # both so toggling it survives a sort/page click, same bookmarkable-URL contract as every
-    # other filter here.
+    # `state_pairs` (adds the active sort) drives the pagination links. The currency lens rides
+    # along in both so toggling it survives a sort/page click, same bookmarkable-URL contract as
+    # every other filter here.
     base_pairs: list[tuple[str, str]] = []
     for k, v in (
         ("q", search), ("sector", sector), ("index", index), ("country", country),
@@ -345,8 +351,10 @@ def screen(request: HttpRequest) -> HttpResponse:
         base_pairs.append(("fmetric", f.metric))
         base_pairs.append(("fmin", "" if f.min_value is None else _num(f.min_value)))
         base_pairs.append(("fmax", "" if f.max_value is None else _num(f.max_value)))
-    if usd_lens:
-        base_pairs.append(("usd", "1"))
+    if native_lens:
+        base_pairs.append(("native", "1"))
+    elif selected_currency:
+        base_pairs.append(("ccy", selected_currency))
     # Snapshot before `desc`/`desc_on` are appended — this is state the table-columns toggle
     # (a second, small GET form near the table, see the template) replicates as hidden fields,
     # since its own checkboxes supply desc/desc_on themselves; duplicating them would conflict.
@@ -440,8 +448,10 @@ def screen(request: HttpRequest) -> HttpResponse:
             "country": country,
             "market": market,
             "industry": industry,
-            "show_usd_toggle": show_usd_toggle,
-            "usd_lens": usd_lens,
+            "show_currency_selector": show_currency_selector,
+            "target_currencies": target_currencies,
+            "native_lens": native_lens,
+            "selected_currency": selected_currency,
             "cols": cols,
             "col_explicit": col_explicit,
             "sort_key": sort_key,

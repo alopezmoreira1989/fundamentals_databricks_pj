@@ -530,8 +530,11 @@ body.fs-app { font-family: var(--sans); background: var(--bg); color: var(--ink)
 }
 .fs-app .scr-add-filter:hover { text-decoration: underline; }
 
-.fs-app .scr-usd-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: .82rem; color: var(--ink-2); white-space: nowrap; }
-.fs-app .scr-usd-toggle input { accent-color: var(--accent); width: 15px; height: 15px; }
+.fs-app .scr-currency-lens { display: inline-flex; align-items: center; gap: 10px; font-size: .82rem; color: var(--ink-2); flex-wrap: wrap; }
+.fs-app .scr-native-toggle { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.fs-app .scr-native-toggle input { accent-color: var(--accent); width: 15px; height: 15px; }
+.fs-app .scr-ccy-select-label select { min-width: 150px; }
+.fs-app .scr-ccy-select-label select:disabled { opacity: .55; cursor: not-allowed; }
 
 /* Table-columns toggle — its own small auto-submitting form, replicating the filter form's
    current state as hidden fields so toggling a column never loses the active search/filters. */

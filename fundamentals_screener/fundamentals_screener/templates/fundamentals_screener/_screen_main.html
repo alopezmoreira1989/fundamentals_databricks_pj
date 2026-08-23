@@ -157,11 +157,23 @@ inherited across {% include %} boundaries.
         </div>
       </details>
 
-      {% if show_usd_toggle %}
-        <label class="scr-usd-toggle">
-          <input type="checkbox" name="usd" value="1" {% if usd_lens %}checked{% endif %}>
-          View Market Cap in USD <span class="text-muted">(other figures stay native)</span>
-        </label>
+      {% if show_currency_selector %}
+        <div class="scr-currency-lens">
+          <label class="scr-native-toggle">
+            <input type="checkbox" name="native" value="1" {% if native_lens %}checked{% endif %}>
+            Native currencies
+          </label>
+          <label class="scr-ccy-select-label" for="scr-ccy">
+            <select id="scr-ccy" name="ccy" class="form-select form-select-sm"
+                    {% if native_lens %}disabled{% endif %} aria-label="Convert figures to currency">
+              <option value="">Native (no conversion)</option>
+              {% for c in target_currencies %}
+                <option value="{{ c }}" {% if c == selected_currency %}selected{% endif %}>{{ c }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <span class="text-muted small">Each figure uses the rate dated at its own reporting date.</span>
+        </div>
       {% endif %}
 
       <div class="scr-toolbar-spacer"></div>
