@@ -390,12 +390,23 @@ def screen(request: HttpRequest) -> HttpResponse:
     # (mirrors _sort_headers' own "precompute the ready-to-use URL in Python" pattern) — "Unknown"
     # (null-sector tickers) gets no `qs` at all, since the Sector <select> has no matching option
     # to click it into (no way to filter on "sector IS NULL" today); it renders as plain text.
+    #
+    # `bar_pct` (the bar's own width) is deliberately a DIFFERENT number than `pct` (the % label
+    # next to it): `pct` is share-of-universe (count/sector_total), always small even for the
+    # biggest sector, since no sector dominates a broad market index — using it for bar width
+    # made every bar look like a similarly-short sliver, defeating the point of a bar chart
+    # (confirmed live, 2026-08-23 screenshot). `bar_pct` is share-of-the-LARGEST-sector-shown
+    # (count/max_count), so the biggest sector's bar always fills the track and the rest scale
+    # visibly against it — an ordinary relative bar chart, `pct` is still the honest stat shown
+    # in the label.
     sector_total = result.total
+    max_sector_count = max((sc.count for sc in result.sector_distribution), default=0)
     sector_rows = [
         {
             "sector": sc.sector,
             "count": sc.count,
             "pct": (sc.count / sector_total * 100) if sector_total else 0.0,
+            "bar_pct": (sc.count / max_sector_count * 100) if max_sector_count else 0.0,
             "qs": (
                 urlencode([(k, v) for k, v in base_pairs if k != "sector"] + [("sector", sc.sector)])
                 if sc.sector != "Unknown" else None

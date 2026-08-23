@@ -3,9 +3,14 @@ Sector Distribution panel — the sector breakdown of the CURRENT filtered Gener
 universe (all matches, not just the current page). Rendered both as part of the full page/
 mode-switch tiers (included from _screen_main.html) and as its own small AJAX fragment (see
 views.screen()'s `X-Sector-Distribution` branch) — same template either way, single source of
-truth. Context: `sector_rows` (a list of {sector, count, pct, qs} dicts, already sorted
-descending by count — see views.screen()), `sector_total`, `sector` (the currently active
-Sector filter value, for highlighting the matching row).
+truth. Context: `sector_rows` (a list of {sector, count, pct, bar_pct, qs} dicts, already
+sorted descending by count — see views.screen()), `sector_total`, `sector` (the currently
+active Sector filter value, for highlighting the matching row).
+
+`bar_pct` (the bar's own CSS width) is NOT the same number as `pct` (the label next to it):
+`pct` is share-of-universe, `bar_pct` is share-of-the-largest-sector-shown, so the biggest
+sector's bar always fills the track and the rest scale visibly against it — see views.screen()'s
+own comment for why using `pct` for both made every bar look like a similarly-short sliver.
 
 Each row with a `qs` is a real `<a href="?...">` (every other active filter preserved, `sector`
 replaced by that row's own) — works with JS disabled as a plain navigation. With JS, screener.js
@@ -33,7 +38,7 @@ as plain text, not a link.
           bare `floatformat:1` on the display text rendered "100,0%" with a comma decimal,
           same bug class, not just the width value.
           {% endcomment %}
-          <span class="scr-sector-bar-track"><span class="scr-sector-bar-fill" style="width:{{ row.pct|floatformat:'1u' }}%"></span></span>
+          <span class="scr-sector-bar-track"><span class="scr-sector-bar-fill" style="width:{{ row.bar_pct|floatformat:'1u' }}%"></span></span>
           <span class="scr-sector-count">{{ row.count }}</span>
           <span class="scr-sector-pct">{{ row.pct|floatformat:'1u' }}%</span>
         {% if row.qs %}</a>{% else %}</div>{% endif %}
