@@ -90,6 +90,23 @@ def test_columns_panel_open_when_selection_differs_from_defaults():
     assert " open" in details_block.split(">")[0]
 
 
+def test_metric_filters_panel_closed_by_default_with_no_bound_filters():
+    # Regression (2026-08-23, caught live): the panel/badge stayed "active" forever after ANY
+    # interaction, because bound-less Columns-mirror rows made the old `bool(filters)` check
+    # true even with zero real bounds set. See views._count_bound_filters.
+    html = _render(has_active_filters=False, active_filter_count=0)
+    details_block = html.split('name="scr_toggle"')[2].split("</details>")[0]
+    assert " open" not in details_block.split(">")[0]
+    assert "scr-count" not in details_block.split("<summary>")[1].split("</summary>")[0]
+
+
+def test_metric_filters_panel_open_and_badged_with_a_real_bound():
+    html = _render(has_active_filters=True, active_filter_count=2)
+    details_block = html.split('name="scr_toggle"')[2].split("</details>")[0]
+    assert " open" in details_block.split(">")[0]
+    assert ">2<" in details_block.split("<summary>")[1].split("</summary>")[0]
+
+
 def test_currency_select_has_a_visible_currency_label():
     html = _render(show_currency_selector=True, target_currencies=("CAD", "USD"))
     assert '<label for="scr-ccy" class="form-label">Currency</label>' in html

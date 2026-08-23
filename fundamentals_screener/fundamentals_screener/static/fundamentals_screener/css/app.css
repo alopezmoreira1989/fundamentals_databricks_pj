@@ -576,9 +576,13 @@ body.fs-app { font-family: var(--sans); background: var(--bg); color: var(--ink)
    instead of collapsing to its own (usually shorter) content height. */
 .fs-app .scr-sector-box {
   align-self: stretch;
-  /* grow to fill the hero's remaining width instead of sitting at a fixed 360px -- capped at
-     640px so it doesn't stretch absurdly wide on an ultra-wide monitor. */
-  flex: 1 1 360px; min-width: 260px; max-width: 640px;
+  /* Grow to fill ALL of the hero's remaining width -- no max-width cap. A 640px cap here
+     (removed 2026-08-23, confirmed live it left 300-400px of visibly unused space on a normal
+     wide screen) turned out to be unnecessary: flex-grow can never claim more than the row
+     actually has left over, and the row itself is already naturally bounded by .container's
+     own 1840px cap (app.css's responsive .container rules) minus the icon/intro columns'
+     fixed+content widths -- roughly 950-1000px in the realistic worst case, not "absurd". */
+  flex: 1 1 360px; min-width: 260px;
   display: flex; flex-direction: column;
 }
 .fs-app .scr-sector-title {
@@ -626,7 +630,7 @@ a.scr-sector-row:hover { background: var(--bg-subtle); }
   border-top: 1px solid var(--rule-soft); margin-top: 5px; padding: 5px 4px 0;
 }
 .fs-app .scr-sector-total span:nth-child(3), .fs-app .scr-sector-total span:nth-child(4) { text-align: right; }
-@media (max-width: 900px) { .fs-app .scr-sector-box { flex-basis: 100%; max-width: none; } }
+@media (max-width: 900px) { .fs-app .scr-sector-box { flex-basis: 100%; } }
 
 /* ---------- Screener-mode AJAX swap targets (General Screener / Net-Net Finder / Investor
    Presets / cross-mode #main) — shared loading-state treatment, see screener.js. Delayed
