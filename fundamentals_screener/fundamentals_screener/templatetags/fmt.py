@@ -61,6 +61,52 @@ def metric_value(value: float | None, unit: str | None = None) -> str:
     return f"{value:,.2f}"
 
 
+_SCALE_DIVISORS = {"B": (1e9, 2, "B"), "M": (1e6, 1, "M"), "K": (1e3, 1, "K")}
+
+
+def _scaled_body(value: float, scale: str) -> str:
+    """The numeric body only (no ``$`` prefix, no currency badge) — callers add those, matching
+    ``metric_value``'s/``compact_money_ccy``'s existing prefix/badge conventions. ``scale``:
+    ``"normal"`` (full comma-grouped number), ``"B"``/``"M"``/``"K"`` (forced divisor + suffix,
+    regardless of the value's own magnitude), or anything else (``"auto"``, the default) — reuses
+    :func:`compact_money`'s existing per-magnitude T/B/M/K logic as-is."""
+    if scale == "normal":
+        return f"{value:,.2f}"
+    if scale in _SCALE_DIVISORS:
+        divisor, precision, suffix = _SCALE_DIVISORS[scale]
+        return f"{value / divisor:,.{precision}f}{suffix}"
+    return compact_money(value)
+
+
+@register.simple_tag(takes_context=True)
+def fmt_value(context, value: float | None, unit: str | None = None) -> str:
+    """Context-aware successor to :func:`metric_value`/:func:`compact_money_ccy` for the
+    General Screener table and Company Detail page's currency-denominated figures — adds the
+    units-scale selector (Auto/Normal/Billions/Millions/Thousands) on top of their exact same
+    percent/currency/plain-number dispatch, which is otherwise byte-for-byte unchanged: scale
+    must never touch a percent or ratio/plain-number value, only the two currency branches.
+
+    A ``@register.filter`` can't take a second argument for ``scale`` alongside ``unit`` — this
+    is a ``simple_tag`` instead so it can read the page-wide ``value_scale`` ("auto" default,
+    or "normal"/"B"/"M"/"K") straight from the render context, the same way every other template
+    on this page already shares page-wide state (mirrors ``target_currency``'s own ``?ccy=``
+    contract — see views.py). Both ``metric_value`` and ``compact_money_ccy`` remain, unchanged,
+    for call sites outside this feature's scope (Net-Net Finder, Investor Presets, per-share
+    price figures) — this tag doesn't replace them everywhere, only where scale applies.
+    """
+    if value is None:
+        return _EMPTY
+    u = (unit or "").lower()
+    if u == "percent":
+        return f"{value:,.1f}%"
+    scale = context.get("value_scale", "auto")
+    if u == "usd":
+        return format_html("${}", _scaled_body(value, scale))
+    if len(u) == 3 and u.isalpha():
+        return format_html("{} {}", _scaled_body(value, scale), currency_badge(u))
+    return f"{value:,.2f}"
+
+
 @register.filter
 def compact_money(value: float | None) -> str:
     """Compact financial-statement figure: ``$391.04B``, ``15.3M``, or ``6.11`` for small

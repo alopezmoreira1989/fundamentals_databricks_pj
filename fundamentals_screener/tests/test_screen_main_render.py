@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import pytest
 from django.template.loader import render_to_string
+from fundamentals_screener.dtos import ScreenTableRow
 
 pytestmark = pytest.mark.django_db
 
@@ -36,6 +37,8 @@ def _base_context(**overrides) -> dict:
         "show_currency_selector": True,
         "target_currencies": ("CAD", "USD"),
         "selected_currency": "",
+        "selected_scale": "auto",
+        "value_scale": "auto",
         "cols": ["Market Cap (Live)", "P/E (TTM, live)", "Current Ratio", "Debt / Equity"],
         "cols_customized": False,
         "sort_key": "ticker",
@@ -103,3 +106,51 @@ def test_currency_select_hidden_when_only_one_currency():
 def test_currency_select_marks_the_chosen_currency():
     html = _render(show_currency_selector=True, target_currencies=("CAD", "USD"), selected_currency="USD")
     assert '<option value="USD" selected>USD</option>' in html
+
+
+def test_scale_select_always_renders_with_a_visible_label():
+    # Unlike Currency, Scale never depends on FX data availability -- it must render regardless
+    # of show_currency_selector.
+    html = _render(show_currency_selector=False, target_currencies=())
+    assert '<label for="scr-scale" class="form-label">Scale</label>' in html
+    assert 'id="scr-scale"' in html
+    assert '<option value="">Auto</option>' in html
+
+
+def test_scale_select_marks_the_chosen_scale():
+    html = _render(selected_scale="M")
+    assert '<option value="M" selected>Millions</option>' in html
+
+
+def test_scale_select_auto_is_the_implicit_default_no_option_marked_selected_but_auto():
+    html = _render(selected_scale="auto")
+    block = html.split('id="scr-scale"')[1].split("</select>")[0]
+    assert "selected" not in block  # "Auto" wins by being the first, unmarked option
+
+
+# ── Default rendering: General Screener cells auto-compact, matching the confirmed
+#    default-behavior decision (large $ figures should be readable out of the box) ────────────
+
+def _row_with_market_cap(value: float, unit: str = "usd") -> dict:
+    row = ScreenTableRow(
+        ticker="BIGCO", name="Big Co", sector="Industrials", industry="Machinery",
+        country="United States", market="US", has_logo=False,
+        values={"Market Cap (Live)": value}, units={"Market Cap (Live)": unit},
+    )
+    return {"row": row, "desc_cells": [row.sector, row.industry, row.country, row.market],
+            "cells": [(value, unit)]}
+
+
+def test_default_scale_auto_compacts_a_large_market_cap_cell():
+    html = _render(rows=[_row_with_market_cap(1_234_567_890.0)], total=1)
+    assert "1.23B" in html
+    assert "1,234,567,890.00" not in html
+
+
+def test_forced_normal_scale_renders_the_full_raw_number():
+    html = _render(
+        value_scale="normal", selected_scale="normal",
+        rows=[_row_with_market_cap(1_234_567_890.0)], total=1,
+    )
+    assert "1,234,567,890.00" in html
+    assert "1.23B" not in html

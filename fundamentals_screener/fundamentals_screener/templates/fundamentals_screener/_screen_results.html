@@ -49,7 +49,7 @@
                 <td class="text-muted">{{ v|default:"—" }}</td>
               {% endfor %}
               {% for cell in item.cells %}
-                <td class="text-end font-monospace">{{ cell.0|metric_value:cell.1 }}</td>
+                <td class="text-end font-monospace">{% fmt_value cell.0 cell.1 %}</td>
               {% endfor %}
             </tr>
           {% endfor %}

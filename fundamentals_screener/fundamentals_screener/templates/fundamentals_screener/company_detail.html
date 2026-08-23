@@ -279,11 +279,11 @@
         <span class="co-chip">{{ s.ticker }}</span>
       </div>
     </div>
-    {% if show_currency_selector %}
-      <form method="get" class="scr-currency-lens" id="co-currency-form">
-        {% if bench %}<input type="hidden" name="bench" value="{{ bench }}">{% endif %}
-        {% if compare_query %}<input type="hidden" name="compare" value="{{ compare_query }}">{% endif %}
-        {% if price_window %}<input type="hidden" name="window" value="{{ price_window }}">{% endif %}
+    <form method="get" class="scr-currency-lens" id="co-lens-form">
+      {% if bench %}<input type="hidden" name="bench" value="{{ bench }}">{% endif %}
+      {% if compare_query %}<input type="hidden" name="compare" value="{{ compare_query }}">{% endif %}
+      {% if price_window %}<input type="hidden" name="window" value="{{ price_window }}">{% endif %}
+      {% if show_currency_selector %}
         <label class="scr-ccy-select-label mb-0" for="co-ccy">Currency</label>
         <select id="co-ccy" name="ccy" class="scr-ccy-select form-select form-select-sm"
                 onchange="this.form.submit()" title="Each figure converts using the FX rate dated at its own reporting date.">
@@ -292,9 +292,18 @@
             <option value="{{ c }}" {% if c == selected_currency %}selected{% endif %}>{{ c }}</option>
           {% endfor %}
         </select>
-        <noscript><button type="submit" class="btn btn-sm btn-outline-secondary">Apply</button></noscript>
-      </form>
-    {% endif %}
+      {% endif %}
+      <label class="scr-ccy-select-label mb-0" for="co-scale">Scale</label>
+      <select id="co-scale" name="scale" class="scr-ccy-select form-select form-select-sm"
+              onchange="this.form.submit()" title="Choose a fixed unit for every dollar figure, or Auto to let each value pick its own.">
+        <option value="">Auto</option>
+        <option value="normal" {% if selected_scale == "normal" %}selected{% endif %}>Normal</option>
+        <option value="B" {% if selected_scale == "B" %}selected{% endif %}>Billions</option>
+        <option value="M" {% if selected_scale == "M" %}selected{% endif %}>Millions</option>
+        <option value="K" {% if selected_scale == "K" %}selected{% endif %}>Thousands</option>
+      </select>
+      <noscript><button type="submit" class="btn btn-sm btn-outline-secondary">Apply</button></noscript>
+    </form>
   </div>
 
   <datalist id="peer-companies-datalist">
@@ -356,7 +365,7 @@
         {% for k in headline %}
           <div class="kpi-cell">
             <div class="k">{{ k.label }}</div>
-            <div class="v">{{ k.value|compact_money_ccy:k.currency }}</div>
+            <div class="v">{% fmt_value k.value k.currency %}</div>
             <div class="fy">{% if k.fiscal_year %}FY {{ k.fiscal_year }}{% endif %}</div>
           </div>
         {% endfor %}
@@ -409,7 +418,7 @@
           <div class="btn-group btn-group-sm mb-3" role="group" aria-label="Price chart range">
             {% for w in price_windows %}
               <a class="btn {% if w == price_window %}btn-dark{% else %}btn-outline-secondary{% endif %}"
-                 href="?window={{ w }}{% if selected_currency %}&amp;ccy={{ selected_currency }}{% endif %}#pane-price">{{ w }}</a>
+                 href="?window={{ w }}{% if selected_currency %}&amp;ccy={{ selected_currency }}{% endif %}{% if value_scale != "auto" %}&amp;scale={{ value_scale }}{% endif %}#pane-price">{{ w }}</a>
             {% endfor %}
           </div>
           {% if price_tab_data %}
@@ -481,7 +490,7 @@
                 {% for line in sec.list %}
                   <tr class="{{ line.row_class }}">
                     <td class="label indent-{{ line.indent }}">{{ line.display_name }}</td>
-                    {% for v in line.values|slice:"::-1" %}<td class="num">{{ v|compact_money_ccy:st_ccy }}</td>{% endfor %}
+                    {% for v in line.values|slice:"::-1" %}<td class="num">{% fmt_value v st_ccy %}</td>{% endfor %}
                     <td class="spark">{{ line.values|sparkline }}</td>
                   </tr>
                 {% endfor %}
@@ -525,7 +534,7 @@
               {% for line in quarterly.lines %}
                 <tr class="{{ line.row_class }}">
                   <td class="label indent-{{ line.indent }}">{{ line.display_name }}</td>
-                  {% for v in line.values|slice:"::-1" %}<td class="num">{{ v|compact_money_ccy:quarterly_currency }}</td>{% endfor %}
+                  {% for v in line.values|slice:"::-1" %}<td class="num">{% fmt_value v quarterly_currency %}</td>{% endfor %}
                   <td class="spark">{{ line.values|sparkline }}</td>
                 </tr>
               {% endfor %}
@@ -551,7 +560,7 @@
               <div class="mb-3">
                 <div class="d-flex justify-content-between small mb-1">
                   <span>{{ b.method }} <span class="text-muted">· FY{{ b.fiscal_year }}</span></span>
-                  <span class="mono">{{ b.bear|metric_value:iv_currency }} – {{ b.mid|metric_value:iv_currency }} – {{ b.bull|metric_value:iv_currency }}</span>
+                  <span class="mono">{% fmt_value b.bear iv_currency %} – {% fmt_value b.mid iv_currency %} – {% fmt_value b.bull iv_currency %}</span>
                 </div>
                 <div class="ff-track">
                   <div class="ff-range {% if b.covers_price %}covers{% endif %}" style="left:{{ b.left_pct }}%; width:{{ b.width_pct }}%"></div>
@@ -600,7 +609,7 @@
                 {% for m in valuation_metrics %}
                   <tr>
                     <td>{{ m.metric }}</td>
-                    <td class="num">{{ m.value|metric_value:m.unit }}</td>
+                    <td class="num">{% fmt_value m.value m.unit %}</td>
                     <td class="text-muted small text-end">FY {{ m.fiscal_year }}</td>
                   </tr>
                 {% endfor %}

@@ -62,6 +62,10 @@ _OPTIONAL_DESC_COLUMNS = (("sector", "Sector"), ("industry", "Industry"),
 # ambiguity `desc_on` resolves above for the separate table-columns toggle.
 _DEFAULT_METRIC_COLUMNS = ("Market Cap (Live)", "P/E (TTM, live)", "Current Ratio", "Debt / Equity")
 
+# Valid ?scale= values other than the default ("auto", never itself a URL value -- see
+# fmt.fmt_value's own docstring for what each one does to a currency-denominated cell).
+_SCALE_CHOICES = ("normal", "B", "M", "K")
+
 
 # ── screener ─────────────────────────────────────────────────────────────────────────────
 def _parse_optional_float(raw: str | None) -> tuple[float | None, bool]:
@@ -292,6 +296,16 @@ def screen(request: HttpRequest) -> HttpResponse:
     raw_ccy = request.GET.get("ccy", "").strip().upper()
     selected_currency = raw_ccy if raw_ccy in target_currencies else ""
     target_currency = selected_currency or None
+    # Units-scale selector: how every currency-denominated cell's numeric body renders --
+    # "auto" (the default, T/B/M/K by each value's own magnitude, same as compact_money always
+    # did) / "normal" (full comma-grouped number) / "B"/"M"/"K" (a forced divisor+suffix on
+    # every value regardless of its own size). Blank ("") is the dropdown's own default option,
+    # same "blank = no param emitted" convention as selected_currency, just resolving to "auto"
+    # here instead of "no conversion". Pure presentation -- templates.fmt.fmt_value reads
+    # value_scale straight from the render context (see that tag's own docstring for why a
+    # simple_tag, not a second filter argument).
+    raw_scale = request.GET.get("scale", "").strip()
+    selected_scale = raw_scale if raw_scale in _SCALE_CHOICES else "auto"
     page = _parse_page(request.GET.get("page"))
 
     desc_explicit = "desc_on" in request.GET
@@ -367,6 +381,8 @@ def screen(request: HttpRequest) -> HttpResponse:
         base_pairs.append(("fmax", "" if f.max_value is None else _num(f.max_value)))
     if selected_currency:
         base_pairs.append(("ccy", selected_currency))
+    if selected_scale != "auto":
+        base_pairs.append(("scale", selected_scale))
     # Snapshot before `desc`/`desc_on` are appended — this is state the table-columns toggle
     # (a second, small GET form near the table, see the template) replicates as hidden fields,
     # since its own checkboxes supply desc/desc_on themselves; duplicating them would conflict.
@@ -463,6 +479,8 @@ def screen(request: HttpRequest) -> HttpResponse:
             "show_currency_selector": show_currency_selector,
             "target_currencies": target_currencies,
             "selected_currency": selected_currency,
+            "selected_scale": selected_scale,
+            "value_scale": selected_scale,
             "cols": cols,
             "cols_customized": cols_customized,
             "sort_key": sort_key,
@@ -867,6 +885,12 @@ def company_detail(request: HttpRequest, ticker: str) -> HttpResponse:
     selected_currency = raw_ccy if raw_ccy in target_currencies else ""
     target_currency = selected_currency or None
 
+    # Units-scale selector: same `?scale=` contract as screen() (see that view's own comment) --
+    # a pure presentation control, no repository/service involvement, threaded to fmt.fmt_value
+    # via the `value_scale` context key alone.
+    raw_scale = request.GET.get("scale", "").strip()
+    selected_scale = raw_scale if raw_scale in _SCALE_CHOICES else "auto"
+
     bench = request.GET.get("bench", "").strip().lower()
     if bench not in _BENCH_MODES:
         bench = ""
@@ -893,6 +917,7 @@ def company_detail(request: HttpRequest, ticker: str) -> HttpResponse:
                 "compare_query": compare,
                 "summary": summary,
                 "selected_currency": selected_currency,
+                "value_scale": selected_scale,
             },
         )
 
@@ -996,6 +1021,8 @@ def company_detail(request: HttpRequest, ticker: str) -> HttpResponse:
         "show_currency_selector": show_currency_selector,
         "target_currencies": target_currencies,
         "selected_currency": selected_currency,
+        "selected_scale": selected_scale,
+        "value_scale": selected_scale,
         "display_currency": display_currency,
         "quarterly": quarterly,
         "quarterly_currency": quarterly_currency,

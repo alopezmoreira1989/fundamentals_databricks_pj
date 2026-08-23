@@ -462,12 +462,12 @@ body.fs-app { font-family: var(--sans); background: var(--bg); color: var(--ink)
    see screener.js) ---------- */
 /* Compact filter toolbar — a dense CSS grid instead of Bootstrap's row/col breakpoints, which
    left dead cells whenever a row's items didn't sum to 12 at every breakpoint (the "View
-   Market Cap in USD" checkbox stranding a bare col-md-4 was the visible symptom). 7 columns:
-   Search + Sector/Index/Industry/Country/Market/Currency -- the last is conditional (only
-   when the FX data has ≥2 currencies to pick between), so a run with it absent just leaves the
-   final cell empty rather than reflowing everything else wider. */
+   Market Cap in USD" checkbox stranding a bare col-md-4 was the visible symptom). 8 columns:
+   Search + Sector/Index/Industry/Country/Market/Currency/Scale -- Currency is conditional (only
+   when the FX data has ≥2 currencies to pick between), so a run with it absent just leaves a
+   cell empty rather than reflowing everything else wider; Scale always renders. */
 .fs-app .scr-filter-row {
-  display: grid; grid-template-columns: 1.6fr repeat(6, 1fr); gap: 12px;
+  display: grid; grid-template-columns: 1.6fr repeat(7, 1fr); gap: 12px;
 }
 @media (max-width: 1080px) { .fs-app .scr-filter-row { grid-template-columns: repeat(3, 1fr); } }
 @media (max-width: 640px) { .fs-app .scr-filter-row { grid-template-columns: repeat(2, 1fr); } }

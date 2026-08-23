@@ -107,6 +107,17 @@ inherited across {% include %} boundaries.
           </select>
         </div>
       {% endif %}
+      <div>
+        <label for="scr-scale" class="form-label">Scale</label>
+        <select id="scr-scale" name="scale" class="form-select" aria-label="Display value figures in"
+                title="Choose a fixed unit for every dollar figure, or Auto to let each value pick its own.">
+          <option value="">Auto</option>
+          <option value="normal" {% if selected_scale == "normal" %}selected{% endif %}>Normal</option>
+          <option value="B" {% if selected_scale == "B" %}selected{% endif %}>Billions</option>
+          <option value="M" {% if selected_scale == "M" %}selected{% endif %}>Millions</option>
+          <option value="K" {% if selected_scale == "K" %}selected{% endif %}>Thousands</option>
+        </select>
+      </div>
     </div>
 
     <div class="scr-toolbar">
