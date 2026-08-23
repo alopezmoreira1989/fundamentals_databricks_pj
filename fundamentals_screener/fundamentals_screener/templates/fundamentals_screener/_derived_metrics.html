@@ -17,15 +17,15 @@
 
 <div class="btn-group btn-group-sm mb-2" role="group" aria-label="Benchmark against">
   <a class="btn {% if bench_ctx.mode == 'industry' %}btn-dark{% else %}btn-outline-secondary{% endif %}"
-     href="?bench=industry{% if selected_currency %}&amp;ccy={{ selected_currency }}{% endif %}#pane-metrics">
+     href="?bench=industry{% if selected_currency %}&amp;ccy={{ selected_currency }}{% endif %}{% if value_scale != "auto" %}&amp;scale={{ value_scale }}{% endif %}#pane-metrics">
     Industry <span class="badge text-bg-secondary">{{ bench_ctx.industry_peer_count }}</span>
   </a>
   <a class="btn {% if bench_ctx.mode == 'sector' %}btn-dark{% else %}btn-outline-secondary{% endif %}"
-     href="?bench=sector{% if selected_currency %}&amp;ccy={{ selected_currency }}{% endif %}#pane-metrics">
+     href="?bench=sector{% if selected_currency %}&amp;ccy={{ selected_currency }}{% endif %}{% if value_scale != "auto" %}&amp;scale={{ value_scale }}{% endif %}#pane-metrics">
     Sector <span class="badge text-bg-secondary">{{ bench_ctx.sector_peer_count }}</span>
   </a>
   <a class="btn {% if bench_ctx.mode == 'compare' %}btn-dark{% else %}btn-outline-secondary{% endif %}"
-     href="?bench=compare{% if selected_currency %}&amp;ccy={{ selected_currency }}{% endif %}#pane-metrics">
+     href="?bench=compare{% if selected_currency %}&amp;ccy={{ selected_currency }}{% endif %}{% if value_scale != "auto" %}&amp;scale={{ value_scale }}{% endif %}#pane-metrics">
     Compare to a company
   </a>
 </div>
@@ -34,6 +34,7 @@
   <form method="get" id="compare-form" class="d-flex align-items-center gap-2 mb-3">
     <input type="hidden" name="bench" value="compare">
     {% if selected_currency %}<input type="hidden" name="ccy" value="{{ selected_currency }}">{% endif %}
+    {% if value_scale != "auto" %}<input type="hidden" name="scale" value="{{ value_scale }}">{% endif %}
     <input type="text" name="compare" list="peer-companies-datalist" autocomplete="off"
            class="form-control form-control-sm" style="max-width:280px"
            placeholder="Search ticker or company…" value="{{ compare_query }}">
@@ -80,12 +81,12 @@
                 <td>{{ m.metric }}</td>
                 <td class="spark">{{ m.values|sparkline }}</td>
                 <td class="num text-end">
-                  {{ m.values.0|metric_value:m.unit }}{{ m|delta_chip }}
+                  {% fmt_value m.values.0 m.unit %}{{ m|delta_chip }}
                   <span class="text-muted small d-block">FY {{ m.fiscal_years.0 }}</span>
                 </td>
                 {% if bench_ctx.basis %}
                   <td class="num text-end text-muted">
-                    {% if m.peer_median is not None %}{{ m.peer_median|metric_value:m.unit }}{% else %}—{% endif %}
+                    {% if m.peer_median is not None %}{% fmt_value m.peer_median m.unit %}{% else %}—{% endif %}
                   </td>
                 {% endif %}
               </tr>

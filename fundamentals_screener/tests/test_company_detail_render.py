@@ -95,6 +95,8 @@ def _base_context() -> dict:
         "show_currency_selector": True,
         "target_currencies": ("CAD", "USD"),
         "selected_currency": "",
+        "selected_scale": "auto",
+        "value_scale": "auto",
         "display_currency": "CAD",
         "quarterly": quarterly,
         "quarterly_currency": "CAD",
@@ -171,7 +173,52 @@ def test_derived_metrics_fragment_renders_without_error():
         "compare_query": "",
         "summary": _summary(),
         "selected_currency": "USD",
+        "value_scale": "M",
     }
     html = render_to_string("fundamentals_screener/_derived_metrics.html", ctx)
     assert "ccy=USD" in html
+    assert "scale=M" in html
     assert "{%" not in html and "{#" not in html
+
+
+def test_masthead_scale_select_renders_with_a_visible_label():
+    html = render_to_string("fundamentals_screener/company_detail.html", _base_context())
+    assert '<label class="scr-ccy-select-label mb-0" for="co-scale">Scale</label>' in html
+    assert 'id="co-scale"' in html
+    assert '<option value="">Auto</option>' in html
+
+
+def test_masthead_scale_select_always_renders_even_with_one_currency():
+    # Scale never depends on FX data availability (unlike Currency) -- must render regardless.
+    ctx = _base_context()
+    ctx.update(show_currency_selector=False, target_currencies=())
+    html = render_to_string("fundamentals_screener/company_detail.html", ctx)
+    assert 'id="co-ccy"' not in html
+    assert 'id="co-scale"' in html
+
+
+def test_default_scale_auto_compacts_a_large_kpi_value():
+    ctx = _base_context()
+    ctx["headline"] = (HeadlineKpi(label="Market Cap", value=1_234_567_890.0, fiscal_year=2024, currency="CAD"),)
+    html = render_to_string("fundamentals_screener/company_detail.html", ctx)
+    assert "1.23B" in html
+    assert "1,234,567,890.00" not in html
+
+
+def test_forced_normal_scale_shows_the_full_raw_kpi_number():
+    ctx = _base_context()
+    ctx.update(selected_scale="normal", value_scale="normal")
+    ctx["headline"] = (HeadlineKpi(label="Market Cap", value=1_234_567_890.0, fiscal_year=2024, currency="CAD"),)
+    html = render_to_string("fundamentals_screener/company_detail.html", ctx)
+    assert "1,234,567,890.00" in html
+    assert "1.23B" not in html
+
+
+def test_default_render_is_unchanged_from_before_the_scale_feature():
+    # Company Detail's statement/KPI figures already auto-compacted before this feature existed
+    # -- the default ("auto", nothing selected) must render byte-for-byte the same numbers:
+    # 400.0 (Revenue) stays under the 1e3 auto-compaction threshold; 1000.0 (Market Cap) has
+    # always crossed it and compacted to "1.0K", both before and after this feature.
+    html = render_to_string("fundamentals_screener/company_detail.html", _base_context())
+    assert "400.00" in html
+    assert "1.0K" in html
