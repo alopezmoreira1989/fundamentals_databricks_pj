@@ -36,7 +36,7 @@ convention used throughout this codebase.
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import date
+from datetime import date, datetime
 
 from fundamentals_pipeline.fx import convert_price
 
@@ -47,11 +47,22 @@ _MISLABELED_EXCLUDE = {"Market Cap", "Market Cap (Live)"}
 _NON_CURRENCY_UNITS = {"percent", "ratio"}
 
 
-def _to_date(s: str | None) -> date | None:
+def _to_date(s: str | date | None) -> date | None:
+    """Every DTO field this module reads is typed ``str | None`` (an ISO date string), but two
+    repository call sites (``CompanyRepository.market_cap``/``latest_metrics``, both routed
+    through the generic ``_fetch`` row-mapper) hand a raw ``datetime.date``/``datetime.datetime``
+    straight from DuckDB into that field without stringifying it first — confirmed as a real
+    production 500 (2026-08-23: `?ccy=USD` on a CAD-reporting ticker, `TypeError: 'datetime.date'
+    object is not subscriptable` from the old `s[:10]`). Accept both shapes rather than relying
+    on every caller to have stringified correctly."""
     if not s:
         return None
+    if isinstance(s, datetime):
+        return s.date()
+    if isinstance(s, date):
+        return s
     try:
-        return date.fromisoformat(s[:10])
+        return date.fromisoformat(str(s)[:10])
     except ValueError:
         return None
 

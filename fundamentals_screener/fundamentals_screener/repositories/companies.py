@@ -35,7 +35,8 @@ from .fx_lens import RateKey, resolve_rates
 # The QUALIFY picks each metric's newest FY inside DuckDB; ordered by the hierarchy's
 # sort_order so categories come out as contiguous blocks the template can regroup.
 _LATEST_METRICS_SQL = """
-    SELECT ticker, metric, unit, fiscal_year, value, category, subcategory, sort_order, period_end
+    SELECT ticker, metric, unit, fiscal_year, value, category, subcategory, sort_order,
+           CAST(period_end AS VARCHAR) AS period_end
     FROM dashboard_metrics
     WHERE ticker = ?
       AND period_type = 'FY'
@@ -92,7 +93,7 @@ _PEER_BENCHMARK_SQL = """
 # calculation, which must stay priced on each year's own basis, never today's — this KPI card is
 # the one place a "what is this worth right now" figure is actually wanted.
 _MARKET_CAP_SQL = """
-    SELECT ticker, 'Market Cap' AS metric, unit, fiscal_year, period_end, value
+    SELECT ticker, 'Market Cap' AS metric, unit, fiscal_year, CAST(period_end AS VARCHAR) AS period_end, value
     FROM dashboard_metrics
     WHERE ticker = ? AND metric = 'Market Cap (Live)' AND period_type = 'FY' AND value IS NOT NULL
     ORDER BY fiscal_year DESC
