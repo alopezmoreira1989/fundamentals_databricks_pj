@@ -112,6 +112,20 @@ def test_metric_point_missing_period_end_stays_native():
     assert out[0].value == 100.0
 
 
+def test_metric_point_period_end_as_real_date_object_not_just_string():
+    # Regression: CompanyRepository.market_cap()/latest_metrics() route through the generic
+    # _fetch() row-mapper, which hands a raw datetime.date straight from DuckDB into this
+    # str-typed field without stringifying it -- a real production 500 (2026-08-23, `?ccy=USD`
+    # on a CAD-reporting ticker) from the old `_to_date` assuming `s[:10]` always works on a
+    # string. period_end must be accepted as either shape.
+    points = (MetricPoint(ticker="C", metric="P/S", unit="cad", fiscal_year=2024, value=100.0,
+                           period_end=date(2024, 12, 31)),)
+    keys = detail_currency.metric_point_keys(points, "USD")
+    assert keys == frozenset({_CAD_2024})
+    out = detail_currency.convert_metric_points(points, _RATES, "USD")
+    assert out[0].value == 100.0 * 0.78
+
+
 # ── MetricSeries: all-or-nothing per series ───────────────────────────────────────────────────
 
 def test_metric_series_converts_every_value_when_all_rates_available():

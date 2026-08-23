@@ -30,7 +30,7 @@ _MOS_SQL = """
 # they're pivoted into one bar per method below. The TTM filter drops the stale FY-only Graham
 # Number, and requiring a full triple drops the total-dollar "Owner Earnings (TTM)".
 _IV_TTM_SQL = """
-    SELECT metric, fiscal_year, value, period_end
+    SELECT metric, fiscal_year, value, CAST(period_end AS VARCHAR) AS period_end
     FROM dashboard_metrics
     WHERE ticker = ?
       AND period_type = 'FY'
