@@ -311,6 +311,17 @@ def screen(request: HttpRequest) -> HttpResponse:
     filters, ok_filters = _parse_filters(request)
     legacy_cols, legacy_filters, ok_legacy = _legacy_single_metric(request)
     cols = list(dict.fromkeys([*cols, *legacy_cols]))
+    # Drives the Columns disclosure's `open` attribute -- deliberately NOT the same signal as
+    # col_explicit. col_on rides along on every single form submission (it's a plain hidden
+    # field in scr-filter-form, unconditional -- see the field's own comment), so col_explicit
+    # is true after touching ANY filter, not just Columns; and since the AJAX filter-apply path
+    # only swaps #scr-results (never re-renders this form), the only time this template re-runs
+    # server-side is a real full navigation -- at which point history.pushState has usually
+    # already baked col_on=1 into the URL from an earlier interaction. Using col_explicit here
+    # made the panel auto-open on nearly every reload/bookmark/mode-switch even when the user
+    # never touched Columns and is still looking at the plain defaults (confirmed live, 2026-08-
+    # 23) -- open only when the selection actually differs from the default set.
+    cols_customized = col_explicit and set(cols) != set(_DEFAULT_METRIC_COLUMNS)
     filters = filters + legacy_filters
     error = None if (ok_filters and ok_legacy) else "Filter bounds must be numbers."
     if error:  # drop the unparseable bounds so the table still renders
@@ -453,7 +464,7 @@ def screen(request: HttpRequest) -> HttpResponse:
             "target_currencies": target_currencies,
             "selected_currency": selected_currency,
             "cols": cols,
-            "col_explicit": col_explicit,
+            "cols_customized": cols_customized,
             "sort_key": sort_key,
             "sort_dir": "desc" if descending else "asc",
             "filter_rows": filter_rows,
@@ -838,8 +849,8 @@ def company_detail(request: HttpRequest, ticker: str) -> HttpResponse:
     reporting_currency = (summary.reporting_currency or "USD").upper()
 
     # Currency lens: same shared engine + one-control param contract as the General Screener
-    # (`?ccy=<CODE>`, dropdown's own "Native (no conversion)" first option — see screen()'s own
-    # comment for why this replaced a separate checkbox). Every currency-denominated figure on
+    # (`?ccy=<CODE>`, dropdown's own "Native" first option, selected by default — see screen()'s
+    # own comment for why this replaced a separate checkbox). Every currency-denominated figure on
     # this page converts to the chosen target, each date independently anchored to its own
     # period_end — see services.apply_currency_lens / detail_currency.py. Out of scope for v1,
     # deliberately (documented in the PR, not silently skipped): the Price tab's full close

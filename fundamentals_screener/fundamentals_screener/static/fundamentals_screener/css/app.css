@@ -462,9 +462,12 @@ body.fs-app { font-family: var(--sans); background: var(--bg); color: var(--ink)
    see screener.js) ---------- */
 /* Compact filter toolbar — a dense CSS grid instead of Bootstrap's row/col breakpoints, which
    left dead cells whenever a row's items didn't sum to 12 at every breakpoint (the "View
-   Market Cap in USD" checkbox stranding a bare col-md-4 was the visible symptom). */
+   Market Cap in USD" checkbox stranding a bare col-md-4 was the visible symptom). 7 columns:
+   Search + Sector/Index/Industry/Country/Market/Currency -- the last is conditional (only
+   when the FX data has ≥2 currencies to pick between), so a run with it absent just leaves the
+   final cell empty rather than reflowing everything else wider. */
 .fs-app .scr-filter-row {
-  display: grid; grid-template-columns: 1.6fr repeat(5, 1fr); gap: 12px;
+  display: grid; grid-template-columns: 1.6fr repeat(6, 1fr); gap: 12px;
 }
 @media (max-width: 1080px) { .fs-app .scr-filter-row { grid-template-columns: repeat(3, 1fr); } }
 @media (max-width: 640px) { .fs-app .scr-filter-row { grid-template-columns: repeat(2, 1fr); } }
@@ -530,8 +533,11 @@ body.fs-app { font-family: var(--sans); background: var(--bg); color: var(--ink)
 }
 .fs-app .scr-add-filter:hover { text-decoration: underline; }
 
-.fs-app .scr-currency-lens { display: inline-flex; align-items: center; gap: 10px; font-size: .82rem; color: var(--ink-2); flex-wrap: wrap; }
-.fs-app .scr-ccy-select-label select { min-width: 150px; }
+/* Company Detail masthead only now — the General Screener's own currency picker moved into
+   .scr-filter-row as a plain label+select matching Sector/Index/etc. (see _screen_main.html). */
+.fs-app .scr-currency-lens { display: inline-flex; align-items: center; gap: 8px; font-size: .82rem; color: var(--ink-2); flex-wrap: wrap; }
+.fs-app .scr-ccy-select-label { font-weight: 500; }
+.fs-app .scr-ccy-select { width: auto; min-width: 110px; }
 
 /* Table-columns toggle — its own small auto-submitting form, replicating the filter form's
    current state as hidden fields so toggling a column never loses the active search/filters. */
