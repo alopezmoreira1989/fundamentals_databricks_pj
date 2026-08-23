@@ -28,12 +28,14 @@ as plain text, not a link.
           {% comment %}
           floatformat ignores {% localize off %} entirely (hardcodes use_l10n=True) -- the
           'u' suffix is floatformat's own unlocalized-output escape hatch, same fix already
-          used for the Net-Net card's/football field's own CSS-width bar fills. Without it,
-          a non-English active locale renders "31,4" here, breaking the CSS width value.
+          used for the Net-Net card's/football field's own CSS-width bar fills. Needed on BOTH
+          uses below, not just the CSS width: confirmed live (2026-08-23, es locale) that the
+          bare `floatformat:1` on the display text rendered "100,0%" with a comma decimal,
+          same bug class, not just the width value.
           {% endcomment %}
           <span class="scr-sector-bar-track"><span class="scr-sector-bar-fill" style="width:{{ row.pct|floatformat:'1u' }}%"></span></span>
           <span class="scr-sector-count">{{ row.count }}</span>
-          <span class="scr-sector-pct">{{ row.pct|floatformat:1 }}%</span>
+          <span class="scr-sector-pct">{{ row.pct|floatformat:'1u' }}%</span>
         {% if row.qs %}</a>{% else %}</div>{% endif %}
       {% endfor %}
     </div>

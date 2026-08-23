@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import pytest
 from django.template.loader import render_to_string
+from django.utils import translation
 
 pytestmark = pytest.mark.django_db
 
@@ -43,6 +44,18 @@ def test_percentages_and_counts_render_correctly():
     assert "31.4%" in html
     assert "830" in html
     assert "1700" in html  # sector_total
+
+
+def test_percentage_display_stays_period_decimal_under_a_non_english_locale():
+    # Regression (2026-08-23, caught live): floatformat ignores {% localize off %} entirely
+    # (hardcodes use_l10n=True) -- an earlier version only applied the 'u' (unlocalized) suffix
+    # to the CSS width value, not the adjacent display text, so a Spanish-locale request
+    # rendered "100,0%" (comma decimal) in the visible label while the CSS width stayed correct.
+    # Both floatformat calls in the template must carry 'u'.
+    with translation.override("es"):
+        html = _render()
+    assert "31,4%" not in html
+    assert "31.4%" in html
 
 
 def test_zero_total_renders_no_companies_state_no_crash():
