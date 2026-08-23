@@ -312,13 +312,28 @@ class ScreenTableRow:
 
 
 @dataclass(frozen=True)
+class SectorCount:
+    """One sector's company count within the current filtered screener universe (the FULL
+    filtered set, not one page) — see ``CompanyListingRepository.screen_table``'s own sector
+    aggregate query. ``sector`` is ``"Unknown"`` (never ``None``) for tickers with no recorded
+    sector, grouped rather than dropped."""
+
+    sector: str
+    count: int
+
+
+@dataclass(frozen=True)
 class ScreenTablePage:
     """A page of the multi-metric screener table: the rows, the total match count (for
-    pagination), and the ordered metric columns those rows carry values for."""
+    pagination), the ordered metric columns those rows carry values for, and the sector
+    breakdown of the FULL filtered set (all matches, not just this page) for the Sector
+    Distribution panel — computed from the exact same scoped/filtered query as ``rows``/
+    ``total``, never a second, independently-filtered query."""
 
     rows: tuple[ScreenTableRow, ...]
     total: int
     columns: tuple[ScreenColumn, ...]
+    sector_distribution: tuple[SectorCount, ...] = ()
 
 
 @dataclass(frozen=True)

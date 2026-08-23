@@ -564,6 +564,44 @@ body.fs-app { font-family: var(--sans); background: var(--bg); color: var(--ink)
 .fs-app .scr-hero-divider { border: none; border-top: 1px solid var(--rule-soft); margin: 26px 0 22px; }
 .fs-app .scr-filter-heading { font-family: var(--display); font-size: 1.28rem; font-weight: 600; margin: 0 0 16px; }
 
+/* Sector Distribution panel -- the hero's 3rd .nn-hero-top child (icon, intro, this). Keeps the
+   deliberate icon+intro flex-start grouping above (see that rule's own long comment) intact by
+   pushing itself flush right via margin-left:auto instead of switching the row to
+   space-between, which would evenly spread all three children apart instead of grouping the
+   first two. align-self:stretch lets it match the icon/intro column's own height instead of
+   collapsing to its own (usually shorter) content height. */
+.fs-app .scr-sector-box {
+  margin-left: auto; align-self: stretch;
+  flex: 0 1 360px; min-width: 260px; max-width: 400px;
+  display: flex; flex-direction: column;
+}
+.fs-app .scr-sector-title {
+  font-family: var(--mono); font-size: .64rem; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--ink-3); margin-bottom: 8px;
+}
+.fs-app .scr-sector-rows { display: flex; flex-direction: column; gap: 1px; }
+.fs-app .scr-sector-row {
+  display: grid; grid-template-columns: 108px 1fr 34px 42px; align-items: center; gap: 8px;
+  font-size: .72rem; padding: 2px 4px; margin: 0 -4px; border-radius: 3px;
+  text-decoration: none; color: inherit;
+}
+a.scr-sector-row:hover { background: var(--bg-subtle); }
+.fs-app .scr-sector-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fs-app .scr-sector-row.active .scr-sector-name { font-weight: 600; color: var(--accent-ink); }
+.fs-app .scr-sector-bar-track { height: 8px; background: var(--rule-soft); border-radius: 3px; overflow: hidden; }
+.fs-app .scr-sector-bar-fill { height: 100%; background: var(--accent); border-radius: 3px; }
+.fs-app .scr-sector-row:hover .scr-sector-bar-fill { opacity: .8; }
+.fs-app .scr-sector-count, .fs-app .scr-sector-pct {
+  font-family: var(--mono); text-align: right; white-space: nowrap;
+}
+.fs-app .scr-sector-total {
+  display: grid; grid-template-columns: 108px 1fr 34px 42px; gap: 8px; align-items: center;
+  font-family: var(--mono); font-size: .68rem; font-weight: 600; color: var(--ink-2);
+  border-top: 1px solid var(--rule-soft); margin-top: 5px; padding: 5px 4px 0;
+}
+.fs-app .scr-sector-total span:nth-child(3), .fs-app .scr-sector-total span:nth-child(4) { text-align: right; }
+@media (max-width: 900px) { .fs-app .scr-sector-box { margin-left: 0; flex-basis: 100%; max-width: none; } }
+
 /* ---------- Screener-mode AJAX swap targets (General Screener / Net-Net Finder / Investor
    Presets / cross-mode #main) — shared loading-state treatment, see screener.js. Delayed
    fade-in (.15s) so a fast local response never visibly flickers; quick fade-out on

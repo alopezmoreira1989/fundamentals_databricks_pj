@@ -1,0 +1,46 @@
+{% comment %}
+Sector Distribution panel — the sector breakdown of the CURRENT filtered General Screener
+universe (all matches, not just the current page). Rendered both as part of the full page/
+mode-switch tiers (included from _screen_main.html) and as its own small AJAX fragment (see
+views.screen()'s `X-Sector-Distribution` branch) — same template either way, single source of
+truth. Context: `sector_rows` (a list of {sector, count, pct, qs} dicts, already sorted
+descending by count — see views.screen()), `sector_total`, `sector` (the currently active
+Sector filter value, for highlighting the matching row).
+
+Each row with a `qs` is a real `<a href="?...">` (every other active filter preserved, `sector`
+replaced by that row's own) — works with JS disabled as a plain navigation. With JS, screener.js
+intercepts the click and routes it through the existing Sector <select> + its `change` listener
+instead of a full reload — see that file's own comment. A row with `qs == None` ("Unknown",
+null-sector tickers) has no matching <select id="sector"> option to click it into, so it renders
+as plain text, not a link.
+{% endcomment %}
+<div class="scr-sector-box">
+  <div class="scr-sector-title">Sector Distribution</div>
+  {% if sector_rows %}
+    <div class="scr-sector-rows">
+      {% for row in sector_rows %}
+        {% if row.qs %}
+          <a href="?{{ row.qs }}" class="scr-sector-row{% if row.sector == sector %} active{% endif %}" data-sector="{{ row.sector }}">
+        {% else %}
+          <div class="scr-sector-row scr-sector-row--unknown">
+        {% endif %}
+          <span class="scr-sector-name" title="{{ row.sector }}">{{ row.sector }}</span>
+          {% comment %}
+          floatformat ignores {% localize off %} entirely (hardcodes use_l10n=True) -- the
+          'u' suffix is floatformat's own unlocalized-output escape hatch, same fix already
+          used for the Net-Net card's/football field's own CSS-width bar fills. Without it,
+          a non-English active locale renders "31,4" here, breaking the CSS width value.
+          {% endcomment %}
+          <span class="scr-sector-bar-track"><span class="scr-sector-bar-fill" style="width:{{ row.pct|floatformat:'1u' }}%"></span></span>
+          <span class="scr-sector-count">{{ row.count }}</span>
+          <span class="scr-sector-pct">{{ row.pct|floatformat:1 }}%</span>
+        {% if row.qs %}</a>{% else %}</div>{% endif %}
+      {% endfor %}
+    </div>
+    <div class="scr-sector-total">
+      <span>TOTAL</span><span></span><span>{{ sector_total }}</span><span>100%</span>
+    </div>
+  {% else %}
+    <p class="text-muted small mb-0">No companies match these filters.</p>
+  {% endif %}
+</div>

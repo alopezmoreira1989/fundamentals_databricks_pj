@@ -61,6 +61,10 @@
     var form = document.getElementById('scr-filter-form');
     if (!results || !form) return;
 
+    // Sector Distribution panel — optional (absent on a screen too narrow/old to matter, or if
+    // this markup somehow isn't present); every reference below is guarded on it.
+    var sectorBox = document.getElementById('scr-sector-distribution');
+
     var search = document.querySelector('.scr-col-search');
     var rowsContainer = document.querySelector('.scr-filter-rows');
 
@@ -150,8 +154,15 @@
 
     function applyForm() {
       var params = new URLSearchParams(new FormData(form));
-      fetchAndSwap(window.location.pathname + '?' + params.toString(), results,
-        { 'X-Requested-With': 'XMLHttpRequest' }, true);
+      var url = window.location.pathname + '?' + params.toString();
+      fetchAndSwap(url, results, { 'X-Requested-With': 'XMLHttpRequest' }, true);
+      // Same URL/params, a second small fetch for the Sector Distribution panel -- it reacts
+      // to every filter this function already reacts to (sector/index/country/market/industry/
+      // search/metric filters/currency/scale), server-side computed from the exact same
+      // scoped+where query screen_table() already runs for the table (see ScreenTablePage.
+      // sector_distribution) -- never a second, independently-filtered universe. `push: false`
+      // since the fetch above already pushes this same URL into history.
+      if (sectorBox) fetchAndSwap(url, sectorBox, { 'X-Sector-Distribution': '1' }, false);
     }
 
     form.addEventListener('submit', function (e) {
@@ -178,6 +189,23 @@
     if (rowsContainer) {
       rowsContainer.addEventListener('click', function (e) {
         if (e.target.closest('.scr-rm-filter')) applyForm();
+      });
+    }
+
+    // Sector Distribution panel: clicking a sector row sets the EXISTING Sector <select>'s
+    // value and dispatches its native `change` event — the form's own `change` listener above
+    // then routes it through the exact same applyForm() every other filter uses. No new fetch
+    // logic, no new filter state; a row with no `data-sector` (the plain, non-link "Unknown"
+    // row — see _sector_distribution.html) is simply not a click target.
+    if (sectorBox) {
+      sectorBox.addEventListener('click', function (e) {
+        var row = e.target.closest('[data-sector]');
+        if (!row) return;
+        var sectorSelect = form.querySelector('#sector');
+        if (!sectorSelect) return;
+        e.preventDefault();
+        sectorSelect.value = row.dataset.sector;
+        sectorSelect.dispatchEvent(new Event('change', { bubbles: true }));
       });
     }
 
