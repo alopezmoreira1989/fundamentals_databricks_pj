@@ -540,11 +540,12 @@ body.fs-app { font-family: var(--sans); background: var(--bg); color: var(--ink)
 .fs-app .scr-table-cols label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; color: var(--ink-2); }
 .fs-app .scr-table-cols input { accent-color: var(--accent); width: 13px; height: 13px; }
 
-/* Unified hero+filter card (General Screener merges what used to be two separate cards): 168px
-   icon (smaller than Net-Net Finder's own 180px .nn-hero-icon default, overridden back down
-   here) since this card also has the filter form + toolbar below it competing for vertical
-   space, unlike Net-Net Finder's hero which stays hero-only, plus a rule + a Fraunces-display
-   "Screener" heading separating the editorial intro from the actual filter form below it.
+/* Unified hero+filter card (General Screener merges what used to be two separate cards): 200px
+   icon (bumped up from the original 168px — plenty of horizontal room in this wide hero row —
+   still distinct from Net-Net Finder's own 180px .nn-hero-icon default) since this card also
+   has the filter form + toolbar below it competing for vertical space, unlike Net-Net Finder's
+   hero which stays hero-only, plus a rule + a Fraunces-display "Screener" heading separating
+   the editorial intro from the actual filter form below it.
 
    .nn-hero-top's shared base rule above is `justify-content: space-between`, built for TWO
    groups (an icon+text group vs. a stats column, see Net-Net Finder's own .nn-hero-left
@@ -553,7 +554,7 @@ body.fs-app { font-family: var(--sans); background: var(--bg); color: var(--ink)
    them, stretching a big, viewport-dependent gap between icon and text. Overridden here, scoped
    to just this page via .scr-hero, to a fixed-gap flex row instead. */
 .fs-app .scr-hero .nn-hero-top { justify-content: flex-start; align-items: center; gap: 26px; }
-.fs-app .scr-hero .nn-hero-icon { width: 168px; height: 168px; }
+.fs-app .scr-hero .nn-hero-icon { width: 200px; height: 200px; }
 .fs-app .scr-hero-divider { border: none; border-top: 1px solid var(--rule-soft); margin: 26px 0 22px; }
 .fs-app .scr-filter-heading { font-family: var(--display); font-size: 1.28rem; font-weight: 600; margin: 0 0 16px; }
 
