@@ -290,16 +290,25 @@ def screen_table(
     sort: SortSpec | None = None,
     page: int = 1,
     page_size: int = 50,
-    usd_lens: bool = False,
+    target_currency: str | None = None,
 ) -> ScreenTablePage:
     """One page of the multi-metric screener table: the descriptive scope narrowed by the
     metric ``filters``, each selected ``columns`` metric pivoted to its latest-FY value.
-    ``usd_lens`` converts a displayed Market Cap column to USD."""
+    ``target_currency`` converts every currency-denominated display column (not just Market
+    Cap) to that currency, each cell date-anchored to its own observation date; ``None``
+    (the default) means no conversion — every figure renders in its own native currency."""
     return CompanyListingRepository().screen_table(
         search=search, sector=sector, index=index, country=country, market=market,
         industry=industry, columns=columns, filters=filters, sort=sort,
-        page=page, page_size=page_size, usd_lens=usd_lens,
+        page=page, page_size=page_size, target_currency=target_currency,
     )
+
+
+def available_target_currencies() -> tuple[str, ...]:
+    """Currencies the user can convert the General Screener table into (for the currency
+    selector) — dynamically enumerated from the real FX data on hand, see
+    CompanyListingRepository.available_target_currencies."""
+    return CompanyListingRepository().available_target_currencies()
 
 
 # ── Net-Net Finder ──────────────────────────────────────────────────────────────────────
