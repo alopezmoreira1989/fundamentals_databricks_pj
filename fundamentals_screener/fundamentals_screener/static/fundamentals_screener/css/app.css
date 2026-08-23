@@ -564,25 +564,27 @@ body.fs-app { font-family: var(--sans); background: var(--bg); color: var(--ink)
 .fs-app .scr-hero-divider { border: none; border-top: 1px solid var(--rule-soft); margin: 26px 0 22px; }
 .fs-app .scr-filter-heading { font-family: var(--display); font-size: 1.28rem; font-weight: 600; margin: 0 0 16px; }
 
-/* Sector Distribution panel -- the hero's 3rd .nn-hero-top child (icon, intro, this).
-   Deliberately NOT margin-left:auto -- confirmed live (2026-08-23, real Playwright measurement
-   against the deployed page) that margin:auto and flex-grow compete for the SAME free space on
-   one item, and the auto margin wins: with both set, the box measured only 298px wide even
-   though .nn-hero-top had 706px of genuinely free space after icon+intro, because the margin
-   absorbed 408px of it before flex-grow ever got to distribute anything -- a well-known
-   flexbox gotcha, not a browser bug. icon+intro (no flex-grow, "auto" basis) naturally sit
-   first in the row; this being the ONLY flex-grow item is what pushes it flush right, with no
-   margin trick needed. align-self:stretch lets it match the icon/intro column's own height
-   instead of collapsing to its own (usually shorter) content height. */
+/* Sector Distribution panel -- the hero's 3rd .nn-hero-top child. THE FLEX ITEM IS
+   #scr-sector-distribution (the plain wrapper div _screen_main.html puts around the
+   {% include %}, so an AJAX innerHTML swap of its CONTENTS never duplicates the wrapper
+   itself) -- NOT .scr-sector-box, which is one level further in (the outermost element of the
+   INCLUDED _sector_distribution.html template). Confirmed live (2026-08-23, real Playwright
+   DOM inspection against the deployed page) that every flex-sizing property below had been on
+   the WRONG element the whole time: .scr-sector-box was correctly measuring the space it was
+   given, but the actual 3rd flex child (#scr-sector-distribution) had no flex/align-self rules
+   of its own at all, so it sat at the flexbox default (flex:0 1 auto, no grow) regardless of
+   what .scr-sector-box itself asked for -- explaining why two earlier fix attempts (dropping a
+   competing margin:auto, then removing an unrelated max-width cap) each produced a real but
+   small improvement without ever reaching the row's true ~592px of leftover space. Also
+   deliberately NOT margin-left:auto -- margin:auto and flex-grow compete for the SAME free
+   space on one item, and the auto margin wins (confirmed on the first fix attempt); being the
+   row's only flex-grow item is what pushes it flush right on its own, no margin trick needed. */
+.fs-app #scr-sector-distribution {
+  align-self: stretch; flex: 1 1 360px; min-width: 260px;
+  display: flex; flex-direction: column;
+}
 .fs-app .scr-sector-box {
-  align-self: stretch;
-  /* Grow to fill ALL of the hero's remaining width -- no max-width cap. A 640px cap here
-     (removed 2026-08-23, confirmed live it left 300-400px of visibly unused space on a normal
-     wide screen) turned out to be unnecessary: flex-grow can never claim more than the row
-     actually has left over, and the row itself is already naturally bounded by .container's
-     own 1840px cap (app.css's responsive .container rules) minus the icon/intro columns'
-     fixed+content widths -- roughly 950-1000px in the realistic worst case, not "absurd". */
-  flex: 1 1 360px; min-width: 260px;
+  width: 100%;
   display: flex; flex-direction: column;
 }
 .fs-app .scr-sector-title {
@@ -630,7 +632,7 @@ a.scr-sector-row:hover { background: var(--bg-subtle); }
   border-top: 1px solid var(--rule-soft); margin-top: 5px; padding: 5px 4px 0;
 }
 .fs-app .scr-sector-total span:nth-child(3), .fs-app .scr-sector-total span:nth-child(4) { text-align: right; }
-@media (max-width: 900px) { .fs-app .scr-sector-box { flex-basis: 100%; } }
+@media (max-width: 900px) { .fs-app #scr-sector-distribution { flex-basis: 100%; } }
 
 /* ---------- Screener-mode AJAX swap targets (General Screener / Net-Net Finder / Investor
    Presets / cross-mode #main) — shared loading-state treatment, see screener.js. Delayed
