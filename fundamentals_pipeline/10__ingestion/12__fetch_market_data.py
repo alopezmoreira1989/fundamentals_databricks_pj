@@ -634,6 +634,25 @@ def _needed_currencies() -> set:
             currencies |= rcs
     except Exception as _e:
         print(f"  ⚠ Could not read config.tickers for FX-pair derivation ({_e}) — assuming USD-only.")
+    # Phase 5.6's admitted European issuers are deliberately NOT a config.tickers row (see
+    # 51__export_dashboard_data.py's own comment on why — a structurally separate admission
+    # concept) — they live in main.config.eu_admission_candidates with their own real,
+    # FIRDS-sourced `currency` column (e.g. "EUR"). Without this, config.tickers alone can never
+    # surface a European reporting currency, so an admitted EUR issuer's fundamentals would
+    # publish correctly (currency-labeled "EUR") while the currency-lens features (General
+    # Screener / Company Detail) could never actually convert to or from it — EUR would just
+    # never appear as an available target currency, confirmed as a real gap 2026-08-23. Same
+    # defensive guard as above: an absent/predating table just means no EU tickers admitted yet.
+    try:
+        _eu = spark.table(f"{CATALOG}.config.eu_admission_candidates")
+        eu_currencies = {
+            r.currency
+            for r in _eu.where("admission_status = 'admitted'").select("currency").distinct().collect()
+            if r.currency
+        }
+        currencies |= eu_currencies
+    except Exception:
+        pass  # table doesn't exist yet (pre-Phase-5.6 schema) -- no EU tickers, no EU currency needed
     return currencies
 
 
