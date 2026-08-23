@@ -16,6 +16,7 @@ does and doesn't cover.
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from urllib.parse import quote, urlencode
 
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
@@ -113,6 +114,26 @@ def _parse_filters(request: HttpRequest) -> tuple[list[MetricFilter], bool]:
         ok = ok and ok_lo and ok_hi
         filters.append(MetricFilter(metric=metric, min_value=lo, max_value=hi))
     return filters, ok
+
+
+def _count_bound_filters(filters: Sequence[MetricFilter]) -> int:
+    """How many filters actually constrain something (>= 1 real bound) -- NOT len(filters),
+    which also counts bound-less rows that exist purely for display. Every column checked in
+    the "Columns" picker (including the DEFAULT columns, pre-checked with no user interaction
+    at all) mirrors into a blank Metric-filters row (see _screen_main.html's own comment on the
+    one-directional Columns-implies-a-filter-row behavior), and screener.js's applyForm() submits
+    the WHOLE form -- including those blank rows' real (if empty) `fmetric`/`fmin`/`fmax` fields
+    -- on ANY filter change, not just a Metric-filters edit. So after literally any interaction
+    (Sector dropdown, Currency, Scale, ...) the raw filters list stops being empty even though
+    nothing was ever actually bounded, and the "Metric filters" panel/badge got stuck "active"
+    forever via history.pushState (confirmed live, 2026-08-23) -- the same bug CLASS the Columns
+    panel's own `cols_customized` fix addressed, for a different underlying cause.
+    `CompanyListingRepository._filter_clause` already treats a bound-less filter as a no-op
+    (neither `min_value`/`max_value` is not None, so it contributes zero WHERE clauses) -- this
+    mirrors that same "only a REAL bound counts" semantic for the UI's own active-count/open
+    state.
+    """
+    return sum(1 for f in filters if f.min_value is not None or f.max_value is not None)
 
 
 def _legacy_single_metric(request: HttpRequest) -> tuple[list[str], list[MetricFilter], bool]:
@@ -340,7 +361,12 @@ def screen(request: HttpRequest) -> HttpResponse:
     error = None if (ok_filters and ok_legacy) else "Filter bounds must be numbers."
     if error:  # drop the unparseable bounds so the table still renders
         filters = [MetricFilter(metric=f.metric) for f in filters]
-    has_active_filters = bool(filters)
+    # `error is not None` is kept as an OR: a genuinely mistyped bound (bounds stripped just
+    # above, right before this line, so the table still renders) is still a real attempted
+    # filter -- the panel should open to show the user where the problem is, not silently look
+    # untouched, even though _count_bound_filters alone would now read 0 for it.
+    active_filter_count = _count_bound_filters(filters)
+    has_active_filters = error is not None or active_filter_count > 0
 
     # Display every selected column plus any filtered metric (so the user sees what they bound
     # on), filters first-seen order preserved.
@@ -530,7 +556,7 @@ def screen(request: HttpRequest) -> HttpResponse:
             "sort_dir": "desc" if descending else "asc",
             "filter_rows": filter_rows,
             "has_active_filters": has_active_filters,
-            "active_filter_count": len(filters),
+            "active_filter_count": active_filter_count,
             "optional_desc_columns": _OPTIONAL_DESC_COLUMNS,
             "visible_desc": visible_desc,
             "desc_explicit": desc_explicit,
