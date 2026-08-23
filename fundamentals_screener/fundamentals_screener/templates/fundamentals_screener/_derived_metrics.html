@@ -17,15 +17,15 @@
 
 <div class="btn-group btn-group-sm mb-2" role="group" aria-label="Benchmark against">
   <a class="btn {% if bench_ctx.mode == 'industry' %}btn-dark{% else %}btn-outline-secondary{% endif %}"
-     href="?bench=industry{% if usd_lens %}&amp;usd=1{% endif %}#pane-metrics">
+     href="?bench=industry{% if selected_currency %}&amp;ccy={{ selected_currency }}{% endif %}#pane-metrics">
     Industry <span class="badge text-bg-secondary">{{ bench_ctx.industry_peer_count }}</span>
   </a>
   <a class="btn {% if bench_ctx.mode == 'sector' %}btn-dark{% else %}btn-outline-secondary{% endif %}"
-     href="?bench=sector{% if usd_lens %}&amp;usd=1{% endif %}#pane-metrics">
+     href="?bench=sector{% if selected_currency %}&amp;ccy={{ selected_currency }}{% endif %}#pane-metrics">
     Sector <span class="badge text-bg-secondary">{{ bench_ctx.sector_peer_count }}</span>
   </a>
   <a class="btn {% if bench_ctx.mode == 'compare' %}btn-dark{% else %}btn-outline-secondary{% endif %}"
-     href="?bench=compare{% if usd_lens %}&amp;usd=1{% endif %}#pane-metrics">
+     href="?bench=compare{% if selected_currency %}&amp;ccy={{ selected_currency }}{% endif %}#pane-metrics">
     Compare to a company
   </a>
 </div>
@@ -33,7 +33,7 @@
 {% if bench_ctx.mode == "compare" %}
   <form method="get" id="compare-form" class="d-flex align-items-center gap-2 mb-3">
     <input type="hidden" name="bench" value="compare">
-    {% if usd_lens %}<input type="hidden" name="usd" value="1">{% endif %}
+    {% if selected_currency %}<input type="hidden" name="ccy" value="{{ selected_currency }}">{% endif %}
     <input type="text" name="compare" list="peer-companies-datalist" autocomplete="off"
            class="form-control form-control-sm" style="max-width:280px"
            placeholder="Search ticker or company…" value="{{ compare_query }}">

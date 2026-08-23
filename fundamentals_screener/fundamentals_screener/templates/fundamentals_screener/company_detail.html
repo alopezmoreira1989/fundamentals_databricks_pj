@@ -279,6 +279,24 @@
         <span class="co-chip">{{ s.ticker }}</span>
       </div>
     </div>
+    {% if show_currency_selector %}
+      <form method="get" class="scr-currency-lens" id="co-currency-form">
+        {% if bench %}<input type="hidden" name="bench" value="{{ bench }}">{% endif %}
+        {% if compare_query %}<input type="hidden" name="compare" value="{{ compare_query }}">{% endif %}
+        {% if price_window %}<input type="hidden" name="window" value="{{ price_window }}">{% endif %}
+        <label class="scr-ccy-select-label" for="co-ccy">
+          <select id="co-ccy" name="ccy" class="form-select form-select-sm"
+                  onchange="this.form.submit()" aria-label="Convert figures to currency">
+            <option value="">Native (no conversion)</option>
+            {% for c in target_currencies %}
+              <option value="{{ c }}" {% if c == selected_currency %}selected{% endif %}>{{ c }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <noscript><button type="submit" class="btn btn-sm btn-outline-secondary">Apply</button></noscript>
+        <span class="text-muted small">Each figure uses the rate dated at its own reporting date.</span>
+      </form>
+    {% endif %}
   </div>
 
   <datalist id="peer-companies-datalist">
@@ -336,15 +354,6 @@
   <div class="tab-content">
     <!-- Overview -->
     <div class="tab-pane fade show active" id="pane-overview" role="tabpanel" aria-labelledby="tab-overview" tabindex="0">
-      {% if show_usd_toggle %}
-        <div class="d-flex justify-content-end mb-2">
-          {% if usd_lens %}
-            <a class="small text-muted" href="{{ request.path }}">Viewing in USD · <span class="text-decoration-underline">show native currency</span></a>
-          {% else %}
-            <a class="small text-muted" href="?usd=1"><span class="text-decoration-underline">View in USD</span> (Market Cap only; other figures stay native)</a>
-          {% endif %}
-        </div>
-      {% endif %}
       <div class="kpi-strip mb-4">
         {% for k in headline %}
           <div class="kpi-cell">
@@ -402,7 +411,7 @@
           <div class="btn-group btn-group-sm mb-3" role="group" aria-label="Price chart range">
             {% for w in price_windows %}
               <a class="btn {% if w == price_window %}btn-dark{% else %}btn-outline-secondary{% endif %}"
-                 href="?window={{ w }}{% if usd_lens %}&amp;usd=1{% endif %}#pane-price">{{ w }}</a>
+                 href="?window={{ w }}{% if selected_currency %}&amp;ccy={{ selected_currency }}{% endif %}#pane-price">{{ w }}</a>
             {% endfor %}
           </div>
           {% if price_tab_data %}
@@ -424,7 +433,7 @@
 
     <!-- Statement tabs -->
     {% if statement_chart_data %}{{ statement_chart_data|json_script:"statement-chart-data" }}{% endif %}
-    {% for st, chart in statement_panes %}
+    {% for st, chart, st_ccy in statement_panes %}
       <div class="tab-pane fade" id="pane-{{ st.name|slugify }}" role="tabpanel" aria-labelledby="tab-{{ st.name|slugify }}" tabindex="0">
         {% if st.name == "Balance Sheet" and bs_compositions_data %}
           <div class="card p-4 mb-3">
@@ -453,8 +462,8 @@
             <div class="cjs-chart-wrap"><canvas data-statement-chart="{{ st.name }}"></canvas></div>
           </div>
         {% endif %}
-        {% if s.reporting_currency|currency_badge %}
-          <div class="eyebrow mb-2 d-flex align-items-center gap-1">Figures in {{ s.reporting_currency|currency_badge }}</div>
+        {% if st_ccy|currency_badge %}
+          <div class="eyebrow mb-2 d-flex align-items-center gap-1">Figures in {{ st_ccy|currency_badge }}</div>
         {% endif %}
         <div class="card p-0 table-responsive">
           <table class="table table-hover fs-web align-middle mb-0">
@@ -474,7 +483,7 @@
                 {% for line in sec.list %}
                   <tr class="{{ line.row_class }}">
                     <td class="label indent-{{ line.indent }}">{{ line.display_name }}</td>
-                    {% for v in line.values|slice:"::-1" %}<td class="num">{{ v|compact_money_ccy:s.reporting_currency }}</td>{% endfor %}
+                    {% for v in line.values|slice:"::-1" %}<td class="num">{{ v|compact_money_ccy:st_ccy }}</td>{% endfor %}
                     <td class="spark">{{ line.values|sparkline }}</td>
                   </tr>
                 {% endfor %}
@@ -504,7 +513,7 @@
           </div>
           {{ quarterly_chart_data|json_script:"quarterly-chart-data" }}
         {% endif %}
-        <div class="eyebrow mb-2 d-flex align-items-center gap-1">{{ quarterly.name }} · by reporting period {{ s.reporting_currency|currency_badge }}</div>
+        <div class="eyebrow mb-2 d-flex align-items-center gap-1">{{ quarterly.name }} · by reporting period {{ quarterly_currency|currency_badge }}</div>
         <div class="card p-0 table-responsive">
           <table class="table table-hover fs-web align-middle mb-0">
             <thead>
@@ -518,7 +527,7 @@
               {% for line in quarterly.lines %}
                 <tr class="{{ line.row_class }}">
                   <td class="label indent-{{ line.indent }}">{{ line.display_name }}</td>
-                  {% for v in line.values|slice:"::-1" %}<td class="num">{{ v|compact_money_ccy:s.reporting_currency }}</td>{% endfor %}
+                  {% for v in line.values|slice:"::-1" %}<td class="num">{{ v|compact_money_ccy:quarterly_currency }}</td>{% endfor %}
                   <td class="spark">{{ line.values|sparkline }}</td>
                 </tr>
               {% endfor %}
@@ -544,7 +553,7 @@
               <div class="mb-3">
                 <div class="d-flex justify-content-between small mb-1">
                   <span>{{ b.method }} <span class="text-muted">· FY{{ b.fiscal_year }}</span></span>
-                  <span class="mono">{{ b.bear|metric_value:s.reporting_currency }} – {{ b.mid|metric_value:s.reporting_currency }} – {{ b.bull|metric_value:s.reporting_currency }}</span>
+                  <span class="mono">{{ b.bear|metric_value:iv_currency }} – {{ b.mid|metric_value:iv_currency }} – {{ b.bull|metric_value:iv_currency }}</span>
                 </div>
                 <div class="ff-track">
                   <div class="ff-range {% if b.covers_price %}covers{% endif %}" style="left:{{ b.left_pct }}%; width:{{ b.width_pct }}%"></div>

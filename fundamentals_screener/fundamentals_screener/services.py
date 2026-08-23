@@ -14,12 +14,12 @@ cover.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import Any
 
 from fundamentals_pipeline.forecasting import TARGET_METRICS as _FORECAST_TARGET_METRICS
-from fundamentals_pipeline.fx import convert_price
 
+from . import detail_currency
 from .dtos import (
     BenchmarkContext,
     CompanyDetail,
@@ -27,6 +27,7 @@ from .dtos import (
     CompanyStatements,
     CompanySummary,
     FilingRow,
+    FootballField,
     ForecastChart,
     ForecastHistoryPoint,
     ForecastMetricChart,
@@ -58,6 +59,7 @@ from .repositories.company_listing import (
     preset_thresholds,
 )
 from .repositories.forecasting import ForecastRepository
+from .repositories.fx_lens import RateKey
 from .repositories.screener import ScreenerRepository
 from .repositories.valuation import ValuationRepository
 
@@ -140,7 +142,8 @@ def _merge_peer_medians(
 
 
 def get_metric_history(
-    ticker: str, *, years: int = 5, bench: str = "", compare: str = ""
+    ticker: str, *, years: int = 5, bench: str = "", compare: str = "",
+    target_currency: str | None = None,
 ) -> tuple[tuple[MetricSeries, ...], BenchmarkContext]:
     """The Derived-metrics tab's data: each metric's recent `years`-year history (for the
     sparkline), merged with the requested benchmark.
@@ -152,6 +155,14 @@ def get_metric_history(
     ``"sector"`` | ``"compare"``. `compare`: a ticker symbol, consulted only when
     ``bench == "compare"``. Returns ``(series, BenchmarkContext)`` — preserves today's exact
     output when `bench`/`compare` are both left blank.
+
+    The "usd"-labeled-but-really-native mislabeling fix (``detail_currency.
+    relabel_metric_series``) is always applied, regardless of `target_currency`. When
+    `target_currency` IS given, this converts every dollar-denominated series to it via its
+    own small, independent resolve — used only by the AJAX benchmark-switch fragment, which
+    doesn't have the rest of the page's data to share a single page-wide resolve with (the
+    full-page load instead goes through ``apply_currency_lens`` below, one round trip for
+    every section at once).
     """
     repo = CompanyRepository()
     series = tuple(
@@ -161,12 +172,20 @@ def get_metric_history(
     summary = repo.get_summary(ticker)
     if summary is None or not series:
         return series, BenchmarkContext(mode="industry", basis=None, peer_count=0)
+    series = detail_currency.relabel_metric_series(series, summary.reporting_currency)
+
+    def _maybe_convert(merged: tuple[MetricSeries, ...]) -> tuple[MetricSeries, ...]:
+        if not target_currency or not summary.reporting_currency:
+            return merged
+        keys = detail_currency.metric_series_keys(merged, target_currency)
+        rates = repo.resolve_currency_rates(keys, target_currency)
+        return detail_currency.convert_metric_series(merged, rates, target_currency)
 
     industry_n, sector_n = repo.peer_counts(ticker, summary.industry, summary.sector)
 
     if bench == "compare":
         benchmarks, compare_company = repo.compare_benchmark(ticker, compare)
-        merged = _merge_peer_medians(series, benchmarks)
+        merged = _maybe_convert(_merge_peer_medians(series, benchmarks))
         ctx = BenchmarkContext(
             mode="compare",
             basis="compare" if compare_company else None,
@@ -181,7 +200,7 @@ def get_metric_history(
     benchmarks, basis, peer_count, peers = repo.industry_benchmark(
         ticker, summary.industry, summary.sector, basis=forced,
     )
-    merged = _merge_peer_medians(series, benchmarks)
+    merged = _maybe_convert(_merge_peer_medians(series, benchmarks))
     mode = basis or (forced if forced in ("industry", "sector") else "industry")
     ctx = BenchmarkContext(
         mode=mode, basis=basis, peer_count=peer_count,
@@ -232,25 +251,119 @@ def headline_kpis(statements: CompanyStatements, *, currency: str | None = None)
     return tuple(kpis)
 
 
-def get_market_cap_kpi(ticker: str, *, usd_lens: bool) -> HeadlineKpi | None:
-    """Market Cap headline card (``None`` if the ticker has no Market Cap row).
+def get_market_cap_point(ticker: str) -> MetricPoint | None:
+    """The ticker's live Market Cap, native currency, unconverted — see
+    ``CompanyRepository.market_cap``. Feed this through ``apply_currency_lens`` for the
+    currency-lens feature; ``market_cap_kpi_from_point`` turns the (possibly converted) result
+    into the headline card."""
+    return CompanyRepository().market_cap(ticker)
 
-    Native currency by default; converts to USD only when `usd_lens` is on AND a same-date FX
-    rate exists — mirrors the "no rate → stay native, still badge" fallback (never silently
-    guessed).
-    """
-    repo = CompanyRepository()
-    mc = repo.market_cap(ticker)
-    if mc is None:
+
+def market_cap_kpi_from_point(point: MetricPoint | None) -> HeadlineKpi | None:
+    """Builds the Market Cap headline card from an already-fetched (and, if the currency lens
+    is active, already-converted) MetricPoint — pure, no fetch, no conversion of its own.
+    ``None`` if the ticker has no Market Cap row."""
+    if point is None:
         return None
-    currency = (mc.unit or "usd").upper()
-    value = mc.value
-    if usd_lens and currency != "USD" and mc.period_end:
-        rate = repo.usd_fx_rate(currency, mc.period_end)
-        if rate is not None:
-            value = convert_price(value, currency, "USD", rate)
-            currency = "USD"
-    return HeadlineKpi(label="Market Cap", value=value, fiscal_year=mc.fiscal_year, currency=currency)
+    currency = (point.unit or "usd").upper()
+    return HeadlineKpi(label="Market Cap", value=point.value, fiscal_year=point.fiscal_year, currency=currency)
+
+
+@dataclass(frozen=True)
+class DetailCurrencyLens:
+    """Every Company Detail page section, after one page-wide currency-lens pass — see
+    ``apply_currency_lens``. ``statement_currencies``/``quarterly_currency``/``iv_currency`` are
+    each section's ACTUAL resulting currency (the target on full success, the native
+    ``reporting_currency`` where a conversion couldn't fully resolve and that section was left
+    as-is) — never assume every section landed in the same currency; read these, not the
+    page's own requested target, when labeling a section."""
+
+    statements: CompanyStatements
+    statement_currencies: dict[str, str]
+    quarterly: QuarterGrid
+    quarterly_currency: str
+    derived_metrics: tuple[MetricSeries, ...]
+    valuation_metrics: tuple[MetricPoint, ...]
+    market_cap_point: MetricPoint | None
+    iv_field: FootballField
+    iv_currency: str
+    net_net: NetNetRow | None
+    display_currency: str
+
+
+def apply_currency_lens(
+    *,
+    reporting_currency: str,
+    target_currency: str,
+    statements: CompanyStatements,
+    quarterly: QuarterGrid,
+    derived_metrics: tuple[MetricSeries, ...],
+    valuation_metrics: tuple[MetricPoint, ...],
+    market_cap_point: MetricPoint | None,
+    iv_field: FootballField,
+    net_net: NetNetRow | None,
+) -> DetailCurrencyLens:
+    """One page-wide currency-lens pass for the Company Detail page: relabels every
+    mislabeled-"usd" figure to its real native currency (unconditional — see
+    ``detail_currency``'s module docstring), then, if `target_currency` differs from
+    `reporting_currency`, converts every currency-denominated figure to it — ONE batched
+    ``resolve_currency_rates`` round trip for every section on the page, sharing the exact same
+    date-anchored, triangulating engine (``fx_lens.resolve_rates``) the General Screener uses.
+    Never fabricates a rate; a section whose dates can't all resolve is left in its own native
+    currency (see ``detail_currency.py`` for the per-DTO all-or-nothing/independent rules)."""
+    valuation_metrics = detail_currency.relabel_metric_points(valuation_metrics, reporting_currency)
+    market_cap_points = detail_currency.relabel_metric_points(
+        (market_cap_point,) if market_cap_point else (), reporting_currency
+    )
+    market_cap_point = market_cap_points[0] if market_cap_points else None
+    derived_metrics = detail_currency.relabel_metric_series(derived_metrics, reporting_currency)
+    net_net_as_of = market_cap_point.period_end if market_cap_point else None
+
+    keys: set[RateKey] = set()
+    for st in statements.statements:
+        keys |= detail_currency.statement_keys(st, reporting_currency, target_currency)
+    keys |= detail_currency.grid_keys(quarterly, reporting_currency, target_currency)
+    keys |= detail_currency.metric_series_keys(derived_metrics, target_currency)
+    keys |= detail_currency.metric_point_keys(valuation_metrics, target_currency)
+    keys |= detail_currency.metric_point_keys(market_cap_points, target_currency)
+    keys |= detail_currency.football_keys(iv_field, reporting_currency, target_currency)
+    keys |= detail_currency.net_net_keys(net_net, reporting_currency, target_currency, net_net_as_of)
+
+    rates = CompanyRepository().resolve_currency_rates(frozenset(keys), target_currency)
+
+    new_statements = []
+    statement_currencies: dict[str, str] = {}
+    for st in statements.statements:
+        converted, ccy = detail_currency.convert_statement(st, reporting_currency, rates, target_currency)
+        new_statements.append(converted)
+        statement_currencies[st.name] = ccy
+    new_quarterly, quarterly_currency = detail_currency.convert_grid(
+        quarterly, reporting_currency, rates, target_currency
+    )
+    new_derived_metrics = detail_currency.convert_metric_series(derived_metrics, rates, target_currency)
+    new_valuation_metrics = detail_currency.convert_metric_points(valuation_metrics, rates, target_currency)
+    new_market_cap_points = detail_currency.convert_metric_points(market_cap_points, rates, target_currency)
+    new_market_cap_point = new_market_cap_points[0] if new_market_cap_points else None
+    new_iv_field, iv_currency = detail_currency.convert_football(
+        iv_field, reporting_currency, rates, target_currency
+    )
+    new_net_net, _net_net_currency = detail_currency.convert_net_net(
+        net_net, reporting_currency, rates, target_currency, net_net_as_of
+    )
+
+    return DetailCurrencyLens(
+        statements=CompanyStatements(statements=tuple(new_statements)),
+        statement_currencies=statement_currencies,
+        quarterly=new_quarterly,
+        quarterly_currency=quarterly_currency,
+        derived_metrics=new_derived_metrics,
+        valuation_metrics=new_valuation_metrics,
+        market_cap_point=new_market_cap_point,
+        iv_field=new_iv_field,
+        iv_currency=iv_currency,
+        net_net=new_net_net,
+        display_currency=target_currency.upper(),
+    )
 
 
 # ── screener ─────────────────────────────────────────────────────────────────────────────

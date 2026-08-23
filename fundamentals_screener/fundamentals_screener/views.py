@@ -172,24 +172,29 @@ _NET_NET_DISCOUNT_OPTIONS: dict[str, float | None] = {"all": None, "0": 0.0, "15
 _NET_NET_CARD_LEVELS = (("Relaxed", "relaxed"), ("Moderate", "moderate"), ("Strict", "strict"))
 
 
-def _net_net_card_context(ticker: str) -> dict | None:
-    """Shared by ``valuation()`` and ``company_detail()``: the Net-Net card's context, or
-    ``None`` when the ticker has no NCAV data at any level at all (unknown ticker, or every
-    level's NCAV/share is null) — nothing to show then, so the card doesn't render rather than
-    showing three dashes. A NEGATIVE NCAV/share (common — most companies aren't net-nets) still
-    renders, deliberately: the Valuation page always shows a company's own numbers, unlike the
-    Net-Net Finder screener which only lists NCAV-positive eligible tickers. ``ratio``/
-    ``bar_pct`` are left ``None``/0 for a non-positive NCAV/share, though — dividing price by a
-    negative or zero NCAV produces a meaningless "ratio" (confirmed as a real bug during
-    testing: a negative ratio like -34.4x satisfied the "classic net-net" bar-color threshold
-    check, painting AAPL's deeply-negative NCAV bright green as if it were a bargain).
+def _net_net_card_context(ticker: str, snapshot=None) -> dict | None:
+    """The Net-Net card's context, or ``None`` when the ticker has no NCAV data at any level at
+    all (unknown ticker, or every level's NCAV/share is null) — nothing to show then, so the
+    card doesn't render rather than showing three dashes. A NEGATIVE NCAV/share (common — most
+    companies aren't net-nets) still renders, deliberately: the company page always shows a
+    company's own numbers, unlike the Net-Net Finder screener which only lists NCAV-positive
+    eligible tickers. ``ratio``/``bar_pct`` are left ``None``/0 for a non-positive NCAV/share,
+    though — dividing price by a negative or zero NCAV produces a meaningless "ratio" (confirmed
+    as a real bug during testing: a negative ratio like -34.4x satisfied the "classic net-net"
+    bar-color threshold check, painting AAPL's deeply-negative NCAV bright green as if it were a
+    bargain).
 
     ``snapshot.price`` comes from ``net_net_snapshot``'s own latest-close lookup — deliberately
     NOT the caller's football-field chart price (confirmed as a second real gap during testing:
     that price is unavailable for tickers lacking EPS/BVPS data even when a real close and real
     NCAV both exist, e.g. an unprofitable clinical-stage biotech).
+
+    `snapshot`: pass the already-fetched (and, if the currency lens is active, already-
+    converted) ``NetNetRow`` to avoid a second, native/unconverted fetch — ``company_detail()``
+    always does. Fetches natively itself only when omitted.
     """
-    snapshot = services.get_net_net_snapshot(ticker)
+    if snapshot is None:
+        snapshot = services.get_net_net_snapshot(ticker)
     if snapshot is None:
         return None
     price = snapshot.price
@@ -825,25 +830,48 @@ def company_detail(request: HttpRequest, ticker: str) -> HttpResponse:
     # the fragment and full-page branches below can share it without needing statements/price
     # data first. `price_currency` is `None` for a listing market this app has no real
     # quote-currency mapping for yet — the Price tab then renders a bare, unlabeled number
-    # (metric_value's own None-unit fallback) rather than a guessed/mislabeled `$`.
+    # (metric_value's own None-unit fallback) rather than a guessed/mislabeled `$`. Deliberately
+    # NOT touched by the currency lens below: it's the ticker's own listing/quote currency, a
+    # different axis than reporting_currency — see apply_currency_lens's own scope note.
     _price_ccy = quote_currency(summary.market)
     price_currency = _price_ccy.lower() if _price_ccy else None
     reporting_currency = (summary.reporting_currency or "USD").upper()
-    show_usd_toggle = price_currency not in (None, "usd") or reporting_currency != "USD"
-    usd_lens = show_usd_toggle and request.GET.get("usd") == "1"
+
+    # Currency lens: same shared engine + one-control param contract as the General Screener
+    # (`?ccy=<CODE>`, dropdown's own "Native (no conversion)" first option — see screen()'s own
+    # comment for why this replaced a separate checkbox). Every currency-denominated figure on
+    # this page converts to the chosen target, each date independently anchored to its own
+    # period_end — see services.apply_currency_lens / detail_currency.py. Out of scope for v1,
+    # deliberately (documented in the PR, not silently skipped): the Price tab's full close
+    # series/SMA lines and the football field's own price reference line (both in the ticker's
+    # *listing* currency, a different axis — converting a ~500-point daily series is a materially
+    # different volume/complexity class than the ~15-20 dates the rest of this page needs), the
+    # Forecasting tab (its years-6-10 scenarios are future-dated — no FX rate can exist for a
+    # future date without fabricating one), and the Derived-metrics tab's peer-median column
+    # (already a pre-existing, undocumented-until-now cross-ticker currency-mixing gap, same
+    # reasoning as the General Screener's own peer_median scope line).
+    target_currencies = services.available_target_currencies()
+    show_currency_selector = len(target_currencies) >= 2
+    raw_ccy = request.GET.get("ccy", "").strip().upper()
+    selected_currency = raw_ccy if raw_ccy in target_currencies else ""
+    target_currency = selected_currency or None
 
     bench = request.GET.get("bench", "").strip().lower()
     if bench not in _BENCH_MODES:
         bench = ""
     compare = request.GET.get("compare", "").strip().upper()
-    derived_metrics, bench_ctx = services.get_metric_history(ticker, years=5, bench=bench, compare=compare)
 
     # Benchmark-switch AJAX partial-swap (mirrors screen()'s is_fragment branch), scoped to just
     # the Derived-metrics tab. Deliberately does NOT mirror screen()'s "same context either way"
     # — unlike screen(), this view also computes statements/price/quarterly/valuation below, none
-    # of which the fragment needs, so this returns before any of that work runs.
+    # of which the fragment needs, so this returns before any of that work runs. Converts via its
+    # own small, independent resolve (target_currency passed straight through) rather than
+    # sharing the full-page apply_currency_lens batch below, which this branch never reaches.
     is_fragment = request.headers.get("X-Requested-With") == "XMLHttpRequest"
     if is_fragment:
+        derived_metrics, bench_ctx = services.get_metric_history(
+            ticker, years=5, bench=bench, compare=compare, target_currency=target_currency,
+        )
         return render(
             request,
             "fundamentals_screener/_derived_metrics.html",
@@ -853,15 +881,17 @@ def company_detail(request: HttpRequest, ticker: str) -> HttpResponse:
                 "bench": bench,
                 "compare_query": compare,
                 "summary": summary,
-                "usd_lens": usd_lens,
+                "selected_currency": selected_currency,
             },
         )
 
     detail = services.get_company_detail(ticker)
     if detail is None:  # defensive only — `summary` above already confirmed the ticker exists
         raise Http404(f"unknown ticker {ticker!r}")
+    # Plain, native fetch here — the full page's derived_metrics gets converted once, together
+    # with every other section, by the single apply_currency_lens call below (never twice).
+    derived_metrics, bench_ctx = services.get_metric_history(ticker, years=5, bench=bench, compare=compare)
     statements = services.get_company_statements(ticker)
-    headline = services.headline_kpis(statements, currency=summary.reporting_currency)
     price_windows = services.price_windows()
     price_window = request.GET.get("window", "").strip()
     if price_window not in price_windows:
@@ -871,6 +901,45 @@ def company_detail(request: HttpRequest, ticker: str) -> HttpResponse:
     price_tab_points = price_chart_data(price_series)
     price_tab_data = _price_chart_json(price_tab_points) if price_tab_points else None
     quarterly = services.get_quarterly(ticker)
+    # Valuation section: intrinsic-value football field + MoS + price multiples. Intrinsic-
+    # value metrics are dropped from the derived-metrics list to avoid duplicating the
+    # football field. valuation_metrics comes from detail.metrics (unchanged, single-value
+    # display) — derived_metrics/bench_ctx were already fetched above the fragment branch.
+    _, valuation_metrics = services.split_metrics(detail.metrics)
+    iv_field = services.get_intrinsic_value_field(ticker)
+    mos_scenarios = services.get_margin_of_safety_scenarios(ticker)
+    market_cap_point = services.get_market_cap_point(ticker)
+    net_net_snapshot = services.get_net_net_snapshot(ticker)
+
+    # ONE page-wide currency-lens pass (one batched rate-resolution round trip, or zero when the
+    # target IS the reporting currency — see apply_currency_lens/resolve_currency_rates' own
+    # empty-keys short-circuit). Always runs, even with no `ccy` selected: this is also what
+    # applies the unconditional "usd"-mislabeling relabel fix to valuation_metrics/derived_
+    # metrics/market_cap_point (see detail_currency.py's module docstring) — targeting the
+    # ticker's own reporting currency in that case is a genuine no-op conversion.
+    lens = services.apply_currency_lens(
+        reporting_currency=reporting_currency,
+        target_currency=target_currency or reporting_currency,
+        statements=statements, quarterly=quarterly, derived_metrics=derived_metrics,
+        valuation_metrics=valuation_metrics, market_cap_point=market_cap_point,
+        iv_field=iv_field, net_net=net_net_snapshot,
+    )
+    statements = lens.statements
+    statement_currencies = lens.statement_currencies
+    quarterly = lens.quarterly
+    quarterly_currency = lens.quarterly_currency
+    derived_metrics = lens.derived_metrics
+    valuation_metrics = lens.valuation_metrics
+    market_cap_point = lens.market_cap_point
+    iv_field = lens.iv_field
+    iv_currency = lens.iv_currency
+    net_net_snapshot = lens.net_net
+    display_currency = lens.display_currency
+
+    headline = services.headline_kpis(statements, currency=display_currency)
+    market_cap_kpi = services.market_cap_kpi_from_point(market_cap_point)
+    headline = (*headline, market_cap_kpi) if market_cap_kpi else headline
+
     # Income/Cash-flow get a headline bar chart; the Balance Sheet gets a single-year
     # composition (rendered below), so it's excluded from the per-statement bar-chart map.
     _chart_for = {
@@ -878,26 +947,22 @@ def company_detail(request: HttpRequest, ticker: str) -> HttpResponse:
         "Cash Flow": cash_flow_chart,
     }
     statement_panes = [
-        (st, _chart_for[st.name](st) if st.name in _chart_for else None)
+        (
+            st,
+            _chart_for[st.name](st) if st.name in _chart_for else None,
+            statement_currencies.get(st.name, display_currency),
+        )
         for st in statements.statements
     ]
     statement_chart_data = {
-        st.name: _tab_chart_json(chart) for st, chart in statement_panes if chart is not None
+        st.name: _tab_chart_json(chart) for st, chart, _ccy in statement_panes if chart is not None
     }
     balance_sheet = next((s for s in statements.statements if s.name == "Balance Sheet"), None)
     bs_compositions = balance_sheet_compositions(balance_sheet) if balance_sheet else ()
     bs_compositions_data = _balance_sheet_json(bs_compositions) if bs_compositions else None
     quarterly_chart_obj = quarterly_chart(quarterly) if quarterly.lines else None
     quarterly_chart_data = _tab_chart_json(quarterly_chart_obj) if quarterly_chart_obj else None
-    # Valuation section: intrinsic-value football field + MoS + price multiples. Intrinsic-
-    # value metrics are dropped from the derived-metrics list to avoid duplicating the
-    # football field. valuation_metrics comes from detail.metrics (unchanged, single-value
-    # display) — derived_metrics/bench_ctx were already fetched above the fragment branch.
-    _, valuation_metrics = services.split_metrics(detail.metrics)
-    iv_chart = football.build_chart(services.get_intrinsic_value_field(ticker))
-    mos_scenarios = services.get_margin_of_safety_scenarios(ticker)
-    market_cap_kpi = services.get_market_cap_kpi(ticker, usd_lens=usd_lens)
-    headline = (*headline, market_cap_kpi) if market_cap_kpi else headline
+    iv_chart = football.build_chart(iv_field)
     compare_options = services.all_companies()
     filings = services.get_company_filings(ticker)
     forecast_chart = services.get_forecast_chart(ticker)
@@ -912,13 +977,17 @@ def company_detail(request: HttpRequest, ticker: str) -> HttpResponse:
         "price_windows": price_windows,
         "price_window": price_window,
         "price_currency": price_currency,
-        # Phase 5.7a: the ticker's reporting currency, embedded once for the Chart.js scripts
-        # (forecasting.js/balance_sheet_chart.js/statement_charts.js) that used to hardcode "$"
-        # client-side with no currency signal from the server at all.
-        "chart_currency": summary.reporting_currency or "USD",
-        "show_usd_toggle": show_usd_toggle,
-        "usd_lens": usd_lens,
+        # Phase 5.7a: the page's resulting display currency, embedded once for the Chart.js
+        # scripts (forecasting.js/balance_sheet_chart.js/statement_charts.js). Was `summary.
+        # reporting_currency` before the currency lens existed; now reflects whichever currency
+        # the statement/quarterly charts actually rendered in (native or converted).
+        "chart_currency": display_currency,
+        "show_currency_selector": show_currency_selector,
+        "target_currencies": target_currencies,
+        "selected_currency": selected_currency,
+        "display_currency": display_currency,
         "quarterly": quarterly,
+        "quarterly_currency": quarterly_currency,
         "quarterly_chart_data": quarterly_chart_data,
         "statement_chart_data": statement_chart_data,
         "bs_compositions": bs_compositions,
@@ -931,12 +1000,13 @@ def company_detail(request: HttpRequest, ticker: str) -> HttpResponse:
         "compare_options": compare_options,
         "valuation_metrics": valuation_metrics,
         "iv_chart": iv_chart,
+        "iv_currency": iv_currency,
         "mos_scenarios": mos_scenarios,
         "filings": filings,
         "forecast_chart": forecast_chart,
         "forecast_chart_data": forecast_chart_data,
     }
-    net_net_ctx = _net_net_card_context(ticker)
+    net_net_ctx = _net_net_card_context(ticker, net_net_snapshot)
     if net_net_ctx:
         context.update(net_net_ctx)
     return render(request, "fundamentals_screener/company_detail.html", context)

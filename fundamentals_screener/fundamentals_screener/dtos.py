@@ -107,6 +107,10 @@ class MetricSeries:
     values: tuple[float | None, ...]
     peer_median: float | None = None
     peer_count: int = 0
+    # Index-aligned with fiscal_years/values -- each value's own observation date, needed to
+    # date-anchor the currency-lens FX lookup per point (see detail_currency.py). Empty for a
+    # DTO built before this field existed; never assumed non-empty.
+    period_ends: tuple[str | None, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -182,6 +186,10 @@ class Statement:
     name: str
     years: tuple[int, ...]
     lines: tuple[StatementLine, ...]
+    # Index-aligned with years -- each fiscal year's own period_end (the same date for every
+    # line in that column), needed to date-anchor the currency-lens FX lookup (see
+    # detail_currency.py). Empty for a DTO built before this field existed.
+    period_ends: tuple[str | None, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -199,6 +207,10 @@ class QuarterGrid:
     name: str
     columns: tuple[str, ...]
     lines: tuple[StatementLine, ...]
+    # Index-aligned with columns -- each column's own period_end date (the raw date the label
+    # was built from), needed to date-anchor the currency-lens FX lookup. Empty for a DTO built
+    # before this field existed.
+    period_ends: tuple[str | None, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -435,13 +447,24 @@ class PresetScreen:
 
 @dataclass(frozen=True)
 class FootballBar:
-    """One intrinsic-value estimate as a bear→bull range with a mid point (per-share, USD)."""
+    """One intrinsic-value estimate as a bear→bull range with a mid point (per-share).
+
+    Despite the "USD" this docstring used to claim, these TTM intrinsic-value figures are NOT
+    actually converted to USD anywhere in the pipeline -- they're computed straight from
+    per-share inputs already in the ticker's own reporting currency, tagged `unit='usd'` in
+    `metrics_hierarchy.json` regardless (the same pre-existing mislabeling class already fixed
+    for the General Screener's non-Market-Cap columns). The template already renders these with
+    `summary.reporting_currency`, which is correct; `period_end` below is what lets the
+    currency-lens feature convert them for real."""
 
     method: str
     bear: float
     mid: float
     bull: float
     fiscal_year: int
+    # This bar's own observation date (bear/mid/bull share one date), needed to date-anchor the
+    # currency-lens FX lookup. `None` for a DTO built before this field existed.
+    period_end: str | None = None
 
 
 @dataclass(frozen=True)

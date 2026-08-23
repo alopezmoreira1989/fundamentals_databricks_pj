@@ -51,8 +51,8 @@ class ForecastRepository(DuckDBRepository):
     def forecast_points(self, ticker: str) -> tuple[ForecastPoint, ...]:
         """Every raw Revenue/Net Income/Free Cash Flow forecast row for the ticker, or ``()``
         if the ``dashboard_forecast`` view is absent (the artifact is optional — degrades
-        gracefully, same as ``usd_fx_rate``/``get_filings`` elsewhere in this codebase) or the
-        ticker has no published forecast.
+        gracefully, same as ``resolve_currency_rates``/``get_filings`` elsewhere in this
+        codebase) or the ticker has no published forecast.
         """
         try:
             return self._fetch(_FORECAST_SQL, [ticker, *_TARGET_METRIC_NAMES], ForecastPoint)
