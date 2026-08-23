@@ -572,7 +572,9 @@ body.fs-app { font-family: var(--sans); background: var(--bg); color: var(--ink)
    collapsing to its own (usually shorter) content height. */
 .fs-app .scr-sector-box {
   margin-left: auto; align-self: stretch;
-  flex: 0 1 360px; min-width: 260px; max-width: 400px;
+  /* grow to fill the hero's remaining width instead of sitting at a fixed 360px -- capped at
+     640px so it doesn't stretch absurdly wide on an ultra-wide monitor. */
+  flex: 1 1 360px; min-width: 260px; max-width: 640px;
   display: flex; flex-direction: column;
 }
 .fs-app .scr-sector-title {
@@ -581,21 +583,26 @@ body.fs-app { font-family: var(--sans); background: var(--bg); color: var(--ink)
 }
 .fs-app .scr-sector-rows { display: flex; flex-direction: column; gap: 1px; }
 .fs-app .scr-sector-row {
-  display: grid; grid-template-columns: 108px 1fr 34px 42px; align-items: center; gap: 8px;
-  font-size: .72rem; padding: 2px 4px; margin: 0 -4px; border-radius: 3px;
+  display: grid; grid-template-columns: 172px 1fr 40px 48px; align-items: center; gap: 10px;
+  font-size: .74rem; padding: 3px 4px; margin: 0 -4px; border-radius: 3px;
   text-decoration: none; color: inherit;
 }
 a.scr-sector-row:hover { background: var(--bg-subtle); }
 .fs-app .scr-sector-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fs-app .scr-sector-row.active .scr-sector-name { font-weight: 600; color: var(--accent-ink); }
-.fs-app .scr-sector-bar-track { height: 8px; background: var(--rule-soft); border-radius: 3px; overflow: hidden; }
+/* Bar width is share-of-the-largest-sector-shown (views.screen()'s `bar_pct`), NOT
+   share-of-universe (`pct`, used only for the label) -- using `pct` for the bar too made every
+   bar a similarly-short sliver, since no sector dominates a broad market index (confirmed live,
+   2026-08-23). This way the biggest sector's bar always fills the track and the rest scale
+   visibly against it, like an ordinary relative bar chart. */
+.fs-app .scr-sector-bar-track { height: 9px; background: var(--rule-soft); border-radius: 3px; overflow: hidden; }
 .fs-app .scr-sector-bar-fill { height: 100%; background: var(--accent); border-radius: 3px; }
 .fs-app .scr-sector-row:hover .scr-sector-bar-fill { opacity: .8; }
 .fs-app .scr-sector-count, .fs-app .scr-sector-pct {
   font-family: var(--mono); text-align: right; white-space: nowrap;
 }
 .fs-app .scr-sector-total {
-  display: grid; grid-template-columns: 108px 1fr 34px 42px; gap: 8px; align-items: center;
+  display: grid; grid-template-columns: 172px 1fr 40px 48px; gap: 10px; align-items: center;
   font-family: var(--mono); font-size: .68rem; font-weight: 600; color: var(--ink-2);
   border-top: 1px solid var(--rule-soft); margin-top: 5px; padding: 5px 4px 0;
 }

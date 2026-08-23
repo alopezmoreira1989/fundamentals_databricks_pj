@@ -17,13 +17,17 @@ pytestmark = pytest.mark.django_db
 
 
 def _sector_rows(*, with_unknown: bool = False):
+    # bar_pct is share-of-the-largest-row-shown (max count here is 830, Information Technology)
+    # -- deliberately a DIFFERENT number than pct (share-of-universe), see views.screen()'s own
+    # comment for why.
     rows = [
-        {"sector": "Information Technology", "count": 830, "pct": 31.4, "qs": "col=x&sector=Information+Technology"},
-        {"sector": "Financials", "count": 481, "pct": 18.2, "qs": "col=x&sector=Financials"},
-        {"sector": "Industrials", "count": 389, "pct": 14.7, "qs": "col=x&sector=Industrials"},
+        {"sector": "Information Technology", "count": 830, "pct": 31.4, "bar_pct": 100.0,
+         "qs": "col=x&sector=Information+Technology"},
+        {"sector": "Financials", "count": 481, "pct": 18.2, "bar_pct": 57.95, "qs": "col=x&sector=Financials"},
+        {"sector": "Industrials", "count": 389, "pct": 14.7, "bar_pct": 46.87, "qs": "col=x&sector=Industrials"},
     ]
     if with_unknown:
-        rows.append({"sector": "Unknown", "count": 5, "pct": 0.2, "qs": None})
+        rows.append({"sector": "Unknown", "count": 5, "pct": 0.2, "bar_pct": 0.6, "qs": None})
     return rows
 
 
@@ -92,14 +96,28 @@ def test_unknown_row_renders_as_plain_element_not_a_link():
 
 def test_long_sector_name_reaches_the_template_intact():
     long_name = "A Very Long Sector Name That Would Otherwise Overflow The Fixed-Width Column"
-    html = _render(sector_rows=[{"sector": long_name, "count": 1, "pct": 100.0, "qs": f"sector={long_name}"}])
+    html = _render(sector_rows=[
+        {"sector": long_name, "count": 1, "pct": 100.0, "bar_pct": 100.0, "qs": f"sector={long_name}"},
+    ])
     assert long_name in html  # CSS text-overflow handles the visual truncation, not Python
+
+
+def test_bar_width_is_relative_to_the_largest_sector_not_the_universe_total():
+    # Regression for the "every bar looks like a similarly-short sliver" bug (2026-08-23, caught
+    # live from a real screenshot): bar_pct must drive the CSS width, not pct. The largest row
+    # (Information Technology, bar_pct=100.0) must fill its track completely; Financials
+    # (bar_pct=57.95, pct=18.2) must use ITS OWN bar_pct, not its much-smaller pct.
+    html = _render()
+    assert 'width:100.0%' in html  # Information Technology's bar -- fills the track
+    assert 'width:58.0%' in html  # Financials: 481/830*100, rounded to 1dp via floatformat
+    assert 'width:18.2%' not in html  # would be wrong -- that's Financials' pct, not bar_pct
 
 
 def test_full_distribution_percentages_sum_to_approximately_100():
     # A COMPLETE distribution (every sector present, none omitted) must sum to ~100% -- the
     # per-row `pct` values are computed upstream (views.screen()) as count/total*100, so this
     # is really a check on that arithmetic reaching the template unchanged, rounding aside.
+    max_count = 830
     complete = [
         {"sector": "Information Technology", "count": 830, "pct": 31.4},
         {"sector": "Financials", "count": 481, "pct": 18.2},
@@ -112,6 +130,8 @@ def test_full_distribution_percentages_sum_to_approximately_100():
         {"sector": "Real Estate", "count": 50, "pct": 1.9},
         {"sector": "Communication Services", "count": 44, "pct": 1.7},
     ]
+    for r in complete:
+        r["bar_pct"] = r["count"] / max_count * 100
     # Independently-rounded per-row percentages (each count/total*100, rounded to 1dp) can
     # legitimately drift a few points from an exact 100 across 10 sectors -- not a bug.
     assert sum(r["pct"] for r in complete) == pytest.approx(100.0, abs=4.0)
