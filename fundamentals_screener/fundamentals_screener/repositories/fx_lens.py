@@ -5,8 +5,10 @@ Non-negotiable date-anchoring rule (unchanged from fundamentals_pipeline/fx.py's
 every rate is looked up AS OF the figure's own observation date, never today's spot rate.
 resolve_rates takes (native_currency, as_of) pairs as data, never infers a date.
 
-Deliberately NOT used by the pre-existing per-ticker usd_fx_rate/_FX_RATE_SQL machinery, which
-this change retires outright once its only caller (Market Cap KPI) is absorbed into this engine.
+The Company Detail page used to have its own bespoke per-ticker `usd_fx_rate`/`_FX_RATE_SQL`
+machinery (Market Cap KPI's sole caller); both were retired once Market Cap was absorbed into
+this shared engine like every other currency-denominated figure on that page — see
+`CompanyRepository.resolve_currency_rates`/`services.apply_currency_lens`.
 """
 from __future__ import annotations
 

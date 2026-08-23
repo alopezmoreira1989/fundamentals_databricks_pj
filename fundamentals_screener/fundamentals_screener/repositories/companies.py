@@ -28,13 +28,14 @@ from ..dtos import (
 )
 from .base import DuckDBRepository
 from .company_listing import _altman_zone
+from .fx_lens import RateKey, resolve_rates
 
 # Latest available value per metric (the most recent FY is often a partial/TTM year that only
 # carries intrinsic-value metrics, so per-metric — not single-year — gives the full picture).
 # The QUALIFY picks each metric's newest FY inside DuckDB; ordered by the hierarchy's
 # sort_order so categories come out as contiguous blocks the template can regroup.
 _LATEST_METRICS_SQL = """
-    SELECT ticker, metric, unit, fiscal_year, value, category, subcategory, sort_order
+    SELECT ticker, metric, unit, fiscal_year, value, category, subcategory, sort_order, period_end
     FROM dashboard_metrics
     WHERE ticker = ?
       AND period_type = 'FY'
@@ -46,9 +47,10 @@ _LATEST_METRICS_SQL = """
 
 # Each derived metric's most recent `years` fiscal-year values (newest first) — the Derived-
 # metrics tab's sparkline + latest-value display. Unlike _LATEST_METRICS_SQL's QUALIFY ... = 1,
-# this keeps up to `years` rows per metric.
+# this keeps up to `years` rows per metric. `period_end` is index-aligned into
+# MetricSeries.period_ends for the currency-lens feature's per-point date-anchoring.
 _METRIC_HISTORY_SQL = """
-    SELECT ticker, metric, unit, fiscal_year, value, category, subcategory, sort_order
+    SELECT ticker, metric, unit, fiscal_year, value, category, subcategory, sort_order, period_end
     FROM dashboard_metrics
     WHERE ticker = ?
       AND period_type = 'FY'
@@ -76,8 +78,8 @@ _PEER_BENCHMARK_SQL = """
 
 # Market Cap (Live)'s category is NULL in the artifact by design (screener-only, invisible in
 # the metrics grid), so it needs its own targeted fetch rather than _LATEST_METRICS_SQL's
-# category-IS-NOT-NULL filter. period_end (a real date) is included for the USD-lens toggle's
-# date-anchored FX lookup (see usd_fx_rate below) — the only MetricPoint use case that needs it.
+# category-IS-NOT-NULL filter. period_end (a real date) is included for the currency lens's
+# date-anchored FX lookup (see resolve_currency_rates below).
 #
 # Reads 'Market Cap (Live)' (22__derived_metrics.py's market_cap_live), NOT the fiscal-year-
 # anchored 'Market Cap' — confirmed real cases (2026-07): DMRA (Damora Therapeutics, formerly
@@ -125,19 +127,13 @@ _NET_NET_LIVE_SQL = """
     )
 """
 
-# Most recent currency->USD rate on or before `as_of` — never today's spot rate, never the
-# SEC filed timestamp (date-anchoring rule).
-_FX_RATE_SQL = """
-    SELECT rate FROM dashboard_fx WHERE base = ? AND quote = 'USD' AND date <= ? ORDER BY date DESC LIMIT 1
-"""
-
 # Reported financial-statement line items across fiscal years (the raw statements, not the
 # derived metrics). Ordered by the reporting hierarchy so the pivot below preserves line order.
 # `concept` (the raw XBRL-derived concept name, not the possibly-overridden display_name) drives
 # fundamentals_pipeline.statement_layout's row classification (subtotal/grand-total/headline)
 # — see get_statements()/get_quarterly() below.
 _STATEMENTS_SQL = """
-    SELECT stmt, section, "group", concept, display_name, sort_order, fiscal_year, value
+    SELECT stmt, section, "group", concept, display_name, sort_order, fiscal_year, value, period_end
     FROM dashboard_data
     WHERE ticker = ?
       AND period_type = 'FY'
@@ -375,8 +371,8 @@ class CompanyRepository(DuckDBRepository):
         """This ticker's real SEC 10-K/10-Q filings (newest first), or ``()`` if none are
         published (unknown ticker, the pipeline's SEC fetch had nothing for it, or the
         `dashboard_filings` view is absent — same optional-artifact degradation as
-        `usd_fx_rate`/`price_series` above; confirmed necessary in production 2026-07-30 when
-        this artifact was declared but not yet published by a pipeline run)."""
+        `resolve_currency_rates`/`price_series` above; confirmed necessary in production
+        2026-07-30 when this artifact was declared but not yet published by a pipeline run)."""
         try:
             return self._fetch(_FILINGS_SQL, [ticker, ticker], FilingRow)
         except duckdb.Error:
@@ -442,15 +438,16 @@ class CompanyRepository(DuckDBRepository):
             rows = con.execute(_METRIC_HISTORY_SQL, [ticker, years]).fetchall()
         series: dict[str, dict[str, Any]] = {}
         order: list[str] = []
-        for _ticker, metric, unit, fiscal_year, value, category, subcategory, sort_order in rows:
+        for _ticker, metric, unit, fiscal_year, value, category, subcategory, sort_order, period_end in rows:
             if metric not in series:
                 series[metric] = {
                     "unit": unit, "category": category, "subcategory": subcategory,
-                    "sort_order": sort_order, "fiscal_years": [], "values": [],
+                    "sort_order": sort_order, "fiscal_years": [], "values": [], "period_ends": [],
                 }
                 order.append(metric)
             series[metric]["fiscal_years"].append(int(fiscal_year))
             series[metric]["values"].append(value)
+            series[metric]["period_ends"].append(str(period_end) if period_end is not None else None)
         return tuple(
             MetricSeries(
                 ticker=ticker, metric=metric, unit=series[metric]["unit"],
@@ -458,6 +455,7 @@ class CompanyRepository(DuckDBRepository):
                 sort_order=series[metric]["sort_order"],
                 fiscal_years=tuple(series[metric]["fiscal_years"]),
                 values=tuple(series[metric]["values"]),
+                period_ends=tuple(series[metric]["period_ends"]),
             )
             for metric in order
         )
@@ -518,15 +516,20 @@ class CompanyRepository(DuckDBRepository):
             if r.get("ticker")
         )
 
-    def usd_fx_rate(self, currency: str, as_of: str) -> float | None:
-        """Most recent `currency`->USD rate on or before `as_of`, or ``None`` if the `fx` view
-        is absent or carries no rate dated early enough — callers must keep the value in its
-        native currency then, never silently guess."""
+    def resolve_currency_rates(
+        self, keys: frozenset[RateKey], target_currency: str
+    ) -> dict[RateKey, float]:
+        """Batched, date-anchored, triangulating FX-rate resolution for the currency-lens
+        feature — see ``fx_lens.resolve_rates`` (the same engine the General Screener uses).
+        Degrades to ``{}`` (never raises) if the ``dashboard_fx`` view is absent or `keys` is
+        empty — callers must then leave every affected value in its native currency."""
+        if not keys:
+            return {}
         try:
-            rates = self._fetch_column(_FX_RATE_SQL, [currency.upper(), as_of])
+            with self._connection() as con:
+                return resolve_rates(con, keys, target_currency)
         except duckdb.Error:
-            return None
-        return float(rates[0]) if rates and rates[0] is not None else None
+            return {}
 
     def get_statements(self, ticker: str, *, max_years: int = 8) -> CompanyStatements:
         """The ticker's reported statements as line-item × fiscal-year grids (newest year first).
@@ -543,6 +546,15 @@ class CompanyRepository(DuckDBRepository):
         # Most recent `max_years` fiscal years, newest first → the display columns.
         years = sorted({int(r[6]) for r in rows}, reverse=True)[:max_years]
         col = {year: i for i, year in enumerate(years)}
+        # Each fiscal year's own period_end -- same date for every line in that column (a fiscal
+        # close is one date), captured for the currency-lens feature's date-anchored FX lookup.
+        period_end_by_year: dict[int, str | None] = {}
+        for r in rows:
+            fy = int(r[6])
+            if fy in col and fy not in period_end_by_year:
+                pe = r[8]
+                period_end_by_year[fy] = str(pe) if pe is not None else None
+        period_ends = tuple(period_end_by_year.get(y) for y in years)
 
         statements: list[Statement] = []
         for stmt in _STATEMENT_ORDER:
@@ -550,7 +562,7 @@ class CompanyRepository(DuckDBRepository):
             sections: dict[str, str | None] = {}
             groups: dict[str, str | None] = {}
             concepts: dict[str, str] = {}
-            for _stmt, section, group, concept, name, _sort, fiscal_year, value in rows:
+            for _stmt, section, group, concept, name, _sort, fiscal_year, value, _period_end in rows:
                 if _stmt != stmt or int(fiscal_year) not in col:
                     continue
                 line = values.get(name)
@@ -571,7 +583,9 @@ class CompanyRepository(DuckDBRepository):
                 )
                 for name, vals in values.items()
             )
-            statements.append(Statement(name=stmt, years=tuple(years), lines=lines))
+            statements.append(
+                Statement(name=stmt, years=tuple(years), lines=lines, period_ends=period_ends)
+            )
         return CompanyStatements(statements=tuple(statements))
 
     def get_quarterly(
@@ -616,7 +630,10 @@ class CompanyRepository(DuckDBRepository):
             )
             for name, vals in values.items()
         )
-        return QuarterGrid(name=statement, columns=tuple(labels[q] for q in recent), lines=lines)
+        return QuarterGrid(
+            name=statement, columns=tuple(labels[q] for q in recent), lines=lines,
+            period_ends=tuple(str(q) for q in recent),
+        )
 
     def price_series(
         self, ticker: str, *, window: str = PRICE_WINDOW_DEFAULT, max_points: int = 500

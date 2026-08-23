@@ -30,7 +30,7 @@ _MOS_SQL = """
 # they're pivoted into one bar per method below. The TTM filter drops the stale FY-only Graham
 # Number, and requiring a full triple drops the total-dollar "Owner Earnings (TTM)".
 _IV_TTM_SQL = """
-    SELECT metric, fiscal_year, value
+    SELECT metric, fiscal_year, value, period_end
     FROM dashboard_metrics
     WHERE ticker = ?
       AND period_type = 'FY'
@@ -106,16 +106,18 @@ class ValuationRepository(DuckDBRepository):
 class _IvRow:
     """Lightweight row holder for the IV pivot (matches the SELECT column names)."""
 
-    def __init__(self, metric: str, fiscal_year: int, value: float) -> None:
+    def __init__(self, metric: str, fiscal_year: int, value: float, period_end: str | None) -> None:
         self.metric = metric
         self.fiscal_year = fiscal_year
         self.value = value
+        self.period_end = period_end
 
 
 def _pivot_bars(rows: tuple[_IvRow, ...]) -> tuple[FootballBar, ...]:
     """Collapse bear/mid/bull scenario rows into one :class:`FootballBar` per method."""
     values: dict[str, dict[str, float]] = {}
     fiscal_years: dict[str, int] = {}
+    period_ends: dict[str, str | None] = {}
     for row in rows:
         head, sep, tail = row.metric.rpartition(_SCENARIO_SEP)
         if sep and tail in ("Bear", "Bull"):
@@ -125,6 +127,7 @@ def _pivot_bars(rows: tuple[_IvRow, ...]) -> tuple[FootballBar, ...]:
         values.setdefault(method, {})[scenario] = row.value
         if scenario == "mid":
             fiscal_years[method] = row.fiscal_year
+            period_ends[method] = row.period_end
 
     bars = [
         FootballBar(
@@ -133,6 +136,7 @@ def _pivot_bars(rows: tuple[_IvRow, ...]) -> tuple[FootballBar, ...]:
             mid=v["mid"],
             bull=v["bull"],
             fiscal_year=fiscal_years[method],
+            period_end=period_ends.get(method),
         )
         for method, v in values.items()
         if {"bear", "mid", "bull"} <= v.keys() and method in fiscal_years
