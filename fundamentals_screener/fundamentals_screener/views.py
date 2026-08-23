@@ -352,20 +352,12 @@ def screen(request: HttpRequest) -> HttpResponse:
     if sort_key not in _SORT_KEYS_DESC and sort_key not in display_cols:
         sort_key, descending = "ticker", False
 
-    result = services.screen_table(
-        search=search, sector=sector, index=index, country=country, market=market,
-        industry=industry, columns=display_cols, filters=filters,
-        sort=SortSpec(key=sort_key, descending=descending),
-        page=page, page_size=PAGE_SIZE, target_currency=target_currency,
-    )
-
-    num_pages = max(1, math.ceil(result.total / PAGE_SIZE))
-    page = min(page, num_pages)
-
-    # State-carrying param pairs. `base_pairs` (no page/sort/dir) drives the sort-header links;
-    # `state_pairs` (adds the active sort) drives the pagination links. The currency lens rides
-    # along in both so toggling it survives a sort/page click, same bookmarkable-URL contract as
-    # every other filter here.
+    # State-carrying param pairs. `base_pairs` (no page/sort/dir) drives the sort-header links
+    # and the Sector Distribution panel's per-sector links; `state_pairs` (built below, once
+    # `page` is known) adds the active sort for pagination links. Built here, before
+    # `screen_table()` runs, purely from already-parsed request params (none of this depends on
+    # `result`) so the sector-distribution response tier below can use it too without a second,
+    # duplicated param-collection pass.
     base_pairs: list[tuple[str, str]] = []
     for k, v in (
         ("q", search), ("sector", sector), ("index", index), ("country", country),
@@ -383,6 +375,44 @@ def screen(request: HttpRequest) -> HttpResponse:
         base_pairs.append(("ccy", selected_currency))
     if selected_scale != "auto":
         base_pairs.append(("scale", selected_scale))
+
+    result = services.screen_table(
+        search=search, sector=sector, index=index, country=country, market=market,
+        industry=industry, columns=display_cols, filters=filters,
+        sort=SortSpec(key=sort_key, descending=descending),
+        page=page, page_size=PAGE_SIZE, target_currency=target_currency,
+    )
+
+    # Sector Distribution panel: the sector breakdown of the CURRENT filtered universe (all
+    # matches, not just this page — see ScreenTablePage.sector_distribution's own docstring),
+    # computed as part of the SAME screen_table() call above, never a second query. Each row's
+    # `qs` carries every OTHER active filter forward with `sector` replaced by that row's own
+    # (mirrors _sort_headers' own "precompute the ready-to-use URL in Python" pattern) — "Unknown"
+    # (null-sector tickers) gets no `qs` at all, since the Sector <select> has no matching option
+    # to click it into (no way to filter on "sector IS NULL" today); it renders as plain text.
+    sector_total = result.total
+    sector_rows = [
+        {
+            "sector": sc.sector,
+            "count": sc.count,
+            "pct": (sc.count / sector_total * 100) if sector_total else 0.0,
+            "qs": (
+                urlencode([(k, v) for k, v in base_pairs if k != "sector"] + [("sector", sc.sector)])
+                if sc.sector != "Unknown" else None
+            ),
+        }
+        for sc in result.sector_distribution
+    ]
+    if request.headers.get("X-Sector-Distribution") == "1":
+        return render(
+            request,
+            "fundamentals_screener/_sector_distribution.html",
+            {"sector_rows": sector_rows, "sector_total": sector_total, "sector": sector},
+        )
+
+    num_pages = max(1, math.ceil(result.total / PAGE_SIZE))
+    page = min(page, num_pages)
+
     # Snapshot before `desc`/`desc_on` are appended — this is state the table-columns toggle
     # (a second, small GET form near the table, see the template) replicates as hidden fields,
     # since its own checkboxes supply desc/desc_on themselves; duplicating them would conflict.
@@ -481,6 +511,8 @@ def screen(request: HttpRequest) -> HttpResponse:
             "selected_currency": selected_currency,
             "selected_scale": selected_scale,
             "value_scale": selected_scale,
+            "sector_rows": sector_rows,
+            "sector_total": sector_total,
             "cols": cols,
             "cols_customized": cols_customized,
             "sort_key": sort_key,

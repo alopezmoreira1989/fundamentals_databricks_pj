@@ -25,7 +25,7 @@ import duckdb
 from fundamentals_pipeline.fx import convert_price
 
 from ..data_source import get_meta as load_meta
-from ..dtos import CompanyListRow, NetNetRow, ScreenColumn, ScreenTablePage, ScreenTableRow
+from ..dtos import CompanyListRow, NetNetRow, ScreenColumn, ScreenTablePage, ScreenTableRow, SectorCount
 from .base import DuckDBRepository
 from .fx_lens import RateKey, resolve_rates
 
@@ -539,7 +539,7 @@ class CompanyListingRepository(DuckDBRepository):
 
         if not scope:
             columns_meta = tuple(ScreenColumn(key=m) for m in display_metrics)
-            return ScreenTablePage(rows=(), total=0, columns=columns_meta)
+            return ScreenTablePage(rows=(), total=0, columns=columns_meta, sector_distribution=())
 
         scope_rows = [
             (
@@ -592,6 +592,19 @@ class CompanyListingRepository(DuckDBRepository):
             count_row = con.execute(count_sql, cte_params + where_params).fetchone()
             total = int(count_row[0]) if count_row else 0
 
+            # Sector Distribution panel: the sector breakdown of the FULL filtered set (no
+            # LIMIT/OFFSET), reusing the exact same scoped/cte/from_join/where(_params) the
+            # count/page queries just above already built — never a second, independently-
+            # filtered query. Null sectors are grouped as "Unknown" rather than dropped.
+            sector_sql = (
+                f"{cte}SELECT COALESCE(s.sector, 'Unknown') AS sector, count(*) AS n"
+                f" FROM {from_join}{where} GROUP BY 1 ORDER BY n DESC"
+            )
+            sector_hits = con.execute(sector_sql, cte_params + where_params).fetchall()
+            sector_distribution = tuple(
+                SectorCount(sector=row[0], count=int(row[1])) for row in sector_hits
+            )
+
             order_sql = self._order_clause(sort, alias)
             page_sql = (
                 f"{cte}SELECT {projection} FROM {from_join}{where}{order_sql}"
@@ -639,7 +652,9 @@ class CompanyListingRepository(DuckDBRepository):
         columns_meta = tuple(
             ScreenColumn(key=m, unit=units.get(m)) for m in display_metrics
         )
-        return ScreenTablePage(rows=rows, total=total, columns=columns_meta)
+        return ScreenTablePage(
+            rows=rows, total=total, columns=columns_meta, sector_distribution=sector_distribution,
+        )
 
     # ── Net-Net Finder ───────────────────────────────────────────────────────────────────
     def net_net_screen(
