@@ -280,15 +280,13 @@ def screen(request: HttpRequest) -> HttpResponse:
     # pick between — a 0-or-1-currency universe gives the user nothing to convert. Dynamically
     # enumerated from dashboard_fx itself (today: CAD/USD), not the ticker universe's listing
     # markets — grows automatically once a new currency's FX pairs are published, never a
-    # hardcoded list.
+    # hardcoded list. A single control: the dropdown's own first option IS "native, no
+    # conversion" — no separate checkbox, that would just be a second way to say the same thing.
     target_currencies = services.available_target_currencies()
     show_currency_selector = len(target_currencies) >= 2
-    native_lens = show_currency_selector and request.GET.get("native") == "1"
     raw_ccy = request.GET.get("ccy", "").strip().upper()
     selected_currency = raw_ccy if raw_ccy in target_currencies else ""
-    # `native` wins if both are somehow present (hand-edited URL) — the repository only ever
-    # sees a single target_currency: str | None, never "native_lens" as a separate concept.
-    target_currency = None if native_lens else (selected_currency or None)
+    target_currency = selected_currency or None
     page = _parse_page(request.GET.get("page"))
 
     desc_explicit = "desc_on" in request.GET
@@ -351,9 +349,7 @@ def screen(request: HttpRequest) -> HttpResponse:
         base_pairs.append(("fmetric", f.metric))
         base_pairs.append(("fmin", "" if f.min_value is None else _num(f.min_value)))
         base_pairs.append(("fmax", "" if f.max_value is None else _num(f.max_value)))
-    if native_lens:
-        base_pairs.append(("native", "1"))
-    elif selected_currency:
+    if selected_currency:
         base_pairs.append(("ccy", selected_currency))
     # Snapshot before `desc`/`desc_on` are appended — this is state the table-columns toggle
     # (a second, small GET form near the table, see the template) replicates as hidden fields,
@@ -450,7 +446,6 @@ def screen(request: HttpRequest) -> HttpResponse:
             "industry": industry,
             "show_currency_selector": show_currency_selector,
             "target_currencies": target_currencies,
-            "native_lens": native_lens,
             "selected_currency": selected_currency,
             "cols": cols,
             "col_explicit": col_explicit,
