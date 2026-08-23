@@ -564,14 +564,18 @@ body.fs-app { font-family: var(--sans); background: var(--bg); color: var(--ink)
 .fs-app .scr-hero-divider { border: none; border-top: 1px solid var(--rule-soft); margin: 26px 0 22px; }
 .fs-app .scr-filter-heading { font-family: var(--display); font-size: 1.28rem; font-weight: 600; margin: 0 0 16px; }
 
-/* Sector Distribution panel -- the hero's 3rd .nn-hero-top child (icon, intro, this). Keeps the
-   deliberate icon+intro flex-start grouping above (see that rule's own long comment) intact by
-   pushing itself flush right via margin-left:auto instead of switching the row to
-   space-between, which would evenly spread all three children apart instead of grouping the
-   first two. align-self:stretch lets it match the icon/intro column's own height instead of
-   collapsing to its own (usually shorter) content height. */
+/* Sector Distribution panel -- the hero's 3rd .nn-hero-top child (icon, intro, this).
+   Deliberately NOT margin-left:auto -- confirmed live (2026-08-23, real Playwright measurement
+   against the deployed page) that margin:auto and flex-grow compete for the SAME free space on
+   one item, and the auto margin wins: with both set, the box measured only 298px wide even
+   though .nn-hero-top had 706px of genuinely free space after icon+intro, because the margin
+   absorbed 408px of it before flex-grow ever got to distribute anything -- a well-known
+   flexbox gotcha, not a browser bug. icon+intro (no flex-grow, "auto" basis) naturally sit
+   first in the row; this being the ONLY flex-grow item is what pushes it flush right, with no
+   margin trick needed. align-self:stretch lets it match the icon/intro column's own height
+   instead of collapsing to its own (usually shorter) content height. */
 .fs-app .scr-sector-box {
-  margin-left: auto; align-self: stretch;
+  align-self: stretch;
   /* grow to fill the hero's remaining width instead of sitting at a fixed 360px -- capped at
      640px so it doesn't stretch absurdly wide on an ultra-wide monitor. */
   flex: 1 1 360px; min-width: 260px; max-width: 640px;
@@ -583,7 +587,8 @@ body.fs-app { font-family: var(--sans); background: var(--bg); color: var(--ink)
 }
 .fs-app .scr-sector-rows { display: flex; flex-direction: column; gap: 1px; }
 .fs-app .scr-sector-row {
-  display: grid; grid-template-columns: 172px 1fr 40px 48px; align-items: center; gap: 10px;
+  display: grid; grid-template-columns: minmax(96px, 172px) minmax(56px, 1fr) 40px 48px;
+  align-items: center; gap: 10px;
   font-size: .74rem; padding: 3px 4px; margin: 0 -4px; border-radius: 3px;
   text-decoration: none; color: inherit;
 }
@@ -594,20 +599,34 @@ a.scr-sector-row:hover { background: var(--bg-subtle); }
    share-of-universe (`pct`, used only for the label) -- using `pct` for the bar too made every
    bar a similarly-short sliver, since no sector dominates a broad market index (confirmed live,
    2026-08-23). This way the biggest sector's bar always fills the track and the rest scale
-   visibly against it, like an ordinary relative bar chart. */
-.fs-app .scr-sector-bar-track { height: 9px; background: var(--rule-soft); border-radius: 3px; overflow: hidden; }
-.fs-app .scr-sector-bar-fill { height: 100%; background: var(--accent); border-radius: 3px; }
+   visibly against it, like an ordinary relative bar chart. Explicit width:100% (not just an
+   implicit grid stretch) plus a min-width floor -- so the child's percentage-width fill always
+   resolves against a definite, non-collapsing size, even if the box ends up narrower than
+   intended for any reason (e.g. a very long hero title, a narrow viewport). */
+.fs-app .scr-sector-bar-track {
+  height: 9px; width: 100%; min-width: 40px; background: var(--rule-soft);
+  border-radius: 3px; overflow: hidden;
+}
+/* display:block is load-bearing, not decorative: .scr-sector-bar-fill is a plain <span>
+   (inline by default) and is NOT itself a grid/flex item (unlike its parent .scr-sector-
+   bar-track, which gets auto-blockified by being a grid child) -- CSS ignores width/height
+   entirely on non-replaced inline elements, so without this the fill's own `style="width:...%"`
+   and `height:100%` were both silently no-ops, collapsing to a 0x0 box regardless of bar_pct.
+   Confirmed via a local Playwright measurement (2026-08-23) showing computed width stuck at
+   the literal string "100%" (never resolved to a pixel value) and a 0x0 bounding box. */
+.fs-app .scr-sector-bar-fill { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
 .fs-app .scr-sector-row:hover .scr-sector-bar-fill { opacity: .8; }
 .fs-app .scr-sector-count, .fs-app .scr-sector-pct {
   font-family: var(--mono); text-align: right; white-space: nowrap;
 }
 .fs-app .scr-sector-total {
-  display: grid; grid-template-columns: 172px 1fr 40px 48px; gap: 10px; align-items: center;
+  display: grid; grid-template-columns: minmax(96px, 172px) minmax(56px, 1fr) 40px 48px;
+  gap: 10px; align-items: center;
   font-family: var(--mono); font-size: .68rem; font-weight: 600; color: var(--ink-2);
   border-top: 1px solid var(--rule-soft); margin-top: 5px; padding: 5px 4px 0;
 }
 .fs-app .scr-sector-total span:nth-child(3), .fs-app .scr-sector-total span:nth-child(4) { text-align: right; }
-@media (max-width: 900px) { .fs-app .scr-sector-box { margin-left: 0; flex-basis: 100%; max-width: none; } }
+@media (max-width: 900px) { .fs-app .scr-sector-box { flex-basis: 100%; max-width: none; } }
 
 /* ---------- Screener-mode AJAX swap targets (General Screener / Net-Net Finder / Investor
    Presets / cross-mode #main) — shared loading-state treatment, see screener.js. Delayed
