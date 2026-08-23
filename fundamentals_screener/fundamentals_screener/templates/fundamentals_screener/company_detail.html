@@ -284,17 +284,15 @@
         {% if bench %}<input type="hidden" name="bench" value="{{ bench }}">{% endif %}
         {% if compare_query %}<input type="hidden" name="compare" value="{{ compare_query }}">{% endif %}
         {% if price_window %}<input type="hidden" name="window" value="{{ price_window }}">{% endif %}
-        <label class="scr-ccy-select-label" for="co-ccy">
-          <select id="co-ccy" name="ccy" class="form-select form-select-sm"
-                  onchange="this.form.submit()" aria-label="Convert figures to currency">
-            <option value="">Native (no conversion)</option>
-            {% for c in target_currencies %}
-              <option value="{{ c }}" {% if c == selected_currency %}selected{% endif %}>{{ c }}</option>
-            {% endfor %}
-          </select>
-        </label>
+        <label class="scr-ccy-select-label mb-0" for="co-ccy">Currency</label>
+        <select id="co-ccy" name="ccy" class="scr-ccy-select form-select form-select-sm"
+                onchange="this.form.submit()" title="Each figure converts using the FX rate dated at its own reporting date.">
+          <option value="">Native</option>
+          {% for c in target_currencies %}
+            <option value="{{ c }}" {% if c == selected_currency %}selected{% endif %}>{{ c }}</option>
+          {% endfor %}
+        </select>
         <noscript><button type="submit" class="btn btn-sm btn-outline-secondary">Apply</button></noscript>
-        <span class="text-muted small">Each figure uses the rate dated at its own reporting date.</span>
       </form>
     {% endif %}
   </div>

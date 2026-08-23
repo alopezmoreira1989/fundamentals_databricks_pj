@@ -95,14 +95,28 @@ inherited across {% include %} boundaries.
           {% endfor %}
         </select>
       </div>
+      {% if show_currency_selector %}
+        <div>
+          <label for="scr-ccy" class="form-label">Currency</label>
+          <select id="scr-ccy" name="ccy" class="form-select" aria-label="Convert figures to currency"
+                  title="Each figure converts using the FX rate dated at its own reporting date.">
+            <option value="">Native</option>
+            {% for c in target_currencies %}
+              <option value="{{ c }}" {% if c == selected_currency %}selected{% endif %}>{{ c }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      {% endif %}
     </div>
 
     <div class="scr-toolbar">
       {% comment %}
-      Never auto-open just because default columns are selected (see _DEFAULT_METRIC_COLUMNS
-      in views.py) — only once the user has actually touched the picker (col_explicit).
+      Only auto-open when the selected columns genuinely differ from the defaults (see
+      views.py's cols_customized) — col_on rides along on every form submission regardless of
+      which field changed, so using that alone reopened this on nearly every reload/bookmark
+      even when the user only touched Sector/Currency/etc. and never Columns.
       {% endcomment %}
-      <details class="scr-disclosure" name="scr_toggle" {% if col_explicit and cols %}open{% endif %}>
+      <details class="scr-disclosure" name="scr_toggle" {% if cols_customized %}open{% endif %}>
         <summary>Columns {% if cols %}<span class="scr-count">{{ cols|length }}</span>{% endif %} <span class="scr-chev">▾</span></summary>
         <div class="scr-panel">
           <div class="scr-panel-title">Metric columns to display</div>
@@ -156,21 +170,6 @@ inherited across {% include %} boundaries.
           </template>
         </div>
       </details>
-
-      {% if show_currency_selector %}
-        <div class="scr-currency-lens">
-          <label class="scr-ccy-select-label" for="scr-ccy">
-            <select id="scr-ccy" name="ccy" class="form-select form-select-sm"
-                    aria-label="Convert figures to currency">
-              <option value="">Native (no conversion)</option>
-              {% for c in target_currencies %}
-                <option value="{{ c }}" {% if c == selected_currency %}selected{% endif %}>{{ c }}</option>
-              {% endfor %}
-            </select>
-          </label>
-          <span class="text-muted small">Each figure uses the rate dated at its own reporting date.</span>
-        </div>
-      {% endif %}
 
       <div class="scr-toolbar-spacer"></div>
       <a href="{% url 'fundamentals_screener:screen' %}" class="btn btn-outline-secondary">Reset</a>
