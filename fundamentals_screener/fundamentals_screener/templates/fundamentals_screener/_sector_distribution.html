@@ -18,9 +18,20 @@ intercepts the click and routes it through the existing Sector <select> + its `c
 instead of a full reload — see that file's own comment. A row with `qs == None` ("Unknown",
 null-sector tickers) has no matching <select id="sector"> option to click it into, so it renders
 as plain text, not a link.
+
+Header folds the universe total into a headline stat (mirroring the `.nn-stat` big-number
+treatment already used elsewhere in this app) instead of a separate bottom TOTAL row — the
+"Paired & framed" hero layout (see CLAUDE.md's Sector Distribution entry) frames this whole panel
+as its own sub-card, so the total reads more naturally as a header stat than a trailing row.
 {% endcomment %}
 <div class="scr-sector-box">
-  <div class="scr-sector-title">Sector Distribution</div>
+  <div class="scr-sector-header">
+    <span class="scr-sector-title">Sector Distribution</span>
+    <span class="scr-sector-stat">
+      <span class="scr-sector-stat-value">{{ sector_total }}</span>
+      <span class="scr-sector-stat-label">companies</span>
+    </span>
+  </div>
   {% if sector_rows %}
     <div class="scr-sector-rows">
       {% for row in sector_rows %}
@@ -43,9 +54,6 @@ as plain text, not a link.
           <span class="scr-sector-pct">{{ row.pct|floatformat:'1u' }}%</span>
         {% if row.qs %}</a>{% else %}</div>{% endif %}
       {% endfor %}
-    </div>
-    <div class="scr-sector-total">
-      <span>TOTAL</span><span></span><span>{{ sector_total }}</span><span>100%</span>
     </div>
   {% else %}
     <p class="text-muted small mb-0">No companies match these filters.</p>
