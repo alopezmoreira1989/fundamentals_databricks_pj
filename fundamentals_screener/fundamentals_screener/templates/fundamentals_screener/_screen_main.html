@@ -11,17 +11,19 @@ inherited across {% include %} boundaries.
 
 <div class="nn-hero scr-hero mb-4">
   <div class="nn-hero-top">
-    <div class="nn-hero-icon">
-      <img src="{% static 'fundamentals_screener/icons/general.png' %}" alt="">
-    </div>
-    <div class="nn-hero-intro">
-      <span class="eyebrow accent">SEC EDGAR &middot; Full Universe</span>
-      <h1 class="nn-title">Every company, every metric, your filters.</h1>
-      <p class="nn-sub">
-        Search and filter the full universe by sector, index, industry, country, and market,
-        then screen on any derived metric — margins, returns, leverage, valuation multiples,
-        and more — sorted and displayed exactly the way you want.
-      </p>
+    <div class="scr-hero-left">
+      <div class="nn-hero-icon">
+        <img src="{% static 'fundamentals_screener/icons/general.png' %}" alt="">
+      </div>
+      <div class="nn-hero-intro">
+        <span class="eyebrow accent">SEC EDGAR &middot; Full Universe</span>
+        <h1 class="nn-title">Every company, every metric, your filters.</h1>
+        <p class="nn-sub">
+          Search and filter the full universe by sector, index, industry, country, and market,
+          then screen on any derived metric — margins, returns, leverage, valuation multiples,
+          and more — sorted and displayed exactly the way you want.
+        </p>
+      </div>
     </div>
     <div id="scr-sector-distribution">
       {% include "fundamentals_screener/_sector_distribution.html" %}

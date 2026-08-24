@@ -555,25 +555,38 @@ body.fs-app { font-family: var(--sans); background: var(--bg); color: var(--ink)
 
    .nn-hero-top's shared base rule above is `justify-content: space-between`, built for TWO
    groups (an icon+text group vs. a stats column, see Net-Net Finder's own .nn-hero-left
-   wrapper). This page's .nn-hero-top has no stats block at all — just the icon and the intro
-   directly as its only two children — so space-between spreads THOSE apart instead of grouping
-   them, stretching a big, viewport-dependent gap between icon and text. Overridden here, scoped
-   to just this page via .scr-hero, to a fixed-gap flex row instead. */
-.fs-app .scr-hero .nn-hero-top { justify-content: flex-start; align-items: center; gap: 26px; }
+   wrapper). This page's .nn-hero-top now has exactly two children too -- .scr-hero-left (icon +
+   intro, grouped) and #scr-sector-distribution -- so space-between would work, but a fixed gap
+   reads more deliberately at this card's width; kept as an explicit override rather than relying
+   on the shared default. align-items: stretch (not the base rule's flex-start) is what makes the
+   "Paired & framed" layout work: both children share the ROW's height (set by whichever is
+   naturally taller -- see .scr-hero-left below), rather than each sizing independently. */
+.fs-app .scr-hero .nn-hero-top { justify-content: flex-start; align-items: stretch; gap: 28px; }
 .fs-app .scr-hero .nn-hero-icon { width: 200px; height: 200px; }
 .fs-app .scr-hero-divider { border: none; border-top: 1px solid var(--rule-soft); margin: 26px 0 22px; }
 .fs-app .scr-filter-heading { font-family: var(--display); font-size: 1.28rem; font-weight: 600; margin: 0 0 16px; }
 
-/* Sector Distribution panel -- the hero's 3rd .nn-hero-top child. THE FLEX ITEM IS
+/* .scr-hero-left groups the icon + intro as ONE flex item under .nn-hero-top's align-items:
+   stretch (above), so it stretches to match the sector panel's own (taller) natural height --
+   its OWN align-items: center then centers the icon+intro pair vertically within that shared
+   height, instead of both blocks starting flush at the top and drifting apart by the bottom
+   (the "misalignment" complaint the mockup fixed). Fixed flex-basis, not flex-grow -- it should
+   not compete with the sector panel for the row's leftover width. */
+.fs-app .scr-hero-left {
+  flex: 0 1 460px; min-width: 320px;
+  display: flex; align-items: center; gap: 22px;
+}
+
+/* Sector Distribution panel -- the hero's 2nd .nn-hero-top child. THE FLEX ITEM IS
    #scr-sector-distribution (the plain wrapper div _screen_main.html puts around the
    {% include %}, so an AJAX innerHTML swap of its CONTENTS never duplicates the wrapper
    itself) -- NOT .scr-sector-box, which is one level further in (the outermost element of the
    INCLUDED _sector_distribution.html template). Confirmed live (2026-08-23, real Playwright
    DOM inspection against the deployed page) that every flex-sizing property below had been on
    the WRONG element the whole time: .scr-sector-box was correctly measuring the space it was
-   given, but the actual 3rd flex child (#scr-sector-distribution) had no flex/align-self rules
-   of its own at all, so it sat at the flexbox default (flex:0 1 auto, no grow) regardless of
-   what .scr-sector-box itself asked for -- explaining why two earlier fix attempts (dropping a
+   given, but the actual flex child (#scr-sector-distribution) had no flex/align-self rules of
+   its own at all, so it sat at the flexbox default (flex:0 1 auto, no grow) regardless of what
+   .scr-sector-box itself asked for -- explaining why two earlier fix attempts (dropping a
    competing margin:auto, then removing an unrelated max-width cap) each produced a real but
    small improvement without ever reaching the row's true ~592px of leftover space. Also
    deliberately NOT margin-left:auto -- margin:auto and flex-grow compete for the SAME free
@@ -583,13 +596,35 @@ body.fs-app { font-family: var(--sans); background: var(--bg); color: var(--ink)
   align-self: stretch; flex: 1 1 360px; min-width: 260px;
   display: flex; flex-direction: column;
 }
+/* .scr-sector-box is now the panel's own framed sub-card (background + border), not a bare
+   wrapper -- flex: 1 fills #scr-sector-distribution's full stretched height (set by .nn-hero-top's
+   align-items: stretch above), so the space that used to look like unused background is now this
+   card's own visible padding, the same reframing .scr-hero-left's centering relies on. */
 .fs-app .scr-sector-box {
-  width: 100%;
+  width: 100%; flex: 1;
+  background: var(--bg-subtle); border: 1px solid var(--rule-soft); border-radius: 8px;
+  padding: 18px 22px;
   display: flex; flex-direction: column;
+}
+.fs-app .scr-sector-header {
+  display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;
+  margin-bottom: 12px;
 }
 .fs-app .scr-sector-title {
   font-family: var(--mono); font-size: .64rem; letter-spacing: .12em; text-transform: uppercase;
-  color: var(--ink-3); margin-bottom: 8px;
+  color: var(--ink-3);
+}
+/* Headline stat -- same Fraunces-number-over-mono-label pairing as .nn-stat .v/.l (Net-Net
+   Finder's own hero stats), reused here so the panel's total reads with the same visual weight
+   as the intro's own title, instead of a small trailing "TOTAL" row easy to miss. */
+.fs-app .scr-sector-stat { text-align: right; flex-shrink: 0; }
+.fs-app .scr-sector-stat-value {
+  display: block; font-family: var(--display); font-variation-settings: "opsz" 144;
+  font-weight: 500; font-size: 22px; line-height: 1; color: var(--ink);
+}
+.fs-app .scr-sector-stat-label {
+  display: block; font-family: var(--mono); font-size: .6rem; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--ink-3); margin-top: 3px;
 }
 .fs-app .scr-sector-rows { display: flex; flex-direction: column; gap: 1px; }
 .fs-app .scr-sector-row {
@@ -625,14 +660,10 @@ a.scr-sector-row:hover { background: var(--bg-subtle); }
 .fs-app .scr-sector-count, .fs-app .scr-sector-pct {
   font-family: var(--mono); text-align: right; white-space: nowrap;
 }
-.fs-app .scr-sector-total {
-  display: grid; grid-template-columns: minmax(96px, 172px) minmax(56px, 1fr) 40px 48px;
-  gap: 10px; align-items: center;
-  font-family: var(--mono); font-size: .68rem; font-weight: 600; color: var(--ink-2);
-  border-top: 1px solid var(--rule-soft); margin-top: 5px; padding: 5px 4px 0;
+@media (max-width: 900px) {
+  .fs-app .scr-hero .nn-hero-top { align-items: flex-start; }
+  .fs-app .scr-hero-left, .fs-app #scr-sector-distribution { flex-basis: 100%; }
 }
-.fs-app .scr-sector-total span:nth-child(3), .fs-app .scr-sector-total span:nth-child(4) { text-align: right; }
-@media (max-width: 900px) { .fs-app #scr-sector-distribution { flex-basis: 100%; } }
 
 /* ---------- Screener-mode AJAX swap targets (General Screener / Net-Net Finder / Investor
    Presets / cross-mode #main) — shared loading-state treatment, see screener.js. Delayed

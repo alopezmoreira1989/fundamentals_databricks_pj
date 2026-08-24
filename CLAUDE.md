@@ -401,6 +401,25 @@ Databricks analytical pipeline that ingests SEC EDGAR XBRL filings (10-K/10-Q) f
     flex/grid layout bug in this app resists a second static-reasoning fix, reach for real
     browser measurement (Playwright `boundingBox`/`getComputedStyle` against the live or a local
     HTML harness reproducing the real DOM nesting) before attempting a third.**
+  - **"Paired & framed" hero redesign (2026-08-24)** — even after the width bug above was fixed,
+    the hero still read as two unrelated blocks: the icon+intro column and the sector panel had
+    no shared height or baseline, and the panel's own leftover vertical space (its row count
+    varies with the active filters) looked like unused background rather than a deliberate gap.
+    Fixed by grouping icon+intro into one `.scr-hero-left` flex item (fixed `flex: 0 1 460px`,
+    `align-items: center`) and switching `.nn-hero-top` to `align-items: stretch` — the row's
+    height is now set by whichever child is naturally taller (almost always the sector panel),
+    and `.scr-hero-left`'s own `align-items: center` centers the icon+intro pair within that
+    shared height instead of both starting flush at the top and drifting apart by the bottom.
+    `.scr-sector-box` (still not the flex item — see above) became the panel's own framed
+    sub-card (`background: var(--bg-subtle)`, a border, and real padding) with `flex: 1` so it
+    fills `#scr-sector-distribution`'s full stretched height — the space that used to look empty
+    is now this card's own visible padding, not a layout defect. The old bottom `TOTAL` row was
+    folded into a header-line headline stat (`{{ sector_total }}` in Fraunces + a "companies"
+    mono caption, mirroring Net-Net Finder's own `.nn-stat` big-number treatment) so the panel's
+    total reads with the same visual weight as the intro's own title. Chosen from three mockup
+    proposals (stacked full-width strip / this one / same-structure-tuned-proportions) — the
+    repo owner picked this middle option specifically because it fixes both complaints (drift
+    between blocks, dead space) without restructuring the panel's own row layout.
 
 ## Operational gotchas
 
