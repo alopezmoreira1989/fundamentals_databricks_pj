@@ -151,15 +151,15 @@ def test_index_never_leaks_the_forloop_first_implementation_comment():
     assert body.count("<h3>") > 0
 
 
-def test_index_renders_all_eleven_seeded_updates_with_correct_accordion_state():
+def test_index_renders_all_twelve_seeded_updates_with_correct_accordion_state():
     resp = Client().get(reverse("fundamentals_screener:updates_list"))
     body = resp.content.decode()
     blocks = re.findall(r"<details.*?</details>", body, re.S)
-    assert len(blocks) == 11
+    assert len(blocks) == 12
     open_blocks = [b for b in blocks if _details_is_open(b)]
     assert len(open_blocks) == 1
-    assert "A public development journal" in open_blocks[0]
-    assert "21 August 2026" in body
+    assert "A reactive Sector Distribution panel" in open_blocks[0]
+    assert "23 August 2026" in body
 
 
 def test_seeded_update_detail_page_returns_200():
