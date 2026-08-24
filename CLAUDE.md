@@ -355,6 +355,53 @@ Databricks analytical pipeline that ingests SEC EDGAR XBRL filings (10-K/10-Q) f
     only fired for `statement_chart_data`/`quarterly_chart_data`/`bs_compositions_data`, a real
     gap for any ticker that somehow has forecast data without those).
 
+- **Sector Distribution panel (General Screener hero, 2026-08-23)** — a horizontal-bar-chart
+  panel showing the sector breakdown of the CURRENTLY FILTERED result set, filling what used to
+  be empty space to the right of the hero's icon/intro. **One source of truth, no duplicated
+  filtering logic**: `CompanyListingRepository.screen_table()` already builds `scoped`/`cte`/
+  `from_join`/`where`/`where_params` once per request to serve the count + paginated-rows
+  queries; the sector aggregate is one more query reusing those exact same variables (no `LIMIT`)
+  — every descriptive filter (sector/index/industry/country/market/search) and every metric
+  filter recalculates the panel automatically, with zero logic to keep in sync. Returned as
+  `ScreenTablePage.sector_distribution: tuple[SectorCount, ...]`.
+  - **A 4th AJAX response tier**, alongside `_render_mode`'s existing 3 (full page / mode-switch
+    fragment / within-mode fragment): `views.screen()` checks `request.headers.get(
+    "X-Sector-Distribution") == "1"` directly (General-Screener-only, so it isn't routed through
+    the shared `_render_mode` Net-Net Finder/Investor Presets also use) and returns just
+    `_sector_distribution.html`. `screener.js`'s `applyForm()` — the one function every filter
+    change already funnels through — fires this as a **second** small fetch alongside the
+    existing results-table swap, same URL/params, `push: false` since the first fetch already
+    updates history.
+  - **Click-to-filter reuses the existing `<select id="sector">` verbatim** — no new client
+    state: a click on a sector row sets that select's `.value` and dispatches a native `change`
+    event with `{bubbles: true}`, caught by the form's already-existing `change` listener and
+    routed through the same `applyForm()` pipeline as every other filter. Each real (non-
+    "Unknown") row is also a plain `<a href="?...">` for progressive enhancement/JS-disabled.
+    The "Unknown" (null-sector) row has no matching `<select>` option, so it renders as
+    non-clickable plain text — an accepted, flagged limitation rather than a second filtering
+    path.
+  - **Three sequential, real (not hypothetical) layout bugs, each only diagnosable by measuring
+    the live rendered page, not by re-reading the CSS** — static reasoning produced two
+    incomplete fixes in a row before switching to real headless-Chromium measurement (Playwright
+    `boundingBox()`/`getComputedStyle()` against the actual deployed URL) settled each one with
+    concrete pixel evidence: (1) `margin-left: auto` and `flex-grow` on the same element compete
+    for the same free space and the auto-margin wins first, starving the grow. (2) `width`/
+    `height` are ignored on a non-replaced **inline** element even when its parent is a flex/grid
+    container — blockification from `display: flex`/`grid` only auto-applies to DIRECT children,
+    not further-nested descendants — so the bar-fill `<span>` needed an explicit `display: block`.
+    (3) The flex-sizing CSS (`flex-grow`/`align-self`/`min-width`) was on `.scr-sector-box`, the
+    included template's own outermost element — one DOM level deeper than the actual flex item,
+    `#scr-sector-distribution` (the wrapper `_screen_main.html` puts around the `{% include %}`
+    specifically so an AJAX innerHTML swap of the include's contents never duplicates the
+    wrapper). With no flex-sizing rules of its own the wrapper defaulted to `flex: 0 1 auto` and
+    never grew, so `.scr-sector-box`'s rules were structurally inert — it only ever filled
+    whatever (too-small) width its parent handed it. This is why two earlier, individually-
+    correct fixes (removing the `margin-left: auto` conflict, removing a `max-width` cap) each
+    produced a real but insufficient improvement: neither touched the actual bottleneck. **When a
+    flex/grid layout bug in this app resists a second static-reasoning fix, reach for real
+    browser measurement (Playwright `boundingBox`/`getComputedStyle` against the live or a local
+    HTML harness reproducing the real DOM nesting) before attempting a third.**
+
 ## Operational gotchas
 
 - **SEC User-Agent must be set before running ingestion.** `00__config/01__tickers.py` ships with placeholder `"MyCompany myemail@example.com"`. SEC blocks requests without a real org/email. Flag this if you see it unchanged when working near ingestion.
