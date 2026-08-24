@@ -4,8 +4,11 @@ universe (all matches, not just the current page). Rendered both as part of the 
 mode-switch tiers (included from _screen_main.html) and as its own small AJAX fragment (see
 views.screen()'s `X-Sector-Distribution` branch) — same template either way, single source of
 truth. Context: `sector_rows` (a list of {sector, count, pct, bar_pct, qs} dicts, already
-sorted descending by count — see views.screen()), `sector_total`, `sector` (the currently
-active Sector filter value, for highlighting the matching row).
+sorted descending by count — see views.screen()), `sector_total` (a plain int, not rendered by
+this template directly — it's an input to `pct`'s own computation in views.screen()),
+`sector_total_display` (the same number pre-formatted with Python's own locale-independent `:,`
+thousands grouping — this is what the header stat actually renders, not `sector_total` itself),
+`sector` (the currently active Sector filter value, for highlighting the matching row).
 
 `bar_pct` (the bar's own CSS width) is NOT the same number as `pct` (the label next to it):
 `pct` is share-of-universe, `bar_pct` is share-of-the-largest-sector-shown, so the biggest
@@ -28,7 +31,7 @@ as its own sub-card, so the total reads more naturally as a header stat than a t
   <div class="scr-sector-header">
     <span class="scr-sector-title">Sector Distribution</span>
     <span class="scr-sector-stat">
-      <span class="scr-sector-stat-value">{{ sector_total }}</span>
+      <span class="scr-sector-stat-value">{{ sector_total_display }}</span>
       <span class="scr-sector-stat-label">companies</span>
     </span>
   </div>

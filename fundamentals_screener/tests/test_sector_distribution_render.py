@@ -32,8 +32,18 @@ def _sector_rows(*, with_unknown: bool = False):
 
 
 def _render(*, with_unknown: bool = False, **overrides):
-    ctx = {"sector_rows": _sector_rows(with_unknown=with_unknown), "sector_total": 1700, "sector": ""}
+    ctx = {
+        "sector_rows": _sector_rows(with_unknown=with_unknown),
+        "sector_total": 1700,
+        "sector_total_display": "1,700",
+        "sector": "",
+    }
     ctx.update(overrides)
+    # views.screen() always derives sector_total_display from sector_total (Python's own `:,`
+    # formatting -- see views.py) -- if a test overrides sector_total without also overriding
+    # sector_total_display, keep them consistent rather than silently rendering a stale stat.
+    if "sector_total" in overrides and "sector_total_display" not in overrides:
+        ctx["sector_total_display"] = f"{ctx['sector_total']:,}"
     return render_to_string("fundamentals_screener/_sector_distribution.html", ctx)
 
 
@@ -47,7 +57,7 @@ def test_percentages_and_counts_render_correctly():
     html = _render()
     assert "31.4%" in html
     assert "830" in html
-    assert "1700" in html  # sector_total
+    assert "1,700" in html  # sector_total_display -- comma-grouped, not the bare sector_total int
 
 
 def test_percentage_display_stays_period_decimal_under_a_non_english_locale():
@@ -65,7 +75,7 @@ def test_percentage_display_stays_period_decimal_under_a_non_english_locale():
 def test_zero_total_renders_no_companies_state_no_crash():
     html = render_to_string(
         "fundamentals_screener/_sector_distribution.html",
-        {"sector_rows": [], "sector_total": 0, "sector": ""},
+        {"sector_rows": [], "sector_total": 0, "sector_total_display": "0", "sector": ""},
     )
     assert "No companies match" in html
     assert "NaN" not in html and "Infinity" not in html
@@ -111,6 +121,27 @@ def test_bar_width_is_relative_to_the_largest_sector_not_the_universe_total():
     assert 'width:100.0%' in html  # Information Technology's bar -- fills the track
     assert 'width:58.0%' in html  # Financials: 481/830*100, rounded to 1dp via floatformat
     assert 'width:18.2%' not in html  # would be wrong -- that's Financials' pct, not bar_pct
+
+
+def test_header_stat_is_thousands_grouped():
+    # Real bug, caught live (2026-08-24): the header stat originally rendered the bare
+    # `sector_total` int directly ("2640"), not comma-grouped ("2,640") -- confirmed via a
+    # Playwright screenshot of the deployed "Paired & framed" redesign. Fixed by having
+    # views.screen() pre-format the number in Python (`f"{n:,}"`) rather than reaching for a
+    # locale-sensitive template filter (see the next test for why that path is avoided here).
+    html = _render(sector_total=2640)
+    assert "2,640" in html
+    assert ">2640<" not in html
+
+
+def test_header_stat_stays_comma_grouped_under_a_non_english_locale():
+    # Same locale-independence discipline as the percentage-label fix above: a plain Python
+    # `:,` format has no active-locale awareness at all (unlike `intcomma`/`floatformat`, which
+    # this app has already been burned by twice), so it can't regress the way those did.
+    with translation.override("es"):
+        html = _render(sector_total=2640)
+    assert "2,640" in html
+    assert "2.640" not in html
 
 
 def test_full_distribution_percentages_sum_to_approximately_100():

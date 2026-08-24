@@ -426,6 +426,12 @@ def screen(request: HttpRequest) -> HttpResponse:
     # visibly against it — an ordinary relative bar chart, `pct` is still the honest stat shown
     # in the label.
     sector_total = result.total
+    # Python-side thousands grouping, not a template filter -- Django's own `intcomma`/
+    # `USE_THOUSAND_SEPARATOR` path is locale-sensitive the same way `floatformat` turned out to
+    # be (see the bar-fill comment above and views.screen()'s own `'u'`-suffix fix elsewhere in
+    # this file), and this app has already been burned once by a comma-vs-period mismatch under
+    # a non-English active locale. A plain `:,` format is deliberately locale-independent.
+    sector_total_display = f"{sector_total:,}"
     max_sector_count = max((sc.count for sc in result.sector_distribution), default=0)
     sector_rows = [
         {
@@ -444,7 +450,12 @@ def screen(request: HttpRequest) -> HttpResponse:
         return render(
             request,
             "fundamentals_screener/_sector_distribution.html",
-            {"sector_rows": sector_rows, "sector_total": sector_total, "sector": sector},
+            {
+                "sector_rows": sector_rows,
+                "sector_total": sector_total,
+                "sector_total_display": sector_total_display,
+                "sector": sector,
+            },
         )
 
     num_pages = max(1, math.ceil(result.total / PAGE_SIZE))
@@ -550,6 +561,7 @@ def screen(request: HttpRequest) -> HttpResponse:
             "value_scale": selected_scale,
             "sector_rows": sector_rows,
             "sector_total": sector_total,
+            "sector_total_display": sector_total_display,
             "cols": cols,
             "cols_customized": cols_customized,
             "sort_key": sort_key,
