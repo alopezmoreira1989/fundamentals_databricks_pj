@@ -161,6 +161,72 @@ def test_owner_earnings_missing_components_treated_as_zero():
     assert v.owner_earnings(None, None, None, None, None) == pytest.approx(0.0)
 
 
+# ── sales_to_ppe_ratio / growth_capex / maintenance_capex / owner_earnings_improved ────────
+def test_sales_to_ppe_ratio_basic():
+    assert v.sales_to_ppe_ratio(500, 250) == pytest.approx(2.0)
+
+
+def test_sales_to_ppe_ratio_non_positive_or_missing_ppe_is_none():
+    assert v.sales_to_ppe_ratio(500, 0) is None
+    assert v.sales_to_ppe_ratio(500, -10) is None
+    assert v.sales_to_ppe_ratio(500, None) is None
+
+
+def test_sales_to_ppe_ratio_missing_revenue_is_none():
+    assert v.sales_to_ppe_ratio(None, 250) is None
+
+
+def test_growth_capex_basic():
+    # delta_revenue=40, ratio=2.0 -> 40/2 = 20
+    assert v.growth_capex(40, 2.0) == pytest.approx(20.0)
+
+
+def test_growth_capex_revenue_decline_floors_to_zero():
+    assert v.growth_capex(-40, 2.0) == pytest.approx(0.0)
+
+
+def test_growth_capex_undefined_ratio_is_zero_not_none():
+    # An unknown ratio (e.g. no PP&E Gross history yet) means ALL capex is assumed
+    # maintenance -- growth_capex is 0.0, never None, so it never nulls out the caller.
+    assert v.growth_capex(40, None) == pytest.approx(0.0)
+    assert v.growth_capex(40, 0) == pytest.approx(0.0)
+    assert v.growth_capex(40, -1) == pytest.approx(0.0)
+
+
+def test_growth_capex_missing_delta_revenue_is_zero():
+    assert v.growth_capex(None, 2.0) == pytest.approx(0.0)
+
+
+def test_maintenance_capex_basic():
+    # capex=100, growth_capex=30 -> 70
+    assert v.maintenance_capex(100, 30) == pytest.approx(70.0)
+
+
+def test_maintenance_capex_floored_at_zero_when_growth_exceeds_capex():
+    assert v.maintenance_capex(100, 150) == pytest.approx(0.0)
+
+
+def test_maintenance_capex_missing_capex_treated_as_zero():
+    assert v.maintenance_capex(None, 30) == pytest.approx(0.0)
+
+
+def test_owner_earnings_improved_basic():
+    # 100 + 20 + 5 - maintenance_capex(30, 10)=20 - 10 = 95
+    assert v.owner_earnings_improved(100, 20, 5, 30, 10, 10) == pytest.approx(95.0)
+
+
+def test_owner_earnings_improved_matches_owner_earnings_when_growth_capex_is_zero():
+    # With growth_capex=0, maintenance_capex == total capex, so this reduces to the
+    # existing owner_earnings() formula exactly -- confirms the two are consistent siblings.
+    assert v.owner_earnings_improved(100, 20, 5, 30, 10, 0) == pytest.approx(
+        v.owner_earnings(100, 20, 5, 30, 10)
+    )
+
+
+def test_owner_earnings_improved_missing_components_treated_as_zero():
+    assert v.owner_earnings_improved(None, None, None, None, None, None) == pytest.approx(0.0)
+
+
 # ── eps_cagr ──────────────────────────────────────────────────────────────────
 def test_eps_cagr_basic():
     # (121/100) ** (1/2) - 1 = 0.10
