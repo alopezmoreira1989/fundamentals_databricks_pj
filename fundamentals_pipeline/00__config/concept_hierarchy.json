@@ -71,6 +71,7 @@
           "group": "Non-Current Assets",
           "children": [
             { "concept": "PP&E Net" },
+            { "concept": "PP&E Gross" },
             { "concept": "Goodwill" },
             { "concept": "Intangible Assets", "display_name": "Intangibles" }
           ]

@@ -173,6 +173,16 @@
       { "metric": "MoS % (Owner Earnings, FY) — Bull",       "unit": "percent", "requires_market_data": true  },
       { "metric": "MoS % (Owner Earnings, FY) — Bear",       "unit": "percent", "requires_market_data": true  }
     ],
+    "Buffett Improved (FY)": [
+      { "metric": "Owner Earnings (Improved) (FY)",                     "unit": "usd",     "requires_market_data": false },
+      { "metric": "Maintenance CapEx (FY)",                             "unit": "usd",     "requires_market_data": false },
+      { "metric": "Owner Earnings (Improved) Value/Share (FY)",         "unit": "usd",     "requires_market_data": false },
+      { "metric": "Owner Earnings (Improved) Value/Share (FY) — Bull",  "unit": "usd",     "requires_market_data": false },
+      { "metric": "Owner Earnings (Improved) Value/Share (FY) — Bear",  "unit": "usd",     "requires_market_data": false },
+      { "metric": "MoS % (Owner Earnings Improved, FY)",                "unit": "percent", "requires_market_data": true  },
+      { "metric": "MoS % (Owner Earnings Improved, FY) — Bull",         "unit": "percent", "requires_market_data": true  },
+      { "metric": "MoS % (Owner Earnings Improved, FY) — Bear",         "unit": "percent", "requires_market_data": true  }
+    ],
     "Graham (TTM)": [
       { "metric": "Graham Number (TTM)",                "unit": "usd",     "requires_market_data": false },
       { "metric": "Graham Number (TTM) — Bull",         "unit": "usd",     "requires_market_data": false },

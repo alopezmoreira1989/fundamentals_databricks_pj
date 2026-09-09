@@ -106,6 +106,7 @@ BALANCE_SHEET = {
     "Inventory":                  ("InventoryNet",                               "stock"),
     "Total Current Assets":       ("AssetsCurrent",                              "stock"),
     "PP&E Net":                   ("PropertyPlantAndEquipmentNet",               "stock"),
+    "PP&E Gross":                 ("PropertyPlantAndEquipmentGross",             "stock"),
     "Goodwill":                   ("Goodwill",                                   "stock"),
     # List of tags in priority order (extract_series_multi, first-hit-wins). Many filers
     # (esp. those with indefinite-lived intangibles like trademarks) don't tag
