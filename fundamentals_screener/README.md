@@ -8,7 +8,9 @@ via DuckDB.
 Extracted from that repo's own `web/` Django app for reuse in an external Django project. It
 is visually and functionally self-contained: it ships its own base template
 (`base_screener.html`, not extending any host template), its own CSS/JS, and does not depend
-on the host project having any particular apps installed (no auth, no user-data apps).
+on the host project having any particular apps installed (no auth, no user-data apps). The one
+exception is the small `Update` model backing the public **Updates** development journal (see
+below) — see [ADR-0013](../docs/adr/0013-updates-development-journal-model.md) for why.
 
 ## Install
 
@@ -41,7 +43,17 @@ pip install "fundamentals-screener @ git+https://github.com/alopezmoreira1989/fu
 
    Reverse with `{% url 'fundamentals_screener:screen' %}`,
    `{% url 'fundamentals_screener:company_detail' ticker %}`.
-3. Set the one required setting:
+3. Run migrations — this package ships one small schema migration for the `Update` model (the
+   public Updates/development-journal section, see below) plus a data migration that seeds
+   ~10 historical entries:
+
+   ```bash
+   python manage.py migrate
+   ```
+
+   Nothing else in this package touches the database — every other view is still read-only
+   against published Parquet artifacts.
+4. Set the one required setting:
 
    ```python
    FUNDAMENTALS_DATA_PATH = env("FUNDAMENTALS_DATA_PATH", default=str(BASE_DIR / "data" / "fundamentals"))
@@ -51,9 +63,9 @@ pip install "fundamentals-screener @ git+https://github.com/alopezmoreira1989/fu
    `fundamentals_pipeline.artifacts.ARTIFACT_NAMES` entry — currently data/metrics/prices/
    backtest/filings/forecast/fx) + `dashboard_meta.json` from. **Nothing in this package
    downloads them on the request path** — see "Keeping data fresh" below.
-4. Optional setting: `LOGO_DEV_KEY` (a [Logo.dev](https://logo.dev) publishable key) — enables
+5. Optional setting: `LOGO_DEV_KEY` (a [Logo.dev](https://logo.dev) publishable key) — enables
    real company logos instead of the monogram fallback. Unset ⇒ always monogram, no error.
-5. Recommended setting: a persistent `CACHES` backend, for the "Latest news" widget on the
+6. Recommended setting: a persistent `CACHES` backend, for the "Latest news" widget on the
    company Overview tab (Yahoo Finance headlines, cached 30 min). Django's default
    `LocMemCache` is process-local — under CGI hosting (a fresh process per request, see
    "Keeping data fresh" below) it never actually persists between requests, so the widget
@@ -165,6 +177,13 @@ Ported from `web/`'s `apps/companies`, `apps/screener`, `apps/valuation`:
   Valuation (football field + Margin of Safety + Net-Net card) is likewise a Company Detail
   tab only — both used to also have their own standalone `/<ticker>/valuation/` and
   `/<ticker>/forecasting/` pages, removed as purely redundant with the tab.
+- **Updates** (`/updates/`): a public development journal — what changed in this project, why,
+  and how, newest first. Each entry (`/updates/<slug>/`) is Markdown, managed through Django
+  admin, backed by the one Django model this package ships (`Update` — see
+  [ADR-0013](../docs/adr/0013-updates-development-journal-model.md)). Only `is_published=True`
+  entries are ever shown publicly. Ships an RSS feed at `/updates/feed/` (Django's built-in
+  syndication framework, no new dependency). Ten historical entries, reconstructed from the
+  project's real git history, are seeded automatically on `manage.py migrate`.
 - JSON siblings of the remaining two (`/data/`, `/<ticker>/data/`).
 
 **Not ported** — these existed in the source app but depend on things this package
@@ -193,6 +212,11 @@ No financial/valuation logic lives in this package — every number is already c
 upstream by `fundamentals_pipeline` (installed as a dependency for its `schemas`,
 `statement_layout`, and `fx` modules) and published as Parquet; this package only reads,
 formats, and renders.
+
+The one exception is the Updates section (`models.py` → `views.py` directly, no
+repository/DuckDB involved) — a small, isolated Django model for maintainer-authored journal
+entries, not financial data. See
+[ADR-0013](../docs/adr/0013-updates-development-journal-model.md).
 
 ## Versioning — this is a public API contract
 

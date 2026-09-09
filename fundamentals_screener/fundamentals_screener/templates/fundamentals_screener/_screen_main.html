@@ -11,17 +11,22 @@ inherited across {% include %} boundaries.
 
 <div class="nn-hero scr-hero mb-4">
   <div class="nn-hero-top">
-    <div class="nn-hero-icon">
-      <img src="{% static 'fundamentals_screener/icons/general.png' %}" alt="">
+    <div class="scr-hero-left">
+      <div class="nn-hero-icon">
+        <img src="{% static 'fundamentals_screener/icons/general.png' %}" alt="">
+      </div>
+      <div class="nn-hero-intro">
+        <span class="eyebrow accent">SEC EDGAR &middot; Full Universe</span>
+        <h1 class="nn-title">Every company, every metric, your filters.</h1>
+        <p class="nn-sub">
+          Search and filter the full universe by sector, index, industry, country, and market,
+          then screen on any derived metric — margins, returns, leverage, valuation multiples,
+          and more — sorted and displayed exactly the way you want.
+        </p>
+      </div>
     </div>
-    <div class="nn-hero-intro">
-      <span class="eyebrow accent">SEC EDGAR &middot; Full Universe</span>
-      <h1 class="nn-title">Every company, every metric, your filters.</h1>
-      <p class="nn-sub">
-        Search and filter the full universe by sector, index, industry, country, and market,
-        then screen on any derived metric — margins, returns, leverage, valuation multiples,
-        and more — sorted and displayed exactly the way you want.
-      </p>
+    <div id="scr-sector-distribution">
+      {% include "fundamentals_screener/_sector_distribution.html" %}
     </div>
   </div>
 
@@ -32,6 +37,12 @@ inherited across {% include %} boundaries.
     {# Keep the active sort when the filter form is re-submitted. #}
     <input type="hidden" name="sort" value="{{ sort_key }}">
     <input type="hidden" name="dir" value="{{ sort_dir }}">
+    {% comment %}
+    Marks the metric-column checkbox state below as explicit — see _DEFAULT_METRIC_COLUMNS
+    in views.py for why this is needed (distinguishes "no columns checked" from "fresh
+    page, defaults apply").
+    {% endcomment %}
+    <input type="hidden" name="col_on" value="1">
     {# Carry the table-columns choice through Apply too, once the user has made one. #}
     {% if desc_explicit %}
       <input type="hidden" name="desc_on" value="1">
@@ -89,10 +100,39 @@ inherited across {% include %} boundaries.
           {% endfor %}
         </select>
       </div>
+      {% if show_currency_selector %}
+        <div>
+          <label for="scr-ccy" class="form-label">Currency</label>
+          <select id="scr-ccy" name="ccy" class="form-select" aria-label="Convert figures to currency"
+                  title="Each figure converts using the FX rate dated at its own reporting date.">
+            <option value="">Native</option>
+            {% for c in target_currencies %}
+              <option value="{{ c }}" {% if c == selected_currency %}selected{% endif %}>{{ c }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      {% endif %}
+      <div>
+        <label for="scr-scale" class="form-label">Scale</label>
+        <select id="scr-scale" name="scale" class="form-select" aria-label="Display value figures in"
+                title="Choose a fixed unit for every dollar figure, or Auto to let each value pick its own.">
+          <option value="">Auto</option>
+          <option value="normal" {% if selected_scale == "normal" %}selected{% endif %}>Normal</option>
+          <option value="B" {% if selected_scale == "B" %}selected{% endif %}>Billions</option>
+          <option value="M" {% if selected_scale == "M" %}selected{% endif %}>Millions</option>
+          <option value="K" {% if selected_scale == "K" %}selected{% endif %}>Thousands</option>
+        </select>
+      </div>
     </div>
 
     <div class="scr-toolbar">
-      <details class="scr-disclosure" name="scr_toggle" {% if cols %}open{% endif %}>
+      {% comment %}
+      Only auto-open when the selected columns genuinely differ from the defaults (see
+      views.py's cols_customized) — col_on rides along on every form submission regardless of
+      which field changed, so using that alone reopened this on nearly every reload/bookmark
+      even when the user only touched Sector/Currency/etc. and never Columns.
+      {% endcomment %}
+      <details class="scr-disclosure" name="scr_toggle" {% if cols_customized %}open{% endif %}>
         <summary>Columns {% if cols %}<span class="scr-count">{{ cols|length }}</span>{% endif %} <span class="scr-chev">▾</span></summary>
         <div class="scr-panel">
           <div class="scr-panel-title">Metric columns to display</div>
@@ -146,13 +186,6 @@ inherited across {% include %} boundaries.
           </template>
         </div>
       </details>
-
-      {% if show_usd_toggle %}
-        <label class="scr-usd-toggle">
-          <input type="checkbox" name="usd" value="1" {% if usd_lens %}checked{% endif %}>
-          View Market Cap in USD <span class="text-muted">(other figures stay native)</span>
-        </label>
-      {% endif %}
 
       <div class="scr-toolbar-spacer"></div>
       <a href="{% url 'fundamentals_screener:screen' %}" class="btn btn-outline-secondary">Reset</a>

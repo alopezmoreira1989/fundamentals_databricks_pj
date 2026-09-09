@@ -1,0 +1,33 @@
+{% extends "fundamentals_screener/base_screener.html" %}
+{% load i18n markdown_extras %}
+{% block title %}{{ update.title }}{% endblock %}
+{% block meta_description %}{{ update.summary }}{% endblock %}
+{% block extra_head %}
+  <link rel="canonical" href="{{ request.build_absolute_uri }}">
+  <meta property="og:type" content="article">
+  <meta property="og:title" content="{{ update.title }}">
+  <meta property="og:description" content="{{ update.summary }}">
+{% endblock %}
+{% block content %}
+  <p class="mb-4"><a href="{% url 'fundamentals_screener:updates_list' %}">← All updates</a></p>
+
+  <article class="card p-4">
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+      {% comment %}
+      See updates_list.html's comment on the same pattern: Django's date filter translates
+      month names via the active locale even with an explicit format string; the language
+      block tag below keeps this page's date in English regardless of the host's own locale,
+      scoped to just this tag.
+      {% endcomment %}
+      {% language "en" %}<span class="mono small" style="color:var(--ink-3)">{{ update.published_at|date:"F Y" }}</span>{% endlanguage %}
+      <span class="mono small" style="color:var(--ink-3)">·</span>
+      <span class="mono small text-uppercase" style="color:var(--accent-ink); letter-spacing:.05em">{{ update.get_category_display }}</span>
+    </div>
+    <h1 class="h3 mb-4">{{ update.title }}</h1>
+    <div class="fs-update-body">
+      {{ update.content|markdownify }}
+    </div>
+  </article>
+
+  <p class="mt-4"><a href="{% url 'fundamentals_screener:updates_list' %}">← All updates</a></p>
+{% endblock %}

@@ -28,10 +28,32 @@ jobs:
           cache: pip
       - name: Install dev dependencies (installs fundamentals_pipeline via -e .)
         run: pip install -r requirements-dev.txt
-      # Only the root suite; web/tests need Django settings and run in the web job. Streamlit
-      # fixture-backed tests self-skip when the gitignored fixtures are absent.
+      # Only the root suite — fundamentals_screener/tests runs in its own job below (it has its
+      # own package/Django-settings needs, see the screener-tests job). Streamlit fixture-backed
+      # tests self-skip when the gitignored fixtures are absent.
       - name: Run pytest
         run: pytest tests -q
+
+  screener-tests:
+    name: fundamentals_screener tests
+    runs-on: ubuntu-latest
+    # fundamentals_screener/tests was previously never run in CI at all — the pipeline-tests
+    # job above only covers root-level tests/. Only tests/test_updates.py needs Django
+    # settings/DB (tests/settings.py, in-memory SQLite); everything else in this suite still
+    # runs with zero Django configuration, unaffected by this job existing.
+    defaults:
+      run:
+        working-directory: fundamentals_screener
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install fundamentals_screener (+ test extras)
+        run: pip install -e ".[test]"
+      - name: Run pytest
+        run: pytest -q
 
   lint:
     name: ruff

@@ -93,6 +93,18 @@ def test_snapshot_has_all_fields_and_own_price(repo):
     assert s.z_score_zone == "safe"  # reuses the same _altman_zone thresholds as net_net_screen
 
 
+def test_market_cap_period_end_is_a_plain_string_not_a_date_object(repo):
+    # Regression (2026-08-23 production 500 on `?ccy=USD`): market_cap() routes through the
+    # generic _fetch() row-mapper, which used to hand the raw DuckDB DATE value straight into
+    # MetricPoint.period_end (typed `str | None`) unconverted -- detail_currency.py's date
+    # parsing then crashed on a real datetime.date. _MARKET_CAP_SQL now casts it in the query
+    # itself, so this must always come back a plain ISO string.
+    mc = repo.market_cap("GOOD1")
+    assert mc is not None
+    assert mc.period_end == "2024-12-31"
+    assert isinstance(mc.period_end, str)
+
+
 def test_unknown_ticker_returns_none(repo):
     assert repo.net_net_snapshot("NOPE") is None
 

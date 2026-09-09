@@ -79,6 +79,17 @@ INCOME_STATEMENT = {
     "R&D Expense":                ("ResearchAndDevelopmentExpense",                                                             "flow_additive"),
     "SG&A Expense":               ("SellingGeneralAndAdministrativeExpense",                                                    "flow_additive"),
     "Operating Income":           ("OperatingIncomeLoss",                                                                       "flow_additive"),
+    # ── Finance Income (Phase 6.6 — Tier A) — a NEW canonical concept, added specifically to
+    # give the EU adapter's real `ifrs-full:FinanceIncome` (5/8 issuers, real, gross, non-netted
+    # income — docs/phase6-4-european-financial-statement-coverage-audit.md §12) a canonical
+    # home; there was no existing SEC-side slot for the income side of interest/finance activity
+    # (only "Interest Expense" existed, cost side only). `InvestmentIncomeInterest` is a real,
+    # standard us-gaap taxonomy element (interest/investment income) — a reasonable, gross-income
+    # counterpart, consistent with this file's own "NET tags are EXCLUDED on purpose" policy for
+    # Interest Expense just below. NOT independently re-verified against live SEC company-facts
+    # data this pass (unlike every EU-side tag in this file, which Phase 6.0/6.4/6.6 fetched and
+    # checked live) — flag for a future confirming pass if real US coverage looks off.
+    "Finance Income":             ("InvestmentIncomeInterest",                                                                  "flow_additive"),
     "Interest Expense":           ("InterestExpense",                                                                           "flow_additive"),
     "Interest Expense (nonoperating)": ("InterestExpenseNonoperating",                                                          "flow_additive"),
     "Interest Expense (incl debt)":    ("InterestAndDebtExpense",                                                               "flow_additive"),
@@ -96,7 +107,15 @@ INCOME_STATEMENT = {
                                     "EarningsPerShareBasicAndDiluted",                  # single combined tag (basic == diluted)
                                     "EarningsPerShareBasic"],                           # last resort: negligible dilution (BRK-B, TR)
                                    "flow_nonadditive"),
-    "Shares Diluted":             ("WeightedAverageNumberOfDilutedSharesOutstanding",                                           "flow_nonadditive"),
+    # Fallback confirmed live against SEC data (2026-08, Market Cap (Live)/P/E (TTM, live)
+    # coverage-gap investigation): KKR & Co Inc reports ZERO facts under the standard tag
+    # (confirmed 404 on SEC's own companyconcept endpoint) — a holdover from its pre-2018
+    # KKR & Co. L.P. structure, its diluted share count is tagged as limited-partnership UNITS
+    # instead. Same "coalesce a priority list" pattern as EPS Basic/Diluted just above, not a
+    # new mechanism — extract_series_multi already resolves either form per period.
+    "Shares Diluted":             (["WeightedAverageNumberOfDilutedSharesOutstanding",  # standard tag (wins whenever present)
+                                    "WeightedAverageLimitedPartnershipUnitsOutstandingDiluted"], # LP/unit-structured filers (KKR)
+                                   "flow_nonadditive"),
 }
 
 BALANCE_SHEET = {
@@ -144,6 +163,13 @@ BALANCE_SHEET = {
     "Total Liabilities":          ("Liabilities",                                "stock"),
     "Additional Paid-in Capital": ("AdditionalPaidInCapital",                    "stock"),
     "Retained Earnings":          ("RetainedEarningsAccumulatedDeficit",         "stock"),
+    # ── Non-Controlling Interests (Phase 6.6 — Tier A) — a NEW canonical concept, distinct from
+    # "Total Equity (incl NCI)" (Phase 6.5): this is the NCI BALANCE itself (a real, standalone
+    # equity-section line), not the aggregate total that includes it. Added for the EU adapter's
+    # real `ifrs-full:NoncontrollingInterests` (8/8 issuers, docs/phase6-4-european-financial-
+    # statement-coverage-audit.md §12) — no existing SEC-side slot for this line existed.
+    # `MinorityInterest` is the standard, well-established us-gaap taxonomy element for it.
+    "Non-Controlling Interests":  ("MinorityInterest",                           "stock"),
     "Total Stockholders Equity":  ("StockholdersEquity",                         "stock"),
     "Total Equity (incl NCI)":    ("StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest", "stock"),
     "Total Liabilities & Equity": ("LiabilitiesAndStockholdersEquity",           "stock"),
@@ -152,6 +178,19 @@ BALANCE_SHEET = {
     # for free. Deliberately excluded from concept_hierarchy.json (see DEI_NAMESPACE_CONCEPTS
     # comment below) — it exists purely as an input to the "live" Market Cap metric, not as a
     # displayable statement line.
+    #
+    # Multi-class-stock fallback (2026-08, Market Cap (Live)/P/E (TTM, live) coverage-gap
+    # investigation): companyfacts/companyconcept ONLY expose undimensioned (default-context)
+    # facts. Filers with dual-class common stock (Workday — Class A / Class B, confirmed live)
+    # report this concept ONLY per-share-class, dimensioned by a "ClassOfStock"-like axis, from
+    # the year they adopt the dual-class structure onward — companyfacts then shows ZERO rows for
+    # this concept forever after, even though the filer discloses it every 10-K. When the normal
+    # dei extraction below comes back completely empty, 11__fetch_sec_xbrl.py's
+    # fetch_multiclass_cover_page_shares falls back to the ticker's most recent 10-K's own raw
+    # XBRL instance document, sums the per-class dimensioned facts at the latest reported
+    # instant, and emits one normal "stock" row (form="10-K", fp="FY") for this SAME concept —
+    # same downstream mechanism this comment already documents, just recovered from a different
+    # SEC endpoint. See fundamentals_pipeline/xbrl_instance.py.
     "Shares Outstanding (Cover Page)": ("EntityCommonStockSharesOutstanding",    "stock"),
 }
 
@@ -171,6 +210,9 @@ BALANCE_SHEET = {
 # `11__fetch_sec_xbrl.py` instead of the default `"us-gaap"`. No new SEC API call is needed for
 # this — `get_facts(cik)` already pulls the whole companyfacts document (all namespaces) in one
 # request per ticker; this just reads one more field already present in that same response.
+# (For the multi-class-stock filers where that field comes back EMPTY, see the fallback
+# documented on the STATEMENTS entry above and in xbrl_instance.py — a separate, extra HTTP
+# fetch of the filing's raw instance document, not part of this shared companyfacts response.)
 # Deliberately NOT added to `concept_hierarchy.json` — that file controls Statement-tab display
 # layout, and this concept would look out of place mixed into the Balance Sheet's real line
 # items. The `validate-concept-hierarchy` skill's own cross-check will report this concept as

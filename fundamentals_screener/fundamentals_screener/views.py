@@ -16,10 +16,11 @@ does and doesn't cover.
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from urllib.parse import quote, urlencode
 
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
-from django.shortcuts import render
+from django.shortcuts import get_object_or_404, render
 
 from . import football, pricechart, services
 from .charts import (
@@ -31,6 +32,7 @@ from .charts import (
     quarterly_chart,
 )
 from .currency import quote_currency
+from .models import Update
 from .repositories.company_listing import MetricFilter, SortSpec
 
 PAGE_SIZE = 50
@@ -53,6 +55,17 @@ _SORT_KEYS_DESC = frozenset(k for k, _ in _DESC_COLUMNS)
 # can't otherwise tell apart.
 _OPTIONAL_DESC_COLUMNS = (("sector", "Sector"), ("industry", "Industry"),
                           ("country", "Country"), ("market", "Market"))
+
+# Metric columns shown checked before the user has touched the "Columns" picker. `col_on` is a
+# hidden marker submitted unconditionally alongside the picker's own `col` checkboxes (see
+# _screen_main.html) — its presence is what distinguishes "user unchecked every metric column"
+# (col_on present, col absent) from "URL never mentioned columns at all" (both absent), the same
+# ambiguity `desc_on` resolves above for the separate table-columns toggle.
+_DEFAULT_METRIC_COLUMNS = ("Market Cap (Live)", "P/E (TTM, live)", "Current Ratio", "Debt / Equity")
+
+# Valid ?scale= values other than the default ("auto", never itself a URL value -- see
+# fmt.fmt_value's own docstring for what each one does to a currency-denominated cell).
+_SCALE_CHOICES = ("normal", "B", "M", "K")
 
 
 # ── screener ─────────────────────────────────────────────────────────────────────────────
@@ -101,6 +114,26 @@ def _parse_filters(request: HttpRequest) -> tuple[list[MetricFilter], bool]:
         ok = ok and ok_lo and ok_hi
         filters.append(MetricFilter(metric=metric, min_value=lo, max_value=hi))
     return filters, ok
+
+
+def _count_bound_filters(filters: Sequence[MetricFilter]) -> int:
+    """How many filters actually constrain something (>= 1 real bound) -- NOT len(filters),
+    which also counts bound-less rows that exist purely for display. Every column checked in
+    the "Columns" picker (including the DEFAULT columns, pre-checked with no user interaction
+    at all) mirrors into a blank Metric-filters row (see _screen_main.html's own comment on the
+    one-directional Columns-implies-a-filter-row behavior), and screener.js's applyForm() submits
+    the WHOLE form -- including those blank rows' real (if empty) `fmetric`/`fmin`/`fmax` fields
+    -- on ANY filter change, not just a Metric-filters edit. So after literally any interaction
+    (Sector dropdown, Currency, Scale, ...) the raw filters list stops being empty even though
+    nothing was ever actually bounded, and the "Metric filters" panel/badge got stuck "active"
+    forever via history.pushState (confirmed live, 2026-08-23) -- the same bug CLASS the Columns
+    panel's own `cols_customized` fix addressed, for a different underlying cause.
+    `CompanyListingRepository._filter_clause` already treats a bound-less filter as a no-op
+    (neither `min_value`/`max_value` is not None, so it contributes zero WHERE clauses) -- this
+    mirrors that same "only a REAL bound counts" semantic for the UI's own active-count/open
+    state.
+    """
+    return sum(1 for f in filters if f.min_value is not None or f.max_value is not None)
 
 
 def _legacy_single_metric(request: HttpRequest) -> tuple[list[str], list[MetricFilter], bool]:
@@ -164,24 +197,29 @@ _NET_NET_DISCOUNT_OPTIONS: dict[str, float | None] = {"all": None, "0": 0.0, "15
 _NET_NET_CARD_LEVELS = (("Relaxed", "relaxed"), ("Moderate", "moderate"), ("Strict", "strict"))
 
 
-def _net_net_card_context(ticker: str) -> dict | None:
-    """Shared by ``valuation()`` and ``company_detail()``: the Net-Net card's context, or
-    ``None`` when the ticker has no NCAV data at any level at all (unknown ticker, or every
-    level's NCAV/share is null) — nothing to show then, so the card doesn't render rather than
-    showing three dashes. A NEGATIVE NCAV/share (common — most companies aren't net-nets) still
-    renders, deliberately: the Valuation page always shows a company's own numbers, unlike the
-    Net-Net Finder screener which only lists NCAV-positive eligible tickers. ``ratio``/
-    ``bar_pct`` are left ``None``/0 for a non-positive NCAV/share, though — dividing price by a
-    negative or zero NCAV produces a meaningless "ratio" (confirmed as a real bug during
-    testing: a negative ratio like -34.4x satisfied the "classic net-net" bar-color threshold
-    check, painting AAPL's deeply-negative NCAV bright green as if it were a bargain).
+def _net_net_card_context(ticker: str, snapshot=None) -> dict | None:
+    """The Net-Net card's context, or ``None`` when the ticker has no NCAV data at any level at
+    all (unknown ticker, or every level's NCAV/share is null) — nothing to show then, so the
+    card doesn't render rather than showing three dashes. A NEGATIVE NCAV/share (common — most
+    companies aren't net-nets) still renders, deliberately: the company page always shows a
+    company's own numbers, unlike the Net-Net Finder screener which only lists NCAV-positive
+    eligible tickers. ``ratio``/``bar_pct`` are left ``None``/0 for a non-positive NCAV/share,
+    though — dividing price by a negative or zero NCAV produces a meaningless "ratio" (confirmed
+    as a real bug during testing: a negative ratio like -34.4x satisfied the "classic net-net"
+    bar-color threshold check, painting AAPL's deeply-negative NCAV bright green as if it were a
+    bargain).
 
     ``snapshot.price`` comes from ``net_net_snapshot``'s own latest-close lookup — deliberately
     NOT the caller's football-field chart price (confirmed as a second real gap during testing:
     that price is unavailable for tickers lacking EPS/BVPS data even when a real close and real
     NCAV both exist, e.g. an unprofitable clinical-stage biotech).
+
+    `snapshot`: pass the already-fetched (and, if the currency lens is active, already-
+    converted) ``NetNetRow`` to avoid a second, native/unconverted fetch — ``company_detail()``
+    always does. Fetches natively itself only when omitted.
     """
-    snapshot = services.get_net_net_snapshot(ticker)
+    if snapshot is None:
+        snapshot = services.get_net_net_snapshot(ticker)
     if snapshot is None:
         return None
     price = snapshot.price
@@ -267,14 +305,28 @@ def screen(request: HttpRequest) -> HttpResponse:
     industries = services.available_industries(sector=sector)
     if industry not in industries:
         industry = ""
-    # Only meaningful once the universe actually has a non-USD market; otherwise there's
-    # nothing for it to convert, so it isn't offered. Generic over any market this app knows a
-    # real quote currency for (not just "CA") — mirrors company_detail()'s own market-agnostic
-    # gate; Phase 5.7a's fix for the stale "CA"-only check (docs/phase5-7-fundamentals-screener-
-    # multi-market-audit.md §5.3 item 8).
     markets = services.available_markets()
-    show_usd_toggle = any(quote_currency(m) not in (None, "USD") for m in markets)
-    usd_lens = show_usd_toggle and request.GET.get("usd") == "1"
+    # Currency-lens selector: only meaningful once there are ≥2 currencies with real FX data to
+    # pick between — a 0-or-1-currency universe gives the user nothing to convert. Dynamically
+    # enumerated from dashboard_fx itself (today: CAD/USD), not the ticker universe's listing
+    # markets — grows automatically once a new currency's FX pairs are published, never a
+    # hardcoded list. A single control: the dropdown's own first option IS "native, no
+    # conversion" — no separate checkbox, that would just be a second way to say the same thing.
+    target_currencies = services.available_target_currencies()
+    show_currency_selector = len(target_currencies) >= 2
+    raw_ccy = request.GET.get("ccy", "").strip().upper()
+    selected_currency = raw_ccy if raw_ccy in target_currencies else ""
+    target_currency = selected_currency or None
+    # Units-scale selector: how every currency-denominated cell's numeric body renders --
+    # "auto" (the default, T/B/M/K by each value's own magnitude, same as compact_money always
+    # did) / "normal" (full comma-grouped number) / "B"/"M"/"K" (a forced divisor+suffix on
+    # every value regardless of its own size). Blank ("") is the dropdown's own default option,
+    # same "blank = no param emitted" convention as selected_currency, just resolving to "auto"
+    # here instead of "no conversion". Pure presentation -- templates.fmt.fmt_value reads
+    # value_scale straight from the render context (see that tag's own docstring for why a
+    # simple_tag, not a second filter argument).
+    raw_scale = request.GET.get("scale", "").strip()
+    selected_scale = raw_scale if raw_scale in _SCALE_CHOICES else "auto"
     page = _parse_page(request.GET.get("page"))
 
     desc_explicit = "desc_on" in request.GET
@@ -287,15 +339,34 @@ def screen(request: HttpRequest) -> HttpResponse:
         visible_desc = [k for k, _ in _OPTIONAL_DESC_COLUMNS]
 
     # Selected display columns + metric filters, with the legacy single-metric URL folded in.
+    col_explicit = "col_on" in request.GET
     cols = [c for c in (c.strip() for c in request.GET.getlist("col")) if c]
+    if not col_explicit and not cols:
+        cols = list(_DEFAULT_METRIC_COLUMNS)
     filters, ok_filters = _parse_filters(request)
     legacy_cols, legacy_filters, ok_legacy = _legacy_single_metric(request)
     cols = list(dict.fromkeys([*cols, *legacy_cols]))
+    # Drives the Columns disclosure's `open` attribute -- deliberately NOT the same signal as
+    # col_explicit. col_on rides along on every single form submission (it's a plain hidden
+    # field in scr-filter-form, unconditional -- see the field's own comment), so col_explicit
+    # is true after touching ANY filter, not just Columns; and since the AJAX filter-apply path
+    # only swaps #scr-results (never re-renders this form), the only time this template re-runs
+    # server-side is a real full navigation -- at which point history.pushState has usually
+    # already baked col_on=1 into the URL from an earlier interaction. Using col_explicit here
+    # made the panel auto-open on nearly every reload/bookmark/mode-switch even when the user
+    # never touched Columns and is still looking at the plain defaults (confirmed live, 2026-08-
+    # 23) -- open only when the selection actually differs from the default set.
+    cols_customized = col_explicit and set(cols) != set(_DEFAULT_METRIC_COLUMNS)
     filters = filters + legacy_filters
     error = None if (ok_filters and ok_legacy) else "Filter bounds must be numbers."
     if error:  # drop the unparseable bounds so the table still renders
         filters = [MetricFilter(metric=f.metric) for f in filters]
-    has_active_filters = bool(filters)
+    # `error is not None` is kept as an OR: a genuinely mistyped bound (bounds stripped just
+    # above, right before this line, so the table still renders) is still a real attempted
+    # filter -- the panel should open to show the user where the problem is, not silently look
+    # untouched, even though _count_bound_filters alone would now read 0 for it.
+    active_filter_count = _count_bound_filters(filters)
+    has_active_filters = error is not None or active_filter_count > 0
 
     # Display every selected column plus any filtered metric (so the user sees what they bound
     # on), filters first-seen order preserved.
@@ -307,20 +378,12 @@ def screen(request: HttpRequest) -> HttpResponse:
     if sort_key not in _SORT_KEYS_DESC and sort_key not in display_cols:
         sort_key, descending = "ticker", False
 
-    result = services.screen_table(
-        search=search, sector=sector, index=index, country=country, market=market,
-        industry=industry, columns=display_cols, filters=filters,
-        sort=SortSpec(key=sort_key, descending=descending),
-        page=page, page_size=PAGE_SIZE, usd_lens=usd_lens,
-    )
-
-    num_pages = max(1, math.ceil(result.total / PAGE_SIZE))
-    page = min(page, num_pages)
-
-    # State-carrying param pairs. `base_pairs` (no page/sort/dir) drives the sort-header links;
-    # `state_pairs` (adds the active sort) drives the pagination links. usd_lens rides along in
-    # both so toggling it survives a sort/page click, same bookmarkable-URL contract as every
-    # other filter here.
+    # State-carrying param pairs. `base_pairs` (no page/sort/dir) drives the sort-header links
+    # and the Sector Distribution panel's per-sector links; `state_pairs` (built below, once
+    # `page` is known) adds the active sort for pagination links. Built here, before
+    # `screen_table()` runs, purely from already-parsed request params (none of this depends on
+    # `result`) so the sector-distribution response tier below can use it too without a second,
+    # duplicated param-collection pass.
     base_pairs: list[tuple[str, str]] = []
     for k, v in (
         ("q", search), ("sector", sector), ("index", index), ("country", country),
@@ -334,8 +397,70 @@ def screen(request: HttpRequest) -> HttpResponse:
         base_pairs.append(("fmetric", f.metric))
         base_pairs.append(("fmin", "" if f.min_value is None else _num(f.min_value)))
         base_pairs.append(("fmax", "" if f.max_value is None else _num(f.max_value)))
-    if usd_lens:
-        base_pairs.append(("usd", "1"))
+    if selected_currency:
+        base_pairs.append(("ccy", selected_currency))
+    if selected_scale != "auto":
+        base_pairs.append(("scale", selected_scale))
+
+    result = services.screen_table(
+        search=search, sector=sector, index=index, country=country, market=market,
+        industry=industry, columns=display_cols, filters=filters,
+        sort=SortSpec(key=sort_key, descending=descending),
+        page=page, page_size=PAGE_SIZE, target_currency=target_currency,
+    )
+
+    # Sector Distribution panel: the sector breakdown of the CURRENT filtered universe (all
+    # matches, not just this page — see ScreenTablePage.sector_distribution's own docstring),
+    # computed as part of the SAME screen_table() call above, never a second query. Each row's
+    # `qs` carries every OTHER active filter forward with `sector` replaced by that row's own
+    # (mirrors _sort_headers' own "precompute the ready-to-use URL in Python" pattern) — "Unknown"
+    # (null-sector tickers) gets no `qs` at all, since the Sector <select> has no matching option
+    # to click it into (no way to filter on "sector IS NULL" today); it renders as plain text.
+    #
+    # `bar_pct` (the bar's own width) is deliberately a DIFFERENT number than `pct` (the % label
+    # next to it): `pct` is share-of-universe (count/sector_total), always small even for the
+    # biggest sector, since no sector dominates a broad market index — using it for bar width
+    # made every bar look like a similarly-short sliver, defeating the point of a bar chart
+    # (confirmed live, 2026-08-23 screenshot). `bar_pct` is share-of-the-LARGEST-sector-shown
+    # (count/max_count), so the biggest sector's bar always fills the track and the rest scale
+    # visibly against it — an ordinary relative bar chart, `pct` is still the honest stat shown
+    # in the label.
+    sector_total = result.total
+    # Python-side thousands grouping, not a template filter -- Django's own `intcomma`/
+    # `USE_THOUSAND_SEPARATOR` path is locale-sensitive the same way `floatformat` turned out to
+    # be (see the bar-fill comment above and views.screen()'s own `'u'`-suffix fix elsewhere in
+    # this file), and this app has already been burned once by a comma-vs-period mismatch under
+    # a non-English active locale. A plain `:,` format is deliberately locale-independent.
+    sector_total_display = f"{sector_total:,}"
+    max_sector_count = max((sc.count for sc in result.sector_distribution), default=0)
+    sector_rows = [
+        {
+            "sector": sc.sector,
+            "count": sc.count,
+            "pct": (sc.count / sector_total * 100) if sector_total else 0.0,
+            "bar_pct": (sc.count / max_sector_count * 100) if max_sector_count else 0.0,
+            "qs": (
+                urlencode([(k, v) for k, v in base_pairs if k != "sector"] + [("sector", sc.sector)])
+                if sc.sector != "Unknown" else None
+            ),
+        }
+        for sc in result.sector_distribution
+    ]
+    if request.headers.get("X-Sector-Distribution") == "1":
+        return render(
+            request,
+            "fundamentals_screener/_sector_distribution.html",
+            {
+                "sector_rows": sector_rows,
+                "sector_total": sector_total,
+                "sector_total_display": sector_total_display,
+                "sector": sector,
+            },
+        )
+
+    num_pages = max(1, math.ceil(result.total / PAGE_SIZE))
+    page = min(page, num_pages)
+
     # Snapshot before `desc`/`desc_on` are appended — this is state the table-columns toggle
     # (a second, small GET form near the table, see the template) replicates as hidden fields,
     # since its own checkboxes supply desc/desc_on themselves; duplicating them would conflict.
@@ -383,6 +508,18 @@ def screen(request: HttpRequest) -> HttpResponse:
         lf = legacy_filters[0]
         filter_rows = [{"metric": lf.metric, "min": request.GET.get("min", ""),
                         "max": request.GET.get("max", "")}]
+    # Every column selected in the "Columns" picker also gets a visible row here (blank bounds,
+    # unless the user already typed a real one above) — one-directional: a column implies a
+    # filter row, but picking a metric in a filter row never checks its "Columns" box. These
+    # synthetic rows are never written into `request.GET`, so `_parse_filters`/`filters`/
+    # `active_filter_count` (which read the GET params directly, not this list) never see them —
+    # this stays purely cosmetic, not a query change; `cols` already puts the metric in
+    # `display_cols` on its own.
+    _shown_metrics = {r["metric"] for r in filter_rows}
+    for m in cols:
+        if m not in _shown_metrics:
+            filter_rows.append({"metric": m, "min": "", "max": ""})
+            _shown_metrics.add(m)
     while len(filter_rows) < 3:
         filter_rows.append({"metric": "", "min": "", "max": ""})
 
@@ -417,14 +554,21 @@ def screen(request: HttpRequest) -> HttpResponse:
             "country": country,
             "market": market,
             "industry": industry,
-            "show_usd_toggle": show_usd_toggle,
-            "usd_lens": usd_lens,
+            "show_currency_selector": show_currency_selector,
+            "target_currencies": target_currencies,
+            "selected_currency": selected_currency,
+            "selected_scale": selected_scale,
+            "value_scale": selected_scale,
+            "sector_rows": sector_rows,
+            "sector_total": sector_total,
+            "sector_total_display": sector_total_display,
             "cols": cols,
+            "cols_customized": cols_customized,
             "sort_key": sort_key,
             "sort_dir": "desc" if descending else "asc",
             "filter_rows": filter_rows,
             "has_active_filters": has_active_filters,
-            "active_filter_count": len(filters),
+            "active_filter_count": active_filter_count,
             "optional_desc_columns": _OPTIONAL_DESC_COLUMNS,
             "visible_desc": visible_desc,
             "desc_explicit": desc_explicit,
@@ -711,6 +855,19 @@ def about(request: HttpRequest) -> HttpResponse:
     return render(request, "fundamentals_screener/about.html")
 
 
+def updates_list(request: HttpRequest) -> HttpResponse:
+    """Public index of the development journal — published updates, newest first."""
+    updates = Update.objects.filter(is_published=True)
+    return render(request, "fundamentals_screener/updates_list.html", {"updates": updates})
+
+
+def update_detail(request: HttpRequest, slug: str) -> HttpResponse:
+    """One development-journal entry. 404s for an unpublished or unknown slug — never leaks a
+    draft's existence to the public site."""
+    update = get_object_or_404(Update, slug=slug, is_published=True)
+    return render(request, "fundamentals_screener/update_detail.html", {"update": update})
+
+
 def screen_data(request: HttpRequest) -> JsonResponse:
     metric = request.GET.get("metric", "").strip()
     if not metric:
@@ -783,25 +940,54 @@ def company_detail(request: HttpRequest, ticker: str) -> HttpResponse:
     # the fragment and full-page branches below can share it without needing statements/price
     # data first. `price_currency` is `None` for a listing market this app has no real
     # quote-currency mapping for yet — the Price tab then renders a bare, unlabeled number
-    # (metric_value's own None-unit fallback) rather than a guessed/mislabeled `$`.
+    # (metric_value's own None-unit fallback) rather than a guessed/mislabeled `$`. Deliberately
+    # NOT touched by the currency lens below: it's the ticker's own listing/quote currency, a
+    # different axis than reporting_currency — see apply_currency_lens's own scope note.
     _price_ccy = quote_currency(summary.market)
     price_currency = _price_ccy.lower() if _price_ccy else None
     reporting_currency = (summary.reporting_currency or "USD").upper()
-    show_usd_toggle = price_currency not in (None, "usd") or reporting_currency != "USD"
-    usd_lens = show_usd_toggle and request.GET.get("usd") == "1"
+
+    # Currency lens: same shared engine + one-control param contract as the General Screener
+    # (`?ccy=<CODE>`, dropdown's own "Native" first option, selected by default — see screen()'s
+    # own comment for why this replaced a separate checkbox). Every currency-denominated figure on
+    # this page converts to the chosen target, each date independently anchored to its own
+    # period_end — see services.apply_currency_lens / detail_currency.py. Out of scope for v1,
+    # deliberately (documented in the PR, not silently skipped): the Price tab's full close
+    # series/SMA lines and the football field's own price reference line (both in the ticker's
+    # *listing* currency, a different axis — converting a ~500-point daily series is a materially
+    # different volume/complexity class than the ~15-20 dates the rest of this page needs), the
+    # Forecasting tab (its years-6-10 scenarios are future-dated — no FX rate can exist for a
+    # future date without fabricating one), and the Derived-metrics tab's peer-median column
+    # (already a pre-existing, undocumented-until-now cross-ticker currency-mixing gap, same
+    # reasoning as the General Screener's own peer_median scope line).
+    target_currencies = services.available_target_currencies()
+    show_currency_selector = len(target_currencies) >= 2
+    raw_ccy = request.GET.get("ccy", "").strip().upper()
+    selected_currency = raw_ccy if raw_ccy in target_currencies else ""
+    target_currency = selected_currency or None
+
+    # Units-scale selector: same `?scale=` contract as screen() (see that view's own comment) --
+    # a pure presentation control, no repository/service involvement, threaded to fmt.fmt_value
+    # via the `value_scale` context key alone.
+    raw_scale = request.GET.get("scale", "").strip()
+    selected_scale = raw_scale if raw_scale in _SCALE_CHOICES else "auto"
 
     bench = request.GET.get("bench", "").strip().lower()
     if bench not in _BENCH_MODES:
         bench = ""
     compare = request.GET.get("compare", "").strip().upper()
-    derived_metrics, bench_ctx = services.get_metric_history(ticker, years=5, bench=bench, compare=compare)
 
     # Benchmark-switch AJAX partial-swap (mirrors screen()'s is_fragment branch), scoped to just
     # the Derived-metrics tab. Deliberately does NOT mirror screen()'s "same context either way"
     # — unlike screen(), this view also computes statements/price/quarterly/valuation below, none
-    # of which the fragment needs, so this returns before any of that work runs.
+    # of which the fragment needs, so this returns before any of that work runs. Converts via its
+    # own small, independent resolve (target_currency passed straight through) rather than
+    # sharing the full-page apply_currency_lens batch below, which this branch never reaches.
     is_fragment = request.headers.get("X-Requested-With") == "XMLHttpRequest"
     if is_fragment:
+        derived_metrics, bench_ctx = services.get_metric_history(
+            ticker, years=5, bench=bench, compare=compare, target_currency=target_currency,
+        )
         return render(
             request,
             "fundamentals_screener/_derived_metrics.html",
@@ -811,15 +997,18 @@ def company_detail(request: HttpRequest, ticker: str) -> HttpResponse:
                 "bench": bench,
                 "compare_query": compare,
                 "summary": summary,
-                "usd_lens": usd_lens,
+                "selected_currency": selected_currency,
+                "value_scale": selected_scale,
             },
         )
 
     detail = services.get_company_detail(ticker)
     if detail is None:  # defensive only — `summary` above already confirmed the ticker exists
         raise Http404(f"unknown ticker {ticker!r}")
+    # Plain, native fetch here — the full page's derived_metrics gets converted once, together
+    # with every other section, by the single apply_currency_lens call below (never twice).
+    derived_metrics, bench_ctx = services.get_metric_history(ticker, years=5, bench=bench, compare=compare)
     statements = services.get_company_statements(ticker)
-    headline = services.headline_kpis(statements, currency=summary.reporting_currency)
     price_windows = services.price_windows()
     price_window = request.GET.get("window", "").strip()
     if price_window not in price_windows:
@@ -829,6 +1018,45 @@ def company_detail(request: HttpRequest, ticker: str) -> HttpResponse:
     price_tab_points = price_chart_data(price_series)
     price_tab_data = _price_chart_json(price_tab_points) if price_tab_points else None
     quarterly = services.get_quarterly(ticker)
+    # Valuation section: intrinsic-value football field + MoS + price multiples. Intrinsic-
+    # value metrics are dropped from the derived-metrics list to avoid duplicating the
+    # football field. valuation_metrics comes from detail.metrics (unchanged, single-value
+    # display) — derived_metrics/bench_ctx were already fetched above the fragment branch.
+    _, valuation_metrics = services.split_metrics(detail.metrics)
+    iv_field = services.get_intrinsic_value_field(ticker)
+    mos_scenarios = services.get_margin_of_safety_scenarios(ticker)
+    market_cap_point = services.get_market_cap_point(ticker)
+    net_net_snapshot = services.get_net_net_snapshot(ticker)
+
+    # ONE page-wide currency-lens pass (one batched rate-resolution round trip, or zero when the
+    # target IS the reporting currency — see apply_currency_lens/resolve_currency_rates' own
+    # empty-keys short-circuit). Always runs, even with no `ccy` selected: this is also what
+    # applies the unconditional "usd"-mislabeling relabel fix to valuation_metrics/derived_
+    # metrics/market_cap_point (see detail_currency.py's module docstring) — targeting the
+    # ticker's own reporting currency in that case is a genuine no-op conversion.
+    lens = services.apply_currency_lens(
+        reporting_currency=reporting_currency,
+        target_currency=target_currency or reporting_currency,
+        statements=statements, quarterly=quarterly, derived_metrics=derived_metrics,
+        valuation_metrics=valuation_metrics, market_cap_point=market_cap_point,
+        iv_field=iv_field, net_net=net_net_snapshot,
+    )
+    statements = lens.statements
+    statement_currencies = lens.statement_currencies
+    quarterly = lens.quarterly
+    quarterly_currency = lens.quarterly_currency
+    derived_metrics = lens.derived_metrics
+    valuation_metrics = lens.valuation_metrics
+    market_cap_point = lens.market_cap_point
+    iv_field = lens.iv_field
+    iv_currency = lens.iv_currency
+    net_net_snapshot = lens.net_net
+    display_currency = lens.display_currency
+
+    headline = services.headline_kpis(statements, currency=display_currency)
+    market_cap_kpi = services.market_cap_kpi_from_point(market_cap_point)
+    headline = (*headline, market_cap_kpi) if market_cap_kpi else headline
+
     # Income/Cash-flow get a headline bar chart; the Balance Sheet gets a single-year
     # composition (rendered below), so it's excluded from the per-statement bar-chart map.
     _chart_for = {
@@ -836,26 +1064,22 @@ def company_detail(request: HttpRequest, ticker: str) -> HttpResponse:
         "Cash Flow": cash_flow_chart,
     }
     statement_panes = [
-        (st, _chart_for[st.name](st) if st.name in _chart_for else None)
+        (
+            st,
+            _chart_for[st.name](st) if st.name in _chart_for else None,
+            statement_currencies.get(st.name, display_currency),
+        )
         for st in statements.statements
     ]
     statement_chart_data = {
-        st.name: _tab_chart_json(chart) for st, chart in statement_panes if chart is not None
+        st.name: _tab_chart_json(chart) for st, chart, _ccy in statement_panes if chart is not None
     }
     balance_sheet = next((s for s in statements.statements if s.name == "Balance Sheet"), None)
     bs_compositions = balance_sheet_compositions(balance_sheet) if balance_sheet else ()
     bs_compositions_data = _balance_sheet_json(bs_compositions) if bs_compositions else None
     quarterly_chart_obj = quarterly_chart(quarterly) if quarterly.lines else None
     quarterly_chart_data = _tab_chart_json(quarterly_chart_obj) if quarterly_chart_obj else None
-    # Valuation section: intrinsic-value football field + MoS + price multiples. Intrinsic-
-    # value metrics are dropped from the derived-metrics list to avoid duplicating the
-    # football field. valuation_metrics comes from detail.metrics (unchanged, single-value
-    # display) — derived_metrics/bench_ctx were already fetched above the fragment branch.
-    _, valuation_metrics = services.split_metrics(detail.metrics)
-    iv_chart = football.build_chart(services.get_intrinsic_value_field(ticker))
-    mos_scenarios = services.get_margin_of_safety_scenarios(ticker)
-    market_cap_kpi = services.get_market_cap_kpi(ticker, usd_lens=usd_lens)
-    headline = (*headline, market_cap_kpi) if market_cap_kpi else headline
+    iv_chart = football.build_chart(iv_field)
     compare_options = services.all_companies()
     filings = services.get_company_filings(ticker)
     forecast_chart = services.get_forecast_chart(ticker)
@@ -870,13 +1094,19 @@ def company_detail(request: HttpRequest, ticker: str) -> HttpResponse:
         "price_windows": price_windows,
         "price_window": price_window,
         "price_currency": price_currency,
-        # Phase 5.7a: the ticker's reporting currency, embedded once for the Chart.js scripts
-        # (forecasting.js/balance_sheet_chart.js/statement_charts.js) that used to hardcode "$"
-        # client-side with no currency signal from the server at all.
-        "chart_currency": summary.reporting_currency or "USD",
-        "show_usd_toggle": show_usd_toggle,
-        "usd_lens": usd_lens,
+        # Phase 5.7a: the page's resulting display currency, embedded once for the Chart.js
+        # scripts (forecasting.js/balance_sheet_chart.js/statement_charts.js). Was `summary.
+        # reporting_currency` before the currency lens existed; now reflects whichever currency
+        # the statement/quarterly charts actually rendered in (native or converted).
+        "chart_currency": display_currency,
+        "show_currency_selector": show_currency_selector,
+        "target_currencies": target_currencies,
+        "selected_currency": selected_currency,
+        "selected_scale": selected_scale,
+        "value_scale": selected_scale,
+        "display_currency": display_currency,
         "quarterly": quarterly,
+        "quarterly_currency": quarterly_currency,
         "quarterly_chart_data": quarterly_chart_data,
         "statement_chart_data": statement_chart_data,
         "bs_compositions": bs_compositions,
@@ -889,12 +1119,13 @@ def company_detail(request: HttpRequest, ticker: str) -> HttpResponse:
         "compare_options": compare_options,
         "valuation_metrics": valuation_metrics,
         "iv_chart": iv_chart,
+        "iv_currency": iv_currency,
         "mos_scenarios": mos_scenarios,
         "filings": filings,
         "forecast_chart": forecast_chart,
         "forecast_chart_data": forecast_chart_data,
     }
-    net_net_ctx = _net_net_card_context(ticker)
+    net_net_ctx = _net_net_card_context(ticker, net_net_snapshot)
     if net_net_ctx:
         context.update(net_net_ctx)
     return render(request, "fundamentals_screener/company_detail.html", context)

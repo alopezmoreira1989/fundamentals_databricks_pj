@@ -61,6 +61,10 @@
     var form = document.getElementById('scr-filter-form');
     if (!results || !form) return;
 
+    // Sector Distribution panel — optional (absent on a screen too narrow/old to matter, or if
+    // this markup somehow isn't present); every reference below is guarded on it.
+    var sectorBox = document.getElementById('scr-sector-distribution');
+
     var search = document.querySelector('.scr-col-search');
     var rowsContainer = document.querySelector('.scr-filter-rows');
 
@@ -93,11 +97,56 @@
     // Metric filters: add/remove rows client-side. The server already accepts any number of
     // fmetric/fmin/fmax triplets (no hardcoded cap) — this only adds the UI to grow past the
     // 3 rows rendered by default.
+    var rowTemplate = document.querySelector('.scr-filter-row-template');
     var addBtn = document.querySelector('.scr-add-filter');
     if (addBtn && rowsContainer) {
-      var rowTemplate = document.querySelector('.scr-filter-row-template');
       addBtn.addEventListener('click', function () {
         rowsContainer.appendChild(rowTemplate.content.cloneNode(true));
+      });
+    }
+
+    // Checking a "Columns" checkbox mirrors it into a Metric-filters row (blank bounds) so it's
+    // one click away from being bounded too — one-directional, the reverse never happens
+    // (picking a metric in a filter row never touches a Columns checkbox; see views.py's
+    // filter_rows comment for the server-side half of this, which covers non-JS/first-load).
+    var chipGrid = document.querySelector('.scr-chip-grid');
+    if (chipGrid && rowsContainer && rowTemplate) {
+      var rowForMetric = function (metric) {
+        var rows = rowsContainer.querySelectorAll('.scr-filter-rule');
+        for (var i = 0; i < rows.length; i++) {
+          if (rows[i].querySelector('select[name="fmetric"]').value === metric) return rows[i];
+        }
+        return null;
+      };
+      var blankRow = function () {
+        var rows = rowsContainer.querySelectorAll('.scr-filter-rule');
+        for (var i = 0; i < rows.length; i++) {
+          var sel = rows[i].querySelector('select[name="fmetric"]');
+          var min = rows[i].querySelector('input[name="fmin"]');
+          var max = rows[i].querySelector('input[name="fmax"]');
+          if (!sel.value && !min.value.trim() && !max.value.trim()) return rows[i];
+        }
+        return null;
+      };
+      chipGrid.addEventListener('change', function (e) {
+        var box = e.target.closest('input[type="checkbox"][name="col"]');
+        if (!box) return;
+        var existing = rowForMetric(box.value);
+        if (box.checked) {
+          if (existing) return;  // already filterable (bounded or not) — leave it as-is
+          var row = blankRow();
+          if (!row) {
+            rowsContainer.appendChild(rowTemplate.content.cloneNode(true));
+            row = rowsContainer.lastElementChild;
+          }
+          row.querySelector('select[name="fmetric"]').value = box.value;
+        } else if (existing) {
+          // Only drop rows this feature created itself — a real user-typed bound must survive
+          // unchecking the column (filters stay independent of Columns once they have a bound).
+          var min = existing.querySelector('input[name="fmin"]');
+          var max = existing.querySelector('input[name="fmax"]');
+          if (!min.value.trim() && !max.value.trim()) existing.remove();
+        }
       });
     }
 
@@ -105,8 +154,15 @@
 
     function applyForm() {
       var params = new URLSearchParams(new FormData(form));
-      fetchAndSwap(window.location.pathname + '?' + params.toString(), results,
-        { 'X-Requested-With': 'XMLHttpRequest' }, true);
+      var url = window.location.pathname + '?' + params.toString();
+      fetchAndSwap(url, results, { 'X-Requested-With': 'XMLHttpRequest' }, true);
+      // Same URL/params, a second small fetch for the Sector Distribution panel -- it reacts
+      // to every filter this function already reacts to (sector/index/country/market/industry/
+      // search/metric filters/currency/scale), server-side computed from the exact same
+      // scoped+where query screen_table() already runs for the table (see ScreenTablePage.
+      // sector_distribution) -- never a second, independently-filtered universe. `push: false`
+      // since the fetch above already pushes this same URL into history.
+      if (sectorBox) fetchAndSwap(url, sectorBox, { 'X-Sector-Distribution': '1' }, false);
     }
 
     form.addEventListener('submit', function (e) {
@@ -133,6 +189,23 @@
     if (rowsContainer) {
       rowsContainer.addEventListener('click', function (e) {
         if (e.target.closest('.scr-rm-filter')) applyForm();
+      });
+    }
+
+    // Sector Distribution panel: clicking a sector row sets the EXISTING Sector <select>'s
+    // value and dispatches its native `change` event — the form's own `change` listener above
+    // then routes it through the exact same applyForm() every other filter uses. No new fetch
+    // logic, no new filter state; a row with no `data-sector` (the plain, non-link "Unknown"
+    // row — see _sector_distribution.html) is simply not a click target.
+    if (sectorBox) {
+      sectorBox.addEventListener('click', function (e) {
+        var row = e.target.closest('[data-sector]');
+        if (!row) return;
+        var sectorSelect = form.querySelector('#sector');
+        if (!sectorSelect) return;
+        e.preventDefault();
+        sectorSelect.value = row.dataset.sector;
+        sectorSelect.dispatchEvent(new Event('change', { bubbles: true }));
       });
     }
 

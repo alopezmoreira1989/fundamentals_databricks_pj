@@ -93,7 +93,8 @@ body.fs-app { font-family: var(--sans); background: var(--bg); color: var(--ink)
 
 /* Visible keyboard focus everywhere. */
 .fs-app a:focus-visible, .fs-app button:focus-visible, .fs-app .btn:focus-visible,
-.fs-app .form-control:focus-visible, .fs-app .form-select:focus-visible {
+.fs-app .form-control:focus-visible, .fs-app .form-select:focus-visible,
+.fs-app summary:focus-visible {
   outline: 3px solid var(--accent); outline-offset: 2px; box-shadow: none;
 }
 
@@ -461,9 +462,12 @@ body.fs-app { font-family: var(--sans); background: var(--bg); color: var(--ink)
    see screener.js) ---------- */
 /* Compact filter toolbar — a dense CSS grid instead of Bootstrap's row/col breakpoints, which
    left dead cells whenever a row's items didn't sum to 12 at every breakpoint (the "View
-   Market Cap in USD" checkbox stranding a bare col-md-4 was the visible symptom). */
+   Market Cap in USD" checkbox stranding a bare col-md-4 was the visible symptom). 8 columns:
+   Search + Sector/Index/Industry/Country/Market/Currency/Scale -- Currency is conditional (only
+   when the FX data has ≥2 currencies to pick between), so a run with it absent just leaves a
+   cell empty rather than reflowing everything else wider; Scale always renders. */
 .fs-app .scr-filter-row {
-  display: grid; grid-template-columns: 1.6fr repeat(5, 1fr); gap: 12px;
+  display: grid; grid-template-columns: 1.6fr repeat(7, 1fr); gap: 12px;
 }
 @media (max-width: 1080px) { .fs-app .scr-filter-row { grid-template-columns: repeat(3, 1fr); } }
 @media (max-width: 640px) { .fs-app .scr-filter-row { grid-template-columns: repeat(2, 1fr); } }
@@ -529,8 +533,11 @@ body.fs-app { font-family: var(--sans); background: var(--bg); color: var(--ink)
 }
 .fs-app .scr-add-filter:hover { text-decoration: underline; }
 
-.fs-app .scr-usd-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: .82rem; color: var(--ink-2); white-space: nowrap; }
-.fs-app .scr-usd-toggle input { accent-color: var(--accent); width: 15px; height: 15px; }
+/* Company Detail masthead only now — the General Screener's own currency picker moved into
+   .scr-filter-row as a plain label+select matching Sector/Index/etc. (see _screen_main.html). */
+.fs-app .scr-currency-lens { display: inline-flex; align-items: center; gap: 8px; font-size: .82rem; color: var(--ink-2); flex-wrap: wrap; }
+.fs-app .scr-ccy-select-label { font-weight: 500; }
+.fs-app .scr-ccy-select { width: auto; min-width: 110px; }
 
 /* Table-columns toggle — its own small auto-submitting form, replicating the filter form's
    current state as hidden fields so toggling a column never loses the active search/filters. */
@@ -539,22 +546,124 @@ body.fs-app { font-family: var(--sans); background: var(--bg); color: var(--ink)
 .fs-app .scr-table-cols label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; color: var(--ink-2); }
 .fs-app .scr-table-cols input { accent-color: var(--accent); width: 13px; height: 13px; }
 
-/* Unified hero+filter card (General Screener merges what used to be two separate cards): 168px
-   icon (smaller than Net-Net Finder's own 180px .nn-hero-icon default, overridden back down
-   here) since this card also has the filter form + toolbar below it competing for vertical
-   space, unlike Net-Net Finder's hero which stays hero-only, plus a rule + a Fraunces-display
-   "Screener" heading separating the editorial intro from the actual filter form below it.
+/* Unified hero+filter card (General Screener merges what used to be two separate cards): 200px
+   icon (bumped up from the original 168px — plenty of horizontal room in this wide hero row —
+   still distinct from Net-Net Finder's own 180px .nn-hero-icon default) since this card also
+   has the filter form + toolbar below it competing for vertical space, unlike Net-Net Finder's
+   hero which stays hero-only, plus a rule + a Fraunces-display "Screener" heading separating
+   the editorial intro from the actual filter form below it.
 
    .nn-hero-top's shared base rule above is `justify-content: space-between`, built for TWO
    groups (an icon+text group vs. a stats column, see Net-Net Finder's own .nn-hero-left
-   wrapper). This page's .nn-hero-top has no stats block at all — just the icon and the intro
-   directly as its only two children — so space-between spreads THOSE apart instead of grouping
-   them, stretching a big, viewport-dependent gap between icon and text. Overridden here, scoped
-   to just this page via .scr-hero, to a fixed-gap flex row instead. */
-.fs-app .scr-hero .nn-hero-top { justify-content: flex-start; align-items: center; gap: 26px; }
-.fs-app .scr-hero .nn-hero-icon { width: 168px; height: 168px; }
+   wrapper). This page's .nn-hero-top now has exactly two children too -- .scr-hero-left (icon +
+   intro, grouped) and #scr-sector-distribution -- so space-between would work, but a fixed gap
+   reads more deliberately at this card's width; kept as an explicit override rather than relying
+   on the shared default. align-items: stretch (not the base rule's flex-start) is what makes the
+   "Paired & framed" layout work: both children share the ROW's height (set by whichever is
+   naturally taller -- see .scr-hero-left below), rather than each sizing independently. */
+.fs-app .scr-hero .nn-hero-top { justify-content: flex-start; align-items: stretch; gap: 28px; }
+.fs-app .scr-hero .nn-hero-icon { width: 200px; height: 200px; }
 .fs-app .scr-hero-divider { border: none; border-top: 1px solid var(--rule-soft); margin: 26px 0 22px; }
 .fs-app .scr-filter-heading { font-family: var(--display); font-size: 1.28rem; font-weight: 600; margin: 0 0 16px; }
+
+/* .scr-hero-left groups the icon + intro as ONE flex item under .nn-hero-top's align-items:
+   stretch (above), so it stretches to match the sector panel's own (taller) natural height --
+   its OWN align-items: center then centers the icon+intro pair vertically within that shared
+   height, instead of both blocks starting flush at the top and drifting apart by the bottom
+   (the "misalignment" complaint the mockup fixed). Fixed flex-basis, not flex-grow -- it should
+   not compete with the sector panel for the row's leftover width. */
+.fs-app .scr-hero-left {
+  flex: 0 1 460px; min-width: 320px;
+  display: flex; align-items: center; gap: 22px;
+}
+
+/* Sector Distribution panel -- the hero's 2nd .nn-hero-top child. THE FLEX ITEM IS
+   #scr-sector-distribution (the plain wrapper div _screen_main.html puts around the
+   {% include %}, so an AJAX innerHTML swap of its CONTENTS never duplicates the wrapper
+   itself) -- NOT .scr-sector-box, which is one level further in (the outermost element of the
+   INCLUDED _sector_distribution.html template). Confirmed live (2026-08-23, real Playwright
+   DOM inspection against the deployed page) that every flex-sizing property below had been on
+   the WRONG element the whole time: .scr-sector-box was correctly measuring the space it was
+   given, but the actual flex child (#scr-sector-distribution) had no flex/align-self rules of
+   its own at all, so it sat at the flexbox default (flex:0 1 auto, no grow) regardless of what
+   .scr-sector-box itself asked for -- explaining why two earlier fix attempts (dropping a
+   competing margin:auto, then removing an unrelated max-width cap) each produced a real but
+   small improvement without ever reaching the row's true ~592px of leftover space. Also
+   deliberately NOT margin-left:auto -- margin:auto and flex-grow compete for the SAME free
+   space on one item, and the auto margin wins (confirmed on the first fix attempt); being the
+   row's only flex-grow item is what pushes it flush right on its own, no margin trick needed. */
+.fs-app #scr-sector-distribution {
+  align-self: stretch; flex: 1 1 360px; min-width: 260px;
+  display: flex; flex-direction: column;
+}
+/* .scr-sector-box is now the panel's own framed sub-card (background + border), not a bare
+   wrapper -- flex: 1 fills #scr-sector-distribution's full stretched height (set by .nn-hero-top's
+   align-items: stretch above), so the space that used to look like unused background is now this
+   card's own visible padding, the same reframing .scr-hero-left's centering relies on. */
+.fs-app .scr-sector-box {
+  width: 100%; flex: 1;
+  background: var(--bg-subtle); border: 1px solid var(--rule-soft); border-radius: 8px;
+  padding: 18px 22px;
+  display: flex; flex-direction: column;
+}
+.fs-app .scr-sector-header {
+  display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;
+  margin-bottom: 12px;
+}
+.fs-app .scr-sector-title {
+  font-family: var(--mono); font-size: .64rem; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--ink-3);
+}
+/* Headline stat -- same Fraunces-number-over-mono-label pairing as .nn-stat .v/.l (Net-Net
+   Finder's own hero stats), reused here so the panel's total reads with the same visual weight
+   as the intro's own title, instead of a small trailing "TOTAL" row easy to miss. */
+.fs-app .scr-sector-stat { text-align: right; flex-shrink: 0; }
+.fs-app .scr-sector-stat-value {
+  display: block; font-family: var(--display); font-variation-settings: "opsz" 144;
+  font-weight: 500; font-size: 22px; line-height: 1; color: var(--ink);
+}
+.fs-app .scr-sector-stat-label {
+  display: block; font-family: var(--mono); font-size: .6rem; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--ink-3); margin-top: 3px;
+}
+.fs-app .scr-sector-rows { display: flex; flex-direction: column; gap: 1px; }
+.fs-app .scr-sector-row {
+  display: grid; grid-template-columns: minmax(96px, 172px) minmax(56px, 1fr) 40px 48px;
+  align-items: center; gap: 10px;
+  font-size: .74rem; padding: 3px 4px; margin: 0 -4px; border-radius: 3px;
+  text-decoration: none; color: inherit;
+}
+a.scr-sector-row:hover { background: var(--bg-subtle); }
+.fs-app .scr-sector-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fs-app .scr-sector-row.active .scr-sector-name { font-weight: 600; color: var(--accent-ink); }
+/* Bar width is share-of-the-largest-sector-shown (views.screen()'s `bar_pct`), NOT
+   share-of-universe (`pct`, used only for the label) -- using `pct` for the bar too made every
+   bar a similarly-short sliver, since no sector dominates a broad market index (confirmed live,
+   2026-08-23). This way the biggest sector's bar always fills the track and the rest scale
+   visibly against it, like an ordinary relative bar chart. Explicit width:100% (not just an
+   implicit grid stretch) plus a min-width floor -- so the child's percentage-width fill always
+   resolves against a definite, non-collapsing size, even if the box ends up narrower than
+   intended for any reason (e.g. a very long hero title, a narrow viewport). */
+.fs-app .scr-sector-bar-track {
+  height: 9px; width: 100%; min-width: 40px; background: var(--rule-soft);
+  border-radius: 3px; overflow: hidden;
+}
+/* display:block is load-bearing, not decorative: .scr-sector-bar-fill is a plain <span>
+   (inline by default) and is NOT itself a grid/flex item (unlike its parent .scr-sector-
+   bar-track, which gets auto-blockified by being a grid child) -- CSS ignores width/height
+   entirely on non-replaced inline elements, so without this the fill's own `style="width:...%"`
+   and `height:100%` were both silently no-ops, collapsing to a 0x0 box regardless of bar_pct.
+   Confirmed via a local Playwright measurement (2026-08-23) showing computed width stuck at
+   the literal string "100%" (never resolved to a pixel value) and a 0x0 bounding box. */
+.fs-app .scr-sector-bar-fill { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+.fs-app .scr-sector-row:hover .scr-sector-bar-fill { opacity: .8; }
+.fs-app .scr-sector-count, .fs-app .scr-sector-pct {
+  font-family: var(--mono); text-align: right; white-space: nowrap;
+}
+@media (max-width: 900px) {
+  .fs-app .scr-hero .nn-hero-top { align-items: flex-start; }
+  .fs-app .scr-hero-left, .fs-app #scr-sector-distribution { flex-basis: 100%; }
+}
 
 /* ---------- Screener-mode AJAX swap targets (General Screener / Net-Net Finder / Investor
    Presets / cross-mode #main) — shared loading-state treatment, see screener.js. Delayed
@@ -597,3 +706,64 @@ body.fs-app { font-family: var(--sans); background: var(--bg); color: var(--ink)
 
 .fs-app .fc-metric-note { font-size: .78rem; color: var(--ink-2); }
 .fs-app .fc-about { border-left: 3px solid var(--accent); }
+
+/* ── Updates (development journal) ─────────────────────────────────────── */
+/* Index page accordion: the newest update (details[open]) reads as the primary item on the
+   page; older ones collapse to a single compact, lighter-weight row (date/category/title +
+   chevron only, per the page's "latest → readable, archive → scannable" goal). Native
+   <details name="..."> gives single-open-at-a-time and full keyboard/screen-reader semantics
+   for free — no JS. name= is a modern-browser feature; on a browser that ignores it, multiple
+   items can stay open at once, which degrades gracefully rather than breaking anything. */
+.fs-app .fs-update-card { transition: border-color .15s, box-shadow .15s; }
+.fs-app .fs-update-card:hover {
+  border-color: var(--accent);
+  box-shadow: 0 1px 8px rgba(14, 165, 176, .12);
+}
+.fs-app .fs-update-item summary { list-style: none; cursor: pointer; }
+.fs-app .fs-update-item summary::-webkit-details-marker { display: none; }
+.fs-app .fs-update-summary {
+  display: flex; flex-wrap: wrap; align-items: center; gap: .15rem .6rem;
+  padding: 1rem 1.25rem;
+}
+.fs-app .fs-update-summary-meta { display: flex; align-items: center; gap: .5rem; flex: 0 0 auto; }
+.fs-app .fs-update-summary-title {
+  color: var(--ink); font-weight: 500; flex: 1 1 260px;
+}
+.fs-app .fs-update-chevron {
+  color: var(--ink-3); font-family: var(--mono); font-size: 1rem; line-height: 1;
+  transition: transform .15s; flex: 0 0 auto;
+}
+.fs-app .fs-update-item[open] .fs-update-chevron { transform: rotate(180deg); color: var(--accent-ink); }
+.fs-app .fs-update-item-body { padding: 0 1.25rem 1.25rem; }
+.fs-app .fs-update-excerpt { color: var(--ink-2); line-height: 1.6; margin-bottom: 1rem; }
+/* Collapsed rows: denser and visually lighter, so the archive scans quickly. */
+.fs-app .fs-update-item:not([open]) .fs-update-summary { padding: .75rem 1.25rem; }
+.fs-app .fs-update-item:not([open]) .fs-update-summary-title { color: var(--ink-2); font-weight: 400; }
+/* The open (newest, by default) entry reads as the page's primary item. */
+.fs-app .fs-update-item[open] { border-color: var(--accent); }
+.fs-app .fs-update-item[open] .fs-update-summary-title { font-size: 1.05rem; }
+.fs-app .fs-update-body { color: var(--ink-2); line-height: 1.7; }
+.fs-app .fs-update-body h1,
+.fs-app .fs-update-body h2,
+.fs-app .fs-update-body h3 {
+  color: var(--ink); margin-top: 1.6em; margin-bottom: .6em;
+}
+.fs-app .fs-update-body h1:first-child,
+.fs-app .fs-update-body h2:first-child,
+.fs-app .fs-update-body h3:first-child { margin-top: 0; }
+.fs-app .fs-update-body p { margin-bottom: 1em; }
+.fs-app .fs-update-body ul,
+.fs-app .fs-update-body ol { margin-bottom: 1em; padding-left: 1.4em; }
+.fs-app .fs-update-body li { margin-bottom: .3em; }
+.fs-app .fs-update-body code {
+  font-family: var(--mono); font-size: .88em;
+  background: var(--bg-subtle); padding: .1em .35em; border-radius: 3px; color: var(--ink);
+}
+.fs-app .fs-update-body pre {
+  font-family: var(--mono); font-size: .82rem; line-height: 1.5;
+  background: var(--bg-subtle); border: 1px solid var(--rule); border-radius: 4px;
+  padding: .9em 1em; overflow-x: auto; margin-bottom: 1em;
+}
+.fs-app .fs-update-body pre code { background: none; padding: 0; }
+.fs-app .fs-update-body a { color: var(--accent-ink); }
+.fs-app .fs-update-body em:first-child { color: var(--ink-3); }

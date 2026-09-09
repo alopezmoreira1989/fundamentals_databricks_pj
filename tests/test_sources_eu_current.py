@@ -273,11 +273,12 @@ def test_map_source_fact_to_canonical_unmapped_concept_returns_none():
 
 
 def test_eu_canonical_mapping_all_entries_are_accepted_and_usable():
-    # Phase 6.1: EU_CANONICAL_MAPPING values are now tuples of one-or-more MappingDecisions
+    # Phase 6.1: EU_CANONICAL_MAPPING values are tuples of one-or-more MappingDecisions
     # (Revenue has two: the bare tag and the RevenueFromContractsWithCustomers variant).
-    assert len(EU_CANONICAL_MAPPING) == 21
+    # Phase 6.6 (Tier A): widened from 21/22 to 30 canonical concepts / 36 accepted source tags.
+    assert len(EU_CANONICAL_MAPPING) == 30
     all_decisions = [d for decisions in EU_CANONICAL_MAPPING.values() for d in decisions]
-    assert len(all_decisions) == 22
+    assert len(all_decisions) == 36
     for decision in all_decisions:
         assert decision.status == MappingStatus.ACCEPTED
         assert is_usable(decision)
@@ -353,6 +354,101 @@ def test_shares_diluted_has_no_eu_mapping():
     # Phase 6.0 confirmed zero usable share-count concepts across all 8 real issuers -- there
     # must be no EU_CANONICAL_MAPPING entry for "Shares Diluted" at all (NULL, not derived).
     assert "Shares Diluted" not in EU_CANONICAL_MAPPING
+
+
+# ── Phase 6.6: Tier A coverage-expansion mappings ───────────────────────────────────────────
+# docs/phase6-4-european-financial-statement-coverage-audit.md §12. Real values/tag strings cited
+# in eu_current.py's own MappingDecision.notes for each entry below.
+
+
+@pytest.mark.parametrize(
+    "source_concept, expected_canonical",
+    [
+        ("ifrs-full:TradeAndOtherCurrentPayablesToTradeSuppliers", "Accounts Payable"),
+        ("ifrs-full:TradeAndOtherPayablesToTradeSuppliers", "Accounts Payable"),
+        ("ifrs-full:TradeAndOtherCurrentPayables", "Accounts Payable"),
+        ("ifrs-full:NoncontrollingInterests", "Non-Controlling Interests"),
+        ("ifrs-full:IncreaseDecreaseThroughSharebasedPaymentTransactions", "Stock-based Compensation"),
+        ("ifrs-full:IncreaseDecreaseInWorkingCapital", "Changes in Working Capital"),
+        ("ifrs-full:ProfitLossBeforeTax", "Income Before Tax"),
+        ("ifrs-full:BasicEarningsLossPerShare", "EPS Basic"),
+        ("ifrs-full:BasicEarningsLossPerShareFromContinuingOperations", "EPS Basic"),
+        ("ifrs-full:DilutedEarningsLossPerShare", "EPS Diluted"),
+        ("ifrs-full:DilutedEarningsLossPerShareFromContinuingOperations", "EPS Diluted"),
+        ("ifrs-full:FinanceIncome", "Finance Income"),
+        ("ifrs-full:CurrentTradeReceivables", "Accounts Receivable"),
+        ("ifrs-full:TradeAndOtherCurrentReceivables", "Accounts Receivable"),
+    ],
+)
+def test_tier_a_mappings_resolve_to_the_expected_canonical_concept(source_concept, expected_canonical):
+    decision = map_source_fact_to_canonical(source_concept)
+    assert decision is not None
+    assert decision.canonical_concept == expected_canonical
+    assert is_usable(decision)
+
+
+def test_accounts_payable_maps_from_all_three_real_tag_variants():
+    # Real evidence: FCC/ALO/SGO/NAI tag ...ToTradeSuppliers (Current); IBE tags the same concept
+    # without the "Current" qualifier; FCT/RAND tag the broader ...CurrentPayables aggregate.
+    # All three must route to the same canonical concept, combining to 7/8 real coverage.
+    variants = [
+        "ifrs-full:TradeAndOtherCurrentPayablesToTradeSuppliers",
+        "ifrs-full:TradeAndOtherPayablesToTradeSuppliers",
+        "ifrs-full:TradeAndOtherCurrentPayables",
+    ]
+    decisions = [map_source_fact_to_canonical(v) for v in variants]
+    assert all(d is not None and d.canonical_concept == "Accounts Payable" for d in decisions)
+    assert len({d.source_concept for d in decisions}) == 3  # three genuinely distinct tags
+
+
+def test_accounts_receivable_new_ifrs_tags_are_additive_not_a_replacement():
+    # Phase 6.6's explicit safety requirement: the new EU tags must be added WITHOUT touching
+    # 01__tickers.py's IFRS_FALLBACK_TAGS["Accounts Receivable"] entry (a separate, pre-existing,
+    # SEC-side tag-string error affecting real ifrs-full 20-F/40-F filers) -- the EU adapter's own
+    # mapping is a fully independent mechanism, so this is a real, not merely incidental, safety
+    # property. The old (wrong-for-EU, 0/8 match) "TradeReceivables" tag is deliberately NOT an
+    # entry in EU_CANONICAL_MAPPING at all -- only the two real tags are.
+    ar_source_concepts = {
+        d.source_concept
+        for d in EU_CANONICAL_MAPPING["Accounts Receivable"]
+    }
+    assert ar_source_concepts == {
+        "ifrs-full:CurrentTradeReceivables",
+        "ifrs-full:TradeAndOtherCurrentReceivables",
+    }
+    assert map_source_fact_to_canonical("ifrs-full:TradeReceivables") is None
+
+
+def test_net_finance_income_cost_tags_are_not_mapped_to_finance_income():
+    # SGO/NAI/ISP-adjacent real tags are NET (income minus cost, ambiguous sign) -- deliberately
+    # excluded, consistent with this codebase's existing "NET tags EXCLUDED" policy for Interest
+    # Expense (01__tickers.py). Only the real, gross ifrs-full:FinanceIncome tag is mapped.
+    assert map_source_fact_to_canonical("ifrs-full:FinanceIncomeCost") is None
+    assert map_source_fact_to_canonical(
+        "isp:InsuranceFinanceIncomeExpensesFromInsuranceContractsIssuedRecognisedInProfitOrLoss"
+    ) is None
+
+
+def test_sharebased_payment_adjustments_tag_deliberately_not_mapped():
+    # ifrs-full:AdjustmentsForSharebasedPayments adds no issuer coverage beyond what
+    # IncreaseDecreaseThroughSharebasedPaymentTransactions already covers (real evidence: both
+    # tags coexist for ALO with an identical value) -- deliberately not mapped, to avoid an
+    # unnecessary second source tag for the same canonical concept with zero coverage gain.
+    assert map_source_fact_to_canonical("ifrs-full:AdjustmentsForSharebasedPayments") is None
+
+
+def test_phase_6_5_total_equity_and_net_income_mappings_are_unchanged():
+    # Regression guard: Phase 6.6 must not touch the Phase 6.3 (Net Income) or Phase 6.5 (Total
+    # Equity incl NCI) mappings -- both concepts are genuinely distinct from this phase's new
+    # "Non-Controlling Interests" concept (a standalone NCI balance, not the aggregate total).
+    net_income = map_source_fact_to_canonical("ifrs-full:ProfitLossAttributableToOwnersOfParent")
+    total_equity_incl_nci = map_source_fact_to_canonical("ifrs-full:Equity")
+    nci_balance = map_source_fact_to_canonical("ifrs-full:NoncontrollingInterests")
+    assert net_income.canonical_concept == "Net Income"
+    assert total_equity_incl_nci.canonical_concept == "Total Equity (incl NCI)"
+    assert nci_balance.canonical_concept == "Non-Controlling Interests"
+    assert len({net_income.canonical_concept, total_equity_incl_nci.canonical_concept,
+                nci_balance.canonical_concept}) == 3  # three genuinely distinct concepts
 
 
 # ── Entity construction ─────────────────────────────────────────────────────────────────────

@@ -187,7 +187,22 @@ incoming = incoming.withColumn("prio", _prio)
 # Normalise: collapse XBRL synonyms to the canonical concept via CONCEPT_SYNONYMS
 # (inherited from the %run of 01__tickers). If both report the same (ticker, stmt, fy),
 # the downstream dedup keeps one — prio asc, latest filed, largest value.
+#
+# EXCEPTION — "Total Equity (incl NCI)" (Phase 6.5c, docs/phase6-5-total-equity-nci-
+# normalization-fix.md): CONCEPT_SYNONYMS still maps it to "Total Stockholders Equity" (real,
+# active US/Canada production data depends on that fallback for ~59 tickers — CAT, T, VZ, PG,
+# ADM, … — that have never tagged the narrower concept at all), but a blind rename here would
+# silently discard the broader concept's own value for every filer that has BOTH (all 7
+# mapped EU issuers, plus ~1,616 US/Canada tickers) the moment the narrower one wins the
+# dedup tiebreak. Deliberately skipped in THIS loop only — CONCEPT_SYNONYMS itself is left
+# byte-identical so every other consumer (21b__derive_quarterly.py, 35__reconcile_filings.py,
+# 38__history_audit.py, sources/eu_current.py) keeps its existing, unrelated-to-this-phase
+# behavior for this pair unchanged. The keyed fallback that reproduces the old behavior WITHOUT
+# discarding data is implemented explicitly below (§2b), after both concepts have independently
+# survived dedup as their own rows.
 for _alt, _canon in CONCEPT_SYNONYMS.items():
+    if _alt == "Total Equity (incl NCI)":
+        continue
     incoming = incoming.withColumn(
         "concept",
         F.when(F.col("concept") == _alt, _canon).otherwise(F.col("concept"))
@@ -275,6 +290,43 @@ print(f"After dedupe & normalize: {clean_fy.count():,} FY rows ready for MERGE")
 
 # COMMAND ----------
 
+# MAGIC %md ## 2b. "Total Equity (incl NCI)" fallback for "Total Stockholders Equity"
+# MAGIC
+# MAGIC Phase 6.5c (docs/phase6-5-total-equity-nci-normalization-fix.md). Both concepts already
+# MAGIC survive `clean_fy` as independent rows wherever their own raw fact exists — §2's synonym
+# MAGIC loop no longer collapses this one pair. This step ADDITIVELY reproduces the pre-existing
+# MAGIC "Total Stockholders Equity" fallback behavior real production data has always had for
+# MAGIC filers that only ever tag the broader concept, WITHOUT overwriting a genuine direct fact
+# MAGIC when one exists: for every `(ticker, stmt, fiscal_year)` key that has a real
+# MAGIC "Total Equity (incl NCI)" row but NO "Total Stockholders Equity" row, a fallback row is
+# MAGIC synthesized with that same value, marked `is_derived=True` (the existing column already
+# MAGIC used elsewhere in this pipeline for a computed/substituted, not directly-reported, value).
+# MAGIC Generic and source-agnostic by construction — keyed only on `(ticker, stmt, fiscal_year)`,
+# MAGIC no market/ticker/country branch.
+
+# COMMAND ----------
+
+_direct_equity_keys = (
+    clean_fy
+    .filter(F.col("concept") == "Total Stockholders Equity")
+    .select("ticker", "stmt", "fiscal_year")
+    .distinct()
+)
+_equity_fallback_rows = (
+    clean_fy
+    .filter(F.col("concept") == "Total Equity (incl NCI)")
+    .join(_direct_equity_keys, on=["ticker", "stmt", "fiscal_year"], how="left_anti")
+    .withColumn("concept", F.lit("Total Stockholders Equity"))
+    .withColumn("is_derived", F.lit(True))
+)
+n_equity_fallback = _equity_fallback_rows.count()
+print(f"Total Stockholders Equity fallback rows synthesized (no direct fact for that key): "
+      f"{n_equity_fallback:,}")
+
+clean_fy = clean_fy.unionByName(_equity_fallback_rows)
+
+# COMMAND ----------
+
 # MAGIC %md ## 3. MERGE — upsert FY rows into clean table
 
 # COMMAND ----------
@@ -290,11 +342,16 @@ spark.sql(f"""
     AND target.fiscal_year = source.fiscal_year
     AND target.period_type = source.period_type
 
-    WHEN MATCHED AND (target.value != source.value OR target.period_end != source.period_end) THEN
+    WHEN MATCHED AND (
+        target.value != source.value
+        OR target.period_end != source.period_end
+        OR target.is_derived != source.is_derived
+    ) THEN
         UPDATE SET
             target.value         = source.value,
             target.period_end    = source.period_end,
             target.company       = source.company,
+            target.is_derived    = source.is_derived,
             target.scraped_at    = source.scraped_at,
             target.tag_namespace = source.tag_namespace,
             target.source_id     = source.source_id
@@ -377,6 +434,101 @@ print(f"✓ Orphan FY DELETE complete → {full_tbl}")
 # 21b/21e/21f/21g have all finished writing quarterly + dedup data) — placing it here, before
 # quarterly rows exist in `financials` at all, was found (via a real pipeline run) to make its
 # broadened all-period_types scan silently see zero quarterly candidates.
+
+# COMMAND ----------
+
+# MAGIC %md ## 4b. Delete stale rows for a concept whose `stmt` classification changed
+# MAGIC
+# MAGIC A different failure mode from §4's "fabricated annual" cleanup, discovered validating the
+# MAGIC Phase 6.3 EU Net Income statement-classification fix
+# MAGIC (docs/phase6-3-net-income-statement-classification.md): a concept classified under one
+# MAGIC `stmt` by a PRIOR scrape can be reclassified to a DIFFERENT `stmt` by a later scrape (e.g.
+# MAGIC 16__fetch_eu_xbrl.py's `_LABEL_TO_STMT_KIND` fix moved EU's "Net Income" from `Cash Flow`
+# MAGIC to `Income Statement`). The plain UPSERT MERGE above never deletes, and §4's own
+# MAGIC orphan-DELETE only catches keys that ARE part of this scrape's reported-key universe under
+# MAGIC their CURRENT `stmt` but failed the "genuine annual" test — a key whose `stmt` moved
+# MAGIC elsewhere never enters that universe at all, so it's invisible to §4. Confirmed against real
+# MAGIC production data: without this step, re-running the fixed ingestion left a stale, wrong-value
+# MAGIC `stmt="Cash Flow"` "Net Income" row (the pre-fix consolidated incl-NCI figure) sitting
+# MAGIC alongside the new, correct `stmt="Income Statement"` row for every one of the 8 EU tickers.
+# MAGIC
+# MAGIC Deliberately narrow, at the same `(ticker, stmt, concept, fiscal_year)` granularity §4
+# MAGIC already uses, to avoid widening into the unrelated (and already-accepted) "concept vanished
+# MAGIC from the filer's reports entirely" case. Only deletes an existing FY row when, for that
+# MAGIC EXACT `(ticker, concept, fiscal_year)`: (a) the ticker was actually re-scraped this run
+# MAGIC (same universe §4 already uses — a targeted EU re-scrape can never touch an SEC/Canada
+# MAGIC ticker's rows, since those tickers are simply absent from `raw`), (b) THIS scrape reports
+# MAGIC zero raw facts under the row's CURRENT `stmt` for that year (any annual-report form, not
+# MAGIC just the genuine-annual shapes §4 checks), AND (c) THIS scrape DOES report a raw fact for
+# MAGIC that exact `(ticker, concept, fiscal_year)` under a genuinely different `stmt` — proof a
+# MAGIC reclassification happened for that specific year, not that the concept simply went
+# MAGIC unreported this time (which stays untouched, matching §4's own existing conservative
+# MAGIC behaviour for that separate, unrelated case). This is a general safety property, not an
+# MAGIC EU-only one: the identical logic would just as correctly clean up a genuine SEC/Canada
+# MAGIC re-tag, should one ever occur — it only ever deletes a row this scrape can positively prove
+# MAGIC moved elsewhere.
+
+# COMMAND ----------
+
+# Fresh re-read (not the §1 `raw` checkpoint) — mirrors §4's own `_flow_fy_all` re-read and its
+# documented reasoning: a local checkpoint this far downstream, after §3's long-running MERGE,
+# isn't reliably still alive on serverless.
+_reclass_raw = (
+    spark.table(raw_full).filter(F.col("scraped_at") == latest_scrape)
+    .filter(F.col("form").isin("10-K", "10-K/A", "20-F", "20-F/A", "40-F", "40-F/A", "ESEF"))
+    .filter(F.col("fp") == "FY")
+    .filter(F.col("value").isNotNull())
+)
+for _alt, _canon in CONCEPT_SYNONYMS.items():
+    _reclass_raw = _reclass_raw.withColumn(
+        "concept", F.when(F.col("concept") == _alt, _canon).otherwise(F.col("concept"))
+    )
+
+_reclass_scraped_tickers = _reclass_raw.select("ticker").distinct()
+
+_reclass_reported_stmt_fy = _reclass_raw.select(
+    "ticker", "stmt", "concept", F.col("fy").alias("fiscal_year")
+).distinct()
+_reclass_reported_concept_fy = _reclass_reported_stmt_fy.select(
+    "ticker", "concept", "fiscal_year"
+).distinct()
+
+_reclass_target = (
+    spark.table(full_tbl)
+    .filter(F.col("period_type") == "FY")
+    .join(_reclass_scraped_tickers, on="ticker", how="inner")
+    .select("ticker", "stmt", "concept", "fiscal_year")
+    .distinct()
+)
+
+# Existing rows this scrape has NO current evidence for, under their OWN stmt.
+_reclass_unsupported = _reclass_target.join(
+    _reclass_reported_stmt_fy, on=["ticker", "stmt", "concept", "fiscal_year"], how="left_anti"
+)
+
+# ...of those, keep only rows where the SAME (ticker, concept, fiscal_year) IS reported this
+# scrape under a (necessarily different, by construction of the anti-join above) stmt — proof
+# of reclassification, not a concept that just went unreported this year.
+reclassified_stmt_keys = _reclass_unsupported.join(
+    _reclass_reported_concept_fy, on=["ticker", "concept", "fiscal_year"], how="inner"
+).select("ticker", "stmt", "concept", "fiscal_year").distinct()
+
+reclassified_stmt_keys.createOrReplaceTempView("reclassified_stmt_keys")
+
+n_reclassified = reclassified_stmt_keys.count()
+print(f"Stale rows to delete (concept reclassified to a different stmt): {n_reclassified:,}")
+
+spark.sql(f"""
+    MERGE INTO {full_tbl} AS t
+    USING reclassified_stmt_keys AS s
+    ON  t.ticker      = s.ticker
+    AND t.stmt        = s.stmt
+    AND t.concept     = s.concept
+    AND t.fiscal_year = s.fiscal_year
+    AND t.period_type = 'FY'
+    WHEN MATCHED THEN DELETE
+""")
+print(f"✓ Stmt-reclassification stale-row DELETE complete → {full_tbl}")
 
 # COMMAND ----------
 

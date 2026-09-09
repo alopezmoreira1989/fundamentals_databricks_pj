@@ -1,0 +1,56 @@
+{% extends "fundamentals_screener/base_screener.html" %}
+{% load i18n markdown_extras %}
+{% block title %}Updates{% endblock %}
+{% block meta_description %}Updates — the development journal for Fundamentals Screener: what changed, why, and how, across the project.{% endblock %}
+{% block extra_head %}
+  <link rel="canonical" href="{{ request.build_absolute_uri }}">
+  <link rel="alternate" type="application/rss+xml" title="Fundamentals Screener — Updates" href="{% url 'fundamentals_screener:updates_feed' %}">
+{% endblock %}
+{% block content %}
+  <div class="mb-4">
+    <div class="eyebrow mb-2">Updates</div>
+    <h1 class="h3 mb-2">Development journal</h1>
+    <p class="mb-0" style="color:var(--ink-2); line-height:1.6">
+      What changed in this project, why, and how — documented in the order it actually
+      happened.
+      <a href="{% url 'fundamentals_screener:updates_feed' %}">RSS feed</a>
+    </p>
+  </div>
+
+  {% for update in updates %}
+    {% comment %}
+    The queryset (Update.Meta.ordering = -published_at) is already newest-first, so
+    forloop.first is genuinely "the newest published Update" -- never a hardcoded slug/id.
+    {% endcomment %}
+    <details class="fs-update-card fs-update-item card mb-3"
+              name="fs-updates-accordion"
+              {% if forloop.first %}open{% endif %}>
+      <summary class="fs-update-summary">
+        <span class="fs-update-summary-meta">
+          {% comment %}
+          This package's pages stay English regardless of the host's active locale (see the
+          package README's "No i18n" section) -- but Django's date filter translates month
+          names via the currently active language even with an explicit format string, so a
+          host with Spanish active (e.g. via its own LocaleMiddleware) would otherwise render
+          "21 agosto 2026" here. The language block tag below scopes English to just this
+          date, without touching any global setting or affecting any other page.
+          {% endcomment %}
+          {% language "en" %}<span class="mono small" style="color:var(--ink-3)">{{ update.published_at|date:"j F Y" }}</span>{% endlanguage %}
+          <span class="mono small" style="color:var(--ink-3)">·</span>
+          <span class="mono small text-uppercase" style="color:var(--accent-ink); letter-spacing:.05em">{{ update.get_category_display }}</span>
+        </span>
+        <span class="fs-update-summary-title">{{ update.title }}</span>
+        <span class="fs-update-chevron" aria-hidden="true">⌄</span>
+      </summary>
+      <div class="fs-update-item-body">
+        <p class="fs-update-excerpt">{{ update.summary }}</p>
+        <div class="fs-update-body">
+          {{ update.content|markdownify }}
+        </div>
+        <a class="mono small" style="color:var(--accent-ink)" href="{% url 'fundamentals_screener:update_detail' update.slug %}">Read update →</a>
+      </div>
+    </details>
+  {% empty %}
+    <p style="color:var(--ink-3)">No updates published yet.</p>
+  {% endfor %}
+{% endblock %}

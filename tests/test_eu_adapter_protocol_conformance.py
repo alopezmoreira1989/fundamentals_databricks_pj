@@ -27,10 +27,20 @@ _NOTEBOOK_PATH = (
 )
 
 
-def _load_eu_adapter_module():
+def _load_eu_adapter_module(statements=None):
+    """Load 16__fetch_eu_xbrl.py as a fresh module. ``statements``, if given, pre-seeds the
+    module-level ``STATEMENTS`` global (the same `%run`-injected config SEC ingestion uses)
+    before the module body executes -- letting callers control exactly what
+    ``_LABEL_TO_STMT_KIND`` (see test_eu_adapter_stmt_kind_priority.py) is built from, including
+    synthetic vocabularies with a different dict-insertion order than production's real
+    STATEMENTS. Each call re-execs a brand-new module, so this can be invoked repeatedly with
+    different ``statements`` values in the same test session without cross-contamination.
+    """
     spec = importlib.util.spec_from_file_location("_eu_adapter_under_test", _NOTEBOOK_PATH)
     module = importlib.util.module_from_spec(spec)
     module.RUN_EU_PILOT = False  # skip table creation / the real pilot loop / Delta writes
+    if statements is not None:
+        module.STATEMENTS = statements
     spec.loader.exec_module(module)
     return module
 
