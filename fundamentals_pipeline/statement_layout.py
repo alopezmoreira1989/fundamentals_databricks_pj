@@ -34,6 +34,24 @@ SUBTOTAL_CONCEPTS = {
 # row_class() return values that get visual emphasis (as opposed to a plain "" line item).
 STYLED_ROW_CLASSES = frozenset({"subtotal", "grand-total", "headline"})
 
+# Concepts whose value is a raw SHARE COUNT, not a monetary amount -- must never be rendered
+# with a currency prefix. "Shares Outstanding (Cover Page)" is included defensively even
+# though it is not currently surfaced as a displayed statement row anywhere (it's deliberately
+# absent from concept_hierarchy.json, used only as a market-cap-calculation input) -- kept here
+# in case that ever changes. `kind` ("flow_nonadditive" for Shares Diluted, same as EPS) can't
+# be reused for this: it encodes period-additivity, not currency-vs-count semantics.
+SHARE_COUNT_CONCEPTS = {
+    "Shares Diluted",
+    "Shares Outstanding (Cover Page)",
+}
+
+
+def is_share_count(concept: str) -> bool:
+    """True for a raw share-count concept — see ``SHARE_COUNT_CONCEPTS``. Concept-name-keyed,
+    same "single source of truth, never re-derive locally" pattern as ``row_class()``.
+    """
+    return concept in SHARE_COUNT_CONCEPTS
+
 
 def row_class(stmt: str, concept: str, display_name: str) -> str:
     """CSS-class label for a statement row: ``"grand-total"`` | ``"headline"`` | ``"subtotal"``

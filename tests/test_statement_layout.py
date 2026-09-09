@@ -3,7 +3,7 @@ both the Streamlit and Django frontends' financial-statement tables."""
 
 from __future__ import annotations
 
-from fundamentals_pipeline.statement_layout import resolve_indent, row_class
+from fundamentals_pipeline.statement_layout import is_share_count, resolve_indent, row_class
 
 
 def test_grand_total_concepts_are_classified():
@@ -50,3 +50,14 @@ def test_styled_rows_never_indent_even_inside_a_group():
     assert resolve_indent("Assets", "Current Assets", "subtotal") == 0
     assert resolve_indent("Assets", "Current Assets", "grand-total") == 0
     assert resolve_indent("Income Statement", "Bottom Line", "headline") == 0
+
+
+def test_share_count_concepts_are_flagged():
+    assert is_share_count("Shares Diluted") is True
+    assert is_share_count("Shares Outstanding (Cover Page)") is True
+
+
+def test_monetary_concepts_are_not_flagged_as_share_counts():
+    assert is_share_count("Revenue") is False
+    assert is_share_count("Net Income") is False
+    assert is_share_count("EPS Diluted") is False
