@@ -165,6 +165,66 @@ def owner_earnings(
     return _z(net_income) + _z(dna) + _z(sbc) - _z(capex) - _z(delta_wc)
 
 
+def sales_to_ppe_ratio(avg_revenue_5y: Number, avg_ppe_gross_5y: Number) -> float | None:
+    """Greenwald's Sales-to-PP&E ratio: ``avg(Revenue, 5y) / avg(PP&E Gross, 5y)``.
+
+    ``None`` when ``avg_ppe_gross_5y`` is missing or ``<= 0`` (undefined denominator —
+    includes the "no PP&E Gross history yet" case) or ``avg_revenue_5y`` is missing. Unlike
+    every other function in this Greenwald group, this one CAN return ``None`` — it feeds
+    ``growth_capex``'s own "unknown ratio ⇒ 0" fallback below, rather than being called
+    directly by anything that needs a guaranteed float.
+    """
+    if _is_missing(avg_revenue_5y) or _is_missing(avg_ppe_gross_5y) or float(avg_ppe_gross_5y) <= 0:
+        return None
+    return float(avg_revenue_5y) / float(avg_ppe_gross_5y)
+
+
+def growth_capex(delta_revenue: Number, ratio: Number) -> float:
+    """Greenwald's growth-capex component: ``max(delta_revenue / ratio, 0)``.
+
+    Always returns a float, NEVER ``None`` — this project's obtainable-first convention
+    (mirrors ``_z()``): when ``ratio`` is ``None``/``<= 0`` (undefined — including "no PP&E
+    Gross history yet", the expected state until a real pipeline run backfills it) or
+    ``delta_revenue`` is missing, ALL capex is conservatively assumed to be maintenance capex
+    (growth capex = 0) rather than propagating an unknown that would null out the whole
+    downstream Owner Earnings (Improved) figure. A revenue DECLINE (``delta_revenue < 0``)
+    also floors to 0 — a shrinking company has no growth-capex need, by definition, not a
+    negative one.
+    """
+    if _is_missing(delta_revenue) or _is_missing(ratio) or float(ratio) <= 0:
+        return 0.0
+    return max(float(delta_revenue) / float(ratio), 0.0)
+
+
+def maintenance_capex(capex: Number, growth_capex: Number) -> float:
+    """``max(CapEx - Growth CapEx, 0)``. Missing ``capex`` treated as 0 (mirrors ``_z()``),
+    always a float, never ``None``.
+    """
+    return max(_z(capex) - _z(growth_capex), 0.0)
+
+
+def owner_earnings_improved(
+    net_income: Number,
+    dna: Number,
+    sbc: Number,
+    capex: Number,
+    delta_wc: Number,
+    growth_capex: Number,
+) -> float:
+    """Owner Earnings (Improved): ``NI + D&A + SBC - Maintenance CapEx - ΔWC``, where
+    Maintenance CapEx substitutes for ``owner_earnings()``'s plain total CapEx term — the
+    Greenwald refinement of the same 1986 Buffett formula, not a different one. Composes
+    ``maintenance_capex(capex, growth_capex)`` rather than re-deriving it inline, so the two
+    can never drift apart. Additive SIBLING of ``owner_earnings()`` — that function and its
+    published "Owner Earnings" metric are untouched by this one. Each missing component is
+    treated as 0, exactly like ``owner_earnings()`` — never returns ``None``.
+    """
+    return (
+        _z(net_income) + _z(dna) + _z(sbc)
+        - maintenance_capex(capex, growth_capex) - _z(delta_wc)
+    )
+
+
 def eps_cagr(eps_start: Number, eps_end: Number, n_years: int) -> float | None:
     """Trailing EPS CAGR: ``(eps_end / eps_start) ** (1/n_years) - 1``.
 

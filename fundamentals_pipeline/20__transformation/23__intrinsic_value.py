@@ -220,6 +220,7 @@ NEEDED = [
     ("Balance Sheet",    "Cash & Equivalents",          "cash"),
     ("Balance Sheet",    "Short-term Investments",      "st_inv"),
     ("Balance Sheet",    "Retained Earnings",           "retained_earnings"),  # for Graham applicability guard
+    ("Balance Sheet",    "PP&E Gross",                  "ppe_gross"),  # Greenwald maintenance-capex input
 
     ("Cash Flow",        "Operating Cash Flow",         "ocf"),
     ("Cash Flow",        "CapEx",                       "capex"),
@@ -233,6 +234,9 @@ STOCK_ALIASES = {"equity", "assets", "lt_debt", "st_debt", "cash", "st_inv", "re
 # Shares is also "stock" in the TTM sense: we use the most recent quarter's value,
 # not the sum (the 'shares' alias is the period's weighted-average diluted count).
 STOCK_ALIASES.add("shares")
+# PP&E Gross is a Balance Sheet snapshot too -- the Greenwald self-join below reads it
+# straight off fy_wide's own (ticker, year) grid, never summed to TTM.
+STOCK_ALIASES.add("ppe_gross")
 
 ALIAS_OF = {(s, c): a for s, c, a in NEEDED}
 ALL_ALIASES = [a for _, _, a in NEEDED]
@@ -366,6 +370,66 @@ eps_cagr = (
     .select("ticker", "year", "eps_cagr")
 )
 fy_wide = fy_wide.join(eps_cagr, on=["ticker", "year"], how="left")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Greenwald maintenance-capex inputs (5y avg Sales-to-PP&E ratio + 1y revenue lag)
+# MAGIC
+# MAGIC Owner Earnings (Improved) needs, per (ticker, year): a trailing 5-year AVERAGE of
+# MAGIC Revenue and PP&E Gross (not a single picked year, unlike the EPS-CAGR block above), plus
+# MAGIC the single prior fiscal year's Revenue for ΔRevenue. Both come from ONE self-join of
+# MAGIC `fy_wide` against itself (`_gw_pairs`) — the 5y average groups the whole filtered window,
+# MAGIC the 1y lag just re-filters that same joined frame to `base_year == year - 1`, no second
+# MAGIC join needed. FY-only: `ttm_wide` has no (ticker, year) grid to self-join against, and PP&E
+# MAGIC Gross is inherently a balance-sheet SNAPSHOT concept with no natural TTM version.
+
+# COMMAND ----------
+
+_gw_base = fy_wide.select(
+    "ticker", "year",
+    F.col("revenue").cast("double").alias("revenue"),
+    F.col("ppe_gross").cast("double").alias("ppe_gross"),
+)
+_gw_pairs = (
+    _gw_base.join(
+        _gw_base.select(
+            "ticker",
+            F.col("year").alias("base_year"),
+            F.col("revenue").alias("base_revenue"),
+            F.col("ppe_gross").alias("base_ppe_gross"),
+        ),
+        on="ticker",
+    )
+    .filter((F.col("base_year") >= F.col("year") - 4) & (F.col("base_year") <= F.col("year")))
+)
+# Require >= 3 of the trailing 5 fiscal years present for PP&E Gross (mirrors the EPS-CAGR
+# block's own [3,5]y floor above) -- a ticker with only 1-2 years of history (always true right
+# after this concept is first backfilled, and for recent IPOs) gets an undefined ratio rather
+# than a shaky "average" of a single data point. Revenue has no such floor: it's a long-lived,
+# near-universally-reported concept, so requiring 5 years of it too would only add spurious
+# NULLs without protecting against anything real.
+_gw_avg = (
+    _gw_pairs.groupBy("ticker", "year")
+    .agg(
+        F.avg("base_revenue").alias("avg_revenue_5y"),
+        F.avg("base_ppe_gross").alias("avg_ppe_gross_5y"),
+        F.count("base_ppe_gross").alias("_ppe_gross_years_present"),
+    )
+    .withColumn(
+        "avg_ppe_gross_5y",
+        F.when(F.col("_ppe_gross_years_present") >= 3, F.col("avg_ppe_gross_5y")),
+    )
+    .drop("_ppe_gross_years_present")
+)
+_gw_lag = (
+    _gw_pairs.filter(F.col("base_year") == F.col("year") - 1)
+    .select("ticker", "year", F.col("base_revenue").alias("revenue_prior"))
+)
+fy_wide = (
+    fy_wide.join(_gw_avg, on=["ticker", "year"], how="left")
+    .join(_gw_lag, on=["ticker", "year"], how="left")
+)
 
 # COMMAND ----------
 
@@ -795,6 +859,34 @@ for pdf in (fy_pdf, ttm_pdf):
         - pdf["capex"].fillna(0) - pdf["delta_wc"].fillna(0)
     )
 
+# Owner Earnings (Improved) -- Greenwald's growth-capex-subtraction refinement of the same
+# 1986 Buffett formula above, substituting Maintenance CapEx for total CapEx. Mirrors
+# fundamentals_pipeline/valuation.py's growth_capex()/maintenance_capex()/
+# owner_earnings_improved() scalar contract exactly. FY-ONLY (see the Greenwald self-join
+# cell's own comment for why) -- ttm_pdf never has avg_revenue_5y/avg_ppe_gross_5y/
+# revenue_prior columns at all (they only exist on fy_wide), so it gets explicit NaN columns
+# below rather than a KeyError, keeping compute_all's per-period loop uniform.
+_avg_rev = fy_pdf["avg_revenue_5y"].astype(float)
+_avg_ppe = fy_pdf["avg_ppe_gross_5y"].astype(float)
+_delta_rev = fy_pdf["revenue"].astype(float) - fy_pdf["revenue_prior"].astype(float)
+_ratio = np.where(_avg_ppe > 0, _avg_rev / _avg_ppe, np.nan)
+_growth_capex = np.where(
+    np.isnan(_ratio) | (_ratio <= 0) | np.isnan(_delta_rev),
+    0.0,
+    np.maximum(_delta_rev / _ratio, 0.0),
+)
+fy_pdf["growth_capex"] = _growth_capex
+fy_pdf["maint_capex"] = np.maximum(
+    fy_pdf["capex"].fillna(0).to_numpy(dtype=float) - _growth_capex, 0.0
+)
+fy_pdf["oe_dollars_improved"] = (
+    fy_pdf["net_income"].fillna(0) + fy_pdf["dna"].fillna(0) + fy_pdf["sbc"].fillna(0)
+    - fy_pdf["maint_capex"] - fy_pdf["delta_wc"].fillna(0)
+)
+ttm_pdf["growth_capex"] = np.nan
+ttm_pdf["maint_capex"] = np.nan
+ttm_pdf["oe_dollars_improved"] = np.nan
+
 # ── Live TTM price multiples ────────────────────────────────────────────────────
 # P/E (TTM, live) / P/B (TTM, live) / EV/EBITDA (TTM, live): "current" multiples using the
 # genuinely live market_cap computed above (§5), TTM financial inputs already in ttm_pdf, and
@@ -948,6 +1040,12 @@ def compute_all(pdf, period_type, computed_at, scenario):
     nan = np.nan
     z = lambda arr: np.where(np.isnan(arr), 0.0, arr)   # = _safe(.., 0)
     oe_dollars = z(ni) + z(dna) + z(sbc) - z(capex) - z(dwc)
+    # Owner Earnings (Improved) -- precomputed in the pandas-prep stage (FY-only; ttm_pdf's
+    # column is all-NaN, see the comment there), read here rather than re-derived so the
+    # Greenwald ratio/growth-capex logic lives in exactly one place.
+    oe_dollars_improved = col("oe_dollars_improved")
+    maint_capex_col     = col("maint_capex")
+    growth_capex_col    = col("growth_capex")
 
     with np.errstate(invalid="ignore", divide="ignore"):
         # ── graham_number ──  sqrt(magic·EPS·BVPS); skip if EPS/BVPS non-positive or book
@@ -999,6 +1097,19 @@ def compute_all(pdf, period_type, computed_at, scenario):
         )
         oev = np.where(oe_valid & ~np.isnan(total), total / shares, nan)
 
+        # ── owner_earnings_improved ──  same method/assumption profile as owner_earnings
+        # above (oe_skip/oe_method/oe_multiple/oe_dr) — this is Greenwald's refinement of the
+        # SAME formula, not a new assumption family, so it inherits the same sector gating.
+        # FY-only by construction: oe_dollars_improved is NaN for every TTM row (see the
+        # pandas-prep stage), so oe_valid_improved is False everywhere on TTM without any
+        # explicit period_type check needed here.
+        oe_valid_improved = ~oe_skip & (oe_dollars_improved > 0) & ~np.isnan(shares) & (shares > 0)
+        total_improved = np.where(
+            oe_method == "multiple", oe_dollars_improved * oe_multiple,
+            np.where(oe_method == "perpetuity", oe_dollars_improved / oe_dr, nan),
+        )
+        oev_improved = np.where(oe_valid_improved & ~np.isnan(total_improved), total_improved / shares, nan)
+
     company    = m["company"].to_numpy(dtype=object)
     ticker_arr = m["ticker"].to_numpy(dtype=object)
     year       = m["year"].to_numpy()
@@ -1031,12 +1142,24 @@ def compute_all(pdf, period_type, computed_at, scenario):
             meta["discount_rate"] = float(oe_dr[i])
         return meta
 
+    def _meta_oe_improved(i):
+        meta = {"method": oe_method[i], "oe": float(oe_dollars_improved[i]),
+                "oe_per_share": float(oe_dollars_improved[i] / shares[i]),
+                "maintenance_capex": float(maint_capex_col[i]),
+                "growth_capex": float(growth_capex_col[i])}
+        if oe_method[i] == "multiple":
+            meta["multiple"] = float(oe_multiple[i])
+        elif oe_method[i] == "perpetuity":
+            meta["discount_rate"] = float(oe_dr[i])
+        return meta
+
     rows = []
     methods = (
         ("graham_number",  gn,  _meta_gn),
         ("graham_revised", grv, _meta_grv),
         ("dcf",            dcf, _meta_dcf),
         ("owner_earnings", oev, _meta_oe),
+        ("owner_earnings_improved", oev_improved, _meta_oe_improved),
     )
     for method_name, iv, meta_fn in methods:
         keep = ~np.isnan(iv) & (iv > 0)
@@ -1274,6 +1397,11 @@ EXPOSED = [
     ("dcf",            "FY",  "margin_of_safety_pct",      "MoS % (DCF, FY)"),
     ("owner_earnings", "FY",  "intrinsic_value_per_share", "Owner Earnings Value/Share (FY)"),
     ("owner_earnings", "FY",  "margin_of_safety_pct",      "MoS % (Owner Earnings, FY)"),
+    # Owner Earnings (Improved) -- Greenwald maintenance-capex refinement. FY-only (see the
+    # Greenwald self-join cell + oe_dollars_improved comments above for why) -- a fully
+    # additive SIBLING of "owner_earnings" above, never a TTM row, never replacing it.
+    ("owner_earnings_improved", "FY", "intrinsic_value_per_share", "Owner Earnings (Improved) Value/Share (FY)"),
+    ("owner_earnings_improved", "FY", "margin_of_safety_pct",      "MoS % (Owner Earnings Improved, FY)"),
     # ── TTM ──
     ("graham_number",  "TTM", "intrinsic_value_per_share", "Graham Number (TTM)"),
     ("graham_number",  "TTM", "margin_of_safety_pct",      "MoS % (Graham Number, TTM)"),
@@ -1333,6 +1461,28 @@ for _pdf, ptype in ((fy_pdf, "FY"), (ttm_pdf, "TTM")):
 
 exposed_frames.extend(oe_frames)
 
+# Absolute Owner Earnings (Improved) + Maintenance CapEx — FY-only standalone metrics (see
+# the Greenwald self-join/pandas-prep comments above for why no TTM variant exists). NOT
+# folded into the oe_frames loop above (which iterates (fy_pdf, ttm_pdf)) since there is
+# deliberately no TTM frame to emit here at all, cleaner than relying on dropna() to absorb
+# an always-NaN TTM row.
+if len(fy_pdf):
+    _yr_improved = [int(y) if pd.notna(y) else None for y in fy_pdf["year"].to_numpy()]
+    exposed_frames.append(pd.DataFrame({
+        "ticker":  fy_pdf["ticker"].to_numpy(),
+        "company": fy_pdf["company"].to_numpy(),
+        year_col:  _yr_improved,
+        "metric":  "Owner Earnings (Improved) (FY)",
+        "value":   fy_pdf["oe_dollars_improved"].to_numpy(dtype=float),
+    }))
+    exposed_frames.append(pd.DataFrame({
+        "ticker":  fy_pdf["ticker"].to_numpy(),
+        "company": fy_pdf["company"].to_numpy(),
+        year_col:  _yr_improved,
+        "metric":  "Maintenance CapEx (FY)",
+        "value":   fy_pdf["maint_capex"].to_numpy(dtype=float),
+    }))
+
 # Live TTM price multiples — scenario-independent (they price off today's market_cap, not a
 # valuation assumption), so unlike EXPOSED there is only ever one variant per label, no
 # Bull/Bear suffix. dropna(value) below drops the rows where the guard above yielded NaN
@@ -1391,6 +1541,7 @@ if exposed_frames:
         _iv_labels = [
             lbl + suf for *_, lbl in EXPOSED for suf in ("", " — Bull", " — Bear")
         ] + ["Owner Earnings (FY)", "Owner Earnings (TTM)",
+             "Owner Earnings (Improved) (FY)", "Maintenance CapEx (FY)",
              "P/E (TTM, live)", "P/B (TTM, live)", "EV/EBITDA (TTM, live)"]
         _iv_labels_sql = ", ".join("'" + lbl.replace("'", "''") + "'" for lbl in _iv_labels)
 
