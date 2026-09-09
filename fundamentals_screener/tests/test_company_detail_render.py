@@ -53,6 +53,22 @@ def _quarterly():
                         period_ends=("2024-12-31", "2024-09-30"))
 
 
+def _statement_with_share_count():
+    revenue = StatementLine(display_name="Revenue", section="Top", values=(400.0, 380.0))
+    shares = StatementLine(display_name="Shares Diluted", section="Per Share Data",
+                            values=(555555.0, 540000.0), is_share_count=True)
+    return Statement(name="Income Statement", years=(2024, 2023), lines=(revenue, shares),
+                      period_ends=("2024-12-31", "2023-12-31"))
+
+
+def _quarterly_with_share_count():
+    revenue = StatementLine(display_name="Revenue", section=None, values=(100.0, 90.0))
+    shares = StatementLine(display_name="Shares Diluted", section=None,
+                            values=(555555.0, 540000.0), is_share_count=True)
+    return QuarterGrid(name="Income Statement", columns=("Q4 2024", "Q3 2024"),
+                        lines=(revenue, shares), period_ends=("2024-12-31", "2024-09-30"))
+
+
 def _base_context() -> dict:
     summary = _summary()
     statements = CompanyStatements(statements=(_statement(),))
@@ -156,6 +172,31 @@ def test_statement_pane_badges_own_currency_not_reporting_currency():
     ctx["statement_panes"] = [(_statement(), None, "CAD")]
     html = render_to_string("fundamentals_screener/company_detail.html", ctx)
     assert "Figures in" in html
+
+
+def test_share_count_row_does_not_render_a_dollar_sign():
+    # Real bug: every statement value was rendered with fmt_value(v, st_ccy) unconditionally,
+    # so a share-count concept (e.g. "Shares Diluted") got a "$" prefix just like a genuinely
+    # monetary row -- st_ccy must be "USD" specifically to reproduce it (fmt.py's fmt_value
+    # only prefixes "$" for unit == "usd"; any other 3-letter code gets a currency BADGE, not
+    # a "$", so a CAD-denominated statement would never have shown this symptom).
+    ctx = _base_context()
+    ctx["statement_panes"] = [(_statement_with_share_count(), None, "USD")]
+    html = render_to_string("fundamentals_screener/company_detail.html", ctx)
+    assert "$400.00" in html               # Revenue (monetary) keeps its "$"
+    assert "$555,555.00" not in html       # Shares Diluted must NOT get a "$" prefix
+    assert "555,555.00" in html            # ...but the number itself still renders
+    assert "{%" not in html and "{#" not in html
+
+
+def test_quarterly_share_count_row_does_not_render_a_dollar_sign():
+    ctx = _base_context()
+    ctx.update(quarterly=_quarterly_with_share_count(), quarterly_currency="USD")
+    html = render_to_string("fundamentals_screener/company_detail.html", ctx)
+    assert "$100.00" in html               # Revenue (monetary) keeps its "$"
+    assert "$555,555.00" not in html       # Shares Diluted must NOT get a "$" prefix
+    assert "555,555.00" in html
+    assert "{%" not in html and "{#" not in html
 
 
 def test_derived_metrics_fragment_renders_without_error():

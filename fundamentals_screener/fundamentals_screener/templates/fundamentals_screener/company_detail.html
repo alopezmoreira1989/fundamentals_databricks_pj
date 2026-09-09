@@ -490,7 +490,7 @@
                 {% for line in sec.list %}
                   <tr class="{{ line.row_class }}">
                     <td class="label indent-{{ line.indent }}">{{ line.display_name }}</td>
-                    {% for v in line.values|slice:"::-1" %}<td class="num">{% fmt_value v st_ccy %}</td>{% endfor %}
+                    {% for v in line.values|slice:"::-1" %}<td class="num">{% if line.is_share_count %}{% fmt_value v %}{% else %}{% fmt_value v st_ccy %}{% endif %}</td>{% endfor %}
                     <td class="spark">{{ line.values|sparkline }}</td>
                   </tr>
                 {% endfor %}
@@ -534,7 +534,7 @@
               {% for line in quarterly.lines %}
                 <tr class="{{ line.row_class }}">
                   <td class="label indent-{{ line.indent }}">{{ line.display_name }}</td>
-                  {% for v in line.values|slice:"::-1" %}<td class="num">{% fmt_value v quarterly_currency %}</td>{% endfor %}
+                  {% for v in line.values|slice:"::-1" %}<td class="num">{% if line.is_share_count %}{% fmt_value v %}{% else %}{% fmt_value v quarterly_currency %}{% endif %}</td>{% endfor %}
                   <td class="spark">{{ line.values|sparkline }}</td>
                 </tr>
               {% endfor %}

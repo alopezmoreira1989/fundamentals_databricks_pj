@@ -8,6 +8,7 @@ from typing import Any
 
 import duckdb
 
+from fundamentals_pipeline.statement_layout import is_share_count as _is_share_count
 from fundamentals_pipeline.statement_layout import resolve_indent
 from fundamentals_pipeline.statement_layout import row_class as _row_class
 
@@ -581,6 +582,7 @@ class CompanyRepository(DuckDBRepository):
                     display_name=name, section=sections[name], values=tuple(vals), group=groups[name],
                     row_class=(cls := _row_class(stmt, concepts[name], name)),
                     indent=resolve_indent(sections[name], groups[name], cls),
+                    is_share_count=_is_share_count(concepts[name]),
                 )
                 for name, vals in values.items()
             )
@@ -628,6 +630,7 @@ class CompanyRepository(DuckDBRepository):
                 display_name=name, section=sections[name], values=tuple(vals), group=groups[name],
                 row_class=(cls := _row_class(statement, concepts[name], name)),
                 indent=resolve_indent(sections[name], groups[name], cls),
+                is_share_count=_is_share_count(concepts[name]),
             )
             for name, vals in values.items()
         )
