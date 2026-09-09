@@ -167,7 +167,10 @@ class StatementLine:
     ``row_class``/``indent`` come from ``fundamentals_pipeline.statement_layout`` — ``row_class``
     is ``"grand-total"``/``"headline"``/``"subtotal"``/``""`` (plain line item); ``indent`` is 1
     for a line nested under a concept_hierarchy.json group, 0 for section-level rows and for any
-    styled row.
+    styled row. ``is_share_count`` (also from ``statement_layout``, ``is_share_count()``) is
+    ``True`` for a raw share-count concept (e.g. "Shares Diluted") — the template checks this
+    before deciding whether to pass the statement's currency to ``fmt_value``, since a share
+    count is not a monetary amount and must never render with a ``$``/currency prefix.
     """
 
     display_name: str
@@ -176,6 +179,7 @@ class StatementLine:
     group: str | None = None
     row_class: str = ""
     indent: int = 0
+    is_share_count: bool = False
 
 
 @dataclass(frozen=True)
