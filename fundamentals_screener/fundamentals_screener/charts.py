@@ -248,13 +248,21 @@ def balance_sheet_compositions(statement: Statement) -> tuple[Composition, ...]:
         def value_of(name: str, _yi: int = yi) -> float | None:
             return next((ln.values[_yi] for ln in lines if ln.display_name == name), None)
 
+        le_total = value_of("Total Liabilities & Equity")
+        equity = value_of("Total Stockholders Equity")
+
         # Assets → blue, dark (Cash, current) → light (PP&E / Other, non-current).
+        # Total Assets == Total Liabilities & Equity by definition -- fall back to le_total when
+        # the "Total Assets" concept itself is NULL for this ticker/year, same reasoning as the
+        # Total Liabilities fallback below.
+        total_assets = value_of("Total Assets")
+        if total_assets is None:
+            total_assets = le_total
         asset_leaves = [
             (ln.display_name, ln.values[yi], ln.group in _CURRENT_GROUPS)
             for ln in lines
             if ln.section == "Assets" and ln.group and not ln.display_name.startswith("Total")
         ]
-        total_assets = value_of("Total Assets")
         asset_raw = _with_other(asset_leaves, total_assets, "Other assets")
         assets = (
             Stack("Assets", total_assets, tuple(_ramped(asset_raw, total_assets, _BLUE_DARK, _BLUE_LIGHT)))
@@ -263,15 +271,24 @@ def balance_sheet_compositions(statement: Statement) -> tuple[Composition, ...]:
         )
 
         # Liabilities → red, dark (current) → light (non-current); equity → green (after).
+        # Prefer the explicitly reported "Total Liabilities" concept; derive it from
+        # le_total - equity when that concept is NULL (confirmed real gap, e.g. Nike: some
+        # filers don't tag an aggregate `Liabilities` XBRL concept at all, which silently
+        # skipped the "Other liabilities" remainder entirely below -- the tracked leaves
+        # (Accounts Payable/ST Debt/LT Debt) plus Equity summed to well under 100% of le_total,
+        # rendering the Liabilities & Equity bar visibly shorter than Assets even though both
+        # stacks' own totals are equal). Derived from numbers already fetched here, so it's
+        # always internally consistent with le_total even when "Total Liabilities" is NULL.
+        total_liabilities = value_of("Total Liabilities")
+        if total_liabilities is None and le_total is not None and equity is not None:
+            total_liabilities = le_total - equity
         liab_leaves = [
             (ln.display_name, ln.values[yi], ln.group in _CURRENT_GROUPS)
             for ln in lines
             if ln.group in _LIABILITY_GROUPS and not ln.display_name.startswith("Total")
         ]
-        liab_raw = _with_other(liab_leaves, value_of("Total Liabilities"), "Other liabilities")
-        le_total = value_of("Total Liabilities & Equity")
+        liab_raw = _with_other(liab_leaves, total_liabilities, "Other liabilities")
         le_segments = _ramped(liab_raw, le_total, _RED_DARK, _RED_LIGHT) if le_total and le_total > 0 else []
-        equity = value_of("Total Stockholders Equity")
         if equity is not None and equity > 0 and le_total:
             le_segments.append(Segment("Equity", equity, equity / le_total * 100, _EQUITY_GREEN))
         le = Stack("Liabilities & Equity", le_total, tuple(le_segments)) if le_total and le_segments else None
