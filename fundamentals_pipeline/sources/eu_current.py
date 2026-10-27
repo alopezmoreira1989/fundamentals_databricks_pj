@@ -667,6 +667,42 @@ EU_CANONICAL_MAPPING: dict[str, tuple[MappingDecision, ...]] = {
             "above: 7/8 real coverage (all but ISP, a bank).",
         ),
     ),
+    "Shares Diluted": (
+        MappingDecision(
+            canonical_concept="Shares Diluted",
+            status=MappingStatus.ACCEPTED,
+            mapping_type=MappingType.DIRECT,
+            source_concept="ifrs-full:AdjustedWeightedAverageShares",
+            notes="Verified live 2026-10 against a fresh fetch of all 8 issuers' latest clean "
+            "filings (the prior Shares-Diluted investigation, Phase 5.6 sec.11.5, checked only "
+            "FCC and IBE and found neither tagged any share-count concept -- correct for those "
+            "two, but it generalized 'no safe mapping exists' to all 8 without checking the "
+            "other 6). SGO's real FY2025 filing tags this with value 498,373,944 (prior year "
+            "503,934,048, confirming it's reported consistently, not a one-off) -- consistent "
+            "with SGO's own reported Diluted EPS (5.78): 2,883,000,000 EUR (Net Income "
+            "Attributable to Owners) / 498,373,944 approx 5.785, matching. Real coverage: SGO "
+            "only (1/8) -- the only issuer that tags a direct weighted-average-DILUTED-shares "
+            "concept at all. Deliberately does NOT map `ifrs-full:WeightedAverageShares` "
+            "(SGO's own BASIC variant, a genuinely different, smaller number, confirmed "
+            "494,245,178 vs this concept's 498,373,944) -- Basic and Diluted are not semantically "
+            "equivalent, this app has no 'Shares Basic' canonical concept to map it to either. "
+            "ALO tags `ifrs-full:NumberOfSharesOutstanding` instead -- a POINT-IN-TIME balance, "
+            "not a weighted average, i.e. a different concept (the EU analogue of 'Shares "
+            "Outstanding (Cover Page)', not 'Shares Diluted') -- deliberately not mapped here, "
+            "left for a separate canonical-concept decision. FCC/NAI/FCT/RAND/ISP tag no "
+            "share-count concept at all (FCC's only appears inside a Spanish free-text "
+            "disclosure, not a structured fact); IBE/FCT's EPS is scoped "
+            "'FromContinuingOperations', the same scope-mismatch risk Phase 5.6 sec.11.5 "
+            "documented for a DERIVED (Net Income / EPS) approach -- irrelevant here since this "
+            "is a DIRECT tag match, not a derivation, but noted for completeness. No new "
+            "canonical concept: 'Shares Diluted' already exists (01__tickers.py "
+            "INCOME_STATEMENT, kind='flow_nonadditive') and is already wired through "
+            "concept_hierarchy.json's Per Share Data group -- the EU adapter's "
+            "`_LABEL_TO_STMT_KIND` reverse-map (reused directly from STATEMENTS) resolves stmt/"
+            "kind for this concept with zero additional wiring, exactly as every other shared "
+            "canonical concept already does.",
+        ),
+    ),
 }
 
 _SOURCE_CONCEPT_TO_DECISION = {

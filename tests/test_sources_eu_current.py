@@ -26,7 +26,7 @@ from fundamentals_pipeline.sources.eu_current import (
     parse_unit_currency,
     select_filing_for_period,
 )
-from fundamentals_pipeline.sources.mapping import MappingStatus, is_usable
+from fundamentals_pipeline.sources.mapping import MappingStatus, MappingType, is_usable
 
 # ── Real filing-list fixtures (captured live 2026-08 against filings.xbrl.org) ──────────────
 
@@ -276,9 +276,11 @@ def test_eu_canonical_mapping_all_entries_are_accepted_and_usable():
     # Phase 6.1: EU_CANONICAL_MAPPING values are tuples of one-or-more MappingDecisions
     # (Revenue has two: the bare tag and the RevenueFromContractsWithCustomers variant).
     # Phase 6.6 (Tier A): widened from 21/22 to 30 canonical concepts / 36 accepted source tags.
-    assert len(EU_CANONICAL_MAPPING) == 30
+    # Post-6.6: +1 concept / +1 tag -- "Shares Diluted" (SGO's AdjustedWeightedAverageShares,
+    # see that entry's own notes for the live-fetch evidence across all 8 issuers).
+    assert len(EU_CANONICAL_MAPPING) == 31
     all_decisions = [d for decisions in EU_CANONICAL_MAPPING.values() for d in decisions]
-    assert len(all_decisions) == 36
+    assert len(all_decisions) == 37
     for decision in all_decisions:
         assert decision.status == MappingStatus.ACCEPTED
         assert is_usable(decision)
@@ -350,10 +352,26 @@ def test_nai_real_estate_top_line_is_not_mapped_to_revenue():
     assert map_source_fact_to_canonical("ifrs-full:RentalIncomeFromInvestmentProperty") is None
 
 
-def test_shares_diluted_has_no_eu_mapping():
-    # Phase 6.0 confirmed zero usable share-count concepts across all 8 real issuers -- there
-    # must be no EU_CANONICAL_MAPPING entry for "Shares Diluted" at all (NULL, not derived).
-    assert "Shares Diluted" not in EU_CANONICAL_MAPPING
+def test_shares_diluted_maps_from_sgo_adjusted_weighted_average_shares():
+    # Phase 6.0 confirmed zero usable share-count concepts across FCC/IBE (the only 2 of 8
+    # issuers checked at the time) -- a later fresh fetch of all 8 found SGO genuinely tags a
+    # direct weighted-average-DILUTED-shares concept (see this mapping's own notes for the
+    # live evidence/arithmetic cross-check against SGO's reported Diluted EPS).
+    decision = map_source_fact_to_canonical("ifrs-full:AdjustedWeightedAverageShares")
+    assert decision is not None
+    assert decision.canonical_concept == "Shares Diluted"
+    assert decision.mapping_type == MappingType.DIRECT
+
+
+def test_shares_diluted_does_not_map_basic_shares_or_point_in_time_shares_outstanding():
+    # SGO's own BASIC weighted-average variant is a genuinely different, smaller number than
+    # the diluted one (494,245,178 vs 498,373,944) -- not semantically equivalent, deliberately
+    # left unmapped (this app has no "Shares Basic" canonical concept to map it to anyway).
+    assert map_source_fact_to_canonical("ifrs-full:WeightedAverageShares") is None
+    # ALO's NumberOfSharesOutstanding is a POINT-IN-TIME balance, not a weighted average -- a
+    # different concept (the EU analogue of "Shares Outstanding (Cover Page)"), deliberately
+    # left for a separate canonical-concept decision, not conflated with Shares Diluted here.
+    assert map_source_fact_to_canonical("ifrs-full:NumberOfSharesOutstanding") is None
 
 
 # ── Phase 6.6: Tier A coverage-expansion mappings ───────────────────────────────────────────
