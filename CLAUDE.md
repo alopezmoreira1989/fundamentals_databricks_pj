@@ -70,6 +70,79 @@ Databricks analytical pipeline that ingests SEC EDGAR XBRL filings (10-K/10-Q) f
   price/fundamentals currency-*mismatch* bug this note originally flagged as blocking
   Canadian ingestion — see the currency-alignment entry above — has since been fixed; that
   was a correctness gate, not a "dual-currency" feature, and is not reopened by this note.)
+- **European ticker onboarding (multi-market roadmap Phase 2, 2026-08) — 8 pilot issuers live
+  end-to-end, but structurally separate from `config.tickers` and NOT in the scheduled DAG.**
+  Unlike Canada (above), Europe is not a `market="EU"` row in `main.config.tickers` at all —
+  an explicit architectural decision ("Option B") after the identity-key question (ticker vs.
+  `MIC:ISIN`, see `docs/adr/0012-listing-identity-key.md`, still `Status: Proposed`, never
+  formally accepted; ticker stays the app's routing/display key either way) turned out not to
+  force the issue.
+  European admission lives in its own table, `main.config.eu_admission_candidates`, written by
+  `10__ingestion/17__firds_admission.py` (ESMA FIRDS membership → SEC-style name/ticker
+  matching) — unioned with `config.tickers` only at the dashboard-export boundary
+  (`51__export_dashboard_data.py`). 8 issuers are admitted today: **FCC, ALO, NAI, FCT, IBE,
+  SGO, RAND, ISP**. `16__fetch_eu_xbrl.py` (ESEF/XBRL-JSON ingestion, via `filings.xbrl.org`,
+  the `EU_CURRENT` source) and `18__fetch_eu_market_data.py` (EU price data) are the other two
+  legs. **None of `16`/`17`/`18` is in `databricks.yml`'s scheduled 9-task DAG** — all three
+  are deliberately bounded, manually-submitted Databricks Job runs (the established pattern:
+  pin a personal Repo clone to a specific `main` commit, run, validate, document), not a
+  recurring refresh. There is no `INGEST_EU` on/off flag analogous to Canada's
+  `INGEST_TSX_COMPOSITE` — admitting more issuers or refreshing existing ones means running
+  these notebooks by hand again, by design, after the incident below.
+  - **Concept mapping**: `fundamentals_pipeline/sources/eu_current.py`'s `EU_CANONICAL_MAPPING`
+    (30 canonical concepts / 36 accepted source tags) is a parallel registry to
+    `01__tickers.py`'s `STATEMENTS` dicts, not an extension of them — each entry is a
+    `MappingDecision` (`sources/mapping.py`) whose `notes` field cites real evidence (a specific
+    issuer/fiscal-year/value from a live filing), never an assumed or taxonomy-inferred mapping.
+    Deliberately **not** covered by the `xbrl-concept-mapping` skill, which is SEC/us-gaap-only
+    — there is no equivalent skill for this registry's own Tier A/B/C evidence bar yet.
+    Investigated and explicitly rejected (`docs/phase6-6-esef-taxonomy-research.md`): using
+    ESMA's official ESEF taxonomy (anchoring/presentation linkbases) to automate mapping — the
+    anchoring mechanism only relates an issuer's *extension* concepts back to one core IFRS
+    concept, it cannot relate two standard IFRS concepts to each other, which is the category
+    almost every real mapping decision here falls into.
+  - **Known, unresolved, high-impact blocker: no safe IFRS tag for Shares Diluted exists for
+    any of the 8 issuers** (investigated twice — Phase 5.6 and Phase 6.0/6.1 — a
+    derived-from-EPS workaround was explicitly rejected as unsafe, at least for IBE). This is
+    what actually blocks Market Cap, intrinsic value, and Net-Net Finder for every European
+    ticker today — not a mapping-coverage gap, a genuinely missing input.
+  - **"Total Equity (incl NCI)" dedup collapse (found + fixed)**: a pre-existing
+    `CONCEPT_SYNONYMS` rule in `21__clean_and_merge.py` silently collapsed this concept into
+    "Total Stockholders Equity" during merge for every European issuer, even though it had been
+    mapped since Phase 6.1 — confirmed it had never once reached `financials` as its own row.
+    Fixed via an explicit repo-owner decision ("Option A"): both concepts now survive dedup, and
+    a keyed fallback row (`is_derived=True`) is synthesized when only the narrower concept is
+    present — deliberately not a `CONCEPT_SYNONYMS`/`01__tickers.py` change, since that would
+    have silently discarded real data for the ~59+ non-EU tickers that only ever tag the
+    broader concept. **Deferred, still open**: this new code path's behavior across the full
+    ~1,616-ticker US/Canada universe has only been unit-tested, never directly observed against
+    a live full-universe `21__clean_and_merge.py` run.
+  - **A real, severe incident (2026-08-16) shapes every live run since**: a write-mode contract
+    bug in the `18`→`12__fetch_market_data.py` handoff briefly reduced `market_prices_daily` to
+    7 tickers and cascaded into 6 tables across the *entire* US/CA/EU universe (recovered via
+    Delta `RESTORE TABLE`). Hardened into `fundamentals_pipeline/write_safety.py`
+    (`is_full_universe_run`/`assert_orphan_delete_safe`/`assert_full_overwrite_safe`/
+    `scoped_orphan_keys`, tested in `tests/test_write_safety.py`) — now a real safety layer
+    `22__derived_metrics.py`/`23__intrinsic_value.py` both depend on, not EU-specific but
+    EU-triggered. Every live EU-touching run since has traced these guards against the
+    *current* code before writing, not just cited the tests.
+  - **Currency**: EUR reaches `fx_rates_daily`/`dashboard_fx` as of a 2026-08-23 fix to
+    `12__fetch_market_data.py`'s `_needed_currencies()` (it previously only unioned
+    `config.tickers`' currencies, never `eu_admission_candidates`'). `fundamentals_screener`'s
+    currency-lens feature (the dynamic currency dropdown replacing the old CA-only "View in
+    USD" toggle) was largely motivated by Europe's `$`-mislabeling gap but shipped as ordinary
+    feature PRs, not a numbered EU phase.
+  - **6 "Tier B" mapping decisions remain open** (CapEx scope, a dedicated NCI-attributable-
+    income concept, a derived Total Liabilities, ST/LT Debt tag fragmentation, Common Stock,
+    sparse Gross Profit/Total Liabilities coverage) — evidence-gathered but not decided or
+    implemented. Documented in `docs/phase6-4-european-financial-statement-coverage-audit.md`.
+  - **Expanding past the 8 pilot issuers**: the Phase 6.4 audit recommended against it until
+    that phase's own Tier A (8 concepts) and Tier D (the NCI collapse above) items closed —
+    both have since shipped (Phase 6.5/6.6), so this guidance is stale on that specific point,
+    but no decision to actually expand the universe has been made since.
+  - **Doc trail** (`docs/phase4-europe-source-research.md` through `phase6-6-tier-a-
+    implementation.md`, ~15 documents spanning Phase 4–6.6): the fullest record of *why*, not
+    just *what* — read the relevant one before re-deciding something it already settled.
 - **`market_data` is frozen legacy** — no longer rebuilt. It was the calendar-year-aligned (last raw `close` per **calendar** year × FY `Shares Diluted`) price/cap table; its 0–11mo fiscal offset distorted multiples for non-December filers, so `12` no longer writes it and all consumers were migrated to `market_cap_asof`. The table is left in place for ad-hoc back-compat queries but receives no new data. Don't add new dependencies on it.
 - **`EPS CAGR (5Y) %` and `PEG` (2026-07) — the first real published metrics computed from a
   multi-year EPS window, not a single-year snapshot.** Previously, a working trailing EPS CAGR
