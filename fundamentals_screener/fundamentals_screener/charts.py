@@ -181,6 +181,9 @@ def price_chart_data(series: Sequence[PricePoint]) -> tuple[PricePoint, ...] | N
 _BLUE_LIGHT, _BLUE_DARK = (168, 210, 214), (11, 37, 69)        # #A8D2D6 (illiquid) … #0B2545 (liquid)
 _RED_LIGHT, _RED_DARK = (240, 195, 168), (122, 45, 22)         # #F0C3A8 (non-current) … #7A2D16 (current)
 _EQUITY_GREEN = "#0F6E56"
+# Noncontrolling interest -- equity-family but visually distinct from the solid parent-equity
+# green, drawn as the stack's last segment (after Equity).
+_NCI_TEAL = "#5FA88E"
 _CURRENT_GROUPS = ("Current Assets", "Current Liabilities")
 _LIABILITY_GROUPS = ("Current Liabilities", "Non-Current Liabilities")
 
@@ -250,6 +253,16 @@ def balance_sheet_compositions(statement: Statement) -> tuple[Composition, ...]:
 
         le_total = value_of("Total Liabilities & Equity")
         equity = value_of("Total Stockholders Equity")
+        # Noncontrolling interest — already ingested/hierarchy-exposed (01__tickers.py's
+        # "Non-Controlling Interests" -> MinorityInterest, concept_hierarchy.json's
+        # "Stockholders Equity" group), but never read here until this fix. Real, confirmed
+        # gap (Viper Energy / VNOM, 2026-10-27 screenshot): an Up-C structure where Diamondback
+        # retains a large NCI stake via the operating LLC -- "Total Stockholders Equity" alone
+        # (parent-only) was ~$4.4B against a le_total of ~$12.7B, and NCI ($5.9B, its own
+        # already-published row) accounted for nearly the entire gap. Without reading it, the
+        # Liabilities & Equity bar rendered visibly shorter than Assets for every NCI-heavy
+        # filer, not just one-off missing-concept cases like the earlier Nike fix covered.
+        nci = value_of("Non-Controlling Interests")
 
         # Assets → blue, dark (Cash, current) → light (PP&E / Other, non-current).
         # Total Assets == Total Liabilities & Equity by definition -- fall back to le_total when
@@ -271,17 +284,18 @@ def balance_sheet_compositions(statement: Statement) -> tuple[Composition, ...]:
         )
 
         # Liabilities → red, dark (current) → light (non-current); equity → green (after).
-        # Prefer the explicitly reported "Total Liabilities" concept; derive it from
-        # le_total - equity when that concept is NULL (confirmed real gap, e.g. Nike: some
-        # filers don't tag an aggregate `Liabilities` XBRL concept at all, which silently
-        # skipped the "Other liabilities" remainder entirely below -- the tracked leaves
-        # (Accounts Payable/ST Debt/LT Debt) plus Equity summed to well under 100% of le_total,
-        # rendering the Liabilities & Equity bar visibly shorter than Assets even though both
-        # stacks' own totals are equal). Derived from numbers already fetched here, so it's
-        # always internally consistent with le_total even when "Total Liabilities" is NULL.
-        total_liabilities = value_of("Total Liabilities")
-        if total_liabilities is None and le_total is not None and equity is not None:
-            total_liabilities = le_total - equity
+        # ALWAYS derive total_liabilities as le_total - equity - nci, rather than trusting the
+        # separately-tagged "Total Liabilities" concept at all -- this is what actually closes
+        # the gap for BOTH confirmed failure modes seen in production: a filer missing the
+        # aggregate `Liabilities` XBRL concept entirely (Nike), and a filer whose "Total
+        # Liabilities" tag is present and internally correct on its own terms but excludes NCI,
+        # which isn't a liability at all (Viper Energy / VNOM). le_total is the one number this
+        # whole stack is normalized against, and equity/nci are what we're explicitly carving
+        # out of it as "not liabilities" -- deriving the remainder from le_total directly
+        # guarantees the stack always sums to exactly 100%, by construction, regardless of
+        # which aggregate concepts a given filer happens to tag. Missing equity/nci treated as
+        # 0 (same missing-component-as-0 convention as valuation.py's _z()).
+        total_liabilities = le_total - (equity or 0.0) - (nci or 0.0) if le_total is not None else None
         liab_leaves = [
             (ln.display_name, ln.values[yi], ln.group in _CURRENT_GROUPS)
             for ln in lines
@@ -291,6 +305,8 @@ def balance_sheet_compositions(statement: Statement) -> tuple[Composition, ...]:
         le_segments = _ramped(liab_raw, le_total, _RED_DARK, _RED_LIGHT) if le_total and le_total > 0 else []
         if equity is not None and equity > 0 and le_total:
             le_segments.append(Segment("Equity", equity, equity / le_total * 100, _EQUITY_GREEN))
+        if nci is not None and nci > 0 and le_total:
+            le_segments.append(Segment("Noncontrolling Interest", nci, nci / le_total * 100, _NCI_TEAL))
         le = Stack("Liabilities & Equity", le_total, tuple(le_segments)) if le_total and le_segments else None
 
         if assets and le:
