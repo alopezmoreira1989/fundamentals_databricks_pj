@@ -80,9 +80,18 @@ def test_total_liabilities_is_derived_from_le_total_even_when_explicit_concept_d
 def test_noncontrolling_interest_closes_the_gap_for_up_c_structures():
     # Real bug (Viper Energy / VNOM, 2026-10-27 screenshot): an Up-C structure where the parent
     # retains only a controlling stake in the operating LLC -- "Total Stockholders Equity" is
-    # parent-only ($4.448B) and the pipeline already ingests "Non-Controlling Interests"
-    # ($5.92B) as its own row, but balance_sheet_compositions() never read it, so le_total
-    # ($12.671B) minus the tracked leaves/equity left a ~$5.9B gap with no segment to fill it.
+    # parent-only ($4.448B) and the pipeline already ingests noncontrolling interest ($5.92B)
+    # as its own row, but balance_sheet_compositions() never read it, so le_total ($12.671B)
+    # minus the tracked leaves/equity left a ~$5.9B gap with no segment to fill it.
+    #
+    # The line's display_name is "NCI", NOT the raw concept name "Non-Controlling Interests" --
+    # concept_hierarchy.json overrides it (`{"concept": "Non-Controlling Interests",
+    # "display_name": "NCI"}`), and StatementLine.display_name carries that override. The first
+    # version of this fix used the raw concept name here and passed against this idealized
+    # fixture while silently returning None in production (live-verified on the real deploy: no
+    # "Noncontrolling Interest" segment appeared, the $5.9B landed in "Other liabilities"
+    # instead) -- keep this fixture on "NCI" so a future regression can't slip past this test
+    # the same way.
     lines = (
         _line("Cash & Equivalents", "Assets", "Current Assets", 0.013e9),
         _line("PP&E Net", "Assets", "Non-Current Assets", 12.209e9),
@@ -90,7 +99,7 @@ def test_noncontrolling_interest_closes_the_gap_for_up_c_structures():
         _line("LT Debt", "Liabilities & Equity", "Non-Current Liabilities", 2.186e9),
         _line("Total Liabilities", "Liabilities & Equity", None, 2.308e9),
         _line("Total Stockholders Equity", "Liabilities & Equity", None, 4.448e9),
-        _line("Non-Controlling Interests", "Liabilities & Equity", "Stockholders Equity", 5.92e9),
+        _line("NCI", "Liabilities & Equity", "Stockholders Equity", 5.92e9),
         _line("Total Liabilities & Equity", "Liabilities & Equity", None, 12.671e9),
     )
     comps = balance_sheet_compositions(_statement(lines))

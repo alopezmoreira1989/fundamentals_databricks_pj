@@ -254,15 +254,20 @@ def balance_sheet_compositions(statement: Statement) -> tuple[Composition, ...]:
         le_total = value_of("Total Liabilities & Equity")
         equity = value_of("Total Stockholders Equity")
         # Noncontrolling interest — already ingested/hierarchy-exposed (01__tickers.py's
-        # "Non-Controlling Interests" -> MinorityInterest, concept_hierarchy.json's
-        # "Stockholders Equity" group), but never read here until this fix. Real, confirmed
-        # gap (Viper Energy / VNOM, 2026-10-27 screenshot): an Up-C structure where Diamondback
-        # retains a large NCI stake via the operating LLC -- "Total Stockholders Equity" alone
-        # (parent-only) was ~$4.4B against a le_total of ~$12.7B, and NCI ($5.9B, its own
-        # already-published row) accounted for nearly the entire gap. Without reading it, the
-        # Liabilities & Equity bar rendered visibly shorter than Assets for every NCI-heavy
-        # filer, not just one-off missing-concept cases like the earlier Nike fix covered.
-        nci = value_of("Non-Controlling Interests")
+        # "Non-Controlling Interests" -> MinorityInterest), but never read here until this fix.
+        # Real, confirmed gap (Viper Energy / VNOM, 2026-10-27 screenshot): an Up-C structure
+        # where Diamondback retains a large NCI stake via the operating LLC -- "Total
+        # Stockholders Equity" alone (parent-only) was ~$4.4B against a le_total of ~$12.7B,
+        # and NCI ($5.9B, its own already-published row) accounted for nearly the entire gap.
+        # Matched on "NCI", NOT the raw concept name "Non-Controlling Interests" --
+        # concept_hierarchy.json overrides this one concept's display_name to "NCI"
+        # (`{"concept": "Non-Controlling Interests", "display_name": "NCI"}`), and
+        # StatementLine.display_name carries that override, not the raw concept name (confirmed
+        # the hard way: value_of("Non-Controlling Interests") silently returned None here on
+        # first deploy, so the $5.9B landed in "Other liabilities" instead of its own segment --
+        # the bars were already equal-length by then since the derivation below doesn't care
+        # which bucket absorbs it, but the segment was mislabeled).
+        nci = value_of("NCI")
 
         # Assets → blue, dark (Cash, current) → light (PP&E / Other, non-current).
         # Total Assets == Total Liabilities & Equity by definition -- fall back to le_total when
