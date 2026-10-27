@@ -1,10 +1,12 @@
-# Phase 6.3 — Safe European derived-metrics recomputation (WIP)
+# Phase 6.3 — Safe European derived-metrics recomputation
 
-**Status as of this commit: IN PROGRESS.** `22__derived_metrics.py` has been run once, live,
-successfully, and validated. `23__intrinsic_value.py`, the idempotency re-run (22+23 a second
-time), and `51__export_dashboard_data.py`/`52__publish_to_github.py` have **not** been run yet
-in this phase. This document will be updated with the remaining phases and a final
-classification (`SUCCESS` / `BLOCKED` / `PARTIAL`) once that work resumes and completes.
+**Status: SUCCESS.** This document was left at "IN PROGRESS" after `22__derived_metrics.py`'s
+first live run (Phase G below) — the remaining steps it lists as not-yet-done (`23`, the
+idempotency re-run, `51`/`52`) were in fact completed shortly after, during Phase 6.6
+(`docs/phase6-6-tier-a-implementation.md`, whose own status line confirms
+`16 → 21 → 22 → 23 → idempotency → 51 → 52 → publish` all ran and validated cleanly against real
+production data, GitHub Release confirmed live). This file was simply never updated to reflect
+that at the time — corrected here rather than rewriting Phase 6.6's own validation record.
 
 ## Objective
 
@@ -189,19 +191,12 @@ No US/Canada regression. `market_cap_asof`/`market_cap_live` untouched (as expec
 run's price coverage didn't change, so no overwrite was even attempted beyond the normal
 full recompute, and the row/ticker counts came back identical).
 
-## Remaining work (not yet done)
+## Remaining work from this phase — completed under Phase 6.6
 
-Per explicit instruction mid-session, this phase is being committed as WIP at this checkpoint.
-**Not yet run or validated**:
-
-- Live run of `23__intrinsic_value.py` (Phase H) — the two-clause NULL-preserving MERGE and
-  its own orphan cleanups have not yet been exercised against real production data this phase.
-- Idempotency check (Phase J) — running `22` and `23` a second time and confirming byte-identical
-  row counts.
-- `51__export_dashboard_data.py` / `52__publish_to_github.py` (Phase I) — not run; the public
-  GitHub Release / website have **not** been updated with the new EU metrics yet.
-- European coverage validation table (Phase L) and real website validation (Phase M).
-- Final classification (`SUCCESS` / `BLOCKED` / `PARTIAL`).
+The items originally listed here as not-yet-done (live `23` run, idempotency check, `51`/`52`
+publish, website validation, final classification) were all completed during Phase 6.6 — see
+`docs/phase6-6-tier-a-implementation.md` for that record, including the GitHub Release
+confirmation and the EU coverage results. Not duplicated here.
 
 **No production code was changed in this phase** — this was purely an execution/validation pass
 against the existing, already-hardened `22`/`23`/`51`/`52`. No defect was found that would
